@@ -30,8 +30,9 @@ Generated: 2026-05-17
 
 ## Known limitations
 
-- not compiled in this environment because Rust/Cargo are unavailable
 - no MIR or `rustc_private` integration
+- no serde-backed JSON schema or golden fixture harness yet
 - baseline/suppression matching is specified but not yet implemented
 - SARIF/LSP/receipt import are specified but not yet implemented
+- guard evidence is still card-wide; obligation-level evidence is planned
 - static reachability is heuristic and should not be treated as execution proof

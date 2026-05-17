@@ -1,5 +1,7 @@
 use crate::analysis::scanner::ScannedSite;
-use crate::domain::{ContractEvidence, DischargeEvidence, ReachEvidence, RelatedTest};
+use crate::domain::{
+    ContractEvidence, DischargeEvidence, OperationFamily, ReachEvidence, RelatedTest,
+};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -15,17 +17,23 @@ pub(crate) fn contract_evidence(site: &ScannedSite) -> ContractEvidence {
 }
 
 pub(crate) fn discharge_evidence(site: &ScannedSite) -> DischargeEvidence {
-    let text = format!(
-        "{}\n{}\n{}",
-        site.context_before.join("\n"),
-        site.site.snippet,
-        site.context_after.join("\n")
-    );
+    let text = code_context(site);
     let lower = text.to_ascii_lowercase();
+    if matches!(
+        site.operation.family,
+        OperationFamily::RawPointerRead
+            | OperationFamily::RawPointerWrite
+            | OperationFamily::SliceFromRawParts
+    ) {
+        if has_alignment_guard(&lower) {
+            return DischargeEvidence::present("Nearby alignment guard code was detected");
+        }
+        return DischargeEvidence::missing();
+    }
     if lower.contains("assert!") || lower.contains("debug_assert!") {
         return DischargeEvidence::present("Nearby assert/debug_assert guard was detected");
     }
-    if lower.contains("align") || lower.contains("is_aligned") || lower.contains("align_offset") {
+    if has_alignment_guard(&lower) {
         return DischargeEvidence::present("Nearby alignment guard vocabulary was detected");
     }
     if lower.contains("len") && (lower.contains(">=") || lower.contains("<")) {
@@ -38,6 +46,27 @@ pub(crate) fn discharge_evidence(site: &ScannedSite) -> DischargeEvidence {
         return DischargeEvidence::present("Nearby nullability guard vocabulary was detected");
     }
     DischargeEvidence::missing()
+}
+
+fn code_context(site: &ScannedSite) -> String {
+    site.context_before
+        .iter()
+        .chain(std::iter::once(&site.site.snippet))
+        .chain(site.context_after.iter())
+        .map(|line| {
+            line.split_once("//")
+                .map_or(line.as_str(), |(code, _comment)| code)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn has_alignment_guard(lower: &str) -> bool {
+    lower.contains("is_aligned")
+        || lower.contains("align_offset")
+        || lower.contains("align_of")
+        || lower.contains("addr() %")
+        || lower.contains("as usize %")
 }
 
 pub(crate) fn reach_evidence(
@@ -149,7 +178,10 @@ fn visit(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> 
         } else if path.extension().is_some_and(|ext| ext == "rs") {
             let rel = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
             let rel_text = rel.to_string_lossy();
-            if rel_text.contains("tests") || rel_text.contains("test") {
+            if rel_text.contains("tests")
+                || rel_text.contains("test")
+                || fs::read_to_string(&path).is_ok_and(|text| text.contains("#[test]"))
+            {
                 out.push(rel);
             }
         }

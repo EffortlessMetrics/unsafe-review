@@ -177,3 +177,39 @@ fn card_id(scanned: &scanner::ScannedSite) -> CardId {
         scanned.operation.family.as_str()
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::{AnalysisMode, DiffSource, PolicyMode};
+    use crate::domain::{HazardKind, ReviewClass};
+    use std::path::PathBuf;
+
+    #[test]
+    fn raw_pointer_alignment_fixture_emits_guard_missing_card() -> Result<(), String> {
+        let root =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/raw_pointer_alignment");
+        let output = analyze(AnalyzeInput {
+            root: root.clone(),
+            scope: Scope::Diff,
+            diff: DiffSource::File(root.join("change.diff")),
+            mode: AnalysisMode::Draft,
+            policy: PolicyMode::Advisory,
+            include_unchanged_tests: true,
+            max_cards: None,
+        })?;
+
+        assert_eq!(output.summary.cards, 1);
+        assert_eq!(output.summary.guard_missing, 1);
+        assert_eq!(output.summary.unsafe_unreached, 0);
+
+        let card = &output.cards[0];
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(card.hazards.contains(&HazardKind::Alignment));
+        assert!(card.contract.present);
+        assert!(!card.discharge.present);
+        assert_eq!(card.reach.state, "owner_reached");
+        assert!(card.missing.iter().any(|missing| missing.kind == "guard"));
+        Ok(())
+    }
+}

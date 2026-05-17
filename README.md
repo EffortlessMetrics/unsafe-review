@@ -33,6 +33,11 @@ unsafe-review check --base origin/main
 # Review a supplied unified diff
 unsafe-review check --diff change.diff --format json
 
+# Try the bundled smoke fixture
+unsafe-review check --root fixtures/raw_pointer_alignment \
+  --diff fixtures/raw_pointer_alignment/change.diff \
+  --format json
+
 # Full repo inventory and badge data
 unsafe-review repo --format json
 unsafe-review badges --out badges/
@@ -44,7 +49,7 @@ unsafe-review context UR-src-lib-rs-42-raw-pointer-read --json
 
 ## Current implementation status
 
-This initial workspace includes the complete specification system and a working
+This initial workspace includes the specification system and an experimental
 stable-only v0.1 analyzer scaffold. The analyzer is intentionally conservative:
 
 - no `rustc_private`
@@ -56,8 +61,8 @@ stable-only v0.1 analyzer scaffold. The analyzer is intentionally conservative:
 The current static engine detects common unsafe seams and operations from source text,
 maps them to hazard classes and safety obligations, mines nearby `# Safety` / `SAFETY:`
 contract evidence, looks for simple local guards, and routes cards to likely witnesses.
-It is useful as an early scaffold and designed to be strengthened behind the documented
-specs.
+It is a scaffold, not a calibrated review signal; the support tiers stay conservative
+until schema fixtures and golden tests prove each claim.
 
 ## Crate surface
 
