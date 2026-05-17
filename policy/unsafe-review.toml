@@ -1,0 +1,22 @@
+schema_version = "0.1"
+
+[analysis]
+mode = "draft"
+include_unchanged_tests = true
+max_cards = 50
+
+[policy]
+mode = "advisory"
+baseline = "policy/unsafe-review-baseline.toml"
+suppressions = "policy/unsafe-review-suppressions.toml"
+require_safety_docs_for_public_unsafe = true
+require_safety_comments_for_unsafe_blocks = true
+require_witness_for_public_unsafe = false
+
+[witness.miri]
+enabled = true
+command = "cargo +nightly miri test"
+
+[witness.loom]
+enabled = true
+required_for = ["unsafe_impl_send_sync", "unsafe_cell", "atomic_ordering"]

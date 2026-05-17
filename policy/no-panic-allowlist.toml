@@ -1,0 +1,4 @@
+schema_version = "0.1"
+policy = "no-panic-allowlist"
+owner = "core/policy"
+status = "empty"
