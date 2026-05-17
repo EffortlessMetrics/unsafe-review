@@ -1,0 +1,5 @@
+/target/
+/.idea/
+/.vscode/.ropeproject/
+*.swp
+.DS_Store

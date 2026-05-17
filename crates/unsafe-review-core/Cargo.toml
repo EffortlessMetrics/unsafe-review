@@ -1,0 +1,18 @@
+[package]
+name = "unsafe-review-core"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Core SDK and static analysis engine for unsafe-review"
+keywords = ["unsafe", "rust", "miri", "static-analysis", "review"]
+categories = ["development-tools", "development-tools::testing"]
+
+[lib]
+name = "unsafe_review_core"
+path = "src/lib.rs"
+
+[lints]
+workspace = true

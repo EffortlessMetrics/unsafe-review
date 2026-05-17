@@ -1,0 +1,78 @@
+[workspace]
+members = [
+  "crates/unsafe-review",
+  "crates/unsafe-review-cli",
+  "crates/unsafe-review-core",
+  "xtask"
+]
+default-members = [
+  "crates/unsafe-review",
+  "crates/unsafe-review-cli",
+  "crates/unsafe-review-core"
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/EffortlessMetrics/unsafe-review"
+homepage = "https://github.com/EffortlessMetrics/unsafe-review"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unsafe_op_in_unsafe_fn = "deny"
+unused_must_use = "deny"
+const_item_interior_mutations = "deny"
+function_casts_as_integer = "deny"
+
+[workspace.lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+panic = "deny"
+unreachable = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+get_unwrap = "deny"
+unwrap_in_result = "deny"
+
+mem_forget = "deny"
+forget_non_drop = "deny"
+drop_non_drop = "deny"
+
+undocumented_unsafe_blocks = "deny"
+multiple_unsafe_ops_per_block = "deny"
+repr_packed_without_abi = "deny"
+
+let_underscore_future = "deny"
+let_underscore_lock = "deny"
+unused_result_ok = "deny"
+map_err_ignore = "deny"
+assertions_on_result_states = "deny"
+lines_filter_map_ok = "deny"
+match_result_ok = "deny"
+
+format_in_format_args = "deny"
+to_string_in_format_args = "deny"
+unused_format_specs = "deny"
+suspicious_open_options = "deny"
+path_buf_push_overwrite = "deny"
+join_absolute_paths = "deny"
+
+char_indices_as_byte_indices = "deny"
+sliced_string_as_bytes = "deny"
+out_of_bounds_indexing = "deny"
+
+await_holding_lock = "deny"
+await_holding_refcell_ref = "deny"
+arc_with_non_send_sync = "deny"
+rc_mutex = "deny"
+
+allow_attributes_without_reason = "deny"
+blanket_clippy_restriction_lints = "deny"
+
+[profile.release]
+lto = true
+strip = true
+codegen-units = 1

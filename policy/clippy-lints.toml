@@ -1,0 +1,9 @@
+schema_version = "0.1"
+msrv = "1.95"
+owner = "core/policy"
+
+[workspace]
+unsafe_code = "forbid"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
