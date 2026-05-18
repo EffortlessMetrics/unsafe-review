@@ -63,6 +63,48 @@ The CI workflow now also runs a docs build:
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
 ```
 
+## Dogfood receipt
+
+The advisory artifact loop has been checked against a real PR workflow artifact,
+not only local renderer tests.
+
+Receipt:
+
+- PR: `#104 cli: harden diff input ergonomics`
+- Workflow: `unsafe-review`
+- Run: `26013330481`
+- Branch: `cli/diff-input-ergonomics`
+- Artifact: `unsafe-review`
+- Artifact id: `7049477825`
+- Artifact digest: `sha256:6368cbe9372a84ae23e8ad587ee75715026fd322bc2fcce692778673c700b10c`
+
+Downloaded artifact contents:
+
+```text
+cards.json
+cards.sarif
+comment-plan.json
+pr-summary.md
+```
+
+Verification command:
+
+```bash
+rtk cargo run --locked -p xtask -- check-advisory-artifacts target/advisory-artifact-104/unsafe-review
+```
+
+Result:
+
+```text
+check-advisory-artifacts: ok (target/advisory-artifact-104/unsafe-review)
+```
+
+This receipt proves the current advisory workflow produced and uploaded the four
+expected artifacts for a real PR, and that the repo verifier accepted their
+advisory policy, plan-only comment mode, projection card identity consistency,
+result counts, parseability, and trust-boundary text. It does not prove
+memory safety, witness execution, code-scanning approval, or policy readiness.
+
 ## Current support posture
 
 The PR artifact surfaces are experimental and advisory. They are suitable for
