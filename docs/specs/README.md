@@ -21,3 +21,17 @@ Specs define behavior. They do not carry the PR queue.
 15. [Public API and crate surface](UNSAFE-REVIEW-SPEC-0015-public-api-crate-surface.md)
 16. [Fixtures, calibration, support tiers](UNSAFE-REVIEW-SPEC-0016-fixtures-calibration-support.md)
 17. [Security and file policy](UNSAFE-REVIEW-SPEC-0017-security-file-policy.md)
+
+## Implementation backlog coverage
+
+The following specs describe behavior that is intentionally ahead of the current
+implementation and should drive the next build-out work:
+
+- [Witness receipts](UNSAFE-REVIEW-SPEC-0009-witness-receipts.md): normalized receipt import, receipt-card matching, and witness-strength semantics.
+- [Policy, baseline, suppressions](UNSAFE-REVIEW-SPEC-0010-policy-baseline-suppressions.md): advisory/no-new-debt/blocking modes and exact identity matching.
+- [PR and CI output](UNSAFE-REVIEW-SPEC-0011-pr-ci-output.md): SARIF, GitHub summaries, inline-comment selection, and durable artifacts.
+- [LSP and editor projection](UNSAFE-REVIEW-SPEC-0012-lsp-editor-projection.md): saved-card diagnostics, hover content, and read-only copy commands.
+- [Agent packets](UNSAFE-REVIEW-SPEC-0013-agent-packets.md): repair packet schema, allowed repairs, and safety rails.
+- [Repo inventory and badges](UNSAFE-REVIEW-SPEC-0014-repo-inventory-badges.md): repository-level counts, badge descriptors, and forbidden safety wording.
+- [Fixtures, calibration, support tiers](UNSAFE-REVIEW-SPEC-0016-fixtures-calibration-support.md): fixture contracts, golden outputs, calibration metrics, and promotion rules.
+
