@@ -11,6 +11,7 @@ required_core_fixtures = [
   "ffi_sanitizer_route",
   "safe_code_no_cards",
   "imports_not_unsafe_operations",
+  "cfg_target_feature_not_operation",
   "comment_alignment_not_guard",
 ]
 
@@ -93,6 +94,13 @@ expected_cards = 0
 fixture = "imports_not_unsafe_operations"
 kind = "false_positive_control"
 claim = "extern crate and import-only unsafe operation paths emit no review cards"
+support_tier = "Diff unsafe site inventory"
+expected_cards = 0
+
+[[cases]]
+fixture = "cfg_target_feature_not_operation"
+kind = "false_positive_control"
+claim = "cfg target_feature predicates emit no review cards"
 support_tier = "Diff unsafe site inventory"
 expected_cards = 0
 

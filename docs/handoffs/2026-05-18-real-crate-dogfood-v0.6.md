@@ -15,7 +15,7 @@ Dogfood repositories:
 |---|---|---|
 | `servo/rust-smallvec` | `bc8a854926a8d940164f6c4ad4fc6efe51962e93` | completed with `--max-cards 50` |
 | `bluss/arrayvec` | `1bc606d8c83a34b8fae9dd117bfeab10f90d2ca7` | completed with `--max-cards 50` |
-| `BurntSushi/memchr` | `db1a77d4b556a1321e136ca0514e43e74ea5fcc3` | timed out before JSON output |
+| `BurntSushi/memchr` | `db1a77d4b556a1321e136ca0514e43e74ea5fcc3` | completed with `--max-cards 50` after capped-scan hardening |
 
 The first two completed runs exposed two noisy false positives:
 
@@ -34,6 +34,26 @@ Regression proof was added through:
 
 - scanner unit tests for `extern crate` and import-only unsafe operation paths
 - `fixtures/imports_not_unsafe_operations`
+- `fixtures/calibration.toml` false-positive-control coverage
+
+A follow-up dogfood pass on `memchr` fixed the timeout and another false
+positive:
+
+- capped repo scans now stop once `--max-cards` cards are emitted
+- Rust file discovery prioritizes Cargo-like source roots before miscellaneous
+  `.rs` data files
+- `#[cfg(target_feature = "...")]` predicates are not classified as target
+  feature obligations
+- real `#[target_feature(enable = "...")]` attributes remain classified as
+  target-feature review surfaces
+
+Additional regression proof was added through:
+
+- workspace discovery ordering tests
+- capped repo scan tests
+- scanner unit tests for `cfg(target_feature)` versus `target_feature`
+  attributes
+- `fixtures/cfg_target_feature_not_operation`
 - `fixtures/calibration.toml` false-positive-control coverage
 
 ## Dogfood observations
@@ -102,6 +122,43 @@ The first cards are real unsafe review surfaces such as
 `MaybeUninit::assume_init`, `Vec::set_len`, pointer arithmetic, raw pointer
 operations, `str::from_utf8_unchecked`, and `zeroed`.
 
+### `memchr`
+
+Before capped-scan hardening:
+
+```text
+result: timed out before JSON output
+largest early discovered file: benchmarks/haystacks/code/rust-library.rs
+```
+
+After capped-scan hardening, before the `cfg(target_feature)` fix:
+
+```text
+elapsed_seconds: 7.5
+cards: 50
+miri_unsupported: 0
+contract_missing: 23
+guard_missing: 27
+target_feature operation cards: 16
+```
+
+The first cards included `#[cfg(target_feature = "neon")]` and
+`#[cfg(not(target_feature = "neon"))]` false positives.
+
+After the `cfg(target_feature)` fix:
+
+```text
+elapsed_seconds: 4.59
+cards: 50
+miri_unsupported: 0
+contract_missing: 20
+guard_missing: 30
+target_feature operation cards: 10
+```
+
+Remaining target-feature cards in the top-50 capped output correspond to real
+`#[target_feature(enable = "neon")]` attributes.
+
 ## Proof
 
 Targeted local validation:
@@ -109,6 +166,8 @@ Targeted local validation:
 ```bash
 rtk cargo fmt --check
 rtk cargo test -p unsafe-review-core scanner --locked
+rtk cargo test -p unsafe-review-core workspace --locked
+rtk cargo test -p unsafe-review-core capped_repo_scan --locked
 rtk cargo test -p unsafe-review-core fixture_card_goldens_match_rendered_json --locked
 rtk cargo run --locked -p xtask -- check-calibration
 ```
@@ -118,6 +177,7 @@ Dogfood commands:
 ```bash
 rtk cargo run --locked -p unsafe-review -- repo --root target/dogfood-work/smallvec --format json --max-cards 50 --out target/dogfood-work/smallvec.unsafe-review.after.json
 rtk cargo run --locked -p unsafe-review -- repo --root target/dogfood-work/arrayvec --format json --max-cards 50 --out target/dogfood-work/arrayvec.unsafe-review.after.json
+rtk cargo run --locked -p unsafe-review -- repo --root target/dogfood-work/memchr --format json --max-cards 50 --out target/dogfood-work/memchr.unsafe-review.after-cap-targetfeature.json
 ```
 
 The dogfood reruns used a temporary `CARGO_TARGET_DIR` to avoid a Windows file
@@ -130,7 +190,10 @@ Real-crate dogfood is experimental.
 The repo may claim:
 
 - the first real-crate dogfood slice was run on `rust-smallvec` and `arrayvec`
-- dogfood found and fixed import/declaration false positives
+- a capped `memchr` dogfood snapshot now completes
+- dogfood found and fixed import/declaration and `cfg(target_feature)`
+  false positives
+- capped repo scans stop after the requested card cap
 - false-positive regression coverage exists in fixtures and calibration
 - dogfood output remains advisory static review evidence
 
@@ -139,6 +202,7 @@ The repo must not claim:
 - calibrated false-positive or false-negative rates
 - usable-alpha support-tier promotion
 - full-repository coverage from top-50 capped snapshots
+- uncapped repo-scan performance
 - memory-safety proof
 - UB-free status
 - witness execution
@@ -146,9 +210,10 @@ The repo must not claim:
 
 ## Known limits
 
-- Only two real crates completed in this slice.
+- Only three real crates completed in this slice.
 - The successful dogfood snapshots were capped at 50 cards.
-- `memchr` timed out before producing JSON output.
+- `memchr` completion depends on capped-scan behavior; uncapped performance is
+  still unmeasured.
 - No human audit was performed for every emitted card.
 - These runs do not prove absence of missed unsafe seams.
 
