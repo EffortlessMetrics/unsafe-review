@@ -37,13 +37,16 @@ pub(crate) fn scan_file(
     let syntax_operation_block_lines = operation_block_start_lines(&parsed);
     let mut out = Vec::new();
     let mut seen = BTreeSet::new();
+    let mut line_comment_state = LineCommentState::default();
     for (idx, raw) in lines.iter().enumerate() {
         let line_no = idx + 1;
         let trimmed = raw.trim();
-        if trimmed.starts_with("//") {
+        let detection_line = line_for_text_detection(raw, &mut line_comment_state);
+        let detection_trimmed = detection_line.trim();
+        if detection_trimmed.is_empty() {
             continue;
         }
-        let Some((kind, family)) = detect_site(trimmed) else {
+        let Some((kind, family)) = detect_site(detection_trimmed) else {
             continue;
         };
         if kind == UnsafeSiteKind::UnsafeBlock
@@ -154,6 +157,112 @@ fn context_slice(lines: &[&str], start: usize, end: usize) -> Vec<String> {
         .iter()
         .map(|line| line.trim().to_string())
         .collect()
+}
+
+#[derive(Default)]
+struct LineCommentState {
+    block_depth: usize,
+}
+
+fn line_for_text_detection(line: &str, state: &mut LineCommentState) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut chars = line.chars().peekable();
+    let mut in_string = false;
+    let mut string_hashes = 0usize;
+    let mut escaped = false;
+
+    while let Some(ch) = chars.next() {
+        if state.block_depth > 0 {
+            if ch == '/' && chars.peek() == Some(&'*') {
+                state.block_depth += 1;
+                let _ = chars.next();
+            } else if ch == '*' && chars.peek() == Some(&'/') {
+                state.block_depth = state.block_depth.saturating_sub(1);
+                let _ = chars.next();
+            }
+            continue;
+        }
+
+        if in_string {
+            if string_hashes == 0 {
+                if escaped {
+                    escaped = false;
+                } else if ch == '\\' {
+                    escaped = true;
+                } else if ch == '"' {
+                    in_string = false;
+                    out.push('"');
+                }
+                continue;
+            }
+
+            if ch == '"' && raw_string_hashes_at_end(&mut chars, string_hashes) {
+                in_string = false;
+                out.push('"');
+            }
+            continue;
+        }
+
+        if ch == '/' && chars.peek() == Some(&'/') {
+            break;
+        }
+        if ch == '/' && chars.peek() == Some(&'*') {
+            state.block_depth += 1;
+            let _ = chars.next();
+            continue;
+        }
+        if ch == 'r'
+            && let Some(hashes) = raw_string_hashes_at_start(&mut chars)
+        {
+            for _ in 0..hashes {
+                let _ = chars.next();
+            }
+            let _ = chars.next();
+            in_string = true;
+            string_hashes = hashes;
+            out.push('"');
+            continue;
+        }
+        if ch == '"' {
+            in_string = true;
+            string_hashes = 0;
+            escaped = false;
+            out.push('"');
+            continue;
+        }
+        out.push(ch);
+    }
+
+    out
+}
+
+fn raw_string_hashes_at_start<I>(chars: &mut std::iter::Peekable<I>) -> Option<usize>
+where
+    I: Iterator<Item = char> + Clone,
+{
+    let mut clone = chars.clone();
+    let mut hashes = 0usize;
+    while clone.peek() == Some(&'#') {
+        hashes += 1;
+        let _ = clone.next();
+    }
+    (clone.peek() == Some(&'"')).then_some(hashes)
+}
+
+fn raw_string_hashes_at_end<I>(chars: &mut std::iter::Peekable<I>, hashes: usize) -> bool
+where
+    I: Iterator<Item = char> + Clone,
+{
+    let mut clone = chars.clone();
+    for _ in 0..hashes {
+        if clone.next() != Some('#') {
+            return false;
+        }
+    }
+    for _ in 0..hashes {
+        let _ = chars.next();
+    }
+    true
 }
 
 fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
@@ -540,4 +649,76 @@ fn parse_ident(rest: &str) -> Option<String> {
         }
     }
     (!name.is_empty()).then_some(name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn text_detection_ignores_comment_only_unsafe_tokens() {
+        let mut state = LineCommentState::default();
+
+        let line = line_for_text_detection("// unsafe { ptr::read(ptr) }", &mut state);
+
+        assert!(line.trim().is_empty());
+        assert_eq!(detect_site(line.trim()), None);
+    }
+
+    #[test]
+    fn text_detection_ignores_block_comment_unsafe_tokens() {
+        let mut state = LineCommentState::default();
+
+        let first = line_for_text_detection("/* unsafe {", &mut state);
+        let second = line_for_text_detection("ptr::read(ptr); */ pub fn safe() {}", &mut state);
+
+        assert!(first.trim().is_empty());
+        assert_eq!(second.trim(), "pub fn safe() {}");
+        assert_eq!(detect_site(second.trim()), None);
+    }
+
+    #[test]
+    fn text_detection_ignores_string_literal_unsafe_tokens_but_preserves_extern_abi() {
+        let mut state = LineCommentState::default();
+
+        let string_line = line_for_text_detection(
+            "let text = \"unsafe { core::ptr::read(ptr) }\";",
+            &mut state,
+        );
+        let extern_line = line_for_text_detection("unsafe extern \"C\" {", &mut state);
+
+        assert_eq!(detect_site(string_line.trim()), None);
+        assert_eq!(
+            detect_site(extern_line.trim()),
+            Some((UnsafeSiteKind::ExternBlock, OperationFamily::Ffi))
+        );
+    }
+
+    #[test]
+    fn scan_file_does_not_emit_cards_for_unsafe_words_in_comments_or_strings() -> Result<(), String>
+    {
+        let root = unique_temp_dir()?;
+        fs::create_dir_all(root.join("src"))
+            .map_err(|err| format!("create temp src failed: {err}"))?;
+        fs::write(
+            root.join("src/lib.rs"),
+            "pub fn safe_text() -> &'static str {\n    /* unsafe { core::ptr::read(ptr) } */\n    \"unsafe { core::ptr::read(ptr) }\"\n}\n",
+        )
+        .map_err(|err| format!("write temp source failed: {err}"))?;
+
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        assert!(sites.is_empty(), "unexpected sites: {sites:#?}");
+        Ok(())
+    }
+
+    fn unique_temp_dir() -> Result<PathBuf, String> {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|err| format!("system clock before UNIX_EPOCH: {err}"))?
+            .as_nanos();
+        Ok(std::env::temp_dir().join(format!("unsafe-review-scanner-test-{nanos}")))
+    }
 }
