@@ -77,8 +77,9 @@ findings independently.
 
 `comment-plan` is plan-only. It does not post comments.
 
-`lsp` writes saved JSON only. There is no editor extension or live LSP server in
-this surface.
+`lsp` writes saved JSON only. It includes a read-only status object,
+diagnostics, hovers, and copy-command action data. There is no editor extension
+or live LSP server in this surface.
 
 `witness-plan` is a routing artifact. It lists suggested witness commands and
 limitations from existing cards, but it does not run those commands.
