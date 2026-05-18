@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="unsafe-review-logo.svg" alt="unsafe-review warning mark" width="160">
+</p>
+
 # unsafe-review
 
 `unsafe-review` is a cheap PR-time review pass for unsafe Rust.
