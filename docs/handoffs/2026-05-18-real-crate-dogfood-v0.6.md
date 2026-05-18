@@ -1570,6 +1570,9 @@ The repo may claim:
   across 123 Rust files, adding concurrency-heavy dogfood for unsafe Send/Sync,
   atomic-ordering witness routes, raw pointer dereference, and ownership-transfer
   card shapes
+- one fixture-backed `transmute_copy` classification improvement changed eight
+  capped `crossbeam` cards from generic `unsafe_fn_call` operation cards to
+  `transmute` invalid-value/layout cards without claiming value validity proof
 - attributed unsafe function declarations are deduped between syntax-backed
   extraction and fallback line scanning
 - false-positive regression coverage exists in fixtures and calibration
@@ -1668,6 +1671,9 @@ The repo must not claim:
 - `bytes#826` now distinguishes `Vec::from_raw_parts` from
   `slice::from_raw_parts`, but the new card remains source-level and does not
   discharge allocator, layout, capacity, initialization, or ownership evidence.
+- The capped `crossbeam` repo rerun now classifies `mem::transmute_copy` as a
+  `transmute` operation family, but it still does not prove layout compatibility
+  or destination value validity.
 - These runs do not prove absence of missed unsafe seams.
 
 ## Next useful work

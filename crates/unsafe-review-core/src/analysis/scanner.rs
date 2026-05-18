@@ -331,7 +331,7 @@ fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
     if contains_call_name(line, "set_len") {
         return Some((UnsafeSiteKind::Operation, OperationFamily::VecSetLen));
     }
-    if contains_call_name(line, "transmute") {
+    if contains_call_name(line, "transmute") || contains_call_name(line, "transmute_copy") {
         return Some((UnsafeSiteKind::Operation, OperationFamily::Transmute));
     }
     if contains_call_name(line, "zeroed") {
@@ -1116,11 +1116,19 @@ mod tests {
             None
         );
         assert_eq!(
+            detect_site("pub use core::mem::transmute_copy as copy_bits;"),
+            None
+        );
+        assert_eq!(
             detect_site("core::ptr::copy_nonoverlapping(src, dst, len);"),
             Some((
                 UnsafeSiteKind::Operation,
                 OperationFamily::CopyNonOverlapping
             ))
+        );
+        assert_eq!(
+            detect_site("core::mem::transmute_copy::<u8, bool>(&value);"),
+            Some((UnsafeSiteKind::Operation, OperationFamily::Transmute))
         );
     }
 
