@@ -1,6 +1,6 @@
 use crate::analysis::pipeline;
 use crate::domain::{CardId, ReviewCard};
-use crate::output::{agent, comment_plan, human, json, lsp, markdown, sarif};
+use crate::output::{agent, comment_plan, human, json, lsp, markdown, sarif, witness_plan};
 use std::path::PathBuf;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -135,6 +135,10 @@ pub fn render_comment_plan(output: &AnalyzeOutput) -> String {
 
 pub fn render_lsp(output: &AnalyzeOutput) -> String {
     lsp::render(output)
+}
+
+pub fn render_witness_plan(output: &AnalyzeOutput) -> String {
+    witness_plan::render(output)
 }
 
 pub fn explain_card(output: &AnalyzeOutput, id: &CardId) -> Option<String> {

@@ -6,7 +6,7 @@ use std::process::Command as ProcessCommand;
 use unsafe_review_core::{
     AnalysisMode, AnalyzeInput, CardId, DiffSource, PolicyMode, Scope, analyze, collect_context,
     explain_card, render_comment_plan, render_human, render_json, render_lsp, render_markdown,
-    render_pr_summary, render_sarif,
+    render_pr_summary, render_sarif, render_witness_plan,
 };
 
 pub(crate) fn execute(command: Command) -> Result<(), String> {
@@ -132,6 +132,7 @@ fn render_with_format(output: &unsafe_review_core::AnalyzeOutput, format: &Forma
         Format::Sarif => render_sarif(output),
         Format::CommentPlan => render_comment_plan(output),
         Format::Lsp => render_lsp(output),
+        Format::WitnessPlan => render_witness_plan(output),
     }
 }
 
@@ -241,10 +242,10 @@ fn print_help() {
     println!();
     println!("Commands:");
     println!(
-        "  check   [--root .] [--base origin/main | --diff file|-] [--format human|json|markdown|pr-summary|sarif|comment-plan|lsp] [--policy advisory|no-new-debt] [--out file]"
+        "  check   [--root .] [--base origin/main | --diff file|-] [--format human|json|markdown|pr-summary|sarif|comment-plan|lsp|witness-plan] [--policy advisory|no-new-debt] [--out file]"
     );
     println!(
-        "  repo    [--root .] [--format human|json|markdown|pr-summary|sarif|comment-plan|lsp] [--policy advisory|no-new-debt] [--out file]"
+        "  repo    [--root .] [--format human|json|markdown|pr-summary|sarif|comment-plan|lsp|witness-plan] [--policy advisory|no-new-debt] [--out file]"
     );
     println!("  pilot   [--root .] [--base origin/main] [--max-cards 5]");
     println!("  badges  [--root .] [--out badges]");

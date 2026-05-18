@@ -249,6 +249,7 @@ fn parse_format(raw: &str) -> Result<Format, String> {
         "sarif" => Ok(Format::Sarif),
         "comment-plan" | "comments" => Ok(Format::CommentPlan),
         "lsp" | "lsp-json" | "editor-json" => Ok(Format::Lsp),
+        "witness-plan" | "witness" | "route-plan" => Ok(Format::WitnessPlan),
         other => Err(format!("unknown format `{other}`")),
     }
 }
@@ -341,6 +342,16 @@ mod tests {
             return Err("expected check command".to_string());
         };
         assert_eq!(options.format, Format::Lsp);
+        Ok(())
+    }
+
+    #[test]
+    fn parses_witness_plan_format_for_check() -> Result<(), String> {
+        let command = parse(args(["unsafe-review", "check", "--format", "witness-plan"]))?;
+        let Command::Check(options) = command else {
+            return Err("expected check command".to_string());
+        };
+        assert_eq!(options.format, Format::WitnessPlan);
         Ok(())
     }
 
