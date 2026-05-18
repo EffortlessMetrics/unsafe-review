@@ -58,6 +58,7 @@ pub(crate) fn routes_for(hazards: &[HazardKind], owner: Option<&String>) -> Vec<
                 | HazardKind::PointerValidity
                 | HazardKind::Bounds
                 | HazardKind::AliasingOrProvenance
+                | HazardKind::DropOrDeallocation
         )
     }) {
         return vec![WitnessRoute {
@@ -100,6 +101,23 @@ mod tests {
             "cargo +nightly careful test read_header",
         );
         assert_no_route(&routes, WitnessKind::AddressSanitizer);
+    }
+
+    #[test]
+    fn drop_deallocation_hazards_route_to_miri_and_careful() {
+        let owner = "drop_tail".to_string();
+        let routes = routes_for(&[HazardKind::DropOrDeallocation], Some(&owner));
+
+        assert_route(
+            &routes,
+            WitnessKind::Miri,
+            "cargo +nightly miri test drop_tail",
+        );
+        assert_route(
+            &routes,
+            WitnessKind::CargoCareful,
+            "cargo +nightly careful test drop_tail",
+        );
     }
 
     #[test]

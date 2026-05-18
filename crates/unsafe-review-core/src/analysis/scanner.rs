@@ -319,6 +319,9 @@ fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
     if contains_call_name(line, "zeroed") {
         return Some((UnsafeSiteKind::Operation, OperationFamily::Zeroed));
     }
+    if contains_call_name(line, "drop_in_place") {
+        return Some((UnsafeSiteKind::Operation, OperationFamily::DropInPlace));
+    }
     if contains_call_name(line, "from_raw") {
         return Some((UnsafeSiteKind::Operation, OperationFamily::BoxFromRaw));
     }

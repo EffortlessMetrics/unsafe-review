@@ -461,11 +461,22 @@ contract_missing: 10
 operation families: vec_set_len, pointer_arithmetic, unknown, raw_pointer_deref, copy_nonoverlapping
 ```
 
-This run exposed and fixed a scanner duplicate: an inline unsafe block that
-contains a concrete raw pointer dereference should not also emit a generic
-unknown unsafe-block wrapper card on the same line. The remaining `unknown` card
-is `unsafe { ptr::drop_in_place(cur) }`, which is still a real unsupported
-operation-family gap for future drop/deallocation modeling.
+After drop/deallocation operation modeling:
+
+```text
+changed_rust_files: 1
+cards: 10
+contract_missing: 10
+operation families: vec_set_len, pointer_arithmetic, drop_in_place, raw_pointer_deref, copy_nonoverlapping
+unknown cards: 0
+```
+
+This run first exposed and fixed a scanner duplicate: an inline unsafe block
+that contains a concrete raw pointer dereference should not also emit a generic
+unknown unsafe-block wrapper card on the same line. A follow-up fixture-backed
+operation slice then modeled `ptr::drop_in_place` as `drop_in_place`, replacing
+the remaining `unknown` card with drop/deallocation hazards while preserving the
+contract and witness prompts.
 
 ### `arrayvec#288`
 
@@ -601,6 +612,7 @@ rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arra
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr138.raw.diff --format json --max-cards 30 --out target/dogfood-work/arrayvec-pr138.after-attributed-dedupe.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr187.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr187.unsafe-review.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr174.raw.diff --format json --max-cards 30 --out target/dogfood-work/arrayvec-pr174.after-inline-dedupe.json
+rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr174.raw.diff --format json --max-cards 30 --out target/dogfood-work/arrayvec-pr174.after-drop-in-place.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.unsafe-review.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-setlen-init.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-setlen-zero.json
@@ -631,6 +643,8 @@ The repo may claim:
   parameter text
 - inline unsafe blocks with concrete same-line raw pointer operations are
   deduped instead of emitting generic unknown wrapper cards
+- `ptr::drop_in_place` is modeled as a fixture-backed drop/deallocation
+  operation family in `arrayvec#174`
 - one fixture-backed `Vec::set_len` initialization-evidence improvement changed
   two `arrayvec#288` cards from `guard_missing` to `guarded_unwitnessed`
 - one fixture-backed `set_len(0)` clear-evidence improvement changed another
@@ -684,8 +698,8 @@ The repo must not claim:
 - `arrayvec#187` shows public unsafe helper APIs with `Safety:` prose remain
   contract prompts until they expose a recognized `# Safety` section or nearby
   `SAFETY:` evidence.
-- `arrayvec#174` shows `ptr::drop_in_place` still routes as an unknown unsafe
-  operation family until drop/deallocation modeling is added.
+- `arrayvec#174` now has a fixture-backed `ptr::drop_in_place` card, but broader
+  drop/deallocation modeling beyond that operation remains narrow.
 - These runs do not prove absence of missed unsafe seams.
 
 ## Next useful work
