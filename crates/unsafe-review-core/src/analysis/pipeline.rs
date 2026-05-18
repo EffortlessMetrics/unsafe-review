@@ -752,6 +752,19 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn unreachable_unchecked_infallible_path_evidence_is_discharged() -> Result<(), String> {
+        let output = fixture_output("unreachable_unchecked_infallible_path")?;
+        let card = single_card("unreachable_unchecked_infallible_path", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::UnreachableUnchecked);
+        assert_eq!(card.class, ReviewClass::GuardedUnwitnessed);
+        assert!(card.discharge.present);
+        assert!(obligation_discharge_present(card, "unreachable"));
+        Ok(())
+    }
+
+    #[test]
     fn impl_trait_bound_owner_inference_uses_function_owner() -> Result<(), String> {
         let output = fixture_output("impl_trait_bound_owner_inference")?;
         let card = single_card("impl_trait_bound_owner_inference", &output)?;

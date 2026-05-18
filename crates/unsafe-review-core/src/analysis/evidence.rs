@@ -202,6 +202,17 @@ fn discharge_state_for(
                 EvidenceState::missing("No obligation-specific guard code was detected")
             }
         }
+        "unreachable" => {
+            if family == &OperationFamily::UnreachableUnchecked
+                && has_unreachable_unchecked_infallible_path_evidence(lower)
+            {
+                EvidenceState::present(
+                    "Infallible error-path evidence was detected before unreachable_unchecked",
+                )
+            } else {
+                EvidenceState::missing("No obligation-specific guard code was detected")
+            }
+        }
         _ => EvidenceState::missing("No obligation-specific guard code was detected"),
     }
 }
@@ -281,6 +292,11 @@ fn has_encode_utf8_remaining_capacity_evidence(lower: &str) -> bool {
 fn has_unwrap_unchecked_infallible_result_evidence(lower: &str) -> bool {
     let compact = compact_code(lower);
     compact.contains("fallibility::infallible") && compact.contains("result.unwrap_unchecked(")
+}
+
+fn has_unreachable_unchecked_infallible_path_evidence(lower: &str) -> bool {
+    let compact = compact_code(lower);
+    compact.contains("fallibility::infallible") && compact.contains("unreachable_unchecked(")
 }
 
 fn has_maybeuninit_slice_context(lower: &str) -> bool {
@@ -1001,6 +1017,56 @@ mod tests {
         );
 
         let evidence = obligation_evidence(&option_unwrap, &obligations, &contract, &reach);
+
+        assert!(!evidence[0].discharge.present);
+    }
+
+    #[test]
+    fn unreachable_unchecked_infallible_path_discharges_unreachable_obligation() {
+        let obligations = vec![SafetyObligation::new(
+            "unreachable",
+            "control flow cannot reach this path before `unreachable_unchecked`",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let unreachable = site_with_family(
+            OperationFamily::UnreachableUnchecked,
+            vec![
+                "match fallible_with_capacity(Fallibility::Infallible) {",
+                "    Ok(value) => value,",
+                "    // SAFETY: infallible mode handles allocation errors before this point.",
+            ],
+            "Err(_) => unsafe { hint::unreachable_unchecked() },",
+            vec![],
+        );
+
+        let evidence = obligation_evidence(&unreachable, &obligations, &contract, &reach);
+
+        assert!(evidence[0].discharge.present);
+    }
+
+    #[test]
+    fn unreachable_unchecked_evidence_requires_infallible_context() {
+        let obligations = vec![SafetyObligation::new(
+            "unreachable",
+            "control flow cannot reach this path before `unreachable_unchecked`",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let unreachable = site_with_family(
+            OperationFamily::UnreachableUnchecked,
+            vec!["match fallible_with_capacity(Fallibility::Fallible) {"],
+            "Err(_) => unsafe { hint::unreachable_unchecked() },",
+            vec![],
+        );
+
+        let evidence = obligation_evidence(&unreachable, &obligations, &contract, &reach);
 
         assert!(!evidence[0].discharge.present);
     }
