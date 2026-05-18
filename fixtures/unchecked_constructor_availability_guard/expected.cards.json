@@ -1,0 +1,59 @@
+[
+  {
+    "id": "UR-unchecked-constructor-availability-guard-fixture-src-lib-rs-new-operation-unsafe_fn_call-some-3ac53e496ec2-unknown-c1",
+    "class": "guarded_unwitnessed",
+    "priority": "medium",
+    "confidence": "medium",
+    "site": {
+      "file": "src/lib.rs",
+      "line": 21,
+      "column": 13,
+      "kind": "operation",
+      "owner": "new",
+      "visibility": "private",
+      "public_api_surface": false,
+      "snippet": "unsafe { Some(One::new_unchecked(needle)) }"
+    },
+    "operation_family": "unsafe_fn_call",
+    "hazards": [
+      "unknown"
+    ],
+    "obligations": [
+      "callee safety preconditions are satisfied"
+    ],
+    "obligation_evidence": [
+      {
+        "key": "callee-contract",
+        "description": "callee safety preconditions are satisfied",
+        "contract": {
+          "present": true,
+          "state": "present",
+          "summary": "Nearby `SAFETY:` comment was detected"
+        },
+        "discharge": {
+          "present": true,
+          "state": "present",
+          "summary": "Unchecked constructor availability guard code was detected"
+        },
+        "reach": {
+          "present": true,
+          "state": "present",
+          "summary": "1 related test file(s) mention owner `new`"
+        },
+        "witness": {
+          "present": false,
+          "state": "missing",
+          "summary": "No imported witness receipt was found"
+        }
+      }
+    ],
+    "contract": "Nearby `SAFETY:` comment was detected",
+    "discharge": "All inferred safety obligations have visible local guard evidence",
+    "reach": "1 related test file(s) mention owner `new`",
+    "witness": "No imported witness receipt was found",
+    "missing": [
+      "No witness receipt imported for this card"
+    ],
+    "verify_commands": []
+  }
+]

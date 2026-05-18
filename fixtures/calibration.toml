@@ -37,6 +37,7 @@ required_core_fixtures = [
   "unsafe_fn_call_wrapper",
   "multiline_unsafe_fn_call_wrapper",
   "unsafe_fn_call_encode_utf8_remaining_cap",
+  "unchecked_constructor_availability_guard",
   "impl_trait_bound_owner_inference",
   "nested_unsafe_operation_call_dedupe",
   "adjacent_unchanged_unsafe_fn_no_card",
@@ -376,6 +377,16 @@ expected_hazard = "unknown"
 fixture = "unsafe_fn_call_encode_utf8_remaining_cap"
 kind = "positive"
 claim = "unsafe encode_utf8 calls recognize remaining capacity argument evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "unsafe_fn_call"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "unchecked_constructor_availability_guard"
+kind = "positive"
+claim = "non-NonNull new_unchecked constructors are unsafe-call cards and recognize local is_available guards"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guarded_unwitnessed"

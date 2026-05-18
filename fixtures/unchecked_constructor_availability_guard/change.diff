@@ -1,0 +1,20 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -12,6 +12,18 @@ impl One {
+     fn constructor_boundary() {}
+ 
++    pub fn new(needle: u8) -> Option<One> {
++        Self::constructor_boundary();
++        if One::is_available() {
++            // SAFETY: availability is checked above before constructing this
++            // target-specific searcher.
++            unsafe { Some(One::new_unchecked(needle)) }
++        } else {
++            None
++        }
++    }
++
+     pub fn needle(&self) -> u8 {
+         self.needle
+     }
