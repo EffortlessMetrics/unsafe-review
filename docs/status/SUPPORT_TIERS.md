@@ -15,6 +15,7 @@ All tiers describe static review evidence. None means memory-safety proof.
 | Repo inventory | scaffold | repo JSON / badges | compile gate only | badge is not UB-free claim |
 | PR Markdown summary | experimental | PR artifact Markdown | `pr_summary` renderer tests and CLI `--format pr-summary` | local artifact only; no workflow wiring or comments yet |
 | SARIF projection | experimental | PR artifact SARIF | `sarif` renderer tests and CLI `--format sarif` | local artifact only; no workflow upload or default blocking |
+| Advisory PR workflow | experimental | GitHub Actions artifacts | workflow renders and uploads cards JSON, PR summary, and SARIF | no comments, witnesses, or blocking policy |
 | LSP projection | planned | editor | saved-card fixtures | read-only first |
 | Agent packets | planned | JSON packet | packet schema tests | agents still require review |
 | Receipt import | planned | witness receipts | Miri/careful/sanitizer fixtures | receipt strength must be explicit |

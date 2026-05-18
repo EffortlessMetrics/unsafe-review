@@ -25,6 +25,17 @@ The SARIF artifact projects the same review cards into code-scanning shape. It
 is still advisory static review evidence; uploading SARIF must not be treated as
 proof that the changed code is memory-safe.
 
+The advisory GitHub workflow writes and uploads:
+
+```text
+target/unsafe-review/cards.json
+target/unsafe-review/pr-summary.md
+target/unsafe-review/cards.sarif
+```
+
+It does not run Miri, sanitizers, Loom, Kani, or other witness tools. It does
+not post comments and does not enable blocking policy.
+
 Witness tools are routed, not run everywhere. Miri, sanitizers, Loom, and Kani
 belong in targeted PR, nightly, or release lanes unless repo policy says
 otherwise.

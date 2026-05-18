@@ -20,6 +20,9 @@ tools, or change policy mode.
 SARIF output is also a projection from existing `ReviewCard`s. SARIF results
 carry card identity, operation family, hazards, missing evidence, witness route
 recommendations, and the same trust boundary in result properties.
+The advisory GitHub workflow uploads the JSON, Markdown summary, and SARIF
+artifacts. It does not run witness tools, post inline comments, or enable
+blocking policy.
 
 ## Non-goals
 
@@ -43,6 +46,8 @@ recommendations, and the same trust boundary in result properties.
   writes a GitHub-ready Markdown artifact.
 - `unsafe-review check --format sarif --out target/unsafe-review/cards.sarif`
   writes parseable SARIF 2.1.0.
+- The advisory workflow uploads `cards.json`, `pr-summary.md`, and `cards.sarif`
+  as artifacts without running Miri or posting comments.
 - Empty output states no actionable cards and does not imply the repository is
   safe or UB-free.
 
