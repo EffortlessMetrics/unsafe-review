@@ -130,4 +130,5 @@ cargo xtask check-pr
 - [Implementation plan](plans/0.1.0/implementation-plan.md)
 - [Support summary](docs/status/SUPPORT_SUMMARY.md)
 - [Support tiers](docs/status/SUPPORT_TIERS.md)
+- [Dogfood index](docs/dogfood/index.md)
 - [Policy ledgers](policy/)

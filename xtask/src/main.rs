@@ -1,5 +1,5 @@
 #![forbid(unsafe_code)]
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -41,6 +41,7 @@ const CALIBRATION_REQUIRED_KINDS: &[&str] = &["positive", "negative", "false_pos
 
 const KNOWN_SUPPORT_TIERS: &[&str] = &["scaffold", "experimental", "planned", "deferred"];
 const DOGFOOD_MANIFEST: &str = "docs/dogfood/corpus.toml";
+const DOGFOOD_INDEX: &str = "docs/dogfood/index.json";
 const DOGFOOD_TARGET_KINDS: &[&str] = &["repo-snapshot", "pr-diff"];
 const DOGFOOD_TARGET_STATUSES: &[&str] = &["active", "parked", "retired"];
 const DOGFOOD_ARTIFACT_STATUSES: &[&str] = &["checked_in", "local_untracked", "remote_manual"];
@@ -390,6 +391,7 @@ fn check_dogfood() -> Result<(), String> {
 
     let mut ids = BTreeSet::new();
     let mut repositories = BTreeSet::new();
+    let mut artifact_status_counts = BTreeMap::new();
     let mut repo_snapshots = 0usize;
     let mut pr_diffs = 0usize;
     for (idx, target) in targets.iter().enumerate() {
@@ -442,6 +444,9 @@ fn check_dogfood() -> Result<(), String> {
                 "{DOGFOOD_MANIFEST} targets[{idx}] uses unknown artifact_status `{artifact_status}`"
             ));
         }
+        *artifact_status_counts
+            .entry(artifact_status.to_string())
+            .or_insert(0usize) += 1;
         let artifacts = target
             .get("artifacts")
             .and_then(toml::Value::as_array)
@@ -514,12 +519,116 @@ fn check_dogfood() -> Result<(), String> {
             "{DOGFOOD_MANIFEST} must include repo-snapshot and pr-diff targets"
         ));
     }
+    check_dogfood_index(
+        targets.len(),
+        repositories.len(),
+        repo_snapshots,
+        pr_diffs,
+        &repositories,
+        &artifact_status_counts,
+    )?;
 
     println!(
         "check-dogfood: ok ({} targets, {} repositories)",
         targets.len(),
         repositories.len()
     );
+    Ok(())
+}
+
+fn check_dogfood_index(
+    target_count: usize,
+    repository_count: usize,
+    repo_snapshots: usize,
+    pr_diffs: usize,
+    repositories: &BTreeSet<String>,
+    artifact_status_counts: &BTreeMap<String, usize>,
+) -> Result<(), String> {
+    let index = parse_json_file(&workspace_path(DOGFOOD_INDEX))?;
+    require_json_str(&index, "schema_version", "0.1", DOGFOOD_INDEX)?;
+    require_json_str(&index, "status", "experimental", DOGFOOD_INDEX)?;
+    require_json_str(&index, "manifest", DOGFOOD_MANIFEST, DOGFOOD_INDEX)?;
+    let boundary = index
+        .get("trust_boundary")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| format!("{DOGFOOD_INDEX} is missing trust_boundary"))?;
+    require_boundary_text(boundary, DOGFOOD_INDEX)?;
+    require_json_usize_at(
+        &index,
+        "/summary/repositories",
+        repository_count,
+        DOGFOOD_INDEX,
+    )?;
+    require_json_usize_at(&index, "/summary/targets", target_count, DOGFOOD_INDEX)?;
+    require_json_usize_at(
+        &index,
+        "/summary/repo_snapshots",
+        repo_snapshots,
+        DOGFOOD_INDEX,
+    )?;
+    require_json_usize_at(&index, "/summary/pr_diffs", pr_diffs, DOGFOOD_INDEX)?;
+
+    for (status, count) in artifact_status_counts {
+        require_json_usize_at(
+            &index,
+            &format!("/summary/artifact_statuses/{status}"),
+            *count,
+            DOGFOOD_INDEX,
+        )?;
+    }
+
+    let repository_rows = json_array_at(&index, "/repositories", DOGFOOD_INDEX)?;
+    if repository_rows.len() != repository_count {
+        return Err(format!(
+            "{DOGFOOD_INDEX} repositories has {}, expected {repository_count}",
+            repository_rows.len()
+        ));
+    }
+    let mut seen = BTreeSet::new();
+    for (idx, row) in repository_rows.iter().enumerate() {
+        let Some(repository) = row.get("repository").and_then(serde_json::Value::as_str) else {
+            return Err(format!(
+                "{DOGFOOD_INDEX} repositories[{idx}] is missing repository"
+            ));
+        };
+        if !repositories.contains(repository) {
+            return Err(format!(
+                "{DOGFOOD_INDEX} repositories[{idx}] references unknown repository `{repository}`"
+            ));
+        }
+        if !seen.insert(repository.to_string()) {
+            return Err(format!(
+                "{DOGFOOD_INDEX} repositories contains duplicate `{repository}`"
+            ));
+        }
+        json_array_at(row, "/snapshot_targets", DOGFOOD_INDEX)?;
+        json_array_at(row, "/pr_diff_targets", DOGFOOD_INDEX)?;
+        let Some(summary) = row
+            .get("primary_exercise")
+            .and_then(serde_json::Value::as_str)
+        else {
+            return Err(format!(
+                "{DOGFOOD_INDEX} repositories[{idx}] is missing primary_exercise"
+            ));
+        };
+        if summary.len() < 24 {
+            return Err(format!(
+                "{DOGFOOD_INDEX} repositories[{idx}] primary_exercise is too terse"
+            ));
+        }
+    }
+
+    if json_array_at(&index, "/recorded_outcomes", DOGFOOD_INDEX)?.is_empty() {
+        return Err(format!(
+            "{DOGFOOD_INDEX} recorded_outcomes must document at least one saved outcome"
+        ));
+    }
+    if json_array_at(&index, "/limitations", DOGFOOD_INDEX)?.is_empty() {
+        return Err(format!(
+            "{DOGFOOD_INDEX} limitations must document current dogfood limits"
+        ));
+    }
+
     Ok(())
 }
 
@@ -847,6 +956,22 @@ fn json_usize_at(value: &serde_json::Value, pointer: &str, path: &str) -> Result
     };
     usize::try_from(number)
         .map_err(|err| format!("{path} integer at `{pointer}` is too large: {err}"))
+}
+
+fn require_json_usize_at(
+    value: &serde_json::Value,
+    pointer: &str,
+    expected: usize,
+    path: &str,
+) -> Result<(), String> {
+    let actual = json_usize_at(value, pointer, path)?;
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(format!(
+            "{path} integer at `{pointer}` is {actual}, expected {expected}"
+        ))
+    }
 }
 
 fn require_toml_string(value: &toml::Value, key: &str, path: &str) -> Result<(), String> {
