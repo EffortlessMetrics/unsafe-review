@@ -6,3 +6,4 @@ what not to do next. Do not put active specs here.
 | Handoff | Date | Scope |
 |---|---|---|
 | [Review-card correctness v0.1](2026-05-18-review-card-correctness-v0.1.md) | 2026-05-18 | fixture-backed experimental review-card engine |
+| [Codex web candidate PR intake](2026-05-18-codex-web-candidate-prs.md) | 2026-05-18 | candidate PR clustering and disposition rules |
