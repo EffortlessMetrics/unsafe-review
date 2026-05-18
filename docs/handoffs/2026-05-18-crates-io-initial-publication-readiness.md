@@ -115,3 +115,42 @@ next lane
 ```
 
 Tag `v0.1.0` only after all three crate publishes and the install smoke pass.
+
+## Current pre-publish proof refresh
+
+After the dogfood-calibrated evidence lane closeout, the following
+non-publishing checks were refreshed from current `origin/main`:
+
+```bash
+rtk cargo package -p unsafe-review-core --list
+rtk cargo package -p unsafe-review-cli --list
+rtk cargo package -p unsafe-review --list
+rtk cargo search unsafe-review-core --limit 10
+rtk cargo search unsafe-review-cli --limit 10
+rtk cargo search unsafe-review --limit 10
+rtk cargo publish -p unsafe-review-core --dry-run
+rtk cargo publish -p unsafe-review-cli --dry-run
+rtk cargo publish -p unsafe-review --dry-run
+```
+
+Observed result:
+
+- all three `cargo package --list` commands completed
+- all three `cargo search` commands returned no matching rows for the exact
+  crate names
+- `unsafe-review-core` packaged, verified, and reached the dry-run upload
+  boundary successfully
+- `unsafe-review-cli` dry-run stopped because `unsafe-review-core` is not yet in
+  the crates.io index
+- `unsafe-review` dry-run stopped because `unsafe-review-cli` is not yet in the
+  crates.io index
+
+Those downstream dry-run failures are expected before the dependency crates are
+actually published. They confirm the documented publish order:
+
+```text
+unsafe-review-core -> unsafe-review-cli -> unsafe-review
+```
+
+No crates were published, no tag was created, and no release receipt was
+recorded by this proof refresh.
