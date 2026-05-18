@@ -217,14 +217,14 @@ fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
     if line.contains("Box::from_raw") || line.contains("from_raw(") {
         return Some((UnsafeSiteKind::Operation, OperationFamily::BoxFromRaw));
     }
-    if line.contains("new_unchecked") {
-        return Some((UnsafeSiteKind::Operation, OperationFamily::NonNullUnchecked));
-    }
-    if line.contains("Pin::new_unchecked") || line.contains("get_unchecked_mut") {
+    if line.contains("Pin::new_unchecked") {
         return Some((UnsafeSiteKind::Operation, OperationFamily::PinUnchecked));
     }
     if line.contains("get_unchecked") {
         return Some((UnsafeSiteKind::Operation, OperationFamily::GetUnchecked));
+    }
+    if line.contains("new_unchecked") {
+        return Some((UnsafeSiteKind::Operation, OperationFamily::NonNullUnchecked));
     }
     if line.contains(".read()") || line.contains("ptr::read") {
         return Some((UnsafeSiteKind::Operation, OperationFamily::RawPointerRead));
