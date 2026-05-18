@@ -1,6 +1,7 @@
-use crate::command::{CheckOptions, Command, Format};
+use crate::command::{CheckOptions, Command, DiffInput, Format};
 use std::fs;
-use std::path::Path;
+use std::io::{self, Read};
+use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use unsafe_review_core::{
     AnalysisMode, AnalyzeInput, CardId, DiffSource, PolicyMode, Scope, analyze, collect_context,
@@ -41,10 +42,7 @@ fn run_check(options: CheckOptions, scope: Scope, mode: AnalysisMode) -> Result<
     })?;
     let rendered = render_with_format(&output, &options.format);
     if let Some(path) = options.out {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|err| format!("create {} failed: {err}", parent.display()))?;
-        }
+        ensure_parent_dir(&path)?;
         fs::write(&path, rendered)
             .map_err(|err| format!("write {} failed: {err}", path.display()))?;
     } else {
@@ -54,8 +52,11 @@ fn run_check(options: CheckOptions, scope: Scope, mode: AnalysisMode) -> Result<
 }
 
 fn diff_source(options: &CheckOptions) -> Result<DiffSource, String> {
-    if let Some(path) = &options.diff {
-        return Ok(DiffSource::File(path.clone()));
+    if let Some(diff) = &options.diff {
+        return match diff {
+            DiffInput::File(path) => Ok(DiffSource::File(resolve_diff_path(&options.root, path))),
+            DiffInput::Stdin => read_stdin_diff(),
+        };
     }
     if let Some(base) = &options.base {
         let output = ProcessCommand::new("git")
@@ -75,6 +76,32 @@ fn diff_source(options: &CheckOptions) -> Result<DiffSource, String> {
         ));
     }
     Ok(DiffSource::NoneRepoScan)
+}
+
+fn read_stdin_diff() -> Result<DiffSource, String> {
+    let mut text = String::new();
+    io::stdin()
+        .read_to_string(&mut text)
+        .map_err(|err| format!("read diff from stdin failed: {err}"))?;
+    Ok(DiffSource::Text(text))
+}
+
+fn resolve_diff_path(root: &Path, path: &Path) -> PathBuf {
+    if path.exists() || path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        root.join(path)
+    }
+}
+
+fn ensure_parent_dir(path: &Path) -> Result<(), String> {
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent)
+            .map_err(|err| format!("create {} failed: {err}", parent.display()))?;
+    }
+    Ok(())
 }
 
 fn render_with_format(output: &unsafe_review_core::AnalyzeOutput, format: &Format) -> String {
@@ -194,13 +221,13 @@ fn print_help() {
     println!();
     println!("Commands:");
     println!(
-        "  check   [--root .] [--base origin/main | --diff file] [--format human|json|markdown|pr-summary|sarif|comment-plan]"
+        "  check   [--root .] [--base origin/main | --diff file|-] [--format human|json|markdown|pr-summary|sarif|comment-plan]"
     );
     println!("  repo    [--root .] [--format json]");
     println!("  pilot   [--root .] [--base origin/main] [--max-cards 5]");
     println!("  badges  [--root .] [--out badges]");
-    println!("  explain [--root .] <card-id>");
-    println!("  context [--root .] <card-id>");
+    println!("  explain [--root .] [--json|--format json] <card-id>");
+    println!("  context [--root .] [--json|--format json] <card-id>");
     println!("  doctor  [--root .]");
     println!();
     println!("Trust boundary: static review evidence, not soundness proof.");

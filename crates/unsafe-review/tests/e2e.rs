@@ -2,8 +2,9 @@ use serde_json::Value;
 use std::error::Error;
 use std::ffi::{OsStr, OsString};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
@@ -27,6 +28,55 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     assert_eq!(value["cards"][0]["class"], "guard_missing");
     assert_eq!(value["cards"][0]["operation_family"], "raw_pointer_read");
     let card_id = json_str(&value["cards"][0]["id"], "cards[0].id")?;
+
+    let root_relative_diff = run_success([
+        os("check"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        os("change.diff"),
+        os("--format"),
+        os("json"),
+    ])?;
+    let root_relative_diff = parse_json(&stdout_text(&root_relative_diff)?)?;
+    assert_eq!(root_relative_diff["summary"]["cards"], 1);
+
+    let stdin_diff = fs::read_to_string(fixture.join("change.diff"))?;
+    let piped_diff = run_success_with_stdin(
+        [
+            os("check"),
+            os("--root"),
+            fixture.as_os_str().to_os_string(),
+            os("--diff"),
+            os("-"),
+            os("--format"),
+            os("json"),
+        ],
+        &stdin_diff,
+    )?;
+    let piped_diff = parse_json(&stdout_text(&piped_diff)?)?;
+    assert_eq!(piped_diff["summary"]["cards"], 1);
+
+    let current_dir_out = temp.path().join("cards.json");
+    let out_current_dir = run_success_in_dir(
+        [
+            os("check"),
+            os("--root"),
+            fixture.as_os_str().to_os_string(),
+            os("--diff"),
+            fixture.join("change.diff").into_os_string(),
+            os("--format"),
+            os("json"),
+            os("--out"),
+            os("cards.json"),
+        ],
+        temp.path(),
+    )?;
+    assert_eq!(stdout_text(&out_current_dir)?.trim(), "");
+    assert_eq!(
+        parse_json(&fs::read_to_string(&current_dir_out)?)?["summary"]["cards"],
+        1
+    );
 
     let summary_path = temp.path().join("nested").join("pr-summary.md");
     let summary = run_success([
@@ -111,20 +161,55 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let output = Command::new(env!("CARGO_BIN_EXE_unsafe-review"))
+    checked_output(Command::new(env!("CARGO_BIN_EXE_unsafe-review")).args(args))
+}
+
+fn run_success_in_dir<I, S>(args: I, current_dir: &Path) -> Result<Output, Box<dyn Error>>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    checked_output(
+        Command::new(env!("CARGO_BIN_EXE_unsafe-review"))
+            .current_dir(current_dir)
+            .args(args),
+    )
+}
+
+fn run_success_with_stdin<I, S>(args: I, stdin: &str) -> Result<Output, Box<dyn Error>>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let mut child = Command::new(env!("CARGO_BIN_EXE_unsafe-review"))
         .args(args)
-        .output()?;
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let Some(mut child_stdin) = child.stdin.take() else {
+        return Err("failed to open child stdin".into());
+    };
+    child_stdin.write_all(stdin.as_bytes())?;
+    drop(child_stdin);
+    checked_completed_output(child.wait_with_output()?)
+}
+
+fn checked_output(command: &mut Command) -> Result<Output, Box<dyn Error>> {
+    checked_completed_output(command.output()?)
+}
+
+fn checked_completed_output(output: Output) -> Result<Output, Box<dyn Error>> {
     if output.status.success() {
-        Ok(output)
-    } else {
-        Err(format!(
-            "command failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
-            output.status.code(),
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        )
-        .into())
+        return Ok(output);
     }
+    Err(format!(
+        "command failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    )
+    .into())
 }
 
 fn stdout_text(output: &Output) -> Result<String, Box<dyn Error>> {

@@ -70,7 +70,7 @@ candidate PRs in the theme inventory below.
 | Property testing | #43, #60, #84, #85 | none yet | park | later hardening | Valuable later, but do not put property infrastructure ahead of current PR projection unless it is tiny and directly protects a current parser invariant. |
 | Fuzzing | #42, #59, #82, #83 | none yet | park | later hardening | Keep as candidate inventory. Avoid scheduled or blocking fuzz workflows in the current lane. |
 | Mutation testing | #41, #57, #78, #79 | none yet | park | later hardening | Useful after the card and PR artifact surfaces settle. Keep non-blocking and manual/scheduled later. |
-| CLI ergonomics and diff handling | #31, #45, #46, #47 | none yet | park or rework | later UX | Review only if it fixes a current workflow bug. Avoid broad CLI semantics changes during projection hardening. |
+| CLI ergonomics and diff handling | #31, #45, #46, #47 | reworked from #31/#45/#47 on current main | merge | current PR/CI projection | The current slice keeps current-lane fixes: stdin diffs, root-relative diff files, current-directory `--out`, JSON aliases, duplicate card-id rejection, and no `--fail-on-gaps` policy behavior. |
 | Documentation usage guides | #36, #37, #53, #56, #72, #73, #76, #77 | choose one only after doc-map review | park or rework | later docs | Pick one canonical CLI usage guide. Avoid multiple overlapping docs pages. |
 | Diataxis docs structure | #35, #54, #70, #71 | none yet | park | later docs | Broad docs restructuring is not active-lane work. |
 | Spec expansion | #38, #52, #68, #69 | none yet | park | later source-of-truth | Specs should follow concrete behavior gaps, not outrun implementation. |
