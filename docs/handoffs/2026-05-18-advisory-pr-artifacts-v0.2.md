@@ -105,6 +105,38 @@ advisory policy, plan-only comment mode, projection card identity consistency,
 result counts, parseability, and trust-boundary text. It does not prove
 memory safety, witness execution, code-scanning approval, or policy readiness.
 
+## Unsafe-adjacent dogfood follow-up
+
+The `#102 analysis: distinguish unaligned raw pointer reads` PR provided a
+stronger unsafe-adjacent dogfood sample because it changed raw-pointer fixture
+and scanner code.
+
+Receipt:
+
+- PR: `#102 analysis: distinguish unaligned raw pointer reads`
+- Workflow: `unsafe-review`
+- Run: `26012554821`
+- Branch: `analysis/read-unaligned-card-v1`
+- Artifact: `unsafe-review`
+- Artifact id: `7049234818`
+- Artifact digest: `sha256:afb743e2547cc06cf406f56e9a85f5e0620f8bf5561dd267dc7e62d5c28a0fae`
+
+The downloaded artifact passed the artifact-contract verifier:
+
+```bash
+rtk cargo run --locked -p xtask -- check-advisory-artifacts target/advisory-artifact-102/unsafe-review
+```
+
+The artifact also exposed dogfood noise: it contained five cards, four of which
+came from detector implementation strings in `scanner.rs`, such as
+`line.contains("get_unchecked")`, rather than from unsafe operations. That
+finding was fixed by `#107 fix: ignore syntax string literal detector text`.
+
+After `#107`, rerunning the `#102` diff locally produced one card: the intended
+`raw_pointer_read_unaligned` fixture card. This confirms the PR artifact loop is
+useful as a noise-finding dogfood path, while the support tier should remain
+experimental and advisory.
+
 ## Current support posture
 
 The PR artifact surfaces are experimental and advisory. They are suitable for
