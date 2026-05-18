@@ -34,9 +34,10 @@ reports card identity deltas:
 - `regressed`
 - `unchanged`
 
-Outcome comparison must compare existing card identity, class actionability, and
-missing-evidence counts from the supplied snapshots. It must not rerun analysis,
-run witnesses, post policy decisions, or claim repository safety.
+Outcome comparison must compare existing card identity, class actionability,
+missing-evidence counts, and saved witness receipt strength from the supplied
+snapshots. It must not rerun analysis, run witnesses, post policy decisions, or
+claim repository safety.
 
 Baseline-known items, suppressions, and no-new-debt policy promotion remain
 separate policy surfaces and are not part of badge proof.
@@ -71,7 +72,8 @@ separate policy surfaces and are not part of badge proof.
   `cards.improved`, `cards.regressed`, and `cards.unchanged` arrays, explicit
   limitations, and the trust boundary.
 - Each outcome card includes a reason that explains the snapshot movement, such
-  as a class change, missing-evidence count change, new card, or resolved card.
+  as a class change, missing-evidence count change, witness receipt strength
+  movement, new card, or resolved card.
 - If evidence is not knowable statically, repo output and badges count the
   card state instead of overclaiming.
 
