@@ -141,6 +141,25 @@ The receipt JSON shape is backed by `unsafe_review_core::WitnessReceipt`, so SDK
 consumers and future native adapters should produce that same schema rather than
 a parallel receipt format.
 
+Generate a receipt JSON template after a witness has been run outside
+`unsafe-review`:
+
+```bash
+unsafe-review receipt template <card-id> \
+  --tool miri \
+  --strength ran \
+  --author core/fixtures \
+  --recorded-at 2026-05-18T00:00:00Z \
+  --expires-at 2026-08-18 \
+  --summary "focused witness passed" \
+  --command "cargo +nightly miri test read_header" \
+  --limitation "fixture only" \
+  --out .unsafe-review/receipts/miri.json
+```
+
+The template command validates the receipt shape and writes JSON. It still does
+not run the witness command.
+
 `unsafe-review` imports receipts. It does not run Miri, `cargo-careful`,
 sanitizers, Loom, Shuttle, Kani, or Crux by default.
 

@@ -28,6 +28,10 @@ The receipt shape is represented in the core SDK as the serde-backed
 `WitnessReceipt` DTO. Importers and future native adapters must use that same
 shape instead of inventing parallel receipt schemas.
 
+The CLI may render a receipt template from explicit user-provided metadata. That
+template output is only a JSON authoring aid; it must not run witness commands or
+claim that a witness succeeded.
+
 Receipt JSON fields:
 
 ```json
@@ -100,6 +104,8 @@ after the `recorded_at` date.
 - If receipt scope is limited, the receipt summary keeps that limitation visible.
 - The core `WitnessReceipt` DTO round-trips through serde JSON and validates the
   same required fields as the importer.
+- The CLI receipt-template command writes a valid receipt JSON object but does
+  not execute the recorded command.
 
 ## CI proof
 
