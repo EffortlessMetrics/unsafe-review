@@ -228,11 +228,18 @@ fn scope_str(output: &AnalyzeOutput) -> &'static str {
 mod tests {
     use super::*;
     use crate::api::{AnalysisMode, AnalyzeInput, DiffSource, PolicyMode, analyze};
+    use std::fs;
     use std::path::PathBuf;
+
+    const FIXTURE_GOLDENS: &[&str] = &[
+        "raw_pointer_alignment",
+        "safe_code_no_cards",
+        "public_unsafe_fn_missing_safety",
+    ];
 
     #[test]
     fn rendered_analysis_json_is_parseable_and_keeps_card_contract() -> Result<(), String> {
-        let output = fixture_output()?;
+        let output = fixture_output("raw_pointer_alignment")?;
         let value = parse_json(&render(&output))?;
 
         assert_eq!(value["schema_version"], "0.1");
@@ -248,7 +255,7 @@ mod tests {
 
     #[test]
     fn rendered_agent_packet_json_is_parseable_and_bounded() -> Result<(), String> {
-        let output = fixture_output()?;
+        let output = fixture_output("raw_pointer_alignment")?;
         let Some(card) = output.cards.first() else {
             return Err("fixture should emit one card".to_string());
         };
@@ -264,9 +271,28 @@ mod tests {
         Ok(())
     }
 
-    fn fixture_output() -> Result<AnalyzeOutput, String> {
-        let root =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/raw_pointer_alignment");
+    #[test]
+    fn fixture_card_goldens_match_rendered_json() -> Result<(), String> {
+        for fixture in FIXTURE_GOLDENS {
+            let output = fixture_output(fixture)?;
+            let actual = parse_json(&render(&output))?;
+            let expected = fixture_expected_cards(fixture)?;
+            let Some(actual_cards) = actual.get("cards") else {
+                return Err(format!("{fixture} JSON output is missing `cards`"));
+            };
+            if actual_cards != &expected {
+                return Err(format!(
+                    "{fixture} card JSON drifted\nexpected:\n{}\nactual:\n{}",
+                    pretty_json(&expected),
+                    pretty_json(actual_cards)
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn fixture_output(name: &str) -> Result<AnalyzeOutput, String> {
+        let root = fixture_root(name);
         analyze(AnalyzeInput {
             root: root.clone(),
             scope: Scope::Diff,
@@ -278,7 +304,27 @@ mod tests {
         })
     }
 
+    fn fixture_expected_cards(name: &str) -> Result<serde_json::Value, String> {
+        let path = fixture_root(name).join("expected.cards.json");
+        let text = fs::read_to_string(&path)
+            .map_err(|err| format!("read {} failed: {err}", path.display()))?;
+        parse_json(&text)
+    }
+
+    fn fixture_root(name: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures")
+            .join(name)
+    }
+
     fn parse_json(text: &str) -> Result<serde_json::Value, String> {
         serde_json::from_str(text).map_err(|err| format!("JSON parse failed: {err}"))
+    }
+
+    fn pretty_json(value: &serde_json::Value) -> String {
+        match serde_json::to_string_pretty(value) {
+            Ok(text) => text,
+            Err(err) => format!("<failed to render JSON: {err}>"),
+        }
     }
 }

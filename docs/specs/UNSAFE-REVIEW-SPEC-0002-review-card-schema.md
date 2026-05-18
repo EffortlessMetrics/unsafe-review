@@ -35,6 +35,7 @@ than hand-rendered strings.
 - A changed unsafe seam produces one review card with stable identity.
 - The card includes missing evidence and a next action.
 - If evidence is not knowable statically, the card names the limitation instead of overclaiming.
+- Fixture `expected.cards.json` files pin the rendered card JSON for supported smoke cases.
 
 ## CI proof
 
