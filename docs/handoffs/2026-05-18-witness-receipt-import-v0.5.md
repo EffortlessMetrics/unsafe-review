@@ -25,6 +25,7 @@ Merged PRs:
 - `#157 receipts: add receipt validate command`
 - `#160 receipts: add miri saved-output adapter`
 - `#162 receipts: add cargo-careful saved-output adapter`
+- `#164 receipts: add sanitizer saved-output adapter`
 
 The receipt importer:
 
@@ -68,6 +69,13 @@ The receipt importer:
 - records matching `cargo-careful` limitations directly in the generated
   receipt: `unsafe-review` did not run `cargo-careful`, and `ran` strength does
   not claim site reach
+- adds `unsafe-review receipt import-sanitizer` as a saved-output adapter that
+  reads an existing sanitizer log, requires an explicit `asan`, `msan`, `tsan`,
+  or `lsan` tool, requires `test result: ok`, rejects failure-looking output,
+  and writes a normal sanitizer `strength = "ran"` receipt
+- records matching sanitizer limitations directly in the generated receipt:
+  `unsafe-review` did not run a sanitizer, and `ran` strength does not claim site
+  reach
 
 Receipt import does not create analyzer truth. It attaches external witness
 evidence to an existing `ReviewCard`.
@@ -128,6 +136,14 @@ rtk cargo test -p unsafe-review-cli receipt_import_careful --locked
 rtk cargo test -p unsafe-review --test e2e receipt_import_careful --locked
 ```
 
+The saved-output sanitizer adapter follow-up also passed:
+
+```bash
+rtk cargo test -p unsafe-review-core sanitizer_receipt --locked
+rtk cargo test -p unsafe-review-cli receipt_import_sanitizer --locked
+rtk cargo test -p unsafe-review --test e2e receipt_import_sanitizer --locked
+```
+
 The recurring workspace gate also passed:
 
 ```bash
@@ -171,6 +187,13 @@ The repo may claim:
   non-success-looking logs
 - generated `cargo-careful` receipts keep visible limitations that
   `unsafe-review` did not run `cargo-careful` and does not claim site reach
+- `unsafe-review receipt import-sanitizer` can convert a saved sanitizer success
+  log into a normal exact-card receipt with explicit `asan`, `msan`, `tsan`, or
+  `lsan` tool and `strength = "ran"`
+- the saved-output sanitizer adapter rejects unsupported sanitizer tools, empty
+  logs, failure-looking logs, and non-success-looking logs
+- generated sanitizer receipts keep visible limitations that `unsafe-review`
+  did not run a sanitizer and does not claim site reach
 - the `raw_pointer_alignment_receipted` golden proves a receipt does not hide
   the still-missing alignment guard
 - CLI JSON output preserves the same behavior end to end
@@ -195,7 +218,9 @@ The repo must not claim:
   parse native UB diagnostics into cards.
 - The `cargo-careful` adapter reads saved success logs only; it does not execute
   `cargo-careful` or parse diagnostics into cards.
-- Receipt import does not parse sanitizer, Loom, Kani, or Crux output.
+- The sanitizer adapter reads saved success logs only; it does not execute
+  sanitizers or parse diagnostics into cards.
+- Receipt import does not parse Loom, Kani, or Crux output.
 - Receipt import does not discharge contract, guard, or reach evidence.
 - Duplicate receipts for the same card are rejected instead of merged.
 - Receipt import validates metadata shape, but it does not verify author identity
@@ -210,8 +235,8 @@ The repo must not claim:
 Prefer dogfood and native adapter proof before adding automation:
 
 - import receipts for real unsafe-review dogfood PRs and inspect card wording
-- dogfood the saved-output Miri and `cargo-careful` adapters before adding more
-  native receipt parsers
+- dogfood the saved-output Miri, `cargo-careful`, and sanitizer adapters before
+  adding more native receipt parsers
 - keep witness execution separate from receipt import
 
 Defer:
