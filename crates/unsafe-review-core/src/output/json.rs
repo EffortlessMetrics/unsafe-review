@@ -231,6 +231,7 @@ mod tests {
         "inline_unsafe_raw_pointer_deref_no_duplicate",
         "unsafe_fn_call_wrapper",
         "multiline_unsafe_fn_call_wrapper",
+        "nested_unsafe_operation_call_dedupe",
         "split_unsafe_block",
         "raw_pointer_deref",
         "raw_pointer_read_unaligned",

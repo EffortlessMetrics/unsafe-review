@@ -454,6 +454,8 @@ struct DetectedSyntaxSite {
     line: usize,
     end_line: usize,
     column: usize,
+    start: usize,
+    end: usize,
     kind: UnsafeSiteKind,
     family: OperationFamily,
     card_snippet: String,
@@ -479,18 +481,47 @@ fn detect_syntax_sites(parsed: &ParsedSource) -> Vec<DetectedSyntaxSite> {
             line: fact.line,
             end_line: fact.line + fact.snippet.lines().count().saturating_sub(1),
             column: fact.column,
+            start: fact.start,
+            end: fact.end,
             kind,
             family,
             card_snippet,
             source_snippet: fact.snippet.clone(),
         });
     }
+    sites = without_parent_duplicate_operations(sites);
     sites.sort_by(|left, right| {
         left.line
             .cmp(&right.line)
             .then(left.column.cmp(&right.column))
     });
     sites
+}
+
+fn without_parent_duplicate_operations(sites: Vec<DetectedSyntaxSite>) -> Vec<DetectedSyntaxSite> {
+    sites
+        .iter()
+        .enumerate()
+        .filter(|(idx, site)| {
+            !is_parent_duplicate_operation(
+                site,
+                sites[..*idx].iter().chain(sites[*idx + 1..].iter()),
+            )
+        })
+        .map(|(_idx, site)| site.clone())
+        .collect()
+}
+
+fn is_parent_duplicate_operation<'a>(
+    site: &DetectedSyntaxSite,
+    others: impl Iterator<Item = &'a DetectedSyntaxSite>,
+) -> bool {
+    site.kind == UnsafeSiteKind::Operation
+        && others
+            .filter(|other| other.kind == UnsafeSiteKind::Operation)
+            .any(|other| {
+                site.family == other.family && site.start < other.start && other.end < site.end
+            })
 }
 
 fn syntax_owner(site: &DetectedSyntaxSite, lines: &[&str], idx: usize) -> Option<String> {
