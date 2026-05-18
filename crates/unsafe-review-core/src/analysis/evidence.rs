@@ -1,6 +1,7 @@
 use crate::analysis::scanner::ScannedSite;
 use crate::domain::{
-    ContractEvidence, DischargeEvidence, OperationFamily, ReachEvidence, RelatedTest,
+    ContractEvidence, DischargeEvidence, EvidenceState, ObligationEvidence, ReachEvidence,
+    RelatedTest, SafetyObligation,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -16,34 +17,45 @@ pub(crate) fn contract_evidence(site: &ScannedSite) -> ContractEvidence {
     ContractEvidence::missing()
 }
 
-pub(crate) fn discharge_evidence(site: &ScannedSite) -> DischargeEvidence {
+pub(crate) fn obligation_evidence(
+    site: &ScannedSite,
+    obligations: &[SafetyObligation],
+    contract: &ContractEvidence,
+    reach: &ReachEvidence,
+) -> Vec<ObligationEvidence> {
     let text = code_context(site);
     let lower = text.to_ascii_lowercase();
-    if matches!(
-        site.operation.family,
-        OperationFamily::RawPointerRead
-            | OperationFamily::RawPointerWrite
-            | OperationFamily::SliceFromRawParts
-    ) {
-        if has_alignment_guard(&lower) {
-            return DischargeEvidence::present("Nearby alignment guard code was detected");
-        }
+    obligations
+        .iter()
+        .map(|obligation| ObligationEvidence {
+            obligation: obligation.clone(),
+            contract: contract_state(contract),
+            discharge: discharge_state_for(&obligation.key, &lower),
+            reach: reach_state(reach),
+            witness: EvidenceState::missing("No imported witness receipt was found"),
+        })
+        .collect()
+}
+
+pub(crate) fn summarize_discharge(evidence: &[ObligationEvidence]) -> DischargeEvidence {
+    if evidence.is_empty() {
         return DischargeEvidence::missing();
     }
-    if lower.contains("assert!") || lower.contains("debug_assert!") {
-        return DischargeEvidence::present("Nearby assert/debug_assert guard was detected");
+    if evidence
+        .iter()
+        .all(|obligation| obligation.discharge.present)
+    {
+        return DischargeEvidence::present(
+            "All inferred safety obligations have visible local guard evidence",
+        );
     }
-    if has_alignment_guard(&lower) {
-        return DischargeEvidence::present("Nearby alignment guard vocabulary was detected");
-    }
-    if lower.contains("len") && (lower.contains(">=") || lower.contains("<")) {
-        return DischargeEvidence::present("Nearby length/bounds guard was detected");
-    }
-    if lower.contains("capacity") || lower.contains("cap()") {
-        return DischargeEvidence::present("Nearby capacity guard vocabulary was detected");
-    }
-    if lower.contains("is_null") || lower.contains("non_null") || lower.contains("nonnull") {
-        return DischargeEvidence::present("Nearby nullability guard vocabulary was detected");
+    if evidence
+        .iter()
+        .any(|obligation| obligation.discharge.present)
+    {
+        return DischargeEvidence::missing_with(
+            "Some inferred safety obligations are missing local guard evidence",
+        );
     }
     DischargeEvidence::missing()
 }
@@ -59,6 +71,61 @@ fn code_context(site: &ScannedSite) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn contract_state(contract: &ContractEvidence) -> EvidenceState {
+    if contract.present {
+        EvidenceState::present(&contract.summary)
+    } else {
+        EvidenceState::missing(&contract.summary)
+    }
+}
+
+fn reach_state(reach: &ReachEvidence) -> EvidenceState {
+    if reach.state == "unreached" || reach.state == "unknown" {
+        EvidenceState::missing(&reach.summary)
+    } else {
+        EvidenceState::present(&reach.summary)
+    }
+}
+
+fn discharge_state_for(key: &str, lower: &str) -> EvidenceState {
+    match key {
+        "alignment" => {
+            if has_alignment_guard(lower) {
+                EvidenceState::present("Alignment guard code was detected")
+            } else {
+                EvidenceState::missing("No alignment guard code was detected")
+            }
+        }
+        "bounds" | "valid-range" => {
+            if has_length_or_bounds_guard(lower) {
+                EvidenceState::present("Length or bounds guard code was detected")
+            } else {
+                EvidenceState::missing("No length or bounds guard code was detected")
+            }
+        }
+        "capacity" => {
+            if lower.contains("capacity") || lower.contains("cap()") {
+                EvidenceState::present("Capacity guard code was detected")
+            } else {
+                EvidenceState::missing("No capacity guard code was detected")
+            }
+        }
+        "non-null" | "pointer-live" => {
+            if lower.contains("is_null") || lower.contains("non_null") || lower.contains("nonnull")
+            {
+                EvidenceState::present("Nullability guard code was detected")
+            } else {
+                EvidenceState::missing("No nullability guard code was detected")
+            }
+        }
+        _ => EvidenceState::missing("No obligation-specific guard code was detected"),
+    }
+}
+
+fn has_length_or_bounds_guard(lower: &str) -> bool {
+    lower.contains("len") && (lower.contains(">=") || lower.contains('<'))
 }
 
 fn has_alignment_guard(lower: &str) -> bool {

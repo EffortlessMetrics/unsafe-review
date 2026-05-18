@@ -1,5 +1,5 @@
 use crate::api::{AnalyzeOutput, Scope, Summary};
-use crate::domain::ReviewCard;
+use crate::domain::{EvidenceState, ObligationEvidence, ReviewCard};
 use crate::util::path_display;
 use serde::Serialize;
 
@@ -91,6 +91,7 @@ struct JsonCard<'a> {
     operation_family: &'static str,
     hazards: Vec<&'static str>,
     obligations: Vec<&'a str>,
+    obligation_evidence: Vec<JsonObligationEvidence<'a>>,
     contract: &'a str,
     discharge: &'a str,
     reach: &'a str,
@@ -114,6 +115,11 @@ impl<'a> From<&'a ReviewCard> for JsonCard<'a> {
                 .iter()
                 .map(|obligation| obligation.description.as_str())
                 .collect(),
+            obligation_evidence: card
+                .obligation_evidence
+                .iter()
+                .map(JsonObligationEvidence::from)
+                .collect(),
             contract: &card.contract.summary,
             discharge: &card.discharge.summary,
             reach: &card.reach.summary,
@@ -124,6 +130,46 @@ impl<'a> From<&'a ReviewCard> for JsonCard<'a> {
                 .map(|missing| missing.message.as_str())
                 .collect(),
             verify_commands: &card.next_action.verify_commands,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct JsonObligationEvidence<'a> {
+    key: &'a str,
+    description: &'a str,
+    contract: JsonEvidenceState<'a>,
+    discharge: JsonEvidenceState<'a>,
+    reach: JsonEvidenceState<'a>,
+    witness: JsonEvidenceState<'a>,
+}
+
+impl<'a> From<&'a ObligationEvidence> for JsonObligationEvidence<'a> {
+    fn from(evidence: &'a ObligationEvidence) -> Self {
+        Self {
+            key: &evidence.obligation.key,
+            description: &evidence.obligation.description,
+            contract: JsonEvidenceState::from(&evidence.contract),
+            discharge: JsonEvidenceState::from(&evidence.discharge),
+            reach: JsonEvidenceState::from(&evidence.reach),
+            witness: JsonEvidenceState::from(&evidence.witness),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct JsonEvidenceState<'a> {
+    present: bool,
+    state: &'a str,
+    summary: &'a str,
+}
+
+impl<'a> From<&'a EvidenceState> for JsonEvidenceState<'a> {
+    fn from(state: &'a EvidenceState) -> Self {
+        Self {
+            present: state.present,
+            state: &state.state,
+            summary: &state.summary,
         }
     }
 }
@@ -159,6 +205,7 @@ struct JsonAgentPacket<'a> {
     task: &'a str,
     context: JsonAgentContext<'a>,
     required_safety_conditions: Vec<&'a str>,
+    obligation_evidence: Vec<JsonObligationEvidence<'a>>,
     missing: Vec<&'a str>,
     allowed_repairs: Vec<&'a str>,
     verify_commands: &'a [String],
@@ -178,6 +225,11 @@ impl<'a> From<&'a ReviewCard> for JsonAgentPacket<'a> {
                 .obligations
                 .iter()
                 .map(|obligation| obligation.description.as_str())
+                .collect(),
+            obligation_evidence: card
+                .obligation_evidence
+                .iter()
+                .map(JsonObligationEvidence::from)
                 .collect(),
             missing: card
                 .missing
@@ -249,6 +301,7 @@ mod tests {
         assert_eq!(value["cards"][0]["class"], "guard_missing");
         assert_eq!(value["cards"][0]["site"]["file"], "src/lib.rs");
         assert_eq!(value["cards"][0]["operation_family"], "raw_pointer_read");
+        assert!(value["cards"][0]["obligation_evidence"].is_array());
         assert!(value["cards"][0]["verify_commands"].is_array());
         Ok(())
     }
@@ -265,6 +318,7 @@ mod tests {
         assert_eq!(value["tool"], "unsafe-review");
         assert_eq!(value["card_id"], card.id.0);
         assert!(value["required_safety_conditions"].is_array());
+        assert!(value["obligation_evidence"].is_array());
         assert!(value["allowed_repairs"].is_array());
         assert!(value["do_not_do"].is_array());
         assert!(value["stop_conditions"].is_array());

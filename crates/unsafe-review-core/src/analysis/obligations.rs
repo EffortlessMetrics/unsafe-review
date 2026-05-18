@@ -65,6 +65,7 @@ pub(crate) fn obligations_for(family: &OperationFamily) -> Vec<SafetyObligation>
                 "pointer-live",
                 "pointer is live and dereferenceable for the accessed type",
             ),
+            SafetyObligation::new("bounds", "buffer has enough bytes for the accessed type"),
             SafetyObligation::new("alignment", "pointer is aligned for the accessed type"),
             SafetyObligation::new("initialized", "memory is initialized for the accessed type"),
             SafetyObligation::new("allocation", "access remains inside one live allocation"),

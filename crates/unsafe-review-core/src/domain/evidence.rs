@@ -1,3 +1,5 @@
+use super::SafetyObligation;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ContractEvidence {
     pub present: bool,
@@ -34,12 +36,53 @@ impl DischargeEvidence {
         }
     }
 
+    pub fn missing_with(summary: impl Into<String>) -> Self {
+        Self {
+            present: false,
+            summary: summary.into(),
+        }
+    }
+
     pub fn present(summary: impl Into<String>) -> Self {
         Self {
             present: true,
             summary: summary.into(),
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EvidenceState {
+    pub present: bool,
+    pub state: String,
+    pub summary: String,
+}
+
+impl EvidenceState {
+    pub fn missing(summary: impl Into<String>) -> Self {
+        Self {
+            present: false,
+            state: "missing".to_string(),
+            summary: summary.into(),
+        }
+    }
+
+    pub fn present(summary: impl Into<String>) -> Self {
+        Self {
+            present: true,
+            state: "present".to_string(),
+            summary: summary.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ObligationEvidence {
+    pub obligation: SafetyObligation,
+    pub contract: EvidenceState,
+    pub discharge: EvidenceState,
+    pub reach: EvidenceState,
+    pub witness: EvidenceState,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

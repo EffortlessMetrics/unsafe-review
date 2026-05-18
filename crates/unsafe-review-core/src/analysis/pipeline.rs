@@ -26,9 +26,11 @@ pub(crate) fn analyze(input: AnalyzeInput) -> Result<AnalyzeOutput, String> {
             let hazards = obligations::hazards_for(&scanned_site.operation.family);
             let obligations = obligations::obligations_for(&scanned_site.operation.family);
             let contract = evidence::contract_evidence(&scanned_site);
-            let discharge = evidence::discharge_evidence(&scanned_site);
             let (reach, related_tests) =
                 evidence::reach_evidence(&input.root, scanned_site.site.owner.as_ref());
+            let obligation_evidence =
+                evidence::obligation_evidence(&scanned_site, &obligations, &contract, &reach);
+            let discharge = evidence::summarize_discharge(&obligation_evidence);
             let routes = witness::routes_for(&hazards, scanned_site.site.owner.as_ref());
             let (class, priority, confidence) =
                 classify::classify(&hazards, &contract, &discharge, &reach);
@@ -74,6 +76,7 @@ pub(crate) fn analyze(input: AnalyzeInput) -> Result<AnalyzeOutput, String> {
                 operation: scanned_site.operation,
                 hazards,
                 obligations,
+                obligation_evidence,
                 contract,
                 discharge,
                 reach,
@@ -209,6 +212,14 @@ mod tests {
         assert!(card.contract.present);
         assert!(!card.discharge.present);
         assert_eq!(card.reach.state, "owner_reached");
+        assert!(
+            card.obligation_evidence.iter().any(|evidence| {
+                evidence.obligation.key == "bounds" && evidence.discharge.present
+            })
+        );
+        assert!(card.obligation_evidence.iter().any(|evidence| {
+            evidence.obligation.key == "alignment" && !evidence.discharge.present
+        }));
         assert!(card.missing.iter().any(|missing| missing.kind == "guard"));
         Ok(())
     }
