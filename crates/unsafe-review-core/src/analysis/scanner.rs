@@ -377,13 +377,16 @@ fn detect_syntax_sites(parsed: &ParsedSource) -> Vec<DetectedSyntaxSite> {
     let unsafe_block_ranges = unsafe_block_ranges(parsed);
     let operation_block_ranges = operation_block_ranges(parsed, &unsafe_block_ranges);
     for fact in &parsed.nodes {
-        let Some((kind, family)) =
-            detect_syntax_site(fact, &unsafe_block_ranges, &operation_block_ranges)
-        else {
+        let Some((kind, family)) = detect_syntax_site(
+            fact,
+            &parsed.text,
+            &unsafe_block_ranges,
+            &operation_block_ranges,
+        ) else {
             continue;
         };
         let _span_len = fact.end.saturating_sub(fact.start);
-        let card_snippet = card_snippet_for(fact, &kind);
+        let card_snippet = card_snippet_for(fact, &kind, &family, &parsed.text);
         sites.push(DetectedSyntaxSite {
             line: fact.line,
             column: fact.column,
@@ -403,6 +406,7 @@ fn detect_syntax_sites(parsed: &ParsedSource) -> Vec<DetectedSyntaxSite> {
 
 fn detect_syntax_site(
     fact: &SyntaxNodeFact,
+    source: &str,
     unsafe_block_ranges: &[(usize, usize)],
     operation_block_ranges: &BTreeSet<(usize, usize)>,
 ) -> Option<(UnsafeSiteKind, OperationFamily)> {
@@ -443,7 +447,12 @@ fn detect_syntax_site(
         "PREFIX_EXPR"
             if is_raw_pointer_deref(&compact) && is_inside_range(fact, unsafe_block_ranges) =>
         {
-            Some((UnsafeSiteKind::Operation, OperationFamily::RawPointerDeref))
+            let family = if prefix_deref_is_assignment_target(fact, source) {
+                OperationFamily::RawPointerWrite
+            } else {
+                OperationFamily::RawPointerDeref
+            };
+            Some((UnsafeSiteKind::Operation, family))
         }
         "CALL_EXPR" | "METHOD_CALL_EXPR" | "MACRO_EXPR" => {
             detect_site(&normalize_call_spacing(&compact))
@@ -452,7 +461,12 @@ fn detect_syntax_site(
     }
 }
 
-fn card_snippet_for(fact: &SyntaxNodeFact, kind: &UnsafeSiteKind) -> String {
+fn card_snippet_for(
+    fact: &SyntaxNodeFact,
+    kind: &UnsafeSiteKind,
+    family: &OperationFamily,
+    source: &str,
+) -> String {
     let compact = compact_whitespace(&fact.snippet);
     match kind {
         UnsafeSiteKind::UnsafeBlock => "unsafe {".to_string(),
@@ -466,6 +480,12 @@ fn card_snippet_for(fact: &SyntaxNodeFact, kind: &UnsafeSiteKind) -> String {
             .map_or(compact.clone(), |(head, _tail)| {
                 format!("{} {{", head.trim())
             }),
+        UnsafeSiteKind::Operation if family == &OperationFamily::RawPointerWrite => {
+            source_line_at(source, fact.start)
+                .map(|line| compact_whitespace(line.trim()))
+                .filter(|line| !line.is_empty())
+                .unwrap_or_else(|| normalize_call_spacing(&compact))
+        }
         UnsafeSiteKind::Operation => normalize_call_spacing(&compact),
         _ => compact,
     }
@@ -483,12 +503,73 @@ fn is_raw_pointer_deref(compact: &str) -> bool {
     compact.starts_with('*') && !compact.starts_with("**")
 }
 
+fn prefix_deref_is_assignment_target(fact: &SyntaxNodeFact, source: &str) -> bool {
+    let Some(rest) = source.get(fact.end..) else {
+        return false;
+    };
+    let mut rest = rest.trim_start();
+    while let Some(after_paren) = rest.strip_prefix(')') {
+        rest = after_paren.trim_start();
+    }
+    starts_with_assignment_operator(rest)
+}
+
+fn source_line_at(source: &str, offset: usize) -> Option<&str> {
+    let offset = offset.min(source.len());
+    let start = source[..offset].rfind('\n').map_or(0, |idx| idx + 1);
+    let end = source[offset..]
+        .find('\n')
+        .map_or(source.len(), |idx| offset + idx);
+    source.get(start..end)
+}
+
 fn is_raw_pointer_write(line: &str) -> bool {
     line.contains("ptr::write")
+        || line.contains("ptr::write_volatile")
         || line.contains("ptr.write(")
+        || line.contains("ptr.write_volatile(")
         || line.contains(".as_mut_ptr().write(")
+        || line.contains(".as_mut_ptr().write_volatile(")
         || line.contains(".cast_mut().write(")
+        || line.contains(".cast_mut().write_volatile(")
         || (line.contains(".cast::<") && line.contains(".write("))
+        || (line.contains(".cast::<") && line.contains(".write_volatile("))
+        || is_raw_pointer_assignment(line)
+}
+
+fn is_raw_pointer_assignment(line: &str) -> bool {
+    let compact = line.trim_start();
+    (compact.starts_with('*') || compact.starts_with("(*")) && contains_assignment_operator(compact)
+}
+
+fn contains_assignment_operator(text: &str) -> bool {
+    let text = text.trim_start();
+    assignment_operator_start(text).is_some()
+}
+
+fn assignment_operator_start(text: &str) -> Option<usize> {
+    const COMPOUND_ASSIGNMENTS: &[&str] =
+        &["+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>="];
+    for operator in COMPOUND_ASSIGNMENTS {
+        if let Some(idx) = text.find(operator) {
+            return Some(idx);
+        }
+    }
+    for (idx, ch) in text.char_indices() {
+        if ch != '=' {
+            continue;
+        }
+        let previous = text[..idx].chars().next_back();
+        let next = text[idx + ch.len_utf8()..].chars().next();
+        if !matches!(previous, Some('=' | '!' | '<' | '>')) && !matches!(next, Some('=' | '>')) {
+            return Some(idx);
+        }
+    }
+    None
+}
+
+fn starts_with_assignment_operator(text: &str) -> bool {
+    assignment_operator_start(text).is_some_and(|idx| idx == 0)
 }
 
 fn unsafe_block_ranges(parsed: &ParsedSource) -> Vec<(usize, usize)> {
@@ -693,6 +774,20 @@ mod tests {
             detect_site(extern_line.trim()),
             Some((UnsafeSiteKind::ExternBlock, OperationFamily::Ffi))
         );
+    }
+
+    #[test]
+    fn text_detection_classifies_raw_pointer_assignments_as_writes() {
+        assert_eq!(
+            detect_site("*ptr = value;"),
+            Some((UnsafeSiteKind::Operation, OperationFamily::RawPointerWrite))
+        );
+        assert_eq!(
+            detect_site("*ptr += 1;"),
+            Some((UnsafeSiteKind::Operation, OperationFamily::RawPointerWrite))
+        );
+        assert!(!is_raw_pointer_assignment("*ptr == value;"));
+        assert_eq!(detect_site("*ptr == value;"), None);
     }
 
     #[test]
