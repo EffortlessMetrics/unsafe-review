@@ -6,9 +6,11 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
+documentation = "https://docs.rs/unsafe-review-core"
 description = "Core SDK and static analysis engine for unsafe-review"
 keywords = ["unsafe", "rust", "miri", "static-analysis", "review"]
 categories = ["development-tools", "development-tools::testing"]
+readme = "README.md"
 
 [lib]
 name = "unsafe_review_core"

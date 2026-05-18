@@ -6,9 +6,11 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
+documentation = "https://docs.rs/unsafe-review-cli"
 description = "CLI adapter for unsafe-review"
 keywords = ["unsafe", "rust", "cli", "miri", "review"]
 categories = ["command-line-utilities", "development-tools"]
+readme = "README.md"
 
 [dependencies]
 unsafe-review-core = { path = "../unsafe-review-core", version = "0.1.0" }
