@@ -26,6 +26,7 @@ Merged PRs:
 - `#160 receipts: add miri saved-output adapter`
 - `#162 receipts: add cargo-careful saved-output adapter`
 - `#164 receipts: add sanitizer saved-output adapter`
+- `#166 receipts: add concurrency saved-output adapter`
 
 The receipt importer:
 
@@ -76,6 +77,13 @@ The receipt importer:
 - records matching sanitizer limitations directly in the generated receipt:
   `unsafe-review` did not run a sanitizer, and `ran` strength does not claim site
   reach
+- adds `unsafe-review receipt import-concurrency` as a saved-output adapter that
+  reads an existing Loom/Shuttle log, requires an explicit `loom` or `shuttle`
+  tool, requires `test result: ok`, rejects failure-looking output, and writes a
+  normal concurrency `strength = "ran"` receipt
+- records matching concurrency limitations directly in the generated receipt:
+  `unsafe-review` did not run a concurrency witness, and `ran` strength does not
+  claim site reach or complete scheduler coverage
 
 Receipt import does not create analyzer truth. It attaches external witness
 evidence to an existing `ReviewCard`.
@@ -144,6 +152,14 @@ rtk cargo test -p unsafe-review-cli receipt_import_sanitizer --locked
 rtk cargo test -p unsafe-review --test e2e receipt_import_sanitizer --locked
 ```
 
+The saved-output Loom/Shuttle adapter follow-up also passed:
+
+```bash
+rtk cargo test -p unsafe-review-core concurrency_receipt --locked
+rtk cargo test -p unsafe-review-cli receipt_import_concurrency --locked
+rtk cargo test -p unsafe-review --test e2e receipt_import_concurrency --locked
+```
+
 The recurring workspace gate also passed:
 
 ```bash
@@ -194,6 +210,14 @@ The repo may claim:
   logs, failure-looking logs, and non-success-looking logs
 - generated sanitizer receipts keep visible limitations that `unsafe-review`
   did not run a sanitizer and does not claim site reach
+- `unsafe-review receipt import-concurrency` can convert a saved Loom/Shuttle
+  success log into a normal exact-card receipt with explicit `loom` or `shuttle`
+  tool and `strength = "ran"`
+- the saved-output Loom/Shuttle adapter rejects unsupported concurrency tools,
+  empty logs, failure-looking logs, and non-success-looking logs
+- generated Loom/Shuttle receipts keep visible limitations that `unsafe-review`
+  did not run a concurrency witness and does not claim site reach or complete
+  scheduler coverage
 - the `raw_pointer_alignment_receipted` golden proves a receipt does not hide
   the still-missing alignment guard
 - CLI JSON output preserves the same behavior end to end
@@ -220,7 +244,9 @@ The repo must not claim:
   `cargo-careful` or parse diagnostics into cards.
 - The sanitizer adapter reads saved success logs only; it does not execute
   sanitizers or parse diagnostics into cards.
-- Receipt import does not parse Loom, Kani, or Crux output.
+- The Loom/Shuttle adapter reads saved success logs only; it does not execute
+  concurrency witnesses or parse interleaving diagnostics into cards.
+- Receipt import does not parse Kani or Crux output.
 - Receipt import does not discharge contract, guard, or reach evidence.
 - Duplicate receipts for the same card are rejected instead of merged.
 - Receipt import validates metadata shape, but it does not verify author identity
@@ -235,8 +261,8 @@ The repo must not claim:
 Prefer dogfood and native adapter proof before adding automation:
 
 - import receipts for real unsafe-review dogfood PRs and inspect card wording
-- dogfood the saved-output Miri, `cargo-careful`, and sanitizer adapters before
-  adding more native receipt parsers
+- dogfood the saved-output Miri, `cargo-careful`, sanitizer, and Loom/Shuttle
+  adapters before adding more native receipt parsers
 - keep witness execution separate from receipt import
 
 Defer:
