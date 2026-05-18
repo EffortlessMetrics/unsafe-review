@@ -20,8 +20,8 @@ pub(crate) fn contract_evidence(site: &ScannedSite) -> ContractEvidence {
             "Public unsafe API is missing nearby `# Safety` documentation",
         );
     }
-    if context.contains("SAFETY:") || site.site.snippet.contains("SAFETY:") {
-        return ContractEvidence::present("Nearby `SAFETY:` comment was detected");
+    if let Some(summary) = safety_comment_summary(&context, &site.site.snippet) {
+        return ContractEvidence::present(summary);
     }
     ContractEvidence::missing()
 }
@@ -40,6 +40,28 @@ fn safety_doc_summary(context: &str) -> Option<&'static str> {
         }
         if trimmed.contains("Safety:") {
             return Some("Nearby `Safety:` documentation was detected");
+        }
+    }
+    None
+}
+
+fn safety_comment_summary(context: &str, snippet: &str) -> Option<&'static str> {
+    for line in context.lines().chain(snippet.lines()) {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("///") || trimmed.starts_with("//!") {
+            continue;
+        }
+        if !(trimmed.starts_with("//")
+            || trimmed.contains("// SAFETY:")
+            || trimmed.contains("// Safety:"))
+        {
+            continue;
+        }
+        if trimmed.contains("SAFETY:") {
+            return Some("Nearby `SAFETY:` comment was detected");
+        }
+        if trimmed.contains("Safety:") {
+            return Some("Nearby `Safety:` comment was detected");
         }
     }
     None
@@ -607,11 +629,17 @@ mod tests {
             "ptr.read()",
             vec![],
         );
+        let safety_colon_comment_site = site_with_context(
+            vec!["// Safety: caller checked pointer"],
+            "ptr.read()",
+            vec![],
+        );
         let missing_site = site_with_context(vec!["// ordinary comment"], "ptr.read()", vec![]);
 
         assert!(contract_evidence(&doc_site).present);
         assert!(contract_evidence(&safety_colon_doc_site).present);
         assert!(contract_evidence(&comment_site).present);
+        assert!(contract_evidence(&safety_colon_comment_site).present);
         assert!(!contract_evidence(&missing_site).present);
     }
 
