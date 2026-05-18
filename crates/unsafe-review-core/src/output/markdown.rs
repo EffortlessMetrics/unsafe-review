@@ -67,6 +67,7 @@ pub(crate) fn render_card_detail(card: &ReviewCard) -> String {
     out.push_str(&format!("- Contract: {}\n", card.contract.summary));
     out.push_str(&format!("- Discharge: {}\n", card.discharge.summary));
     out.push_str(&format!("- Reach: {}\n", card.reach.summary));
+    out.push_str("- Reach note: static reach evidence only; it does not prove site execution.\n");
     out.push_str(&format!("- Witness: {}\n", card.witness.summary));
     if !card.obligation_evidence.is_empty() {
         out.push_str("\n## Obligation evidence\n\n");
@@ -126,6 +127,7 @@ mod tests {
         assert!(rendered.contains("Missing visible local guard"));
         assert!(rendered.contains("## Recommended witness routes"));
         assert!(rendered.contains("Pure-Rust UB-adjacent hazard"));
+        assert!(rendered.contains("does not prove site execution"));
         assert!(rendered.contains("## Trust boundary"));
         Ok(())
     }
