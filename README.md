@@ -88,7 +88,14 @@ cargo xtask check-pr
 
 ## Documentation map
 
+The documentation follows Diataxis: tutorials teach first use, how-to guides
+complete tasks, reference pages define contracts, and explanation pages record
+rationale. Start with the [documentation map](docs/README.md).
+
 - [Mission and vision](docs/MISSION.md)
+- [Tutorials](docs/tutorials/README.md)
+- [How-to guides](docs/how-to/README.md)
+- [Reference index](docs/reference/README.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Specifications](docs/specs/README.md)
