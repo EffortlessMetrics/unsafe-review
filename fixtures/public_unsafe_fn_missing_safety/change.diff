@@ -1,0 +1,7 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,0 +1,3 @@
++pub unsafe fn caller_must_uphold_contract() {
++    // The missing # Safety section is the fixture target.
++}
