@@ -84,6 +84,9 @@ cargo check --workspace --all-targets
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo xtask check-pr
+
+# Optional fuzzing robustness pass
+cargo fuzz run analysis -- -max_total_time=60
 ```
 
 ## Documentation map
@@ -95,4 +98,5 @@ cargo xtask check-pr
 - [ADRs](docs/adr/README.md)
 - [Implementation plan](plans/0.1.0/implementation-plan.md)
 - [Support tiers](docs/status/SUPPORT_TIERS.md)
+- [Fuzzing](docs/FUZZING.md)
 - [Policy ledgers](policy/)

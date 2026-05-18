@@ -3,3 +3,6 @@
 /.vscode/.ropeproject/
 *.swp
 .DS_Store
+/fuzz/artifacts/
+/fuzz/coverage/
+/fuzz/target/
