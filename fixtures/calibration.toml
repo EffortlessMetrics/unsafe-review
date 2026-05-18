@@ -27,6 +27,7 @@ required_core_fixtures = [
   "pointer_arithmetic_slice_end",
   "slice_from_raw_parts_mut",
   "slice_from_raw_parts_mut_maybeuninit",
+  "vec_from_raw_parts",
   "transmute_invalid_value",
   "unsafe_impl_send",
   "ffi_sanitizer_route",
@@ -293,6 +294,16 @@ expected_cards = 1
 expected_class = "guard_missing"
 expected_operation_family = "slice_from_raw_parts"
 expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_from_raw_parts"
+kind = "positive"
+claim = "Vec::from_raw_parts reports Vec ownership and deallocation obligations instead of slice range obligations"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_from_raw_parts"
+expected_hazard = "drop_or_deallocation"
 
 [[cases]]
 fixture = "transmute_invalid_value"

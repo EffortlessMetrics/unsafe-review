@@ -32,6 +32,14 @@ pub(crate) fn hazards_for(family: &OperationFamily) -> Vec<HazardKind> {
             HazardKind::Bounds,
             HazardKind::SameAllocation,
         ],
+        OperationFamily::VecFromRawParts => vec![
+            HazardKind::PointerValidity,
+            HazardKind::Alignment,
+            HazardKind::InitializedMemory,
+            HazardKind::Bounds,
+            HazardKind::DropOrDeallocation,
+            HazardKind::LeakOrOwnershipTransfer,
+        ],
         OperationFamily::StrFromUtf8Unchecked => vec![HazardKind::InvalidValue],
         OperationFamily::MaybeUninitAssumeInit => {
             vec![HazardKind::InitializedMemory, HazardKind::InvalidValue]
@@ -98,6 +106,19 @@ pub(crate) fn obligations_for(family: &OperationFamily) -> Vec<SafetyObligation>
             SafetyObligation::new("alignment", "pointer is aligned for the element type"),
             SafetyObligation::new("initialized", "memory range is initialized"),
             SafetyObligation::new("allocation", "range fits in one allocation"),
+        ],
+        OperationFamily::VecFromRawParts => vec![
+            SafetyObligation::new(
+                "pointer-live",
+                "pointer was allocated by a compatible allocator for `capacity` elements",
+            ),
+            SafetyObligation::new("alignment", "pointer is aligned for the element type"),
+            SafetyObligation::new("initialized", "first `len` elements are initialized"),
+            SafetyObligation::new("capacity", "`len` is at most `capacity`"),
+            SafetyObligation::new(
+                "ownership",
+                "the constructed Vec receives unique ownership and will not double-free",
+            ),
         ],
         OperationFamily::MaybeUninitAssumeInit => vec![SafetyObligation::new(
             "initialized",
