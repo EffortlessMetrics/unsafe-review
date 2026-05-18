@@ -654,14 +654,19 @@ fn source_line_at(source: &str, offset: usize) -> Option<&str> {
 fn is_raw_pointer_write(line: &str) -> bool {
     line.contains("ptr::write")
         || line.contains("ptr::write_volatile")
+        || line.contains("ptr::write_bytes")
         || line.contains("ptr.write(")
         || line.contains("ptr.write_volatile(")
+        || line.contains("ptr.write_bytes(")
         || line.contains(".as_mut_ptr().write(")
         || line.contains(".as_mut_ptr().write_volatile(")
+        || line.contains(".as_mut_ptr().write_bytes")
         || line.contains(".cast_mut().write(")
         || line.contains(".cast_mut().write_volatile(")
+        || line.contains(".cast_mut().write_bytes")
         || (line.contains(".cast::<") && line.contains(".write("))
         || (line.contains(".cast::<") && line.contains(".write_volatile("))
+        || (line.contains(".cast::<") && line.contains(".write_bytes"))
 }
 
 fn assignment_operator_start(text: &str) -> Option<usize> {
@@ -1036,6 +1041,21 @@ mod tests {
         assert_eq!(detect_site("*ptr += 1;"), None);
         assert_eq!(detect_site("*next += 1;"), None);
         assert_eq!(detect_site("*ptr == value;"), None);
+    }
+
+    #[test]
+    fn text_detection_classifies_raw_pointer_write_bytes_as_write() {
+        for line in [
+            "unsafe { ptr.write_bytes(byte, len) }",
+            "unsafe { self.as_mut_ptr().write_bytes(tag.0, self.len()) }",
+            "unsafe { core::ptr::write_bytes(ptr, byte, len) }",
+        ] {
+            assert_eq!(
+                detect_site(line),
+                Some((UnsafeSiteKind::Operation, OperationFamily::RawPointerWrite)),
+                "{line} should be classified as a raw pointer write"
+            );
+        }
     }
 
     #[test]
