@@ -545,6 +545,7 @@ fn receipt_audit_reports_matching_saved_receipts_without_running_witnesses()
     assert_eq!(value["summary"]["receipts"], 1);
     assert_eq!(value["summary"]["matched"], 1);
     assert_eq!(value["summary"]["unmatched"], 0);
+    assert_eq!(value["summary"]["duplicate"], 0);
     assert!(
         value["trust_boundary"]
             .as_str()
@@ -578,6 +579,7 @@ fn receipt_audit_reports_matching_saved_receipts_without_running_witnesses()
     assert_eq!(stdout_text(&markdown)?.trim(), "");
     let markdown = fs::read_to_string(audit_path)?;
     assert!(markdown.contains("# unsafe-review receipt audit"));
+    assert!(markdown.contains("Duplicate"));
     assert!(markdown.contains("does not execute witnesses"));
     assert!(markdown.contains("| 1 | 1 | 0 | 0 | 0 |"));
     Ok(())
