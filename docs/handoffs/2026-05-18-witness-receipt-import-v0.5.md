@@ -24,6 +24,7 @@ Merged PRs:
 - `#155 receipts: add receipt template command`
 - `#157 receipts: add receipt validate command`
 - `#160 receipts: add miri saved-output adapter`
+- `#162 receipts: add cargo-careful saved-output adapter`
 
 The receipt importer:
 
@@ -60,6 +61,13 @@ The receipt importer:
   output, and writes a normal `tool = "miri"`, `strength = "ran"` receipt
 - records saved-output adapter limitations directly in the generated receipt:
   `unsafe-review` did not run Miri, and `ran` strength does not claim site reach
+- adds `unsafe-review receipt import-careful` as a saved-output adapter that
+  reads an existing `cargo-careful` log, requires `test result: ok`, rejects
+  failure-looking output, and writes a normal `tool = "cargo-careful"`,
+  `strength = "ran"` receipt
+- records matching `cargo-careful` limitations directly in the generated
+  receipt: `unsafe-review` did not run `cargo-careful`, and `ran` strength does
+  not claim site reach
 
 Receipt import does not create analyzer truth. It attaches external witness
 evidence to an existing `ReviewCard`.
@@ -112,6 +120,14 @@ rtk cargo test -p unsafe-review-cli receipt_import_miri --locked
 rtk cargo test -p unsafe-review --test e2e receipt_import_miri --locked
 ```
 
+The saved-output `cargo-careful` adapter follow-up also passed:
+
+```bash
+rtk cargo test -p unsafe-review-core careful_receipt --locked
+rtk cargo test -p unsafe-review-cli receipt_import_careful --locked
+rtk cargo test -p unsafe-review --test e2e receipt_import_careful --locked
+```
+
 The recurring workspace gate also passed:
 
 ```bash
@@ -148,6 +164,13 @@ The repo may claim:
   non-success-looking logs
 - generated Miri receipts keep visible limitations that `unsafe-review` did not
   run Miri and does not claim site reach
+- `unsafe-review receipt import-careful` can convert a saved `cargo-careful`
+  success log into a normal exact-card receipt with `tool = "cargo-careful"` and
+  `strength = "ran"`
+- the saved-output `cargo-careful` adapter rejects empty, failure-looking, and
+  non-success-looking logs
+- generated `cargo-careful` receipts keep visible limitations that
+  `unsafe-review` did not run `cargo-careful` and does not claim site reach
 - the `raw_pointer_alignment_receipted` golden proves a receipt does not hide
   the still-missing alignment guard
 - CLI JSON output preserves the same behavior end to end
@@ -170,8 +193,9 @@ The repo must not claim:
 - Receipt import does not validate that the recorded command actually ran.
 - The Miri adapter reads saved success logs only; it does not execute Miri or
   parse native UB diagnostics into cards.
-- Receipt import does not parse cargo-careful, sanitizer, Loom, Kani, or Crux
-  output.
+- The `cargo-careful` adapter reads saved success logs only; it does not execute
+  `cargo-careful` or parse diagnostics into cards.
+- Receipt import does not parse sanitizer, Loom, Kani, or Crux output.
 - Receipt import does not discharge contract, guard, or reach evidence.
 - Duplicate receipts for the same card are rejected instead of merged.
 - Receipt import validates metadata shape, but it does not verify author identity
@@ -186,8 +210,8 @@ The repo must not claim:
 Prefer dogfood and native adapter proof before adding automation:
 
 - import receipts for real unsafe-review dogfood PRs and inspect card wording
-- add native Miri or cargo-careful receipt adapters only after the JSON shape
-  holds up
+- dogfood the saved-output Miri and `cargo-careful` adapters before adding more
+  native receipt parsers
 - keep witness execution separate from receipt import
 
 Defer:
