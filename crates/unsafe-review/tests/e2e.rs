@@ -145,6 +145,8 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     ])?;
     let lsp = parse_json(&fs::read_to_string(&lsp_path)?)?;
     assert_eq!(lsp["mode"], "read_only_projection");
+    assert_eq!(lsp["status"]["state"], "actionable");
+    assert_eq!(lsp["status"]["cards"], 1);
     assert_eq!(lsp["diagnostics"][0]["card_id"], card_id);
     assert_eq!(lsp["hovers"][0]["card_id"], card_id);
     assert_eq!(

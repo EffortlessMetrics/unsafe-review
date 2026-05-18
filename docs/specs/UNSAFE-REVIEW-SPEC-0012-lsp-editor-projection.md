@@ -37,7 +37,8 @@ action data from existing `ReviewCard`s.
 - The card includes missing evidence and a next action.
 - If evidence is not knowable statically, the card names the limitation instead of overclaiming.
 - `unsafe-review check --format lsp --out target/unsafe-review/lsp.json`
-  writes read-only diagnostics, hovers, and copy-command action data.
+  writes read-only status data, diagnostics, hovers, and copy-command action
+  data.
 - The projection includes no source edits and preserves the static-review trust
   boundary.
 

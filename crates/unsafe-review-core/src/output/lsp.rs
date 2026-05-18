@@ -23,6 +23,7 @@ struct LspProjection<'a> {
     mode: &'static str,
     policy: &'static str,
     scope: &'static str,
+    status: LspStatus,
     diagnostics: Vec<LspDiagnostic<'a>>,
     hovers: Vec<LspHover<'a>>,
     code_actions: Vec<LspCodeAction<'a>>,
@@ -37,6 +38,7 @@ impl<'a> From<&'a AnalyzeOutput> for LspProjection<'a> {
             mode: "read_only_projection",
             policy: output.policy.as_str(),
             scope: scope_label(output),
+            status: status_for(output),
             diagnostics: output.cards.iter().map(LspDiagnostic::from).collect(),
             hovers: output.cards.iter().map(LspHover::from).collect(),
             code_actions: output.cards.iter().flat_map(code_actions).collect(),
@@ -116,6 +118,16 @@ struct LspCodeAction<'a> {
     kind: &'static str,
     command: &'static str,
     arguments: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct LspStatus {
+    state: &'static str,
+    cards: usize,
+    open_actionable_gaps: usize,
+    high_priority_cards: usize,
+    message: String,
+    trust_boundary: &'static str,
 }
 
 #[derive(Serialize, Clone)]
@@ -224,6 +236,36 @@ fn severity_for(card: &ReviewCard) -> usize {
     }
 }
 
+fn status_for(output: &AnalyzeOutput) -> LspStatus {
+    let high_priority_cards = output
+        .cards
+        .iter()
+        .filter(|card| matches!(card.priority, Priority::High))
+        .count();
+    let state = if output.cards.is_empty() {
+        "quiet"
+    } else if output.summary.open_actionable_gaps > 0 {
+        "actionable"
+    } else {
+        "informational"
+    };
+    let message = match state {
+        "quiet" => "No unsafe-review cards for this scope".to_string(),
+        _ => format!(
+            "{} unsafe-review card(s), {} open actionable gap(s)",
+            output.summary.cards, output.summary.open_actionable_gaps
+        ),
+    };
+    LspStatus {
+        state,
+        cards: output.summary.cards,
+        open_actionable_gaps: output.summary.open_actionable_gaps,
+        high_priority_cards,
+        message,
+        trust_boundary: TRUST_BOUNDARY,
+    }
+}
+
 fn scope_label(output: &AnalyzeOutput) -> &'static str {
     match output.scope {
         Scope::Diff => "diff",
@@ -246,6 +288,16 @@ mod tests {
         assert_eq!(value["tool"], "unsafe-review");
         assert_eq!(value["mode"], "read_only_projection");
         assert_eq!(value["policy"], "advisory");
+        assert_eq!(value["status"]["state"], "actionable");
+        assert_eq!(value["status"]["cards"], 1);
+        assert_eq!(value["status"]["open_actionable_gaps"], 1);
+        assert_eq!(value["status"]["high_priority_cards"], 1);
+        assert!(
+            value["status"]["trust_boundary"]
+                .as_str()
+                .unwrap_or("")
+                .contains("not UB-free status")
+        );
         assert_eq!(value["diagnostics"][0]["source"], "unsafe-review");
         assert_eq!(value["diagnostics"][0]["path"], "src/lib.rs");
         assert_eq!(
@@ -282,6 +334,15 @@ mod tests {
         let output = fixture_output("safe_code_no_cards")?;
         let value = parse_json(&render(&output))?;
 
+        assert_eq!(value["status"]["state"], "quiet");
+        assert_eq!(value["status"]["cards"], 0);
+        assert_eq!(value["status"]["open_actionable_gaps"], 0);
+        assert!(
+            value["status"]["message"]
+                .as_str()
+                .unwrap_or("")
+                .contains("No unsafe-review cards")
+        );
         assert_eq!(value["diagnostics"].as_array().map_or(1, Vec::len), 0);
         assert_eq!(value["hovers"].as_array().map_or(1, Vec::len), 0);
         assert_eq!(value["code_actions"].as_array().map_or(1, Vec::len), 0);
