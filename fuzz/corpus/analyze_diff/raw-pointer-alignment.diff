@@ -1,0 +1,12 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,15 +1,15 @@
+ pub fn read_aligned(bytes: &[u8]) -> u32 {
+     if bytes.len() < core::mem::size_of::<u32>() {
+         return 0;
+     }
+     // SAFETY: length is checked above, but this fixture intentionally omits an
+     // alignment guard so unsafe-review should ask for one.
+     unsafe { *(bytes.as_ptr() as *const u32) }
+ }
