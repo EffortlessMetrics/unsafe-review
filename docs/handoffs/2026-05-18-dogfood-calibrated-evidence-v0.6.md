@@ -49,7 +49,7 @@ and post-publish receipts are separate operations.
 
 | Criterion | Evidence | Status |
 |---|---|---|
-| Dogfood has a manifest-backed corpus of selected real crates and PR diffs | `dogfood/corpus.toml` is validated by `cargo xtask check-dogfood`; current `check-pr` reports 26 targets across 7 repositories | Done |
+| Dogfood has a manifest-backed corpus of selected real crates and PR diffs | `dogfood/corpus.toml` is validated by `cargo xtask check-dogfood`; current `check-pr` reports 27 targets across 7 repositories | Done |
 | Dogfood artifacts are mechanically validated | `cargo xtask check-pr` includes `check-dogfood` | Done |
 | Saved-snapshot outcome JSON and Markdown are pinned and explain movement | `#221` pinned outcome JSON; `#222` added movement reasons; support tiers list outcome renderer/e2e proof | Done |
 | Receipt matching reports matched, unmatched, expired, stale, wrong identity, wrong tool, and weaker receipts | `#224` added `receipt audit` JSON/Markdown and core/e2e proof | Done |
