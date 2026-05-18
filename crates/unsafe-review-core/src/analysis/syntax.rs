@@ -19,6 +19,7 @@ pub(crate) struct SyntaxNodeFact {
 
 pub(crate) fn parse_source(text: impl Into<String>) -> ParsedSource {
     let text = text.into();
+    let line_starts = line_starts(&text);
     let parse = SourceFile::parse(&text, Edition::CURRENT);
     let parse_errors = parse
         .errors()
@@ -33,7 +34,7 @@ pub(crate) fn parse_source(text: impl Into<String>) -> ParsedSource {
             let range = node.text_range();
             let start = text_size_to_usize(range.start());
             let end = text_size_to_usize(range.end());
-            let position = line_column(&text, start);
+            let position = line_column(&text, start, &line_starts);
             SyntaxNodeFact {
                 kind: format!("{:?}", node.kind()),
                 start,
@@ -58,25 +59,18 @@ struct LineColumn {
     column: usize,
 }
 
-fn line_column(text: &str, offset: usize) -> LineColumn {
+fn line_column(text: &str, offset: usize, line_starts: &[usize]) -> LineColumn {
     let offset = offset.min(text.len());
-    let mut line = 1usize;
-    let mut line_start = 0usize;
-
-    for (idx, ch) in text.char_indices() {
-        if idx >= offset {
-            break;
-        }
-        if ch == '\n' {
-            line += 1;
-            line_start = idx + ch.len_utf8();
-        }
-    }
+    let line_idx = line_starts
+        .partition_point(|line_start| *line_start <= offset)
+        .saturating_sub(1);
+    let line_start = line_starts.get(line_idx).copied().unwrap_or(0);
+    let line = line_idx + 1;
 
     let column = text
-        .char_indices()
-        .skip_while(|(idx, _ch)| *idx < line_start)
-        .take_while(|(idx, _ch)| *idx < offset)
+        .get(line_start..offset)
+        .unwrap_or_default()
+        .chars()
         .count()
         + 1;
 
@@ -90,6 +84,15 @@ fn snippet(text: &str, start: usize, end: usize) -> String {
 
 fn text_size_to_usize(size: ra_ap_syntax::TextSize) -> usize {
     u32::from(size) as usize
+}
+
+fn line_starts(text: &str) -> Vec<usize> {
+    let mut starts = vec![0usize];
+    starts.extend(
+        text.char_indices()
+            .filter_map(|(idx, ch)| (ch == '\n').then_some(idx + ch.len_utf8())),
+    );
+    starts
 }
 
 #[cfg(test)]
