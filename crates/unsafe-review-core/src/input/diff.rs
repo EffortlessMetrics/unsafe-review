@@ -82,3 +82,68 @@ fn parse_new_start(header: &str) -> Option<usize> {
     let start = new.split(',').next()?;
     start.parse::<usize>().ok()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn indexes_added_lines_in_new_file_coordinates() {
+        let diff = r"diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -10,4 +10,5 @@ fn demo() {
+ context();
+-removed();
++added_one();
+ unchanged();
++added_two();
+";
+
+        let index = parse_unified_diff(diff);
+        let path = PathBuf::from("src/lib.rs");
+
+        assert!(!index.is_empty());
+        assert!(index.contains_file(&path));
+        assert_eq!(
+            index.changed_lines.get(&path).cloned().unwrap_or_default(),
+            BTreeSet::from([11, 13])
+        );
+    }
+
+    #[test]
+    fn supports_single_line_hunks_without_counts() {
+        let diff = "diff --git a/src/main.rs b/src/main.rs\n\
+--- a/src/main.rs\n\
++++ b/src/main.rs\n\
+@@ -1 +7 @@\n\
+-old();\n\
++new();\n";
+
+        let index = parse_unified_diff(diff);
+        let path = PathBuf::from("src/main.rs");
+
+        assert_eq!(
+            index.changed_lines.get(&path).cloned().unwrap_or_default(),
+            BTreeSet::from([7])
+        );
+    }
+
+    #[test]
+    fn contains_near_uses_six_line_review_window() {
+        let diff = "diff --git a/src/lib.rs b/src/lib.rs\n\
+--- a/src/lib.rs\n\
++++ b/src/lib.rs\n\
+@@ -20,0 +21,1 @@\n\
++unsafe { core::ptr::read(ptr) };\n";
+
+        let index = parse_unified_diff(diff);
+        let path = PathBuf::from("src/lib.rs");
+
+        assert!(index.contains_near(&path, 15));
+        assert!(index.contains_near(&path, 27));
+        assert!(!index.contains_near(&path, 14));
+        assert!(!index.contains_near(&path, 28));
+        assert!(!index.contains_near(&PathBuf::from("src/other.rs"), 21));
+    }
+}
