@@ -292,6 +292,44 @@ cards: 0
 open_actionable_gaps: 0
 ```
 
+### Canonical cards JSON trust boundary
+
+The `#117 artifact: add cards json trust boundary` PR closed an artifact
+contract gap: `cards.json` is the canonical `ReviewCard` artifact, but the
+trust-boundary text was only enforced in PR summary, SARIF, and comment-plan
+outputs. The merged change added `trust_boundary` to top-level `cards.json` and
+made `xtask check-advisory-artifacts` reject artifact sets where that field is
+missing or incomplete.
+
+The advisory workflow artifact for `#117` was downloaded and verified:
+
+- PR: `#117 artifact: add cards json trust boundary`
+- Workflow: `unsafe-review`
+- Run: `26014930037`
+- Branch: `artifact/cards-json-trust-boundary`
+- Artifact: `unsafe-review`
+- Artifact id: `7050035092`
+- Artifact digest: `sha256:a131bd604188fe77b67cb15808fdf42d9bff2d923a60a58db6d60555d6d6c037`
+
+Verification command:
+
+```bash
+rtk cargo run --locked -p xtask -- check-advisory-artifacts target/advisory-artifact-117
+```
+
+Result:
+
+```text
+check-advisory-artifacts: ok (target/advisory-artifact-117)
+```
+
+The downloaded `cards.json` summary reported zero cards for the verifier-only
+change, and its top-level `trust_boundary` field contained:
+
+```text
+Static unsafe contract review only; this is not a proof of memory safety, not UB-free status, and not a Miri result unless a witness receipt is attached.
+```
+
 ## Current support posture
 
 The PR artifact surfaces are experimental and advisory. They are suitable for
