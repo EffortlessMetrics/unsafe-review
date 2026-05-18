@@ -44,7 +44,7 @@ unsafe-review badges --out badges/
 
 # Explain one card and produce an LLM-ready packet
 unsafe-review explain UR-src-lib-rs-42-raw-pointer-read
-unsafe-review context UR-src-lib-rs-42-raw-pointer-read --json
+unsafe-review context UR-src-lib-rs-42-raw-pointer-read
 ```
 
 ## Current implementation status
@@ -91,6 +91,7 @@ cargo xtask check-pr
 - [Mission and vision](docs/MISSION.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Architecture](docs/ARCHITECTURE.md)
+- [CLI guide](docs/CLI.md)
 - [Specifications](docs/specs/README.md)
 - [ADRs](docs/adr/README.md)
 - [Implementation plan](plans/0.1.0/implementation-plan.md)

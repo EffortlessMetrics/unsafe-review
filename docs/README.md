@@ -4,6 +4,7 @@
 |---|---|---|
 | Mission / vision | product purpose and end state | `docs/MISSION.md`, `docs/VISION.md` |
 | Roadmap | release direction | `docs/ROADMAP.md` |
+| CLI guide | command workflow, options, and CI usage | `docs/CLI.md` |
 | Proposals | why a workstream exists | `docs/proposals/` |
 | Specs | behavior contracts | `docs/specs/` |
 | ADRs | durable architecture decisions | `docs/adr/` |
