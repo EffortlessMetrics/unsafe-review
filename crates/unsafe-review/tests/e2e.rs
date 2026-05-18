@@ -131,6 +131,27 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
             .contains("not UB-free status")
     );
 
+    let lsp_path = temp.path().join("lsp.json");
+    run_success([
+        os("check"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        fixture.join("change.diff").into_os_string(),
+        os("--format"),
+        os("lsp"),
+        os("--out"),
+        lsp_path.as_os_str().to_os_string(),
+    ])?;
+    let lsp = parse_json(&fs::read_to_string(&lsp_path)?)?;
+    assert_eq!(lsp["mode"], "read_only_projection");
+    assert_eq!(lsp["diagnostics"][0]["card_id"], card_id);
+    assert_eq!(lsp["hovers"][0]["card_id"], card_id);
+    assert_eq!(
+        lsp["code_actions"][0]["command"],
+        "unsafe-review.copyAgentPacket"
+    );
+
     let context = run_success([
         os("context"),
         os("--root"),

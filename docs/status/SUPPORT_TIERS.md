@@ -17,7 +17,8 @@ All tiers describe static review evidence. None means memory-safety proof.
 | SARIF projection | experimental | PR artifact SARIF | `sarif` renderer tests, CLI `--format sarif`, CLI e2e, and advisory workflow upload | advisory static review evidence; no default blocking |
 | Advisory PR workflow | experimental | GitHub Actions artifacts | workflow renders cards JSON, PR summary, SARIF, and comment plan; runs `cargo xtask check-advisory-artifacts target/unsafe-review` before upload; downloaded artifacts are verified for cards JSON trust boundary and projection card identity consistency | no comments, witnesses, or blocking policy |
 | Inline comment plan | experimental | PR artifact JSON | `comment_plan` renderer tests, CLI `--format comment-plan`, CLI e2e, and advisory workflow upload | artifact-only; no posting by default |
-| LSP projection | planned | editor | saved-card fixtures | read-only first |
+| Saved LSP JSON projection | experimental | `--format lsp` JSON | `lsp_projection` renderer tests and CLI e2e cover read-only diagnostics, hovers, and copy-command action data projected from ReviewCards | no LSP server, no editor integration, no source edits |
+| LSP server/editor integration | planned | editor | saved-card fixtures | read-only first |
 | Agent packets | planned | JSON packet | packet schema tests | agents still require review |
 | Receipt import | planned | witness receipts | Miri/careful/sanitizer fixtures | receipt strength must be explicit |
 | MIR/nightly facts | deferred | optional adapter | ADR needed | not v0.1 product default |

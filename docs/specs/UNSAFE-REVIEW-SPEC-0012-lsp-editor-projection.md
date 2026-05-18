@@ -13,6 +13,10 @@ Linked plan: ../../plans/0.1.0/implementation-plan.md
 ## Behavior
 
 LSP v1 is read-only: diagnostics, hover, status, copy agent packet, copy witness command, open related test.
+The first supported surface is a saved JSON projection rendered with
+`unsafe-review check --format lsp`. It is not an LSP server and it does not
+edit source. The projection derives diagnostics, hovers, and command-style
+action data from existing `ReviewCard`s.
 
 ## Non-goals
 
@@ -32,12 +36,17 @@ LSP v1 is read-only: diagnostics, hover, status, copy agent packet, copy witness
 - A changed unsafe seam produces one review card with stable identity.
 - The card includes missing evidence and a next action.
 - If evidence is not knowable statically, the card names the limitation instead of overclaiming.
+- `unsafe-review check --format lsp --out target/unsafe-review/lsp.json`
+  writes read-only diagnostics, hovers, and copy-command action data.
+- The projection includes no source edits and preserves the static-review trust
+  boundary.
 
 ## CI proof
 
 ```bash
 cargo xtask check-pr
 cargo test --workspace
+cargo test -p unsafe-review-core lsp_projection
 ```
 
 ## Promotion rule
