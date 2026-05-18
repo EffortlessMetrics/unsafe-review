@@ -7,7 +7,7 @@ Linked proposal: ../proposals/UNSAFE-REVIEW-PROP-0001-product-contract.md
 
 ## Decision
 
-v0.1 uses stable Rust, source parsing, Cargo metadata, workflow/config scanning, and receipts. It avoids rustc_private and MIR coupling until the card contract is proven.
+v0.1 uses stable Rust, source parsing, Cargo metadata, workflow/config scanning, and receipts. Source parsing is backed by `ra_ap_syntax` so the analyzer can use stable rust-analyzer syntax ranges without `rustc_private`. It avoids rustc_private and MIR coupling until the card contract is proven.
 
 ## Context
 
