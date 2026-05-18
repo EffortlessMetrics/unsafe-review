@@ -14,6 +14,7 @@ required_core_fixtures = [
   "vec_set_len_start_bound_shrink",
   "vec_set_len_zero_clear",
   "drop_in_place_deallocation",
+  "slice_from_raw_parts_mut",
   "transmute_invalid_value",
   "unsafe_impl_send",
   "ffi_sanitizer_route",
@@ -143,6 +144,16 @@ expected_cards = 1
 expected_class = "guard_missing"
 expected_operation_family = "drop_in_place"
 expected_hazard = "drop_or_deallocation"
+
+[[cases]]
+fixture = "slice_from_raw_parts_mut"
+kind = "positive"
+claim = "slice::from_raw_parts_mut reports slice range obligations instead of a generic unsafe function call"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "slice_from_raw_parts"
+expected_hazard = "pointer_validity"
 
 [[cases]]
 fixture = "transmute_invalid_value"

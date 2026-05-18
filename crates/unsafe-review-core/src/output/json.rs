@@ -233,6 +233,7 @@ mod tests {
         "raw_pointer_deref",
         "raw_pointer_read_unaligned",
         "raw_pointer_write_assignment",
+        "slice_from_raw_parts_mut",
         "safe_reference_deref_no_cards",
         "imports_not_unsafe_operations",
         "cfg_target_feature_not_operation",

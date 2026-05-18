@@ -16,6 +16,7 @@ Dogfood repositories:
 | `servo/rust-smallvec` | `bc8a854926a8d940164f6c4ad4fc6efe51962e93` | completed with `--max-cards 50` |
 | `bluss/arrayvec` | `1bc606d8c83a34b8fae9dd117bfeab10f90d2ca7` | completed with `--max-cards 50` |
 | `BurntSushi/memchr` | `db1a77d4b556a1321e136ca0514e43e74ea5fcc3` | completed with `--max-cards 50` after capped-scan hardening |
+| `rust-lang/hashbrown` | `7b3bba6eb4b2f03636155c918552b5f30c1a05b3` | PR-diff dogfood completed for `hashbrown#692` |
 
 The first two completed runs exposed two noisy false positives:
 
@@ -77,6 +78,18 @@ owner-inference gap:
 
 Regression proof was added with a scanner unit test for comment text during
 owner inference.
+
+A real PR-diff dogfood pass on `rust-lang/hashbrown#692` exposed and fixed a
+core operation classification gap:
+
+- `slice::from_raw_parts_mut(...)` now uses the existing
+  `slice_from_raw_parts` operation family instead of generic `unsafe_fn_call`
+- `&'static mut ...` lifetime/type text is not classified as a `static mut`
+  item
+
+Regression proof was added with a fixture golden for
+`slice_from_raw_parts_mut` and scanner tests for `&'static mut` versus real
+`static mut` items.
 
 ## Dogfood observations
 
@@ -658,6 +671,55 @@ It moved from `unknown` to `unsafe_fn_call`, with the callee identity captured a
 tool does not infer the callee's full safety contract from the function name or
 nearby prose.
 
+### `hashbrown#692`
+
+PR: `https://github.com/rust-lang/hashbrown/pull/692`
+
+The PR fixes potential UB in `RawTableInner::fallible_with_capacity` and touches
+raw table control-byte allocation paths.
+
+Initial dogfood output:
+
+```text
+changed_rust_files: 2
+cards: 4
+contract_missing: 0
+guard_missing: 4
+operation families: unsafe_fn_call, unknown, pointer_arithmetic
+unsafe_fn_call cards: 2
+```
+
+This run exposed a classification gap: the changed
+`slice::from_raw_parts_mut(...)` call was labeled as a generic
+`unsafe_fn_call`, which hid the more specific slice range obligations already
+modeled for `slice::from_raw_parts`. Building a fixture for the case also
+exposed a false-positive boundary: `&'static mut [u8]` type/lifetime text must
+not be treated as a `static mut` item.
+
+Follow-up rerun after adding fixture-backed mutable slice detection and the
+static-lifetime false-positive guard:
+
+```text
+changed_rust_files: 2
+cards: 4
+contract_missing: 0
+guard_missing: 4
+operation families: unsafe_fn_call, unknown, pointer_arithmetic, slice_from_raw_parts
+unsafe_fn_call cards: 1
+slice_from_raw_parts cards: 1
+```
+
+The improved card is still advisory only:
+
+```text
+ctrl_slice  line 2648  slice_from_raw_parts  guard_missing
+```
+
+It now carries the pointer validity, alignment, initialized-memory, bounds, and
+same-allocation obligations for the mutable slice construction. No witness was
+executed, and the remaining `unknown` card on the documented unsafe helper
+declaration remains a separate modeling limit.
+
 ## Proof
 
 Targeted local validation:
@@ -668,6 +730,9 @@ rtk cargo test -p unsafe-review-core scanner --locked
 rtk cargo test -p unsafe-review-core workspace --locked
 rtk cargo test -p unsafe-review-core capped_repo_scan --locked
 rtk cargo test -p unsafe-review-core owner_safety --locked
+rtk cargo test -p unsafe-review-core slice_from_raw_parts_mut_uses_slice_operation_family --locked
+rtk cargo test -p unsafe-review-core scan_file_does_not_classify_static_lifetime_mut_reference_as_static_mut --locked
+rtk cargo test -p unsafe-review-core scan_file_classifies_static_mut_items --locked
 rtk cargo test -p unsafe-review-core fixture_card_goldens_match_rendered_json --locked
 rtk cargo run --locked -p xtask -- check-calibration
 ```
@@ -694,6 +759,7 @@ rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arra
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-public-unsafe-contract.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-call-result-init.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-unsafe-fn-call.json
+rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr692.raw.diff --format json --max-cards 30 --out target/dogfood-work/hashbrown-pr692.after-slice-mut.json
 ```
 
 The dogfood reruns used a temporary `CARGO_TARGET_DIR` to avoid a Windows file
@@ -705,14 +771,17 @@ Real-crate dogfood is experimental.
 
 The repo may claim:
 
-- the first real-crate dogfood slice was run on `rust-smallvec` and `arrayvec`
+- the first real-crate dogfood slice includes capped repo snapshots on
+  `rust-smallvec`, `arrayvec`, and `memchr`, plus PR-diff dogfood on
+  `hashbrown`
 - a capped `memchr` dogfood snapshot now completes
 - real PR-diff dogfood runs on `memchr#215`, `rust-smallvec#407`,
   `rust-smallvec#277`, `rust-smallvec#64`, `rust-smallvec#254`,
   `arrayvec#308`, `arrayvec#138`, `arrayvec#187`, `arrayvec#174`, and
-  `arrayvec#288` produce card output
+  `arrayvec#288`, and `hashbrown#692` produce card output
 - dogfood found and fixed import/declaration and `cfg(target_feature)`
   false positives
+- `&'static mut` type/lifetime text is not classified as a `static mut` item
 - capped repo scans stop after the requested card cap
 - operation cards can inherit enclosing unsafe function `# Safety` docs
 - owner inference ignores comments while scanning backward
@@ -745,6 +814,9 @@ The repo may claim:
 - one fixture-backed unsafe-call wrapper improvement changed the `arrayvec#288`
   `encode_utf8` unsafe block from `unknown` to `unsafe_fn_call` while preserving
   the missing-discharge prompt
+- one fixture-backed mutable slice improvement changed the `hashbrown#692`
+  `slice::from_raw_parts_mut` card from generic `unsafe_fn_call` to
+  `slice_from_raw_parts`
 - attributed unsafe function declarations are deduped between syntax-backed
   extraction and fallback line scanning
 - false-positive regression coverage exists in fixtures and calibration
@@ -756,7 +828,7 @@ The repo must not claim:
 - usable-alpha support-tier promotion
 - full-repository coverage from top-50 capped snapshots
 - uncapped repo-scan performance
-- general PR-diff usefulness from ten PRs
+- general PR-diff usefulness from eleven PRs
 - memory-safety proof
 - UB-free status
 - witness execution
@@ -764,9 +836,10 @@ The repo must not claim:
 
 ## Known limits
 
-- Only three real crates completed in this slice.
+- Only three real crates completed capped repo snapshots in this slice; four
+  crates have at least one snapshot or PR-diff receipt.
 - The successful dogfood snapshots were capped at 50 cards.
-- Only ten real PR diffs were measured.
+- Only eleven real PR diffs were measured.
 - `memchr` completion depends on capped-scan behavior; uncapped performance is
   still unmeasured.
 - No human audit was performed for every emitted card.
@@ -790,6 +863,8 @@ The repo must not claim:
   callee-specific safety contract inference remains future work.
 - `arrayvec#174` now has a fixture-backed `ptr::drop_in_place` card, but broader
   drop/deallocation modeling beyond that operation remains narrow.
+- `hashbrown#692` now has a fixture-backed `slice::from_raw_parts_mut` card, but
+  broader slice range proof remains source-level and advisory.
 - These runs do not prove absence of missed unsafe seams.
 
 ## Next useful work

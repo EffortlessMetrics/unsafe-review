@@ -21,7 +21,7 @@ witnesses by default.
 | Requirement | Current evidence | Status | Gap |
 |---|---|---|---|
 | Canonical product unit is `ReviewCard`; projections must not create parallel truth | JSON, PR summary, SARIF, comment-plan, saved LSP, agent packet, repo, badge, policy, and receipt surfaces are all listed in `SUPPORT_TIERS.md` as card projections; handoffs record lane boundaries | Experimental | Continue watching new surfaces for reclassification logic |
-| Card correctness before breadth | Fixture goldens cover raw pointer alignment/deref/read/write, split syntax, inline unsafe operation dedupe, attributed unsafe-fn dedupe, unsafe-call wrappers, public unsafe contracts including documented public unsafe API declarations, `MaybeUninit`, `Vec::set_len`, `Vec::set_len` initialized-loop evidence, `Vec::set_len` call-result initialization evidence, `Vec::set_len` shrink evidence, `Vec::set_len` last-index shrink evidence, `Vec::set_len` start-bound shrink evidence, `Vec::set_len(0)` clear evidence, `transmute`, `get_unchecked_mut`, `Pin::new_unchecked`, `drop_in_place`, FFI, unsafe impl Send, and negative safe/comment cases; `fixtures/calibration.toml` indexes the core positive, negative, and false-positive-control claims | Experimental | Fixture corpus is curated; no broad semantic proof |
+| Card correctness before breadth | Fixture goldens cover raw pointer alignment/deref/read/write, split syntax, inline unsafe operation dedupe, attributed unsafe-fn dedupe, unsafe-call wrappers, public unsafe contracts including documented public unsafe API declarations, `MaybeUninit`, `Vec::set_len`, `Vec::set_len` initialized-loop evidence, `Vec::set_len` call-result initialization evidence, `Vec::set_len` shrink evidence, `Vec::set_len` last-index shrink evidence, `Vec::set_len` start-bound shrink evidence, `Vec::set_len(0)` clear evidence, `transmute`, `get_unchecked_mut`, `Pin::new_unchecked`, `drop_in_place`, `slice::from_raw_parts_mut`, FFI, unsafe impl Send, and negative safe/comment cases; `fixtures/calibration.toml` indexes the core positive, negative, and false-positive-control claims | Experimental | Fixture corpus is curated; no broad semantic proof |
 | Obligation-level evidence | `ReviewCard` output and fixture goldens distinguish contract, discharge, reach, and witness evidence per obligation | Experimental | Guard patterns remain sparse |
 | Length guard does not discharge alignment; comments do not count as guards | Raw-pointer alignment and comment-not-guard fixtures are listed as proof in support tiers | Experimental | More real-world guard idioms need calibration |
 | Stable-first implementation; no mandatory MIR or `rustc_private` | Workspace uses stable source parsing and `ra_ap_syntax`; support tiers mark MIR/nightly facts as deferred | Met for current lanes | Optional adapters still need ADR before promotion |
@@ -35,7 +35,7 @@ witnesses by default.
 | Explicit receipts can be authored and validated safely | `receipt template` and `receipt validate` are covered by CLI e2e tests and support tiers | Experimental | Template output does not verify that the recorded command ran |
 | Public claims map to proof | `SUPPORT_TIERS.md` maps every current surface to proof and limits | In place | Keep updating for every new lane |
 | No soundness, UB-free, Miri-clean, site-execution, or default-blocking claim | Trust-boundary text is enforced across artifacts; support tiers and handoffs repeat limits | In place | Must remain part of all new projections |
-| First real-crate dogfood measurement | Handoff `2026-05-18-real-crate-dogfood-v0.6.md` records top-50 capped `rust-smallvec`, `arrayvec`, and `memchr` runs plus `memchr#215`, `rust-smallvec#407`, `rust-smallvec#277`, `rust-smallvec#64`, `rust-smallvec#254`, `arrayvec#308`, `arrayvec#138`, `arrayvec#187`, `arrayvec#174`, and `arrayvec#288` PR-diff runs; dogfood found and fixed import/declaration false positives, `cfg(target_feature)` false positives, capped repo scan timeout behavior, missing owner-contract inheritance for operation cards, comment-derived owner false positives, attributed unsafe-fn duplicates, inline unsafe-block duplicates, `drop_in_place` operation modeling from `arrayvec#174`, documented public unsafe API declaration handling and unsafe-call wrapper labeling from `arrayvec#288`, and fixture-backed `Vec::set_len` evidence improvements with `arrayvec#288`, `rust-smallvec#277`, and `rust-smallvec#64` reruns, including call-result initialization evidence | Experimental | More crates, more real PR diffs, uncapped/sampled runs, broader `Vec::set_len`, unsafe-call, and drop/deallocation evidence modeling, and human review are still needed before calibration claims |
+| First real-crate dogfood measurement | Handoff `2026-05-18-real-crate-dogfood-v0.6.md` records top-50 capped `rust-smallvec`, `arrayvec`, and `memchr` runs plus `memchr#215`, `rust-smallvec#407`, `rust-smallvec#277`, `rust-smallvec#64`, `rust-smallvec#254`, `arrayvec#308`, `arrayvec#138`, `arrayvec#187`, `arrayvec#174`, `arrayvec#288`, and `hashbrown#692` PR-diff runs; dogfood found and fixed import/declaration false positives, `cfg(target_feature)` false positives, capped repo scan timeout behavior, missing owner-contract inheritance for operation cards, comment-derived owner false positives, attributed unsafe-fn duplicates, inline unsafe-block duplicates, `drop_in_place` operation modeling from `arrayvec#174`, documented public unsafe API declaration handling and unsafe-call wrapper labeling from `arrayvec#288`, `slice::from_raw_parts_mut` operation modeling and `&'static mut` false-positive control from `hashbrown#692`, and fixture-backed `Vec::set_len` evidence improvements with `arrayvec#288`, `rust-smallvec#277`, and `rust-smallvec#64` reruns, including call-result initialization evidence | Experimental | More crates, more real PR diffs, uncapped/sampled runs, broader `Vec::set_len`, unsafe-call, mutable slice, and drop/deallocation evidence modeling, and human review are still needed before calibration claims |
 
 ## Current Gaps
 
@@ -49,8 +49,9 @@ These are not failures; they are the next unsupported or weakly verified areas:
 - Schema compatibility is not yet a public promise.
 - Broader calibration on real unsafe-heavy crates is still needed before any
   support tier promotion toward usable alpha. The first dogfood slice covered
-  three top-50 capped repo snapshots; the fixture calibration
-  manifest remains a proof index, not real-world calibration.
+  three top-50 capped repo snapshots and eleven PR diffs across four crates;
+  the fixture calibration manifest remains a proof index, not real-world
+  calibration.
 - No default no-new-debt or blocking branch-protection policy is justified yet.
 - Outcome comparison is saved-snapshot only and still needs dogfood on real
   repo posture snapshots.
@@ -65,6 +66,9 @@ These are not failures; they are the next unsupported or weakly verified areas:
 - Real PR-diff dogfood now recognizes `ptr::drop_in_place` as a
   drop/deallocation operation family, but broader drop/deallocation evidence
   modeling remains narrow.
+- Real PR-diff dogfood now recognizes `slice::from_raw_parts_mut` as the
+  `slice_from_raw_parts` operation family, but broader mutable-slice range proof
+  remains source-level and advisory.
 - Public unsafe API declarations with recognized `# Safety` docs no longer ask
   for local declaration guards, but static reach remains a heuristic name search.
 - The `arrayvec#288` `set_len(len + n)` call-result pattern now has fixture and

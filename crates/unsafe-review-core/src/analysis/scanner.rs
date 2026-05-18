@@ -280,7 +280,7 @@ fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
     if is_extern_boundary(line) {
         return Some((UnsafeSiteKind::ExternBlock, OperationFamily::Ffi));
     }
-    if line.contains("static mut") {
+    if is_static_mut_item(line) {
         return Some((UnsafeSiteKind::StaticMut, OperationFamily::StaticMut));
     }
     if is_import_item(line) {
@@ -292,7 +292,8 @@ fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
             OperationFamily::CopyNonOverlapping,
         ));
     }
-    if contains_call_name(line, "from_raw_parts") {
+    if contains_call_name(line, "from_raw_parts") || contains_call_name(line, "from_raw_parts_mut")
+    {
         return Some((
             UnsafeSiteKind::Operation,
             OperationFamily::SliceFromRawParts,
@@ -382,6 +383,22 @@ fn is_import_item(line: &str) -> bool {
     trimmed.starts_with("use ")
         || trimmed.starts_with("pub use ")
         || (trimmed.starts_with("pub(") && trimmed.contains(" use "))
+}
+
+fn is_static_mut_item(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    if trimmed.starts_with("static mut ") {
+        return true;
+    }
+    if let Some(rest) = trimmed.strip_prefix("pub ") {
+        return rest.trim_start().starts_with("static mut ");
+    }
+    if trimmed.starts_with("pub(") {
+        return trimmed
+            .split_once(')')
+            .is_some_and(|(_visibility, rest)| rest.trim_start().starts_with("static mut "));
+    }
+    false
 }
 
 fn contains_call_name(line: &str, name: &str) -> bool {
@@ -1084,6 +1101,70 @@ mod tests {
 
         fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
         assert!(sites.is_empty(), "unexpected sites: {sites:#?}");
+        Ok(())
+    }
+
+    #[test]
+    fn scan_file_does_not_classify_static_lifetime_mut_reference_as_static_mut()
+    -> Result<(), String> {
+        let root = unique_temp_dir()?;
+        fs::create_dir_all(root.join("src"))
+            .map_err(|err| format!("create temp src failed: {err}"))?;
+        fs::write(
+            root.join("src/lib.rs"),
+            "pub fn expose_mut(ptr: *mut u8, len: usize) -> &'static mut [u8] {\n    unsafe { core::slice::from_raw_parts_mut(ptr, len) }\n}\n",
+        )
+        .map_err(|err| format!("write temp source failed: {err}"))?;
+
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        assert!(
+            sites
+                .iter()
+                .all(|site| site.site.kind != UnsafeSiteKind::StaticMut),
+            "static lifetime in mutable reference should not be a static mut item: {sites:#?}"
+        );
+        assert_eq!(
+            sites
+                .iter()
+                .filter(|site| site.operation.family == OperationFamily::SliceFromRawParts)
+                .count(),
+            1,
+            "slice operation should still be detected: {sites:#?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn scan_file_classifies_static_mut_items() -> Result<(), String> {
+        let root = unique_temp_dir()?;
+        fs::create_dir_all(root.join("src"))
+            .map_err(|err| format!("create temp src failed: {err}"))?;
+        fs::write(
+            root.join("src/lib.rs"),
+            "static mut ROOT: usize = 0;\npub static mut PUBLIC: usize = 0;\npub(crate) static mut RESTRICTED: usize = 0;\n",
+        )
+        .map_err(|err| format!("write temp source failed: {err}"))?;
+
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        let static_mut_sites = sites
+            .iter()
+            .filter(|site| site.site.kind == UnsafeSiteKind::StaticMut)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            static_mut_sites.len(),
+            3,
+            "expected each static mut item to be detected: {sites:#?}"
+        );
+        assert!(
+            static_mut_sites
+                .iter()
+                .all(|site| site.operation.family == OperationFamily::StaticMut),
+            "static mut sites should keep the static_mut operation family: {sites:#?}"
+        );
         Ok(())
     }
 
