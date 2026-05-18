@@ -15,6 +15,7 @@ required_core_fixtures = [
   "vec_set_len_zero_clear",
   "drop_in_place_deallocation",
   "raw_pointer_write_bytes",
+  "pointer_arithmetic_num_ctrl_bytes_guard",
   "slice_from_raw_parts_mut",
   "transmute_invalid_value",
   "unsafe_impl_send",
@@ -155,6 +156,16 @@ expected_cards = 1
 expected_class = "guard_missing"
 expected_operation_family = "raw_pointer_write"
 expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "pointer_arithmetic_num_ctrl_bytes_guard"
+kind = "positive"
+claim = "pointer arithmetic recognizes index < num_ctrl_bytes as bounds guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "pointer_arithmetic"
+expected_hazard = "bounds"
 
 [[cases]]
 fixture = "slice_from_raw_parts_mut"

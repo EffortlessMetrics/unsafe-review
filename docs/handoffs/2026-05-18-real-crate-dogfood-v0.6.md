@@ -86,12 +86,15 @@ core operation classification gap:
   `slice_from_raw_parts` operation family instead of generic `unsafe_fn_call`
 - raw pointer `write_bytes` calls now use the existing `raw_pointer_write`
   operation family instead of generic `unsafe_fn_call`
+- `index < self.num_ctrl_bytes()` debug assertions now count as visible bounds
+  guard evidence for pointer arithmetic cards
 - `&'static mut ...` lifetime/type text is not classified as a `static mut`
   item
 
 Regression proof was added with a fixture golden for
 `slice_from_raw_parts_mut`, a fixture golden for `raw_pointer_write_bytes`, and
-scanner tests for `&'static mut` versus real `static mut` items.
+fixture coverage for `pointer_arithmetic_num_ctrl_bytes_guard`, plus scanner
+tests for `&'static mut` versus real `static mut` items.
 
 ## Dogfood observations
 
@@ -745,6 +748,28 @@ uses the pointer validity, alignment, initialized-memory, and allocation
 obligation vocabulary already used by raw pointer writes. No witness was
 executed.
 
+Follow-up rerun after adding fixture-backed `num_ctrl_bytes` bounds evidence for
+pointer arithmetic:
+
+```text
+changed_rust_files: 2
+cards: 4
+contract_missing: 0
+guard_missing: 3
+guarded_unwitnessed: 1
+operation families: raw_pointer_write, unknown, pointer_arithmetic, slice_from_raw_parts
+```
+
+The improved card is still advisory only:
+
+```text
+ctrl  line 2642  pointer_arithmetic  guarded_unwitnessed
+```
+
+It moved from `guard_missing` to `guarded_unwitnessed` because the local context
+contains `debug_assert!(index < self.num_ctrl_bytes())`. No witness was
+executed, and other pointer-arithmetic bound naming patterns remain uncalibrated.
+
 ## Proof
 
 Targeted local validation:
@@ -760,6 +785,7 @@ rtk cargo test -p unsafe-review-core scan_file_does_not_classify_static_lifetime
 rtk cargo test -p unsafe-review-core scan_file_classifies_static_mut_items --locked
 rtk cargo test -p unsafe-review-core text_detection_classifies_raw_pointer_write_bytes_as_write --locked
 rtk cargo test -p unsafe-review-core raw_pointer_v1_operation_cards_are_concrete --locked
+rtk cargo test -p unsafe-review-core pointer_arithmetic_num_ctrl_bytes_guard_is_discharged --locked
 rtk cargo test -p unsafe-review-core fixture_card_goldens_match_rendered_json --locked
 rtk cargo run --locked -p xtask -- check-calibration
 ```
@@ -788,6 +814,7 @@ rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arra
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-unsafe-fn-call.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr692.raw.diff --format json --max-cards 30 --out target/dogfood-work/hashbrown-pr692.after-slice-mut.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr692.raw.diff --format json --max-cards 30 --out target/dogfood-work/hashbrown-pr692.after-write-bytes.json
+rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr692.raw.diff --format json --max-cards 30 --out target/dogfood-work/hashbrown-pr692.after-num-ctrl-guard.json
 ```
 
 The dogfood reruns used a temporary `CARGO_TARGET_DIR` to avoid a Windows file
@@ -847,6 +874,9 @@ The repo may claim:
   `slice_from_raw_parts`
 - one fixture-backed raw pointer write improvement changed the `hashbrown#692`
   `write_bytes` card from generic `unsafe_fn_call` to `raw_pointer_write`
+- one fixture-backed pointer arithmetic improvement changed the `hashbrown#692`
+  `ctrl` pointer arithmetic card from `guard_missing` to `guarded_unwitnessed`
+  when `index < self.num_ctrl_bytes()` is visible
 - attributed unsafe function declarations are deduped between syntax-backed
   extraction and fallback line scanning
 - false-positive regression coverage exists in fixtures and calibration
@@ -898,6 +928,8 @@ The repo must not claim:
 - `hashbrown#692` now has a fixture-backed `write_bytes` card, but broader
   byte-pattern validity and destination-type modeling remains source-level and
   advisory.
+- `hashbrown#692` now recognizes `num_ctrl_bytes` bounds evidence for pointer
+  arithmetic, but broader pointer-arithmetic guard naming remains uncalibrated.
 - These runs do not prove absence of missed unsafe seams.
 
 ## Next useful work

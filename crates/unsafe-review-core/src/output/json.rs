@@ -234,6 +234,7 @@ mod tests {
         "raw_pointer_read_unaligned",
         "raw_pointer_write_assignment",
         "raw_pointer_write_bytes",
+        "pointer_arithmetic_num_ctrl_bytes_guard",
         "slice_from_raw_parts_mut",
         "safe_reference_deref_no_cards",
         "imports_not_unsafe_operations",
