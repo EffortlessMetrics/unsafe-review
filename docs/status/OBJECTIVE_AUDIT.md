@@ -1,15 +1,16 @@
 # Objective audit
 
 Date: 2026-05-18
-Status: active objective partially achieved; continue dogfood measurement before
-any release or policy promotion
+Status: active objective partially achieved; dogfood-calibrated evidence lane
+closed experimentally; continue broader calibration before policy promotion
 
 This audit maps the current product objective to concrete repo evidence. It is a
 status artifact, not a support-tier promotion. `docs/status/SUPPORT_TIERS.md`
 remains the authority for public claim wording.
 
-The active execution lane is defined in
-`docs/status/DOGFOOD_CALIBRATED_EVIDENCE_LANE.md`.
+The latest closed execution lane is recorded in
+`docs/status/DOGFOOD_CALIBRATED_EVIDENCE_LANE.md` and
+`docs/handoffs/2026-05-18-dogfood-calibrated-evidence-v0.6.md`.
 
 ## Objective
 
