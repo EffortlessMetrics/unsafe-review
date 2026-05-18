@@ -1,7 +1,7 @@
 # Witness receipt import v0.5 receipt
 
 Date: 2026-05-18
-Status: initial exact-card witness receipt import landed
+Status: exact-card witness receipt import and fixture proof landed
 Owner: CLI/core/policy
 
 ## What landed
@@ -12,9 +12,11 @@ The first witness receipt slice imports user-provided JSON receipts from:
 .unsafe-review/receipts/*.json
 ```
 
-Merged PR:
+Merged PRs:
 
 - `#138 receipts: import exact card witness receipts`
+- `#140 receipts: validate witness receipt metadata`
+- `#141 test(fixtures): add receipted review card golden`
 
 The receipt importer:
 
@@ -24,9 +26,15 @@ The receipt importer:
   `site_reached`
 - rejects unknown receipt strengths
 - rejects uncounted card identities
+- requires non-empty `author`
+- requires `recorded_at` in `YYYY-MM-DDTHH:MM:SSZ` UTC timestamp form
+- requires `expires_at` in `YYYY-MM-DD` date form
+- rejects receipts whose expiry predates their recorded date
 - marks top-level witness evidence present for exact matches
 - marks obligation-level witness evidence present for exact matches
 - removes the `witness` missing-evidence item for exact matches
+- has a committed `raw_pointer_alignment_receipted` fixture/golden proving rendered
+  card output
 
 Receipt import does not create analyzer truth. It attaches external witness
 evidence to an existing `ReviewCard`.
@@ -41,6 +49,8 @@ Targeted local validation added during this slice included:
 ```bash
 rtk cargo test -p unsafe-review-core receipt --locked
 rtk cargo test -p unsafe-review-core imported_receipt --locked
+rtk cargo test -p unsafe-review-core fixture_card_goldens_match_rendered_json --locked
+rtk cargo run --locked -p xtask -- check-fixtures
 ```
 
 The recurring workspace gate also passed:
@@ -65,6 +75,10 @@ The repo may claim:
 - matching receipts mark witness evidence present in card JSON
 - matching receipts remove missing witness evidence
 - receipt strength remains explicit in imported evidence summaries
+- receipt author, recorded timestamp, expiry, command, and limitations remain
+  visible in imported evidence summaries
+- the `raw_pointer_alignment_receipted` golden proves a receipt does not hide
+  the still-missing alignment guard
 
 The repo must not claim:
 
@@ -84,14 +98,14 @@ The repo must not claim:
   output.
 - Receipt import does not discharge contract, guard, or reach evidence.
 - Duplicate receipts for the same card are rejected instead of merged.
-- There is no receipt author, timestamp, or expiry validation yet.
+- Receipt import validates metadata shape, but it does not verify author identity
+  or clock freshness against the current date.
 
 ## Next useful work
 
-Prefer dogfood and receipt shape validation before adding automation:
+Prefer dogfood and native adapter proof before adding automation:
 
-- import receipts for fixture-backed local runs and inspect card wording
-- add receipt author/timestamp/expiry validation before policy use
+- import receipts for real unsafe-review dogfood PRs and inspect card wording
 - add native Miri or cargo-careful receipt adapters only after the JSON shape
   holds up
 - keep witness execution separate from receipt import
