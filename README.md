@@ -88,11 +88,12 @@ cargo xtask check-pr
 
 ## Documentation map
 
-- [Mission and vision](docs/MISSION.md)
-- [Roadmap](docs/ROADMAP.md)
-- [Architecture](docs/ARCHITECTURE.md)
-- [Specifications](docs/specs/README.md)
-- [ADRs](docs/adr/README.md)
-- [Implementation plan](plans/0.1.0/implementation-plan.md)
-- [Support tiers](docs/status/SUPPORT_TIERS.md)
-- [Policy ledgers](policy/)
+The docs use the Diátaxis model: tutorials teach, how-to guides solve a task,
+reference pages define behavior, and explanation pages describe context and
+trade-offs. Start with the [documentation map](docs/README.md) when deciding
+where to read or write.
+
+- Tutorial: [Quick start](#quick-start)
+- How-to: [PR and CI model](docs/ci/PR_CI.md), [implementation plan](plans/0.1.0/implementation-plan.md)
+- Reference: [Specifications](docs/specs/README.md), [support tiers](docs/status/SUPPORT_TIERS.md), [policy ledgers](policy/)
+- Explanation: [Mission](docs/MISSION.md), [Vision](docs/VISION.md), [Roadmap](docs/ROADMAP.md), [Architecture](docs/ARCHITECTURE.md), [ADRs](docs/adr/README.md)
