@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 const PUBLIC_UNSAFE_API_CONTRACT_DISCHARGE: &str = "Public unsafe API declaration is a caller-contract site; local guard evidence is not expected at the declaration";
 const DOCUMENTED_PRIVATE_UNSAFE_CONTRACT_DISCHARGE: &str = "Documented private unsafe declaration is a caller-contract site; local guard evidence is not expected at the declaration";
+const TARGET_FEATURE_CONTRACT_DISCHARGE: &str = "Documented target-feature declaration is a caller-contract site; local guard evidence is not expected at the attribute";
 
 pub(crate) fn contract_evidence(site: &ScannedSite) -> ContractEvidence {
     let context = site.context_before.join("\n");
@@ -215,6 +216,13 @@ fn discharge_state_for(
                 EvidenceState::present(
                     "Infallible error-path evidence was detected before unreachable_unchecked",
                 )
+            } else {
+                EvidenceState::missing("No obligation-specific guard code was detected")
+            }
+        }
+        "target-feature" => {
+            if family == &OperationFamily::TargetFeature && contract.present {
+                EvidenceState::present(TARGET_FEATURE_CONTRACT_DISCHARGE)
             } else {
                 EvidenceState::missing("No obligation-specific guard code was detected")
             }
@@ -700,6 +708,36 @@ mod tests {
                 .discharge
                 .present
         );
+    }
+
+    #[test]
+    fn documented_target_feature_declaration_does_not_require_local_guard() {
+        let obligations = vec![SafetyObligation::new(
+            "target-feature",
+            "callers only execute this path on supported hardware",
+        )];
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let site = site_with_family(
+            OperationFamily::TargetFeature,
+            vec!["/// # Safety"],
+            "#[target_feature(enable = \"sse2\")]",
+            vec!["pub unsafe fn find_raw() {}"],
+        );
+
+        let with_contract = obligation_evidence(
+            &site,
+            &obligations,
+            &ContractEvidence::present("contract"),
+            &reach,
+        );
+        let without_contract =
+            obligation_evidence(&site, &obligations, &ContractEvidence::missing(), &reach);
+
+        assert!(with_contract[0].discharge.present);
+        assert!(!without_contract[0].discharge.present);
     }
 
     #[test]
