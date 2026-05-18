@@ -1,0 +1,10 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,0 +1,6 @@
++#[inline]
++unsafe fn write_one(ptr: *mut u8, byte: u8) {
++    unsafe {
++        core::ptr::write(ptr, byte);
++    }
++}
