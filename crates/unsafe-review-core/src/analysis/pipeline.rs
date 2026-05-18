@@ -466,6 +466,65 @@ mod tests {
     }
 
     #[test]
+    fn operation_cards_inside_unsafe_fn_inherit_owner_safety_docs() -> Result<(), String> {
+        let root = unique_temp_dir("unsafe-review-owner-contract")?;
+        fs::create_dir_all(root.join("src")).map_err(|err| format!("create src failed: {err}"))?;
+        fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"owner-contract-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+        )
+        .map_err(|err| format!("write Cargo.toml failed: {err}"))?;
+        fs::write(
+            root.join("src/lib.rs"),
+            r#"/// Advances a raw pointer.
+///
+/// # Safety
+///
+/// Caller must ensure `ptr.add(offset)` remains within the same allocation.
+pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
+    let _padding0 = offset;
+    let _padding1 = offset;
+    let _padding2 = offset;
+    let _padding3 = offset;
+    let _padding4 = offset;
+    let _padding5 = offset;
+    let _padding6 = offset;
+    unsafe { ptr.add(offset) }
+}
+"#,
+        )
+        .map_err(|err| format!("write src file failed: {err}"))?;
+
+        let output = analyze(AnalyzeInput {
+            root: root.clone(),
+            scope: Scope::Repo,
+            diff: DiffSource::NoneRepoScan,
+            mode: AnalysisMode::Repo,
+            policy: PolicyMode::Advisory,
+            include_unchanged_tests: true,
+            max_cards: None,
+        })?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        let Some(card) = output
+            .cards
+            .iter()
+            .find(|card| card.operation.family == OperationFamily::PointerArithmetic)
+        else {
+            return Err(format!(
+                "expected pointer arithmetic card: {:#?}",
+                output.cards
+            ));
+        };
+        assert_eq!(card.site.owner, Some("advance".to_string()));
+        assert!(
+            card.contract.present,
+            "operation card should inherit enclosing unsafe fn # Safety docs"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn public_unsafe_api_contract_evidence_requires_safety_docs() -> Result<(), String> {
         for fixture in [
             "public_unsafe_fn_missing_safety",

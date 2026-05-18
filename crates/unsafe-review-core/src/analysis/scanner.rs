@@ -60,7 +60,7 @@ pub(crate) fn scan_file(
         let owner = find_owner(&lines, idx);
         let visibility = visibility_for_snippet(trimmed).to_string();
         let public_api_surface = is_public_api_surface(&kind, trimmed);
-        let context_before = context_slice(&lines, idx.saturating_sub(8), idx);
+        let context_before = context_before_site(&lines, idx);
         let context_after = context_slice(&lines, idx + 1, (idx + 8).min(lines.len()));
         out.push(ScannedSite {
             site: UnsafeSite {
@@ -96,7 +96,7 @@ pub(crate) fn scan_file(
             .or_else(|| find_owner(&lines, idx));
         let visibility = visibility_for_snippet(&detected.source_snippet).to_string();
         let public_api_surface = is_public_api_surface(&detected.kind, &detected.source_snippet);
-        let context_before = context_slice(&lines, idx.saturating_sub(8), idx.min(lines.len()));
+        let context_before = context_before_site(&lines, idx);
         let context_after = context_slice(
             &lines,
             (idx + 1).min(lines.len()),
@@ -751,6 +751,48 @@ fn find_owner(lines: &[&str], idx: usize) -> Option<String> {
         }
     }
     None
+}
+
+fn context_before_site(lines: &[&str], idx: usize) -> Vec<String> {
+    let mut start = idx.saturating_sub(8);
+    if let Some(owner_idx) = find_owner_declaration_index(lines, idx) {
+        start = start.min(owner_doc_start(lines, owner_idx));
+    }
+    context_slice(lines, start, idx.min(lines.len()))
+}
+
+fn find_owner_declaration_index(lines: &[&str], idx: usize) -> Option<usize> {
+    let limit = idx.min(lines.len().saturating_sub(1));
+    for (line_idx, raw) in lines[..=limit].iter().enumerate().rev().take(120) {
+        let line = raw.trim();
+        if parse_impl_owner(line).is_some()
+            || parse_trait_name(line).is_some()
+            || parse_fn_name(line).is_some()
+        {
+            return Some(line_idx);
+        }
+    }
+    None
+}
+
+fn owner_doc_start(lines: &[&str], decl_idx: usize) -> usize {
+    let mut start = decl_idx;
+    let mut idx = decl_idx;
+    while idx > 0 {
+        let previous = lines[idx - 1].trim_start();
+        if previous.starts_with("///")
+            || previous.starts_with("//!")
+            || previous.starts_with("#[doc")
+            || previous.starts_with("#[")
+            || previous.is_empty()
+        {
+            start = idx - 1;
+            idx -= 1;
+            continue;
+        }
+        break;
+    }
+    start
 }
 
 fn parse_impl_owner(line: &str) -> Option<String> {
