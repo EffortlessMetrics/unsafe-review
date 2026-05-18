@@ -19,7 +19,7 @@ Dogfood repositories:
 | `rust-lang/hashbrown` | `7b3bba6eb4b2f03636155c918552b5f30c1a05b3` | completed with `--max-cards 50` after syntax-scan performance hardening; PR-diff dogfood completed for `hashbrown#469`, `hashbrown#501`, `hashbrown#556`, `hashbrown#657`, `hashbrown#667`, `hashbrown#692`, `hashbrown#681`, and `hashbrown#693` |
 | `tokio-rs/bytes` | `245adff079eb0cb1a706d35bab5f68b2d51919f6` | completed with `--max-cards 50`; PR-diff dogfood completed for `bytes#826` |
 | `crossbeam-rs/crossbeam` | `03919fedb43cdbd0866aee0c77e0d6df8976b12f` | completed with `--max-cards 50`; capped output recorded 45 `contract_missing`, 4 `requires_loom`, and 1 `guard_missing` cards; PR-diff dogfood completed for `crossbeam#1226` and `crossbeam#1187` |
-| `tokio-rs/mio` | `0d82f2a51a57d435f79f9cf77f1c6e3f84a587de` | completed with `--max-cards 50`; capped output recorded 42 `contract_missing`, 4 `guard_missing`, 3 `requires_loom`, and 1 `unsafe_unreached` cards |
+| `tokio-rs/mio` | `0d82f2a51a57d435f79f9cf77f1c6e3f84a587de` | completed with `--max-cards 50`; capped output recorded 42 `contract_missing`, 4 `guard_missing`, 3 `requires_loom`, and 1 `unsafe_unreached` cards; PR-diff dogfood completed for `mio#1388` |
 
 The first two completed runs exposed two noisy false positives:
 
@@ -1492,7 +1492,8 @@ The repo may claim:
   `arrayvec#174`, and `arrayvec#288`, `hashbrown#469`, `hashbrown#501`,
   `hashbrown#657`,
   `hashbrown#556`, `hashbrown#667`, `hashbrown#692`, `hashbrown#681`,
-  `hashbrown#693`, `bytes#826`, `crossbeam#1226`, and `crossbeam#1187`
+  `hashbrown#693`, `bytes#826`, `crossbeam#1226`, `crossbeam#1187`, and
+  `mio#1388`
   produce card output
 - dogfood found and fixed import/declaration and `cfg(target_feature)`
   false positives
@@ -1630,6 +1631,10 @@ The repo may claim:
 - one capped `tokio-rs/mio` repo snapshot completed with 50 cards across 80
   Rust files, adding dogfood for unsafe function call contracts, `Vec::set_len`,
   zeroed values, pointer operations, and unsafe Send/Sync route cards
+- one PR-diff dogfood pass on `tokio-rs/mio#1388` completed with 18
+  contract-missing cards across six changed Rust files, adding focused coverage
+  for socket-address layout conversions, `mem::zeroed`, raw pointer writes, raw
+  pointer dereferences, and unsafe function call contract prompts
 - one PR-diff dogfood pass on `bluss/arrayvec#137` completed with 15
   contract-missing cards across three changed Rust files, adding focused
   coverage for raw pointer accessor soundness fixes, raw pointer reads/writes,
@@ -1650,7 +1655,7 @@ The repo must not claim:
 - usable-alpha support-tier promotion
 - full-repository coverage from top-50 capped snapshots
 - uncapped repo-scan performance
-- general PR-diff usefulness from twenty-two PRs
+- general PR-diff usefulness from twenty-three PRs
 - memory-safety proof
 - UB-free status
 - witness execution
@@ -1660,7 +1665,7 @@ The repo must not claim:
 
 - Seven real crates completed capped repo snapshots in this slice.
 - The successful dogfood snapshots were capped at 50 cards.
-- Only twenty-two real PR diffs were measured.
+- Only twenty-three real PR diffs were measured.
 - `memchr` completion depends on capped-scan behavior; uncapped performance is
   still unmeasured.
 - No human audit was performed for every emitted card.

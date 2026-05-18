@@ -6,12 +6,12 @@
   "trust_boundary": "Dogfood corpus records are static unsafe contract review evidence, not a proof of memory safety, not UB-free status, and not a Miri result unless an exact witness receipt is attached.",
   "summary": {
     "repositories": 7,
-    "targets": 29,
+    "targets": 30,
     "repo_snapshots": 7,
-    "pr_diffs": 22,
+    "pr_diffs": 23,
     "checked_in_scan_outputs": 0,
     "artifact_statuses": {
-      "local_untracked": 29
+      "local_untracked": 30
     }
   },
   "repositories": [
@@ -54,8 +54,8 @@
     {
       "repository": "tokio-rs/mio",
       "snapshot_targets": ["mio-capped"],
-      "pr_diff_targets": [],
-      "primary_exercise": "Unsafe function call contracts, Vec::set_len, zeroed values, pointer operations, and unsafe Send/Sync route cards"
+      "pr_diff_targets": ["mio-pr1388"],
+      "primary_exercise": "Unsafe function call contracts, Vec::set_len, zeroed values, pointer operations, socket address layout conversions, and unsafe Send/Sync route cards"
     }
   ],
   "recorded_outcomes": [
