@@ -181,6 +181,8 @@ struct JsonSite<'a> {
     column: usize,
     kind: &'static str,
     owner: &'a str,
+    visibility: &'a str,
+    public_api_surface: bool,
     snippet: &'a str,
 }
 
@@ -192,6 +194,8 @@ impl<'a> From<&'a ReviewCard> for JsonSite<'a> {
             column: card.site.location.column,
             kind: card.site.kind.as_str(),
             owner: card.site.owner.as_deref().unwrap_or(""),
+            visibility: &card.site.visibility,
+            public_api_surface: card.site.public_api_surface,
             snippet: &card.site.snippet,
         }
     }

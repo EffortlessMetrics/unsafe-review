@@ -10,6 +10,8 @@
       "column": 5,
       "kind": "operation",
       "owner": "pin_mut_unchecked",
+      "visibility": "private",
+      "public_api_surface": false,
       "snippet": "unsafe { Pin::new_unchecked(value) }"
     },
     "operation_family": "pin_unchecked",

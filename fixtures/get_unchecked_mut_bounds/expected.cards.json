@@ -10,6 +10,8 @@
       "column": 5,
       "kind": "operation",
       "owner": "pick_unchecked_mut",
+      "visibility": "private",
+      "public_api_surface": false,
       "snippet": "unsafe { values.get_unchecked_mut(index) }"
     },
     "operation_family": "get_unchecked",

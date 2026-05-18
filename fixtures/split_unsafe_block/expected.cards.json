@@ -10,6 +10,8 @@
       "column": 17,
       "kind": "unsafe_block",
       "owner": "split_block",
+      "visibility": "private",
+      "public_api_surface": false,
       "snippet": "unsafe {"
     },
     "operation_family": "unknown",

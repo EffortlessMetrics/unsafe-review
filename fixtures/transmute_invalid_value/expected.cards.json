@@ -10,6 +10,8 @@
       "column": 5,
       "kind": "operation",
       "owner": "byte_to_bool",
+      "visibility": "private",
+      "public_api_surface": false,
       "snippet": "unsafe { core::mem::transmute::<u8, bool>(value) }"
     },
     "operation_family": "transmute",

@@ -10,6 +10,8 @@
       "column": 9,
       "kind": "operation",
       "owner": "read_header",
+      "visibility": "private",
+      "public_api_surface": false,
       "snippet": "ptr.cast::<Header>().read()"
     },
     "operation_family": "raw_pointer_read",

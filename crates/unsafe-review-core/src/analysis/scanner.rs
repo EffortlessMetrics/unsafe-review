@@ -59,15 +59,8 @@ pub(crate) fn scan_file(
             continue;
         }
         let owner = find_owner(&lines, idx);
-        let visibility = if trimmed.starts_with("pub ") || trimmed.contains(" pub ") {
-            "public"
-        } else {
-            "private"
-        }
-        .to_string();
-        let public_api_surface = trimmed.contains("pub unsafe fn")
-            || trimmed.contains("pub unsafe trait")
-            || trimmed.contains("pub unsafe impl");
+        let visibility = visibility_for_snippet(trimmed).to_string();
+        let public_api_surface = is_public_api_surface(&kind, trimmed);
         let context_before = context_slice(&lines, idx.saturating_sub(8), idx);
         let context_after = context_slice(&lines, idx + 1, (idx + 8).min(lines.len()));
         out.push(ScannedSite {
@@ -99,12 +92,7 @@ pub(crate) fn scan_file(
         }
         let idx = detected.line.saturating_sub(1);
         let owner = parse_fn_name(&detected.source_snippet).or_else(|| find_owner(&lines, idx));
-        let visibility = if is_public_surface(&detected.source_snippet) {
-            "public"
-        } else {
-            "private"
-        }
-        .to_string();
+        let visibility = visibility_for_snippet(&detected.source_snippet).to_string();
         let public_api_surface = is_public_api_surface(&detected.kind, &detected.source_snippet);
         let context_before = context_slice(&lines, idx.saturating_sub(8), idx.min(lines.len()));
         let context_after = context_slice(
@@ -464,9 +452,21 @@ fn site_key(
     (line, kind.as_str().to_string(), family.as_str().to_string())
 }
 
+fn visibility_for_snippet(snippet: &str) -> &'static str {
+    if is_public_surface(snippet) {
+        "public"
+    } else {
+        "private"
+    }
+}
+
 fn is_public_surface(snippet: &str) -> bool {
     let compact = compact_whitespace(snippet);
-    compact.starts_with("pub ") || compact.contains(" pub ")
+    starts_with_pub_visibility(&compact) || compact.contains(" pub ") || compact.contains(" pub(")
+}
+
+fn starts_with_pub_visibility(compact: &str) -> bool {
+    compact.starts_with("pub ") || compact.starts_with("pub(")
 }
 
 fn is_public_api_surface(kind: &UnsafeSiteKind, snippet: &str) -> bool {
@@ -527,4 +527,37 @@ fn parse_ident(rest: &str) -> Option<String> {
         }
     }
     (!name.is_empty()).then_some(name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn restricted_visibility_counts_as_public_surface() {
+        for snippet in [
+            "pub(crate) unsafe fn expose() {}",
+            "pub(super) unsafe trait Token {}",
+            "pub(in crate::ffi) unsafe fn expose() {}",
+        ] {
+            assert_eq!(visibility_for_snippet(snippet), "public");
+            assert!(is_public_surface(snippet));
+        }
+    }
+
+    #[test]
+    fn unsafe_api_surface_includes_restricted_pub_items() {
+        assert!(is_public_api_surface(
+            &UnsafeSiteKind::UnsafeFn,
+            "pub(crate) unsafe fn expose() {}"
+        ));
+        assert!(is_public_api_surface(
+            &UnsafeSiteKind::UnsafeTrait,
+            "pub(super) unsafe trait Token {}"
+        ));
+        assert!(!is_public_api_surface(
+            &UnsafeSiteKind::Operation,
+            "pub(crate) unsafe { *ptr }"
+        ));
+    }
 }
