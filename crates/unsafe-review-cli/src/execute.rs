@@ -7,7 +7,7 @@ use unsafe_review_core::{
     AnalysisMode, AnalyzeInput, CardId, DiffSource, PolicyMode, Scope,
     WITNESS_RECEIPT_SCHEMA_VERSION, WitnessReceipt, analyze, collect_context, explain_card,
     render_comment_plan, render_human, render_json, render_lsp, render_markdown, render_pr_summary,
-    render_sarif, render_witness_plan,
+    render_sarif, render_witness_plan, validate_witness_receipts,
 };
 
 pub(crate) fn execute(command: Command) -> Result<(), String> {
@@ -28,6 +28,7 @@ pub(crate) fn execute(command: Command) -> Result<(), String> {
         Command::Explain { root, id, format } => explain(&root, &id, format),
         Command::Context { root, id } => context(&root, &id),
         Command::ReceiptTemplate(options) => receipt_template(options),
+        Command::ReceiptValidate { root } => receipt_validate(&root),
     }
 }
 
@@ -268,6 +269,12 @@ fn receipt_template(options: ReceiptTemplateOptions) -> Result<(), String> {
     Ok(())
 }
 
+fn receipt_validate(root: &Path) -> Result<(), String> {
+    let count = validate_witness_receipts(root.to_path_buf())?;
+    println!("witness receipts: {count} valid");
+    Ok(())
+}
+
 fn print_help() {
     println!("unsafe-review: cheap unsafe contract review for Rust");
     println!();
@@ -285,6 +292,7 @@ fn print_help() {
     println!(
         "  receipt template <card-id> --tool <lane> --strength <level> --author <owner> --recorded-at <utc> --expires-at <date> [--summary text] [--command text] [--limitation text] [--out file]"
     );
+    println!("  receipt validate [--root .]");
     println!("  doctor  [--root .]");
     println!();
     println!("Flags may be passed as `--flag value` or `--flag=value`.");

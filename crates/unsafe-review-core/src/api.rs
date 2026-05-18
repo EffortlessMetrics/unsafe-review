@@ -1,4 +1,4 @@
-use crate::analysis::pipeline;
+use crate::analysis::{pipeline, receipts};
 use crate::domain::{CardId, ReviewCard};
 use crate::output::{agent, comment_plan, human, json, lsp, markdown, sarif, witness_plan};
 use std::path::PathBuf;
@@ -107,6 +107,10 @@ pub struct AnalyzeOutput {
 
 pub fn analyze(input: AnalyzeInput) -> Result<AnalyzeOutput, String> {
     pipeline::analyze(input)
+}
+
+pub fn validate_witness_receipts(root: PathBuf) -> Result<usize, String> {
+    receipts::validate_receipts(&root)
 }
 
 pub fn render_json(output: &AnalyzeOutput) -> String {

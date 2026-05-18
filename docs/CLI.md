@@ -160,6 +160,15 @@ unsafe-review receipt template <card-id> \
 The template command validates the receipt shape and writes JSON. It still does
 not run the witness command.
 
+Validate imported receipt files without running analysis:
+
+```bash
+unsafe-review receipt validate --root .
+```
+
+This checks `.unsafe-review/receipts/*.json` with the same validation path used
+by `check` and reports how many receipts are importable.
+
 `unsafe-review` imports receipts. It does not run Miri, `cargo-careful`,
 sanitizers, Loom, Shuttle, Kani, or Crux by default.
 
