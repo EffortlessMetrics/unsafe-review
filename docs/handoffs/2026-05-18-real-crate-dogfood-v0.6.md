@@ -885,6 +885,29 @@ unsafe declaration has explicit `# Safety` documentation and a related static
 test mention. This does not infer the safety contract of unsafe call sites and
 does not execute a witness.
 
+Follow-up rerun after adding fixture-backed `MaybeUninit` slice evidence:
+
+```text
+changed_rust_files: 2
+cards: 3
+contract_missing: 0
+guard_missing: 2
+guarded_unwitnessed: 1
+operation families: raw_pointer_write, pointer_arithmetic, slice_from_raw_parts
+```
+
+The improved mutable-slice card is still advisory only and remains
+`guard_missing`:
+
+```text
+ctrl_slice  line 2648  slice_from_raw_parts  guard_missing
+```
+
+The change is obligation-specific: returning `&mut [MaybeUninit<Tag>]` now
+discharges the initialized-memory obligation for the
+`slice::from_raw_parts_mut` card, while pointer validity, alignment,
+same-allocation, and witness evidence remain separate review prompts.
+
 ### `hashbrown#693`
 
 PR: `https://github.com/rust-lang/hashbrown/pull/693`
@@ -1166,6 +1189,7 @@ rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hash
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr692.raw.diff --format json --max-cards 30 --out target/dogfood-work/hashbrown-pr692.after-write-bytes.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr692.raw.diff --format json --max-cards 30 --out target/dogfood-work/hashbrown-pr692.after-num-ctrl-guard.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr692.raw.diff --format json --max-cards 30 --out target/dogfood-work/hashbrown-pr692.after-private-contract.json
+rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr692.raw.diff --format json --max-cards 30 --out target/dogfood-work/hashbrown-pr692.after-maybeuninit-slice.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr693.raw.diff --format json --max-cards 30 --out target/dogfood-work/hashbrown-pr693.after-unwrap-unchecked.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr657.raw.diff --format json --max-cards 40 --out target/dogfood-work/hashbrown-pr657.after-multiline-unsafe-call.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr667.raw.diff --format json --max-cards 40 --out target/dogfood-work/hashbrown-pr667.after-nested-dedupe.json
@@ -1254,6 +1278,10 @@ The repo may claim:
 - one fixture-backed contract improvement changed the `hashbrown#692` private
   documented `unsafe fn ctrl` declaration from `guard_missing` to
   `guarded_unwitnessed`
+- one fixture-backed `MaybeUninit` slice improvement discharged the
+  initialized-memory obligation on the `hashbrown#692`
+  `slice::from_raw_parts_mut` card without discharging the remaining pointer,
+  alignment, allocation, or witness obligations
 - one fixture-backed operation classification improvement changed
   `hashbrown#693` `unwrap_unchecked` sites from generic `unsafe_fn_call` to
   `unwrap_unchecked` invalid-value cards
@@ -1322,7 +1350,9 @@ The repo must not claim:
 - `arrayvec#174` now has a fixture-backed `ptr::drop_in_place` card, but broader
   drop/deallocation modeling beyond that operation remains narrow.
 - `hashbrown#692` now has a fixture-backed `slice::from_raw_parts_mut` card, but
-  broader slice range proof remains source-level and advisory.
+  broader slice range proof remains source-level and advisory. `MaybeUninit`
+  slice element evidence can discharge the initialized-memory obligation, but
+  not pointer validity, alignment, allocation, or witness obligations.
 - `hashbrown#692` now has a fixture-backed `write_bytes` card, but broader
   byte-pattern validity and destination-type modeling remains source-level and
   advisory.
