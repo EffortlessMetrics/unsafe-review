@@ -62,7 +62,7 @@ candidate PRs in the theme inventory below.
 | Theme | Candidate PRs | Current canonical | Disposition | Target lane | Reason |
 |---|---:|---|---|---|---|
 | Scanner false-positive hardening | #29, #32 | none | close-duplicate or park | already landed | PR #27 merged this class; only extract anything not covered by current scanner tests. |
-| Raw pointer write detection | #49, #62 | choose after review | rework or merge | current hardening | Active-lane aligned if fixture-backed and narrow; conflicting branches need rebase before judging. |
+| Raw pointer write detection | #49, #62 | reworked from #49/#62 on current main | merge | current hardening | The current slice keeps the syntax-target behavior and fixture proof, but rebuilds them narrowly on current main as raw pointer assignment-write detection. |
 | xtask fixture validation | #33, #50, #63, #64 | reworked from #64 on current main | merge | current hardening | Fixture validation protects the support-tier proof mechanism. The reworked slice validates fixture layout, golden JSON shape, diff shape, and package naming without broad xtask policy changes. |
 | CLI e2e coverage | #39, #58, #80, #81 | reworked from #81 on current main | merge | current PR/CI projection | The current slice keeps #81's user-path shape but updates it for landed PR artifacts: JSON, PR summary, SARIF, comment plan, context, and explain. |
 | Focused unit coverage | #44, #61, #86, #87 | #86 | merge | current hardening | #86 is the canonical core-only slice for classifier, evidence, and diff parser invariants. Keep broader CLI parser coverage for the CLI e2e/ergonomics queue. |
@@ -84,8 +84,7 @@ candidate PRs in the theme inventory below.
    #64.
 2. Complete the focused unit-coverage slice from #86.
 3. Complete the reworked CLI e2e artifact slice from #81.
-4. Review raw pointer write candidates (#49, #62), choose one canonical, and
-   rework only if it stays fixture-backed and narrow.
+4. Complete the reworked raw pointer write slice from #49/#62.
 5. Park property, fuzz, mutation, broad docs, broad CI, and broad refactor PRs
    until their target lane opens.
 

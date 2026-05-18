@@ -284,6 +284,10 @@ mod tests {
             ("raw_pointer_alignment", OperationFamily::RawPointerRead),
             ("raw_pointer_deref", OperationFamily::RawPointerDeref),
             (
+                "raw_pointer_write_assignment",
+                OperationFamily::RawPointerWrite,
+            ),
+            (
                 "split_raw_pointer_read_call",
                 OperationFamily::RawPointerRead,
             ),
