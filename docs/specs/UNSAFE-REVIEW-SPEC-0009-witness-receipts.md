@@ -48,6 +48,21 @@ Receipt JSON fields:
 - `test_targeted`
 - `site_reached`
 
+`tool` must be one of the supported witness lanes:
+
+- `miri`
+- `cargo-careful`
+- `asan`
+- `msan`
+- `tsan`
+- `lsan`
+- `loom`
+- `shuttle`
+- `kani`
+- `crux`
+- `human-deep-review`
+- `unsupported`
+
 `author` must be non-empty. `recorded_at` must be a UTC timestamp in
 `YYYY-MM-DDTHH:MM:SSZ` form. `expires_at` must be a `YYYY-MM-DD` date on or
 after the `recorded_at` date.
@@ -73,6 +88,7 @@ after the `recorded_at` date.
 
 - A matching receipt removes the `witness` missing-evidence item.
 - A matching receipt marks obligation-level witness evidence present.
+- A receipt with unknown tool is rejected.
 - A receipt with unknown strength is rejected.
 - A receipt with uncounted card identity is rejected.
 - A receipt missing author, timestamp, or expiry metadata is rejected.
