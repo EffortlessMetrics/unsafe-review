@@ -414,22 +414,23 @@ fn detect_syntax_site(
     if compact.starts_with("//") {
         return None;
     }
+    let declaration = declaration_prefix(&compact);
     match fact.kind.as_str() {
-        "FN" if compact.contains("unsafe fn") => {
+        "FN" if declaration.contains("unsafe fn") => {
             Some((UnsafeSiteKind::UnsafeFn, OperationFamily::Unknown))
         }
-        "TRAIT" if compact.contains("unsafe trait") => {
+        "TRAIT" if declaration.contains("unsafe trait") => {
             Some((UnsafeSiteKind::UnsafeTrait, OperationFamily::Unknown))
         }
-        "IMPL" if compact.contains("unsafe impl") && compact.contains(" Send") => Some((
+        "IMPL" if declaration.contains("unsafe impl") && declaration.contains(" Send") => Some((
             UnsafeSiteKind::UnsafeImplSend,
             OperationFamily::UnsafeImplSendSync,
         )),
-        "IMPL" if compact.contains("unsafe impl") && compact.contains(" Sync") => Some((
+        "IMPL" if declaration.contains("unsafe impl") && declaration.contains(" Sync") => Some((
             UnsafeSiteKind::UnsafeImplSync,
             OperationFamily::UnsafeImplSendSync,
         )),
-        "IMPL" if compact.contains("unsafe impl") => {
+        "IMPL" if declaration.contains("unsafe impl") => {
             Some((UnsafeSiteKind::UnsafeImpl, OperationFamily::Unknown))
         }
         "EXTERN_BLOCK" if compact.contains("extern") => {
@@ -459,6 +460,12 @@ fn detect_syntax_site(
         }
         _ => None,
     }
+}
+
+fn declaration_prefix(compact: &str) -> &str {
+    compact
+        .split_once('{')
+        .map_or(compact, |(declaration, _body)| declaration.trim())
 }
 
 fn card_snippet_for(
@@ -807,6 +814,36 @@ mod tests {
         fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
         assert!(sites.is_empty(), "unexpected sites: {sites:#?}");
         Ok(())
+    }
+
+    #[test]
+    fn syntax_detection_ignores_unsafe_declarations_inside_function_bodies() -> Result<(), String> {
+        let root = unique_temp_dir()?;
+        fs::create_dir_all(root.join("src"))
+            .map_err(|err| format!("create temp src failed: {err}"))?;
+        fs::write(
+            root.join("src/lib.rs"),
+            "pub fn safe_text() -> &'static str {\n    r#\"pub unsafe fn fake() {}\"#\n}\n",
+        )
+        .map_err(|err| format!("write temp source failed: {err}"))?;
+
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        assert!(sites.is_empty(), "unexpected sites: {sites:#?}");
+        Ok(())
+    }
+
+    #[test]
+    fn declaration_prefix_limits_declaration_detection_to_header() {
+        assert_eq!(
+            declaration_prefix("pub fn safe() { let text = \"pub unsafe fn fake() {}\"; }"),
+            "pub fn safe()"
+        );
+        assert_eq!(
+            declaration_prefix("pub unsafe fn real() { }"),
+            "pub unsafe fn real()"
+        );
     }
 
     fn unique_temp_dir() -> Result<PathBuf, String> {
