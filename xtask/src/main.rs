@@ -4,6 +4,34 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+const COMMANDS: &[CommandSpec] = &[
+    CommandSpec {
+        name: "check-pr",
+        description: "run every repository policy check used by PR CI",
+    },
+    CommandSpec {
+        name: "check-docs",
+        description: "verify required docs, indexes, and path spelling",
+    },
+    CommandSpec {
+        name: "check-policy",
+        description: "validate policy TOML files and required schema metadata",
+    },
+    CommandSpec {
+        name: "check-support-tiers",
+        description: "validate support-tier status table values",
+    },
+    CommandSpec {
+        name: "check-fixtures",
+        description: "validate fixture directories and expected card JSON files",
+    },
+];
+
+struct CommandSpec {
+    name: &'static str,
+    description: &'static str,
+}
+
 const REQUIRED_DOCS: &[&str] = &[
     "README.md",
     "docs/MISSION.md",
@@ -37,24 +65,71 @@ fn main() {
 }
 
 fn run(args: Vec<String>) -> Result<(), String> {
-    match args.get(1).map(|arg| arg.as_str()) {
-        None | Some("help") | Some("--help") => {
-            println!("xtask commands: check-pr, check-docs, check-policy, check-support-tiers");
+    let root = workspace_root()?;
+    std::env::set_current_dir(&root)
+        .map_err(|err| format!("failed to enter workspace root {}: {err}", root.display()))?;
+
+    let command = args.get(1).map_or("help", String::as_str);
+    match command {
+        "help" | "--help" | "-h" => {
+            print_help();
             Ok(())
         }
-        Some("check-pr") => {
+        "check-pr" => {
+            require_no_extra_args(&args, command)?;
             check_docs()?;
             check_policy()?;
             check_support_tiers()?;
+            check_fixtures()?;
             check_tracked_generated_artifacts()?;
             println!("check-pr: ok");
             Ok(())
         }
-        Some("check-docs") => check_docs(),
-        Some("check-policy") => check_policy(),
-        Some("check-support-tiers") => check_support_tiers(),
-        Some(other) => Err(format!("unknown xtask command `{other}`")),
+        "check-docs" => {
+            require_no_extra_args(&args, command)?;
+            check_docs()
+        }
+        "check-policy" => {
+            require_no_extra_args(&args, command)?;
+            check_policy()
+        }
+        "check-support-tiers" => {
+            require_no_extra_args(&args, command)?;
+            check_support_tiers()
+        }
+        "check-fixtures" => {
+            require_no_extra_args(&args, command)?;
+            check_fixtures()
+        }
+        other => Err(format!(
+            "unknown xtask command `{other}`\n\nRun `cargo xtask help` for available commands."
+        )),
     }
+}
+
+fn workspace_root() -> Result<PathBuf, String> {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| "failed to resolve workspace root from xtask manifest path".to_string())
+}
+
+fn print_help() {
+    println!("Repository automation commands:\n");
+    for command in COMMANDS {
+        println!("  {:<20} {}", command.name, command.description);
+    }
+    println!("\nRun with `cargo xtask <command>` from any directory in the workspace.");
+}
+
+fn require_no_extra_args(args: &[String], command: &str) -> Result<(), String> {
+    if args.len() <= 2 {
+        return Ok(());
+    }
+    Err(format!(
+        "`{command}` does not accept arguments: {}",
+        args[2..].join(" ")
+    ))
 }
 
 fn check_docs() -> Result<(), String> {
@@ -95,6 +170,48 @@ fn check_policy() -> Result<(), String> {
     }
     parse_toml_file(Path::new(".unsafe-review/goals/active.toml"))?;
     println!("check-policy: ok");
+    Ok(())
+}
+
+fn check_fixtures() -> Result<(), String> {
+    let root = Path::new("fixtures");
+    if !root.is_dir() {
+        return Err("fixtures directory is missing".to_string());
+    }
+
+    let mut fixture_count = 0usize;
+    let entries = fs::read_dir(root).map_err(|err| format!("read fixtures failed: {err}"))?;
+    for entry in entries {
+        let entry = entry.map_err(|err| format!("read fixtures entry failed: {err}"))?;
+        let path = entry.path();
+        if !path.is_dir() {
+            return Err(format!(
+                "fixtures may only contain fixture directories: {}",
+                path.display()
+            ));
+        }
+        fixture_count += 1;
+        check_fixture_dir(&path)?;
+    }
+
+    if fixture_count == 0 {
+        return Err("fixtures directory has no fixture cases".to_string());
+    }
+
+    println!("check-fixtures: ok");
+    Ok(())
+}
+
+fn check_fixture_dir(dir: &Path) -> Result<(), String> {
+    for required in [
+        "Cargo.toml",
+        "change.diff",
+        "expected.cards.json",
+        "src/lib.rs",
+    ] {
+        require_file_path(&dir.join(required))?;
+    }
+    parse_json_file(&dir.join("expected.cards.json"))?;
     Ok(())
 }
 
@@ -190,6 +307,18 @@ fn check_tracked_generated_artifacts() -> Result<(), String> {
     Ok(())
 }
 
+fn parse_json_file(path: &Path) -> Result<(), String> {
+    let text = read_to_string(path)?;
+    let value = text
+        .parse::<serde_json::Value>()
+        .map_err(|err| format!("{} is not valid JSON: {err}", path.display()))?;
+    if matches!(value, serde_json::Value::Array(_)) {
+        Ok(())
+    } else {
+        Err(format!("{} must contain a JSON array", path.display()))
+    }
+}
+
 fn parse_toml_file(path: &Path) -> Result<toml::Value, String> {
     let text = read_to_string(path)?;
     text.parse::<toml::Value>()
@@ -204,10 +333,14 @@ fn require_toml_string(value: &toml::Value, key: &str, path: &str) -> Result<(),
 }
 
 fn require_file(path: &str) -> Result<(), String> {
-    if Path::new(path).is_file() {
+    require_file_path(Path::new(path))
+}
+
+fn require_file_path(path: &Path) -> Result<(), String> {
+    if path.is_file() {
         Ok(())
     } else {
-        Err(format!("required file missing: {path}"))
+        Err(format!("required file missing: {}", path.display()))
     }
 }
 
@@ -291,6 +424,21 @@ mod tests {
             Some("scaffold")
         );
         assert_eq!(support_tier_from_row("|---|---|"), None);
+    }
+
+    #[test]
+    fn extra_arg_validator_rejects_trailing_values() -> Result<(), String> {
+        let args = vec![
+            "xtask".to_string(),
+            "check-docs".to_string(),
+            "unexpected".to_string(),
+        ];
+        let Err(err) = require_no_extra_args(&args, "check-docs") else {
+            return Err("extra argument should be rejected".to_string());
+        };
+        assert!(err.contains("unexpected"));
+        require_no_extra_args(&args[..2], "check-docs")?;
+        Ok(())
     }
 
     #[test]
