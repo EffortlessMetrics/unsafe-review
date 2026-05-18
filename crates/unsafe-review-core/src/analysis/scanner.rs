@@ -24,11 +24,7 @@ pub(crate) fn scan_file(
         fs::read_to_string(&abs).map_err(|err| format!("read {} failed: {err}", abs.display()))?;
     let lines: Vec<&str> = text.lines().collect();
     let parsed = super::syntax::parse_source(text.as_str());
-    let syntax_sites = if parsed.parse_errors.is_empty() {
-        detect_syntax_sites(&parsed)
-    } else {
-        Vec::new()
-    };
+    let syntax_sites = detect_syntax_sites(&parsed);
     let syntax_operation_lines = syntax_sites
         .iter()
         .filter(|site| site.kind == UnsafeSiteKind::Operation)
@@ -527,4 +523,79 @@ fn parse_ident(rest: &str) -> Option<String> {
         }
     }
     (!name.is_empty()).then_some(name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{OperationFamily, UnsafeSiteKind};
+    use std::env;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::process;
+
+    #[test]
+    fn syntax_detection_survives_unrelated_parse_errors() -> Result<(), String> {
+        let root = temp_fixture_root("partial_parse");
+        let src_dir = root.join("src");
+        fs::create_dir_all(&src_dir)
+            .map_err(|err| format!("create {} failed: {err}", src_dir.display()))?;
+        let source = r#"
+pub fn read_byte(ptr: *const u8) -> u8 {
+    // SAFETY: the caller provides a valid pointer.
+    unsafe {
+        core::ptr::read(
+            ptr
+        )
+    }
+}
+
+pub fn broken( {
+"#;
+        let file = src_dir.join("lib.rs");
+        fs::write(&file, source)
+            .map_err(|err| format!("write {} failed: {err}", file.display()))?;
+
+        let rel = PathBuf::from("src/lib.rs");
+        let sites = scan_file(&root, &rel, None, true)?;
+        let operation_sites = sites
+            .iter()
+            .filter(|site| site.site.kind == UnsafeSiteKind::Operation)
+            .collect::<Vec<_>>();
+
+        if operation_sites.len() != 1 {
+            return Err(format!(
+                "expected one concrete operation site, got {}: {sites:?}",
+                operation_sites.len()
+            ));
+        }
+        let site = operation_sites[0];
+        assert_eq!(site.operation.family, OperationFamily::RawPointerRead);
+        assert_eq!(site.site.location.line, 5);
+        assert!(
+            sites.iter().all(|site| {
+                !(site.site.kind == UnsafeSiteKind::UnsafeBlock
+                    && site.operation.family == OperationFamily::Unknown)
+            }),
+            "concrete operation should suppress the wrapper unsafe block"
+        );
+
+        cleanup_temp_fixture(&root)?;
+        Ok(())
+    }
+
+    fn temp_fixture_root(name: &str) -> PathBuf {
+        env::temp_dir().join(format!(
+            "unsafe-review-core-scanner-{name}-{}",
+            process::id()
+        ))
+    }
+
+    fn cleanup_temp_fixture(root: &Path) -> Result<(), String> {
+        if root.exists() {
+            fs::remove_dir_all(root)
+                .map_err(|err| format!("remove {} failed: {err}", root.display()))?;
+        }
+        Ok(())
+    }
 }
