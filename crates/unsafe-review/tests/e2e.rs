@@ -152,6 +152,24 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
         "unsafe-review.copyAgentPacket"
     );
 
+    let witness_plan_path = temp.path().join("witness-plan.md");
+    run_success([
+        os("check"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        fixture.join("change.diff").into_os_string(),
+        os("--format"),
+        os("witness-plan"),
+        os("--out"),
+        witness_plan_path.as_os_str().to_os_string(),
+    ])?;
+    let witness_plan = fs::read_to_string(&witness_plan_path)?;
+    assert!(witness_plan.contains("# unsafe-review witness plan"));
+    assert!(witness_plan.contains("Route: `miri`"));
+    assert!(witness_plan.contains("cargo +nightly miri test read_header"));
+    assert!(witness_plan.contains("does not run Miri"));
+
     let context = run_success([
         os("context"),
         os("--root"),

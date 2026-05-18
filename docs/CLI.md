@@ -57,11 +57,15 @@ findings independently.
 | `sarif` | `unsafe-review check --base origin/main --format sarif --out target/unsafe-review/cards.sarif` | code-scanning-compatible artifact |
 | `comment-plan` | `unsafe-review check --base origin/main --format comment-plan --out target/unsafe-review/comment-plan.json` | artifact-only inline comment candidates |
 | `lsp` | `unsafe-review check --base origin/main --format lsp --out target/unsafe-review/lsp.json` | saved editor diagnostics and hovers |
+| `witness-plan` | `unsafe-review check --base origin/main --format witness-plan --out target/unsafe-review/witness-plan.md` | reviewer-facing witness route plan |
 
 `comment-plan` is plan-only. It does not post comments.
 
 `lsp` writes saved JSON only. There is no editor extension or live LSP server in
 this surface.
+
+`witness-plan` is a routing artifact. It lists suggested witness commands and
+limitations from existing cards, but it does not run those commands.
 
 ## PR Artifacts
 
