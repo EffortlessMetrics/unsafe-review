@@ -8,6 +8,9 @@ This audit maps the current product objective to concrete repo evidence. It is a
 status artifact, not a support-tier promotion. `docs/status/SUPPORT_TIERS.md`
 remains the authority for public claim wording.
 
+The active execution lane is defined in
+`docs/status/DOGFOOD_CALIBRATED_EVIDENCE_LANE.md`.
+
 ## Objective
 
 `unsafe-review` should be the cheap PR-time unsafe contract reviewer for Rust:

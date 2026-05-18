@@ -43,6 +43,10 @@
 
 - fixture-backed calibration corpus
 - false-positive tracking
+- dogfood-calibrated evidence loop
+- real-crate dogfood corpus manifest and validation
+- saved-snapshot outcome reasons and receipt movement
+- non-blocking advisory policy reports
 - support-tier promotion rules
 - optional nightly/MIR fact adapter ADR
 - repo outcome comparison
