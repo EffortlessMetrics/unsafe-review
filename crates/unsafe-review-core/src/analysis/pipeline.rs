@@ -359,6 +359,11 @@ mod tests {
                 true,
             ),
             (
+                "raw_pointer_write_bytes",
+                OperationFamily::RawPointerWrite,
+                true,
+            ),
+            (
                 "split_raw_pointer_read_call",
                 OperationFamily::RawPointerRead,
                 true,

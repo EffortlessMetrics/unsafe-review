@@ -84,12 +84,14 @@ core operation classification gap:
 
 - `slice::from_raw_parts_mut(...)` now uses the existing
   `slice_from_raw_parts` operation family instead of generic `unsafe_fn_call`
+- raw pointer `write_bytes` calls now use the existing `raw_pointer_write`
+  operation family instead of generic `unsafe_fn_call`
 - `&'static mut ...` lifetime/type text is not classified as a `static mut`
   item
 
 Regression proof was added with a fixture golden for
-`slice_from_raw_parts_mut` and scanner tests for `&'static mut` versus real
-`static mut` items.
+`slice_from_raw_parts_mut`, a fixture golden for `raw_pointer_write_bytes`, and
+scanner tests for `&'static mut` versus real `static mut` items.
 
 ## Dogfood observations
 
@@ -720,6 +722,29 @@ same-allocation obligations for the mutable slice construction. No witness was
 executed, and the remaining `unknown` card on the documented unsafe helper
 declaration remains a separate modeling limit.
 
+Follow-up rerun after adding fixture-backed `write_bytes` detection:
+
+```text
+changed_rust_files: 2
+cards: 4
+contract_missing: 0
+guard_missing: 4
+operation families: raw_pointer_write, unknown, pointer_arithmetic, slice_from_raw_parts
+unsafe_fn_call cards: 0
+raw_pointer_write cards: 1
+```
+
+The additional improved card is still advisory only:
+
+```text
+fill_tag  line 80  raw_pointer_write  guard_missing
+```
+
+It moved from generic `unsafe_fn_call` to `raw_pointer_write`, so the card now
+uses the pointer validity, alignment, initialized-memory, and allocation
+obligation vocabulary already used by raw pointer writes. No witness was
+executed.
+
 ## Proof
 
 Targeted local validation:
@@ -733,6 +758,8 @@ rtk cargo test -p unsafe-review-core owner_safety --locked
 rtk cargo test -p unsafe-review-core slice_from_raw_parts_mut_uses_slice_operation_family --locked
 rtk cargo test -p unsafe-review-core scan_file_does_not_classify_static_lifetime_mut_reference_as_static_mut --locked
 rtk cargo test -p unsafe-review-core scan_file_classifies_static_mut_items --locked
+rtk cargo test -p unsafe-review-core text_detection_classifies_raw_pointer_write_bytes_as_write --locked
+rtk cargo test -p unsafe-review-core raw_pointer_v1_operation_cards_are_concrete --locked
 rtk cargo test -p unsafe-review-core fixture_card_goldens_match_rendered_json --locked
 rtk cargo run --locked -p xtask -- check-calibration
 ```
@@ -760,6 +787,7 @@ rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arra
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-call-result-init.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-unsafe-fn-call.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr692.raw.diff --format json --max-cards 30 --out target/dogfood-work/hashbrown-pr692.after-slice-mut.json
+rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr692.raw.diff --format json --max-cards 30 --out target/dogfood-work/hashbrown-pr692.after-write-bytes.json
 ```
 
 The dogfood reruns used a temporary `CARGO_TARGET_DIR` to avoid a Windows file
@@ -817,6 +845,8 @@ The repo may claim:
 - one fixture-backed mutable slice improvement changed the `hashbrown#692`
   `slice::from_raw_parts_mut` card from generic `unsafe_fn_call` to
   `slice_from_raw_parts`
+- one fixture-backed raw pointer write improvement changed the `hashbrown#692`
+  `write_bytes` card from generic `unsafe_fn_call` to `raw_pointer_write`
 - attributed unsafe function declarations are deduped between syntax-backed
   extraction and fallback line scanning
 - false-positive regression coverage exists in fixtures and calibration
@@ -865,6 +895,9 @@ The repo must not claim:
   drop/deallocation modeling beyond that operation remains narrow.
 - `hashbrown#692` now has a fixture-backed `slice::from_raw_parts_mut` card, but
   broader slice range proof remains source-level and advisory.
+- `hashbrown#692` now has a fixture-backed `write_bytes` card, but broader
+  byte-pattern validity and destination-type modeling remains source-level and
+  advisory.
 - These runs do not prove absence of missed unsafe seams.
 
 ## Next useful work

@@ -1,0 +1,4 @@
+[package]
+name = "raw-pointer-write-bytes-fixture"
+version = "0.0.0"
+edition = "2024"
