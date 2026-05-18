@@ -3,6 +3,8 @@ use crate::domain::{EvidenceState, ObligationEvidence, ReviewCard};
 use crate::util::path_display;
 use serde::Serialize;
 
+const TRUST_BOUNDARY: &str = "Static unsafe contract review only; this is not a proof of memory safety, not UB-free status, and not a Miri result unless a witness receipt is attached.";
+
 pub(crate) fn render(output: &AnalyzeOutput) -> String {
     render_pretty(&JsonAnalyzeOutput::from(output))
 }
@@ -25,6 +27,7 @@ struct JsonAnalyzeOutput<'a> {
     scope: &'static str,
     mode: &'static str,
     policy: &'static str,
+    trust_boundary: &'static str,
     root: String,
     summary: JsonSummary,
     cards: Vec<JsonCard<'a>>,
@@ -38,6 +41,7 @@ impl<'a> From<&'a AnalyzeOutput> for JsonAnalyzeOutput<'a> {
             scope: scope_str(output),
             mode: output.mode.as_str(),
             policy: output.policy.as_str(),
+            trust_boundary: TRUST_BOUNDARY,
             root: path_display(&output.root),
             summary: JsonSummary::from(&output.summary),
             cards: output.cards.iter().map(JsonCard::from).collect(),
@@ -319,6 +323,12 @@ mod tests {
         assert_eq!(value["schema_version"], "0.1");
         assert_eq!(value["tool"], "unsafe-review");
         assert_eq!(value["scope"], "diff");
+        assert!(
+            value["trust_boundary"]
+                .as_str()
+                .unwrap_or("")
+                .contains("not a Miri result")
+        );
         assert_eq!(value["summary"]["cards"], 1);
         assert_eq!(value["cards"][0]["class"], "guard_missing");
         assert_eq!(value["cards"][0]["site"]["file"], "src/lib.rs");

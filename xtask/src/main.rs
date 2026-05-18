@@ -165,6 +165,11 @@ fn check_advisory_artifacts(dir: &Path) -> Result<(), String> {
     require_json_str(&cards, "tool", "unsafe-review", "cards.json")?;
     require_json_str(&cards, "policy", "advisory", "cards.json")?;
     require_json_array(&cards, "cards", "cards.json")?;
+    let cards_boundary = cards
+        .get("trust_boundary")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "cards.json is missing trust_boundary".to_string())?;
+    require_boundary_text(cards_boundary, "cards.json")?;
     let card_ids = advisory_card_ids(&cards)?;
     let card_count = card_ids.len();
     let summary_cards = json_usize_at(&cards, "/summary/cards", "cards.json")?;
@@ -711,6 +716,29 @@ mod tests {
     }
 
     #[test]
+    fn advisory_artifact_checker_rejects_cards_json_without_trust_boundary() -> Result<(), String> {
+        let dir = unique_temp_dir("unsafe-review-artifacts-missing-cards-boundary")?;
+        fs::create_dir_all(&dir).map_err(|err| format!("create temp dir failed: {err}"))?;
+        write_valid_artifacts(&dir)?;
+        fs::write(
+            dir.join("cards.json"),
+            r#"{"tool":"unsafe-review","policy":"advisory","summary":{"cards":1},"cards":[{"id":"card-1"}]}"#,
+        )
+        .map_err(|err| format!("write cards failed: {err}"))?;
+
+        let result = check_advisory_artifacts(&dir);
+
+        fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        assert!(
+            result
+                .err()
+                .unwrap_or_default()
+                .contains("cards.json is missing trust_boundary")
+        );
+        Ok(())
+    }
+
+    #[test]
     fn advisory_artifact_checker_rejects_unknown_projection_card_ids() -> Result<(), String> {
         let dir = unique_temp_dir("unsafe-review-artifacts-unknown-id")?;
         fs::create_dir_all(&dir).map_err(|err| format!("create temp dir failed: {err}"))?;
@@ -731,7 +759,7 @@ mod tests {
     fn write_valid_artifacts(dir: &Path) -> Result<(), String> {
         fs::write(
             dir.join("cards.json"),
-            r#"{"tool":"unsafe-review","policy":"advisory","summary":{"cards":1},"cards":[{"id":"card-1"}]}"#,
+            r#"{"tool":"unsafe-review","policy":"advisory","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result","summary":{"cards":1},"cards":[{"id":"card-1"}]}"#,
         )
         .map_err(|err| format!("write cards failed: {err}"))?;
         fs::write(
