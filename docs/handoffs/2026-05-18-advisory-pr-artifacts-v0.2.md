@@ -202,6 +202,66 @@ This receipt proves docs-only PRs can be quiet for the advisory artifact
 workflow. It does not change the advisory workflow's manual `workflow_dispatch`
 behavior, and it does not imply any policy gate.
 
+## Post-closeout stabilization receipts
+
+The first dogfood stabilization fixes after lane closeout stayed within the
+advisory artifact loop: they reduced observed noise and made artifact commands
+less error-prone without adding new analyzer truth, comments, witnesses, or
+blocking policy.
+
+### Repo-mode deref-assignment false positive
+
+Repo-mode self-dogfood found a product-code card in
+`crates/unsafe-review-core/src/analysis/pipeline.rs` from ordinary
+mutable-reference code:
+
+```text
+*next += 1;
+```
+
+That line updates an identity counter. It is not a raw-pointer write seam. The
+fix in `#111 fix: avoid text fallback deref write cards` removed bare
+deref-assignment classification from text fallback detection while preserving
+syntax-backed detection for real unsafe raw pointer assignments such as:
+
+```text
+unsafe { *ptr = value; }
+```
+
+Validation included:
+
+```bash
+rtk cargo test -p unsafe-review-core text_detection_does_not_classify_deref_assignments_as_writes --locked
+rtk cargo test -p unsafe-review-core syntax_detection_classifies_unsafe_raw_pointer_assignments_as_writes --locked
+rtk cargo test -p unsafe-review-core fixture_card_goldens_match_rendered_json --locked
+rtk cargo run --quiet --locked -p unsafe-review -- repo --format json --out target/dogfood/repo-self-after-fix.json
+```
+
+The repo-mode result after the fix was:
+
+```text
+cards: 23
+open_actionable_gaps: 23
+product_code_cards: 0
+fixture_cards: 23
+```
+
+### Equals-style artifact flags
+
+Candidate PR `#46` contained useful CLI parser hardening but was stale and
+overlapped with already-landed diff-input ergonomics. The current-lane slice was
+rebuilt as `#112 cli: accept equals-style flag values`.
+
+The merged behavior accepts artifact-oriented invocations such as:
+
+```bash
+rtk cargo run --quiet --locked -p unsafe-review -- check --root=fixtures/raw_pointer_alignment --diff=change.diff --format=sarif --out=target/dogfood/equals-flags/cards.sarif
+```
+
+It also rejects missing flag values such as `--diff --json` while preserving
+`--diff -` for stdin diff input. This is CLI stabilization for the advisory
+artifact path, not new policy authority.
+
 ## Current support posture
 
 The PR artifact surfaces are experimental and advisory. They are suitable for
