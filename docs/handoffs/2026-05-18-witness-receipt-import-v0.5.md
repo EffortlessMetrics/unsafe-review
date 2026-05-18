@@ -18,6 +18,7 @@ Merged PRs:
 - `#140 receipts: validate witness receipt metadata`
 - `#141 test(fixtures): add receipted review card golden`
 - `#146 test(cli): cover receipted fixture output`
+- `#148 output: add witness plan format`
 
 The receipt importer:
 
@@ -38,6 +39,9 @@ The receipt importer:
   card output
 - has CLI e2e coverage proving `check --format json` imports the receipt,
   removes missing witness evidence, and keeps the guard gap visible
+- adds `--format witness-plan` as a card-sourced route artifact that lists
+  recommended witnesses, commands, imported receipt evidence, missing evidence,
+  and the trust boundary
 
 Receipt import does not create analyzer truth. It attaches external witness
 evidence to an existing `ReviewCard`.
@@ -54,6 +58,9 @@ rtk cargo test -p unsafe-review-core receipt --locked
 rtk cargo test -p unsafe-review-core imported_receipt --locked
 rtk cargo test -p unsafe-review-core fixture_card_goldens_match_rendered_json --locked
 rtk cargo test -p unsafe-review --test e2e check_json_imports_witness_receipts_without_hiding_guard_gaps --locked
+rtk cargo test -p unsafe-review-core witness_plan --locked
+rtk cargo test -p unsafe-review-cli witness_plan --locked
+rtk cargo test -p unsafe-review --test e2e check_artifact_formats_context_and_explain_work_end_to_end --locked
 rtk cargo run --locked -p xtask -- check-fixtures
 ```
 
@@ -84,6 +91,8 @@ The repo may claim:
 - the `raw_pointer_alignment_receipted` golden proves a receipt does not hide
   the still-missing alignment guard
 - CLI JSON output preserves the same behavior end to end
+- `--format witness-plan` emits a route plan from existing cards without
+  executing witness tools
 
 The repo must not claim:
 
