@@ -50,6 +50,9 @@ struct ReceiptFile {
     card_id: String,
     tool: String,
     strength: String,
+    author: Option<String>,
+    recorded_at: Option<String>,
+    expires_at: Option<String>,
     summary: Option<String>,
     command: Option<String>,
     limitations: Option<Vec<String>>,
@@ -75,6 +78,17 @@ fn parse_receipt_file(path: &Path) -> Result<ParsedReceipt, String> {
             path.display()
         ));
     }
+    validate_required_option(&receipt.author, "author", path)?;
+    let recorded_at = validate_required_option(&receipt.recorded_at, "recorded_at", path)?;
+    let expires_at = validate_required_option(&receipt.expires_at, "expires_at", path)?;
+    validate_utc_timestamp(recorded_at, "recorded_at", path)?;
+    validate_date(expires_at, "expires_at", path)?;
+    if expires_at < &recorded_at[..10] {
+        return Err(format!(
+            "{} `expires_at` must be on or after the `recorded_at` date",
+            path.display()
+        ));
+    }
     Ok(ParsedReceipt {
         card_id: receipt.card_id.clone(),
         evidence: WitnessEvidence::present(receipt_summary(&receipt)),
@@ -89,6 +103,18 @@ fn validate_required(value: &str, key: &str, path: &Path) -> Result<(), String> 
     }
 }
 
+fn validate_required_option<'a>(
+    value: &'a Option<String>,
+    key: &str,
+    path: &Path,
+) -> Result<&'a str, String> {
+    let Some(value) = value.as_deref() else {
+        return Err(format!("{} `{key}` is required", path.display()));
+    };
+    validate_required(value, key, path)?;
+    Ok(value)
+}
+
 fn validate_strength(value: &str, path: &Path) -> Result<(), String> {
     match value {
         "configured" | "ran" | "test_targeted" | "site_reached" => Ok(()),
@@ -96,6 +122,73 @@ fn validate_strength(value: &str, path: &Path) -> Result<(), String> {
             "{} uses unknown receipt strength `{other}`",
             path.display()
         )),
+    }
+}
+
+fn validate_utc_timestamp(value: &str, key: &str, path: &Path) -> Result<(), String> {
+    let bytes = value.as_bytes();
+    let valid_shape = bytes.len() == 20
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes[10] == b'T'
+        && bytes[13] == b':'
+        && bytes[16] == b':'
+        && bytes[19] == b'Z'
+        && [0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18]
+            .iter()
+            .all(|index| bytes[*index].is_ascii_digit());
+    if !valid_shape {
+        return Err(format!(
+            "{} `{key}` must use UTC timestamp format YYYY-MM-DDTHH:MM:SSZ",
+            path.display()
+        ));
+    }
+    validate_date(&value[..10], key, path)?;
+    validate_range(decimal_at(value, 11, 2), 0, 23, key, path)?;
+    validate_range(decimal_at(value, 14, 2), 0, 59, key, path)?;
+    validate_range(decimal_at(value, 17, 2), 0, 59, key, path)
+}
+
+fn validate_date(value: &str, key: &str, path: &Path) -> Result<(), String> {
+    let bytes = value.as_bytes();
+    let valid_shape = bytes.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && [0, 1, 2, 3, 5, 6, 8, 9]
+            .iter()
+            .all(|index| bytes[*index].is_ascii_digit());
+    if !valid_shape {
+        return Err(format!(
+            "{} `{key}` must use date format YYYY-MM-DD",
+            path.display()
+        ));
+    }
+    validate_range(decimal_at(value, 0, 4), 1, 9999, key, path)?;
+    validate_range(decimal_at(value, 5, 2), 1, 12, key, path)?;
+    validate_range(decimal_at(value, 8, 2), 1, 31, key, path)
+}
+
+fn decimal_at(value: &str, start: usize, len: usize) -> Option<u32> {
+    value.get(start..start + len)?.parse().ok()
+}
+
+fn validate_range(
+    value: Option<u32>,
+    min: u32,
+    max: u32,
+    key: &str,
+    path: &Path,
+) -> Result<(), String> {
+    let Some(value) = value else {
+        return Err(format!(
+            "{} `{key}` contains an invalid number",
+            path.display()
+        ));
+    };
+    if (min..=max).contains(&value) {
+        Ok(())
+    } else {
+        Err(format!("{} `{key}` is out of range", path.display()))
     }
 }
 
@@ -107,6 +200,26 @@ fn receipt_summary(receipt: &ReceiptFile) -> String {
     if let Some(detail) = receipt.summary.as_deref().filter(|value| !value.is_empty()) {
         summary.push_str(": ");
         summary.push_str(detail);
+    }
+    if let Some(author) = receipt.author.as_deref().filter(|value| !value.is_empty()) {
+        summary.push_str("; author: ");
+        summary.push_str(author);
+    }
+    if let Some(recorded_at) = receipt
+        .recorded_at
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        summary.push_str("; recorded_at: ");
+        summary.push_str(recorded_at);
+    }
+    if let Some(expires_at) = receipt
+        .expires_at
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        summary.push_str("; expires_at: ");
+        summary.push_str(expires_at);
     }
     if let Some(command) = receipt.command.as_deref().filter(|value| !value.is_empty()) {
         summary.push_str("; command: ");
@@ -152,6 +265,9 @@ mod tests {
   "card_id": "{card_id}",
   "tool": "miri",
   "strength": "ran",
+  "author": "core/fixtures",
+  "recorded_at": "2026-05-18T00:00:00Z",
+  "expires_at": "2026-08-18",
   "summary": "focused witness passed",
   "command": "cargo +nightly miri test read_header",
   "limitations": ["fixture only"]
@@ -169,6 +285,8 @@ mod tests {
         assert!(evidence.present);
         assert!(evidence.summary.contains("miri"));
         assert!(evidence.summary.contains("ran"));
+        assert!(evidence.summary.contains("core/fixtures"));
+        assert!(evidence.summary.contains("2026-08-18"));
         assert!(evidence.summary.contains("fixture only"));
         Ok(())
     }
@@ -225,6 +343,98 @@ mod tests {
                 .err()
                 .unwrap_or_default()
                 .contains("exact counted UR-* identity")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn receipt_index_rejects_missing_author() -> Result<(), String> {
+        let root = unique_temp_dir("unsafe-review-missing-author-receipt")?;
+        let receipts = root.join(".unsafe-review").join("receipts");
+        fs::create_dir_all(&receipts).map_err(|err| format!("create receipt dir failed: {err}"))?;
+        fs::write(
+            receipts.join("bad.json"),
+            r#"{
+  "schema_version": "0.1",
+  "card_id": "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1",
+  "tool": "miri",
+  "strength": "ran",
+  "recorded_at": "2026-05-18T00:00:00Z",
+  "expires_at": "2026-08-18"
+}"#,
+        )
+        .map_err(|err| format!("write receipt failed: {err}"))?;
+
+        let result = ReceiptIndex::load(&root);
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp root failed: {err}"))?;
+        assert!(
+            result
+                .err()
+                .unwrap_or_default()
+                .contains("`author` is required")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn receipt_index_rejects_invalid_recorded_at_timestamp() -> Result<(), String> {
+        let root = unique_temp_dir("unsafe-review-invalid-recorded-at-receipt")?;
+        let receipts = root.join(".unsafe-review").join("receipts");
+        fs::create_dir_all(&receipts).map_err(|err| format!("create receipt dir failed: {err}"))?;
+        fs::write(
+            receipts.join("bad.json"),
+            r#"{
+  "schema_version": "0.1",
+  "card_id": "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1",
+  "tool": "miri",
+  "strength": "ran",
+  "author": "core/fixtures",
+  "recorded_at": "2026-05-18",
+  "expires_at": "2026-08-18"
+}"#,
+        )
+        .map_err(|err| format!("write receipt failed: {err}"))?;
+
+        let result = ReceiptIndex::load(&root);
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp root failed: {err}"))?;
+        assert!(
+            result
+                .err()
+                .unwrap_or_default()
+                .contains("UTC timestamp format")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn receipt_index_rejects_expiry_before_recorded_date() -> Result<(), String> {
+        let root = unique_temp_dir("unsafe-review-expired-receipt")?;
+        let receipts = root.join(".unsafe-review").join("receipts");
+        fs::create_dir_all(&receipts).map_err(|err| format!("create receipt dir failed: {err}"))?;
+        fs::write(
+            receipts.join("bad.json"),
+            r#"{
+  "schema_version": "0.1",
+  "card_id": "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1",
+  "tool": "miri",
+  "strength": "ran",
+  "author": "core/fixtures",
+  "recorded_at": "2026-05-18T00:00:00Z",
+  "expires_at": "2026-05-17"
+}"#,
+        )
+        .map_err(|err| format!("write receipt failed: {err}"))?;
+
+        let result = ReceiptIndex::load(&root);
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp root failed: {err}"))?;
+        assert!(
+            result
+                .err()
+                .unwrap_or_default()
+                .contains("on or after the `recorded_at` date")
         );
         Ok(())
     }

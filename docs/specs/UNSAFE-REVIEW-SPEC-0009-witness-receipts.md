@@ -32,6 +32,9 @@ Receipt JSON fields:
   "card_id": "UR-...-c1",
   "tool": "miri",
   "strength": "ran",
+  "author": "core/fixtures",
+  "recorded_at": "2026-05-18T00:00:00Z",
+  "expires_at": "2026-08-18",
   "summary": "focused witness passed",
   "command": "cargo +nightly miri test read_header",
   "limitations": ["fixture only"]
@@ -44,6 +47,10 @@ Receipt JSON fields:
 - `ran`
 - `test_targeted`
 - `site_reached`
+
+`author` must be non-empty. `recorded_at` must be a UTC timestamp in
+`YYYY-MM-DDTHH:MM:SSZ` form. `expires_at` must be a `YYYY-MM-DD` date on or
+after the `recorded_at` date.
 
 ## Non-goals
 
@@ -68,6 +75,8 @@ Receipt JSON fields:
 - A matching receipt marks obligation-level witness evidence present.
 - A receipt with unknown strength is rejected.
 - A receipt with uncounted card identity is rejected.
+- A receipt missing author, timestamp, or expiry metadata is rejected.
+- A receipt whose expiry predates its recorded date is rejected.
 - If receipt scope is limited, the receipt summary keeps that limitation visible.
 
 ## CI proof
