@@ -1,0 +1,23 @@
+pub fn pop_last(values: &mut Vec<u8>) -> Option<u8> {
+    if values.len() == 0 {
+        return None;
+    }
+    let last_index = values.len() - 1;
+    // SAFETY: `last_index` is less than the current initialized length, so
+    // setting len to `last_index` only shrinks the initialized range.
+    unsafe {
+        values.set_len(last_index);
+    }
+    Some(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pop_last;
+
+    #[test]
+    fn pop_shrinks_len() {
+        let mut values = vec![1];
+        assert_eq!(pop_last(&mut values), Some(0));
+    }
+}
