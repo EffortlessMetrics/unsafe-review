@@ -262,6 +262,36 @@ It also rejects missing flag values such as `--diff --json` while preserving
 `--diff -` for stdin diff input. This is CLI stabilization for the advisory
 artifact path, not new policy authority.
 
+The advisory workflow artifact for `#112` was then downloaded and verified:
+
+- PR: `#112 cli: accept equals-style flag values`
+- Workflow: `unsafe-review`
+- Run: `26014327438`
+- Branch: `cli/equals-style-flags`
+- Artifact: `unsafe-review`
+- Artifact id: `7049824978`
+- Artifact digest: `sha256:d9743e8b29c709c356cc1c1d12a3a1368071561a6ccea20e173d6ce2dcf35a92`
+
+Verification command:
+
+```bash
+rtk cargo run --locked -p xtask -- check-advisory-artifacts target/advisory-artifact-112
+```
+
+Result:
+
+```text
+check-advisory-artifacts: ok (target/advisory-artifact-112)
+```
+
+The downloaded `cards.json` summary reported:
+
+```text
+changed_rust_files: 2
+cards: 0
+open_actionable_gaps: 0
+```
+
 ## Current support posture
 
 The PR artifact surfaces are experimental and advisory. They are suitable for
