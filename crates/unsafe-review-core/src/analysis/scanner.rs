@@ -295,6 +295,9 @@ fn detect_syntax_site(
     operation_block_ranges: &BTreeSet<(usize, usize)>,
 ) -> Option<(UnsafeSiteKind, OperationFamily)> {
     let compact = compact_whitespace(&fact.snippet);
+    if compact.starts_with("//") {
+        return None;
+    }
     match fact.kind.as_str() {
         "FN" if compact.contains("unsafe fn") => {
             Some((UnsafeSiteKind::UnsafeFn, OperationFamily::Unknown))
@@ -483,6 +486,9 @@ fn is_public_api_surface(kind: &UnsafeSiteKind, snippet: &str) -> bool {
 fn find_owner(lines: &[&str], idx: usize) -> Option<String> {
     for raw in lines[..=idx].iter().rev().take(80) {
         let line = raw.trim();
+        if let Some(name) = parse_impl_owner(line) {
+            return Some(name);
+        }
         if let Some(name) = parse_fn_name(line) {
             return Some(name);
         }
@@ -493,10 +499,25 @@ fn find_owner(lines: &[&str], idx: usize) -> Option<String> {
     None
 }
 
+fn parse_impl_owner(line: &str) -> Option<String> {
+    if !line.contains("impl ") {
+        return None;
+    }
+    let owner_start = line
+        .find(" for ")
+        .map(|pos| pos + " for ".len())
+        .or_else(|| line.find("impl ").map(|pos| pos + "impl ".len()))?;
+    parse_ident(&line[owner_start..])
+}
+
 fn parse_fn_name(line: &str) -> Option<String> {
     let marker = "fn ";
     let pos = line.find(marker)?;
     let rest = &line[pos + marker.len()..];
+    parse_ident(rest)
+}
+
+fn parse_ident(rest: &str) -> Option<String> {
     let mut name = String::new();
     for ch in rest.chars() {
         if ch == '_' || ch.is_ascii_alphanumeric() {
