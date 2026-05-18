@@ -21,3 +21,19 @@ Specs define behavior. They do not carry the PR queue.
 15. [Public API and crate surface](UNSAFE-REVIEW-SPEC-0015-public-api-crate-surface.md)
 16. [Fixtures, calibration, support tiers](UNSAFE-REVIEW-SPEC-0016-fixtures-calibration-support.md)
 17. [Security and file policy](UNSAFE-REVIEW-SPEC-0017-security-file-policy.md)
+
+## Implementation backlog coverage
+
+The implementation plan still lists several planned slices. Their detailed behavior
+contracts now live in these specs:
+
+| Planned slice | Spec | Implementation focus |
+| --- | --- | --- |
+| Policy/baseline matching | [Policy, baseline, suppressions](UNSAFE-REVIEW-SPEC-0010-policy-baseline-suppressions.md) | policy TOML parsing, counted baselines, suppression validation, mode-based exit codes |
+| SARIF/GitHub output | [PR and CI output](UNSAFE-REVIEW-SPEC-0011-pr-ci-output.md) | SARIF, GitHub summaries, CI artifact set, inline-comment payloads |
+| LSP projection | [LSP and editor projection](UNSAFE-REVIEW-SPEC-0012-lsp-editor-projection.md) | saved-artifact diagnostics, hover content, copy/open commands, staleness reporting |
+| Agent packet hardening | [Agent packets](UNSAFE-REVIEW-SPEC-0013-agent-packets.md) | canonical packet schema, bounded context, allowed/disallowed repairs, stop conditions |
+| Receipt import | [Witness receipts](UNSAFE-REVIEW-SPEC-0009-witness-receipts.md) | receipt DTOs, validation, matching, stale/malformed receipt handling |
+
+Each linked spec includes an **Implementation still required** section that can be
+used as the implementation checklist for that slice.
