@@ -295,6 +295,7 @@ mod tests {
         "maybeuninit_assume_init",
         "vec_set_len",
         "transmute_invalid_value",
+        "unsafe_impl_send",
     ];
 
     #[test]
