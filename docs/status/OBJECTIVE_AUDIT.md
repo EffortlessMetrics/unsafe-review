@@ -35,7 +35,7 @@ witnesses by default.
 | Explicit receipts can be authored and validated safely | `receipt template` and `receipt validate` are covered by CLI e2e tests and support tiers | Experimental | Template output does not verify that the recorded command ran |
 | Public claims map to proof | `SUPPORT_TIERS.md` maps every current surface to proof and limits | In place | Keep updating for every new lane |
 | No soundness, UB-free, Miri-clean, site-execution, or default-blocking claim | Trust-boundary text is enforced across artifacts; support tiers and handoffs repeat limits | In place | Must remain part of all new projections |
-| First real-crate dogfood measurement | Handoff `2026-05-18-real-crate-dogfood-v0.6.md` records top-50 capped `rust-smallvec` and `arrayvec` runs plus a `memchr` timeout; dogfood found and fixed import/declaration false positives | Experimental | More crates, real PR diffs, uncapped/sampled runs, and human review are still needed before calibration claims |
+| First real-crate dogfood measurement | Handoff `2026-05-18-real-crate-dogfood-v0.6.md` records top-50 capped `rust-smallvec`, `arrayvec`, and `memchr` runs; dogfood found and fixed import/declaration false positives, `cfg(target_feature)` false positives, and capped repo scan timeout behavior | Experimental | More crates, real PR diffs, uncapped/sampled runs, and human review are still needed before calibration claims |
 
 ## Current Gaps
 
@@ -49,7 +49,7 @@ These are not failures; they are the next unsupported or weakly verified areas:
 - Schema compatibility is not yet a public promise.
 - Broader calibration on real unsafe-heavy crates is still needed before any
   support tier promotion toward usable alpha. The first dogfood slice covered
-  two top-50 capped repo snapshots and one timeout; the fixture calibration
+  three top-50 capped repo snapshots; the fixture calibration
   manifest remains a proof index, not real-world calibration.
 - No default no-new-debt or blocking branch-protection policy is justified yet.
 - Outcome comparison is saved-snapshot only and still needs dogfood on real

@@ -26,7 +26,11 @@ pub(crate) fn analyze(input: AnalyzeInput) -> Result<AnalyzeOutput, String> {
 
     let mut cards = Vec::new();
     let mut identity_counts = BTreeMap::new();
-    for rel in &candidate_files {
+    let max_cards = input.max_cards.unwrap_or(usize::MAX);
+    'files: for rel in &candidate_files {
+        if cards.len() >= max_cards {
+            break;
+        }
         let scanned = scanner::scan_file(&input.root, rel, Some(&diff_index), repo_mode)?;
         for scanned_site in scanned {
             let hazards = obligations::hazards_for(&scanned_site.operation.family);
@@ -115,6 +119,9 @@ pub(crate) fn analyze(input: AnalyzeInput) -> Result<AnalyzeOutput, String> {
                 next_action,
                 related_tests,
             });
+            if cards.len() >= max_cards {
+                break 'files;
+            }
         }
     }
     cards.sort_by(|left, right| {
@@ -124,9 +131,6 @@ pub(crate) fn analyze(input: AnalyzeInput) -> Result<AnalyzeOutput, String> {
             .cmp(&right.site.location.file)
             .then(left.site.location.line.cmp(&right.site.location.line))
     });
-    if let Some(max_cards) = input.max_cards {
-        cards.truncate(max_cards);
-    }
     let summary = summarize(all_rust_files.len(), candidate_files.len(), &cards);
     Ok(AnalyzeOutput {
         schema_version: "0.1".to_string(),
@@ -300,7 +304,7 @@ fn operation_path(scanned: &scanner::ScannedSite) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::{AnalysisMode, DiffSource, PolicyMode};
+    use crate::api::{AnalysisMode, DiffSource, PolicyMode, Scope};
     use crate::domain::{HazardKind, OperationFamily, ReviewCard, ReviewClass, UnsafeSiteKind};
     use std::fs;
     use std::path::Path;
@@ -417,6 +421,47 @@ mod tests {
         assert_eq!(card.site.kind, UnsafeSiteKind::UnsafeBlock);
         assert_eq!(card.operation.family, OperationFamily::Unknown);
         assert_eq!(card.class, ReviewClass::ContractMissing);
+        Ok(())
+    }
+
+    #[test]
+    fn capped_repo_scan_prefers_source_roots_before_miscellaneous_rust_files() -> Result<(), String>
+    {
+        let root = unique_temp_dir("unsafe-review-capped-repo")?;
+        fs::create_dir_all(root.join("benchmarks/haystacks/code"))
+            .map_err(|err| format!("create benchmark dirs failed: {err}"))?;
+        fs::create_dir_all(root.join("src")).map_err(|err| format!("create src failed: {err}"))?;
+        fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"capped-repo-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+        )
+        .map_err(|err| format!("write Cargo.toml failed: {err}"))?;
+        fs::write(
+            root.join("benchmarks/haystacks/code/rust-library.rs"),
+            "pub unsafe fn fixture_data() {}\n",
+        )
+        .map_err(|err| format!("write benchmark file failed: {err}"))?;
+        fs::write(root.join("src/lib.rs"), "pub unsafe fn source_root() {}\n")
+            .map_err(|err| format!("write src file failed: {err}"))?;
+
+        let output = analyze(AnalyzeInput {
+            root: root.clone(),
+            scope: Scope::Repo,
+            diff: DiffSource::NoneRepoScan,
+            mode: AnalysisMode::Repo,
+            policy: PolicyMode::Advisory,
+            include_unchanged_tests: true,
+            max_cards: Some(1),
+        })?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        assert_eq!(output.cards.len(), 1);
+        assert_eq!(output.summary.cards, 1);
+        assert_eq!(
+            output.cards[0].site.location.file,
+            PathBuf::from("src/lib.rs")
+        );
+        assert_eq!(output.cards[0].site.owner, Some("source_root".to_string()));
         Ok(())
     }
 

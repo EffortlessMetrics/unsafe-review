@@ -346,7 +346,7 @@ fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
     if line.contains("asm!") {
         return Some((UnsafeSiteKind::Operation, OperationFamily::InlineAsm));
     }
-    if line.contains("target_feature") {
+    if is_target_feature_attribute(line) {
         return Some((UnsafeSiteKind::Operation, OperationFamily::TargetFeature));
     }
     if line.contains("unsafe {") || line == "unsafe" {
@@ -400,6 +400,11 @@ fn call_suffix(after_name: &str) -> bool {
 
 fn is_ident_continue(ch: char) -> bool {
     ch == '_' || ch.is_ascii_alphanumeric()
+}
+
+fn is_target_feature_attribute(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with("#[target_feature") || contains_call_name(trimmed, "target_feature")
 }
 
 #[derive(Clone, Debug)]
@@ -852,6 +857,22 @@ mod tests {
                 UnsafeSiteKind::Operation,
                 OperationFamily::CopyNonOverlapping
             ))
+        );
+    }
+
+    #[test]
+    fn text_detection_distinguishes_target_feature_attributes_from_cfg_checks() {
+        assert_eq!(detect_site("#[cfg(target_feature = \"neon\")]"), None);
+        assert_eq!(detect_site("#[cfg(not(target_feature = \"neon\"))]"), None);
+        assert_eq!(
+            detect_site("#[target_feature(enable = \"neon\")]"),
+            Some((UnsafeSiteKind::Operation, OperationFamily::TargetFeature))
+        );
+        assert_eq!(
+            detect_site(
+                "#[cfg_attr(target_arch = \"aarch64\", target_feature(enable = \"neon\"))]"
+            ),
+            Some((UnsafeSiteKind::Operation, OperationFamily::TargetFeature))
         );
     }
 
