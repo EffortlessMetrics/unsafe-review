@@ -71,6 +71,7 @@ fn parse_receipt_file(path: &Path) -> Result<ParsedReceipt, String> {
     validate_required(&receipt.schema_version, "schema_version", path)?;
     validate_required(&receipt.card_id, "card_id", path)?;
     validate_required(&receipt.tool, "tool", path)?;
+    validate_tool(&receipt.tool, path)?;
     validate_strength(&receipt.strength, path)?;
     if !looks_like_counted_card_id(&receipt.card_id) {
         return Err(format!(
@@ -120,6 +121,17 @@ fn validate_strength(value: &str, path: &Path) -> Result<(), String> {
         "configured" | "ran" | "test_targeted" | "site_reached" => Ok(()),
         other => Err(format!(
             "{} uses unknown receipt strength `{other}`",
+            path.display()
+        )),
+    }
+}
+
+fn validate_tool(value: &str, path: &Path) -> Result<(), String> {
+    match value {
+        "miri" | "cargo-careful" | "asan" | "msan" | "tsan" | "lsan" | "loom" | "shuttle"
+        | "kani" | "crux" | "human-deep-review" | "unsupported" => Ok(()),
+        other => Err(format!(
+            "{} uses unknown receipt tool `{other}`",
             path.display()
         )),
     }
@@ -315,6 +327,37 @@ mod tests {
                 .err()
                 .unwrap_or_default()
                 .contains("unknown receipt strength")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn receipt_index_rejects_unknown_tool() -> Result<(), String> {
+        let root = unique_temp_dir("unsafe-review-bad-tool-receipt")?;
+        let receipts = root.join(".unsafe-review").join("receipts");
+        fs::create_dir_all(&receipts).map_err(|err| format!("create receipt dir failed: {err}"))?;
+        fs::write(
+            receipts.join("bad.json"),
+            r#"{
+  "schema_version": "0.1",
+  "card_id": "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1",
+  "tool": "proof-bot",
+  "strength": "ran",
+  "author": "core/fixtures",
+  "recorded_at": "2026-05-18T00:00:00Z",
+  "expires_at": "2026-08-18"
+}"#,
+        )
+        .map_err(|err| format!("write receipt failed: {err}"))?;
+
+        let result = ReceiptIndex::load(&root);
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp root failed: {err}"))?;
+        assert!(
+            result
+                .err()
+                .unwrap_or_default()
+                .contains("unknown receipt tool")
         );
         Ok(())
     }
