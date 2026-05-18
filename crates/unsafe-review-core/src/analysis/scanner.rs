@@ -352,6 +352,9 @@ fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
             OperationFamily::PointerArithmetic,
         ));
     }
+    if unsafe_block_contains_call(line) {
+        return Some((UnsafeSiteKind::Operation, OperationFamily::UnsafeFnCall));
+    }
     if line.contains("asm!") {
         return Some((UnsafeSiteKind::Operation, OperationFamily::InlineAsm));
     }
@@ -396,6 +399,16 @@ fn contains_call_name(line: &str, name: &str) -> bool {
             .map_or(after.len(), |(idx, ch)| idx + ch.len_utf8())..];
     }
     false
+}
+
+fn unsafe_block_contains_call(line: &str) -> bool {
+    let Some((_before, after_unsafe)) = line.split_once("unsafe") else {
+        return false;
+    };
+    let Some((_before_block, after_open)) = after_unsafe.split_once('{') else {
+        return false;
+    };
+    after_open.contains('(') && after_open.contains(')')
 }
 
 fn call_suffix(after_name: &str) -> bool {
