@@ -11,8 +11,8 @@ const DOCUMENTED_PRIVATE_UNSAFE_CONTRACT_DISCHARGE: &str = "Documented private u
 
 pub(crate) fn contract_evidence(site: &ScannedSite) -> ContractEvidence {
     let context = site.context_before.join("\n");
-    if has_safety_doc(&context) {
-        return ContractEvidence::present("Nearby `# Safety` documentation was detected");
+    if let Some(summary) = safety_doc_summary(&context) {
+        return ContractEvidence::present(summary);
     }
     if site.site.public_api_surface {
         return ContractEvidence::missing_with(
@@ -25,12 +25,23 @@ pub(crate) fn contract_evidence(site: &ScannedSite) -> ContractEvidence {
     ContractEvidence::missing()
 }
 
-fn has_safety_doc(context: &str) -> bool {
-    context.lines().any(|line| {
+fn safety_doc_summary(context: &str) -> Option<&'static str> {
+    for line in context.lines() {
         let trimmed = line.trim_start();
-        (trimmed.starts_with("///") || trimmed.starts_with("//!") || trimmed.starts_with("#[doc"))
-            && trimmed.contains("# Safety")
-    })
+        if !(trimmed.starts_with("///")
+            || trimmed.starts_with("//!")
+            || trimmed.starts_with("#[doc"))
+        {
+            continue;
+        }
+        if trimmed.contains("# Safety") {
+            return Some("Nearby `# Safety` documentation was detected");
+        }
+        if trimmed.contains("Safety:") {
+            return Some("Nearby `Safety:` documentation was detected");
+        }
+    }
+    None
 }
 
 pub(crate) fn obligation_evidence(
@@ -185,7 +196,7 @@ fn is_documented_private_unsafe_contract_obligation(
     key == "unknown"
         && !site.site.public_api_surface
         && contract.present
-        && contract.summary.contains("# Safety")
+        && contract.summary.contains("documentation")
         && site.operation.family == OperationFamily::Unknown
         && matches!(
             site.site.kind,
@@ -450,6 +461,11 @@ mod tests {
             "ptr.read()",
             vec![],
         );
+        let safety_colon_doc_site = site_with_context(
+            vec!["/// Safety: pointer must be valid"],
+            "ptr.read()",
+            vec![],
+        );
         let comment_site = site_with_context(
             vec!["// SAFETY: caller checked pointer"],
             "ptr.read()",
@@ -458,6 +474,7 @@ mod tests {
         let missing_site = site_with_context(vec!["// ordinary comment"], "ptr.read()", vec![]);
 
         assert!(contract_evidence(&doc_site).present);
+        assert!(contract_evidence(&safety_colon_doc_site).present);
         assert!(contract_evidence(&comment_site).present);
         assert!(!contract_evidence(&missing_site).present);
     }

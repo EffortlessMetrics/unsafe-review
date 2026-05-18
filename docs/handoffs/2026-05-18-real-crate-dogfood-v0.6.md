@@ -450,6 +450,21 @@ on the signature line. The remaining cards are legitimate advisory prompts for
 missing contract evidence around the raw-pointer UTF-8 write path, including the
 public unsafe `encode_utf8` API.
 
+Follow-up rerun after recognizing doc-comment `Safety:` prose as contract
+evidence:
+
+```text
+changed_rust_files: 2
+cards: 8
+contract_missing: 7
+guarded_unwitnessed: 1
+```
+
+The improved `encode_utf8` declaration card is still advisory only. It now
+treats the public unsafe API as documented contract evidence and keeps the
+remaining witness prompt. The raw pointer writes inside the helper still need
+more precise local discharge and witness evidence.
+
 ### `arrayvec#187`
 
 PR: `https://github.com/bluss/arrayvec/pull/187`
@@ -458,7 +473,7 @@ The PR adds `ArrayVec::take` and a public unsafe
 `into_inner_unchecked` helper that reads the initialized backing array with
 `ptr::read`.
 
-Dogfood output:
+Initial dogfood output:
 
 ```text
 changed_rust_files: 2
@@ -468,13 +483,24 @@ operation families: unknown, raw_pointer_read
 owners: into_inner, into_inner_unchecked
 ```
 
-This run did not require a scanner patch. It is useful because it shows a
-legitimate contract-quality prompt: the new public unsafe API uses `Safety:`
-prose rather than a `# Safety` section, so the public unsafe function and the
-raw `ptr::read` remain `contract_missing` prompts. The safe `into_inner` wrapper
-has a related test mention, while `into_inner_unchecked` itself is still
-statically unreached by name. The output remains advisory and does not claim the
-change is wrong.
+This run exposed a contract-evidence gap: the new public unsafe API uses
+doc-comment `Safety:` prose rather than a Markdown `# Safety` section.
+
+Follow-up rerun after recognizing doc-comment `Safety:` prose as contract
+evidence:
+
+```text
+changed_rust_files: 2
+cards: 3
+contract_missing: 1
+guard_missing: 1
+unsafe_unreached: 1
+```
+
+The improved cards are still advisory only. The public unsafe declaration and
+the raw `ptr::read` operation now inherit contract evidence from the
+`Safety:` docs. The safe `into_inner` wrapper still lacks local contract prose,
+and the raw pointer read still needs visible local guard/discharge evidence.
 
 ### `arrayvec#174`
 
@@ -1062,6 +1088,8 @@ rtk cargo test -p unsafe-review-core nested_unsafe_operation_does_not_emit_paren
 rtk cargo test -p unsafe-review-core adjacent_unchanged_unsafe_fn_is_not_reported_by_neighboring_change --locked
 rtk cargo test -p unsafe-review-core owner_inference_ignores_multiline_impl_trait_bounds --locked
 rtk cargo test -p unsafe-review-core impl_trait_bound_owner_inference_uses_function_owner --locked
+rtk cargo test -p unsafe-review-core contract_evidence_accepts_safety_docs_and_safety_comments --locked
+rtk cargo test -p unsafe-review-core documented_public_unsafe_api_does_not_require_local_guard --locked
 rtk cargo test -p unsafe-review-core fixture_card_goldens_match_rendered_json --locked
 rtk cargo run --locked -p xtask -- check-calibration
 ```
@@ -1078,7 +1106,9 @@ rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/smal
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/smallvec --diff target/dogfood-work/smallvec-pr64.raw.diff --format json --max-cards 20 --out target/dogfood-work/smallvec-pr64.after-last-index-shrink.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr308.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr308.unsafe-review.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr138.raw.diff --format json --max-cards 30 --out target/dogfood-work/arrayvec-pr138.after-attributed-dedupe.json
+rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr138.raw.diff --format json --max-cards 30 --out target/dogfood-work/arrayvec-pr138.after-safety-colon-docs.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr187.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr187.unsafe-review.json
+rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr187.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr187.after-safety-colon-docs.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr174.raw.diff --format json --max-cards 30 --out target/dogfood-work/arrayvec-pr174.after-inline-dedupe.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr174.raw.diff --format json --max-cards 30 --out target/dogfood-work/arrayvec-pr174.after-drop-in-place.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.unsafe-review.json
@@ -1129,6 +1159,8 @@ The repo may claim:
   parameter text
 - owner inference ignores multi-line `impl Trait` bounds such as `impl Fn(...)`
   in function signatures
+- doc-comment `Safety:` prose counts as safety contract evidence for public
+  unsafe API declarations
 - inline unsafe blocks with concrete same-line raw pointer operations are
   deduped instead of emitting generic unknown wrapper cards
 - `ptr::drop_in_place` is modeled as a fixture-backed drop/deallocation
@@ -1156,6 +1188,11 @@ The repo may claim:
 - one fixture-backed unsafe-call wrapper improvement changed the `arrayvec#288`
   `encode_utf8` unsafe block from `unknown` to `unsafe_fn_call` while preserving
   the missing-discharge prompt
+- one fixture-backed contract-evidence improvement changed the `arrayvec#138`
+  `encode_utf8` declaration from `contract_missing` to `guarded_unwitnessed`
+- one fixture-backed contract-evidence improvement changed two `arrayvec#187`
+  cards away from `contract_missing` by recognizing `Safety:` doc prose on
+  `into_inner_unchecked`
 - one fixture-backed mutable slice improvement changed the `hashbrown#692`
   `slice::from_raw_parts_mut` card from generic `unsafe_fn_call` to
   `slice_from_raw_parts`
@@ -1218,13 +1255,15 @@ The repo must not claim:
   coverage, while other `set_len` and broader initialization patterns remain
   limited.
 - `arrayvec#138` shows the raw-pointer UTF-8 write path still needs better
-  contract evidence, especially around unsafe helper APIs and tests with unsafe
-  blocks.
-- `arrayvec#187` shows public unsafe helper APIs with `Safety:` prose remain
-  contract prompts until they expose a recognized `# Safety` section or nearby
-  `SAFETY:` evidence.
+  local discharge evidence around unsafe helper APIs and tests with unsafe
+  blocks, even though the public `encode_utf8` `Safety:` docs are now contract
+  evidence.
+- `arrayvec#187` shows `Safety:` docs can now satisfy public unsafe API
+  contract evidence, but the safe wrapper and raw pointer read still need
+  separate contract/discharge evidence.
 - Public unsafe API declarations with recognized `# Safety` docs no longer ask
-  for local declaration guards, but static reach remains a heuristic name search.
+  or `Safety:` docs no longer ask for local declaration guards, but static reach
+  remains a heuristic name search.
 - `arrayvec#288` now labels the `encode_utf8` wrapper as `unsafe_fn_call`, but
   callee-specific safety contract inference remains future work.
 - `arrayvec#174` now has a fixture-backed `ptr::drop_in_place` card, but broader

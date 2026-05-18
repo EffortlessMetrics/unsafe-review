@@ -5,6 +5,7 @@ required_core_fixtures = [
   "raw_pointer_alignment",
   "public_unsafe_fn_missing_safety",
   "public_unsafe_fn_with_safety_docs",
+  "public_unsafe_fn_safety_colon_docs",
   "documented_private_unsafe_fn",
   "maybeuninit_assume_init",
   "vec_set_len",
@@ -58,6 +59,16 @@ expected_class = "contract_missing"
 fixture = "public_unsafe_fn_with_safety_docs"
 kind = "positive"
 claim = "public unsafe function with a # Safety contract does not report a missing local declaration guard"
+support_tier = "Contract evidence mining"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "unknown"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "public_unsafe_fn_safety_colon_docs"
+kind = "positive"
+claim = "public unsafe function with Safety: doc prose is treated as documented contract evidence"
 support_tier = "Contract evidence mining"
 expected_cards = 1
 expected_class = "guarded_unwitnessed"

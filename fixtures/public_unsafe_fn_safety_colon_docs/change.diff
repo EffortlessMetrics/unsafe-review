@@ -1,0 +1,10 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,0 +1,6 @@
++/// Registers a raw pointer contract.
++///
++/// Safety: caller must pass a valid pointer to one initialized byte.
++pub unsafe fn caller_contract(ptr: *const u8) {
++    let _ = ptr;
++}

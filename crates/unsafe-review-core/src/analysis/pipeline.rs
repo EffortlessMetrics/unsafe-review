@@ -592,21 +592,26 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
 
     #[test]
     fn documented_public_unsafe_api_does_not_require_local_guard() -> Result<(), String> {
-        let output = fixture_output("public_unsafe_fn_with_safety_docs")?;
-        let card = single_card("public_unsafe_fn_with_safety_docs", &output)?;
+        for fixture in [
+            "public_unsafe_fn_with_safety_docs",
+            "public_unsafe_fn_safety_colon_docs",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
 
-        assert_eq!(card.class, ReviewClass::GuardedUnwitnessed);
-        assert!(card.site.public_api_surface);
-        assert!(card.contract.present);
-        assert!(card.discharge.present);
-        assert!(
-            !card.missing.iter().any(|missing| missing.kind == "guard"),
-            "public unsafe API declarations with # Safety docs should not ask for local guard evidence"
-        );
-        assert!(
-            card.missing.iter().any(|missing| missing.kind == "witness"),
-            "documented public unsafe APIs should still preserve witness prompts"
-        );
+            assert_eq!(card.class, ReviewClass::GuardedUnwitnessed);
+            assert!(card.site.public_api_surface);
+            assert!(card.contract.present);
+            assert!(card.discharge.present);
+            assert!(
+                !card.missing.iter().any(|missing| missing.kind == "guard"),
+                "{fixture} should not ask for local declaration guard evidence"
+            );
+            assert!(
+                card.missing.iter().any(|missing| missing.kind == "witness"),
+                "{fixture} should still preserve witness prompts"
+            );
+        }
         Ok(())
     }
 
