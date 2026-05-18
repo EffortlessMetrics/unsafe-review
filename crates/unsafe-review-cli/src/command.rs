@@ -113,4 +113,5 @@ pub(crate) enum Command {
     ReceiptImportConcurrency(SavedOutputReceiptOptions),
     ReceiptImportProof(SavedOutputReceiptOptions),
     Outcome(OutcomeOptions),
+    PolicyReport(CheckOptions),
 }

@@ -916,6 +916,80 @@ fn no_new_debt_policy_fails_only_for_unbaselined_actionable_gaps() -> Result<(),
     Ok(())
 }
 
+#[test]
+fn policy_report_is_advisory_and_counts_baseline_state() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_alignment");
+    let report = run_success([
+        os("policy"),
+        os("report"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        fixture.join("change.diff").into_os_string(),
+        os("--format"),
+        os("json"),
+    ])?;
+    let report = parse_json(&stdout_text(&report)?)?;
+    assert_eq!(report["mode"], "policy-report");
+    assert_eq!(report["policy"], "advisory");
+    assert_eq!(report["summary"]["new_gaps"], 1);
+    assert_eq!(report["summary"]["baseline_known"], 0);
+    assert!(
+        json_str(&report["trust_boundary"], "trust_boundary")?
+            .contains("does not enforce blocking policy")
+    );
+
+    let temp = TempDir::new("unsafe-review-policy-report-e2e")?;
+    let copied = temp.path().join("fixture");
+    copy_dir_all(&fixture, &copied)?;
+    let advisory = run_success([
+        os("check"),
+        os("--root"),
+        copied.as_os_str().to_os_string(),
+        os("--diff"),
+        copied.join("change.diff").into_os_string(),
+        os("--format"),
+        os("json"),
+    ])?;
+    let advisory = parse_json(&stdout_text(&advisory)?)?;
+    let card_id = json_str(&advisory["cards"][0]["id"], "cards[0].id")?;
+    write_baseline(&copied, card_id)?;
+
+    let baselined = run_success([
+        os("policy"),
+        os("report"),
+        os("--root"),
+        copied.as_os_str().to_os_string(),
+        os("--diff"),
+        copied.join("change.diff").into_os_string(),
+        os("--format"),
+        os("json"),
+    ])?;
+    let baselined = parse_json(&stdout_text(&baselined)?)?;
+    assert_eq!(baselined["summary"]["new_gaps"], 0);
+    assert_eq!(baselined["summary"]["baseline_known"], 1);
+
+    let markdown_path = temp.path().join("policy-report.md");
+    let markdown = run_success([
+        os("policy"),
+        os("report"),
+        os("--root"),
+        copied.as_os_str().to_os_string(),
+        os("--diff"),
+        copied.join("change.diff").into_os_string(),
+        os("--format"),
+        os("markdown"),
+        os("--out"),
+        markdown_path.as_os_str().to_os_string(),
+    ])?;
+    assert_eq!(stdout_text(&markdown)?.trim(), "");
+    let markdown = fs::read_to_string(markdown_path)?;
+    assert!(markdown.contains("# unsafe-review policy report"));
+    assert!(markdown.contains("## Trust boundary"));
+
+    Ok(())
+}
+
 fn run_success<I, S>(args: I) -> Result<Output, Box<dyn Error>>
 where
     I: IntoIterator<Item = S>,

@@ -13,10 +13,11 @@ mod policy;
 mod util;
 
 pub use api::{
-    AnalysisMode, AnalyzeInput, AnalyzeOutput, DiffSource, OutcomeReport, PolicyMode,
+    AnalysisMode, AnalyzeInput, AnalyzeOutput, DiffSource, OutcomeReport, PolicyMode, PolicyReport,
     ReceiptAuditReport, Scope, analyze, audit_witness_receipts, collect_context,
-    compare_outcome_json, explain_card, render_comment_plan, render_human, render_json, render_lsp,
-    render_markdown, render_outcome_json, render_outcome_markdown, render_pr_summary,
+    compare_outcome_json, evaluate_policy_report, explain_card, render_comment_plan, render_human,
+    render_json, render_lsp, render_markdown, render_outcome_json, render_outcome_markdown,
+    render_policy_report_json, render_policy_report_markdown, render_pr_summary,
     render_receipt_audit_json, render_receipt_audit_markdown, render_sarif, render_witness_plan,
     validate_witness_receipts,
 };

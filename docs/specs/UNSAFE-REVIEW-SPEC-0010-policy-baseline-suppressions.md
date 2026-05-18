@@ -40,6 +40,12 @@ No-new-debt is available only when explicitly requested through
 actionable gaps remain. Exact baseline and suppression matches are excluded from
 the actionable-gap count.
 
+`policy report` is an advisory-only policy projection. It runs analysis in
+advisory mode and reports new gaps, baseline-known cards, suppressed cards,
+resolved baseline entries, and expired suppression entries from exact card
+identity matching. It may render JSON or Markdown. It must not change exit-code
+policy, create broad suppression authority, execute witnesses, or claim safety.
+
 Blocking mode remains later policy work. Matching is exact and counted; broad
 path, owner, or operation-family suppression is not supported.
 
@@ -74,6 +80,10 @@ path, owner, or operation-family suppression is not supported.
 - `--policy no-new-debt` exits nonzero when unbaselined actionable gaps remain.
 - `--policy no-new-debt` succeeds when exact baseline matches clear actionable
   gaps.
+- `policy report` succeeds in advisory mode, reports unbaselined actionable
+  gaps, and does not fail the command for those gaps.
+- `policy report` reports exact resolved baseline entries and expired
+  suppressions without altering card classification.
 
 ## CI proof
 
@@ -83,8 +93,11 @@ cargo test --workspace
 cargo test -p xtask ledger
 cargo test -p unsafe-review-core baseline_policy
 cargo test -p unsafe-review-core suppression_policy
+cargo test -p unsafe-review-core policy_report
 cargo test -p unsafe-review-cli no_new_debt
+cargo test -p unsafe-review-cli policy_report
 cargo test -p unsafe-review --test e2e no_new_debt_policy_fails_only_for_unbaselined_actionable_gaps
+cargo test -p unsafe-review --test e2e policy_report
 ```
 
 ## Promotion rule
