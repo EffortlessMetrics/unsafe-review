@@ -35,7 +35,7 @@ witnesses by default.
 | Explicit receipts can be authored and validated safely | `receipt template` and `receipt validate` are covered by CLI e2e tests and support tiers | Experimental | Template output does not verify that the recorded command ran |
 | Public claims map to proof | `SUPPORT_TIERS.md` maps every current surface to proof and limits | In place | Keep updating for every new lane |
 | No soundness, UB-free, Miri-clean, site-execution, or default-blocking claim | Trust-boundary text is enforced across artifacts; support tiers and handoffs repeat limits | In place | Must remain part of all new projections |
-| First real-crate dogfood measurement | Handoff `2026-05-18-real-crate-dogfood-v0.6.md` records top-50 capped `rust-smallvec`, `arrayvec`, and `memchr` runs plus `memchr#215`, `rust-smallvec#407`, `arrayvec#308`, and `arrayvec#288` PR-diff runs; dogfood found and fixed import/declaration false positives, `cfg(target_feature)` false positives, capped repo scan timeout behavior, missing owner-contract inheritance for operation cards, comment-derived owner false positives, and one fixture-backed `Vec::set_len` initialization-evidence improvement | Experimental | More crates, more real PR diffs, uncapped/sampled runs, broader `Vec::set_len` evidence modeling, and human review are still needed before calibration claims |
+| First real-crate dogfood measurement | Handoff `2026-05-18-real-crate-dogfood-v0.6.md` records top-50 capped `rust-smallvec`, `arrayvec`, and `memchr` runs plus `memchr#215`, `rust-smallvec#407`, `arrayvec#308`, and `arrayvec#288` PR-diff runs; dogfood found and fixed import/declaration false positives, `cfg(target_feature)` false positives, capped repo scan timeout behavior, missing owner-contract inheritance for operation cards, comment-derived owner false positives, and one fixture-backed `Vec::set_len` initialization-evidence improvement with an `arrayvec#288` rerun | Experimental | More crates, more real PR diffs, uncapped/sampled runs, broader `Vec::set_len` evidence modeling, and human review are still needed before calibration claims |
 
 ## Current Gaps
 
@@ -56,7 +56,8 @@ These are not failures; they are the next unsupported or weakly verified areas:
   repo posture snapshots.
 - Real PR-diff dogfood shows `Vec::set_len` guard evidence still needs broader
   modeling; visible `MaybeUninit::new` initialization loops and const `CAP`
-  capacity facts now have fixture coverage, while shrink operations remain weak.
+  capacity facts now have fixture coverage and an `arrayvec#288` rerun receipt,
+  while shrink operations remain weak.
 
 ## Current Gates
 
