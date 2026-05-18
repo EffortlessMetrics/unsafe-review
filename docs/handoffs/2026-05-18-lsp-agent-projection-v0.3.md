@@ -100,6 +100,20 @@ The repo must not claim:
 - memory-safety proof, UB-free status, or proof that a static test mention
   executed the unsafe site
 
+## Subsequent status
+
+This handoff preserves the state at saved LSP and bounded agent projection lane
+closeout. Later lanes have since landed repo posture and policy surfaces,
+exact-card witness receipt import, and witness-plan output. The "Known limits"
+below describe what was outside this lane at closeout, not the full current repo
+state.
+
+For current posture, read this handoff together with:
+
+- `docs/handoffs/2026-05-18-repo-policy-v0.4.md`
+- `docs/handoffs/2026-05-18-witness-receipt-import-v0.5.md`
+- `docs/status/SUPPORT_TIERS.md`
+
 ## Known limits
 
 - There is no LSP server or editor integration yet.

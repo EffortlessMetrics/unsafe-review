@@ -71,6 +71,21 @@ The repo must not claim:
 - default blocking policy
 - broad operation-family support beyond fixture-backed slices
 
+## Subsequent status
+
+This handoff preserves the state at review-card lane closeout. Later lanes have
+since landed the first advisory PR artifact loop, saved LSP and bounded agent
+projections, repo posture and policy surfaces, and exact-card witness receipt
+import.
+
+For current posture, read this handoff together with:
+
+- `docs/handoffs/2026-05-18-advisory-pr-artifacts-v0.2.md`
+- `docs/handoffs/2026-05-18-lsp-agent-projection-v0.3.md`
+- `docs/handoffs/2026-05-18-repo-policy-v0.4.md`
+- `docs/handoffs/2026-05-18-witness-receipt-import-v0.5.md`
+- `docs/status/SUPPORT_TIERS.md`
+
 ## Known limits
 
 - Evidence remains source-level and heuristic.
