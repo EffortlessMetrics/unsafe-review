@@ -24,8 +24,13 @@ UB-free, and not a Miri result unless a witness receipt is attached.
 
 ## Quick start
 
+Install the CLI, run `doctor` once to confirm the checkout, then review either a PR diff or a supplied patch.
+
 ```bash
 cargo install unsafe-review
+
+# Confirm local tool and root setup
+unsafe-review doctor --root .
 
 # Review the current diff against origin/main
 unsafe-review check --base origin/main
@@ -44,8 +49,17 @@ unsafe-review badges --out badges/
 
 # Explain one card and produce an LLM-ready packet
 unsafe-review explain UR-src-lib-rs-42-raw-pointer-read
-unsafe-review context UR-src-lib-rs-42-raw-pointer-read --json
+unsafe-review context UR-src-lib-rs-42-raw-pointer-read
 ```
+
+## How to read a card
+
+Every finding is emitted as a review card. Start with `missing`, then use `next`
+and `verify` to decide whether to add a `# Safety` / `SAFETY:` contract, expose a
+local guard, connect tests, run a routed witness, or apply repository policy. A
+witness route is only a recommendation until a receipt from that tool is attached.
+
+For command details, output formats, and CI patterns, see the [CLI guide](docs/CLI.md).
 
 ## Current implementation status
 
@@ -91,6 +105,7 @@ cargo xtask check-pr
 - [Mission and vision](docs/MISSION.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Architecture](docs/ARCHITECTURE.md)
+- [CLI guide](docs/CLI.md)
 - [Specifications](docs/specs/README.md)
 - [ADRs](docs/adr/README.md)
 - [Implementation plan](plans/0.1.0/implementation-plan.md)
