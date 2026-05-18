@@ -183,6 +183,58 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     Ok(())
 }
 
+#[test]
+fn repo_inventory_and_badges_count_open_gaps_without_safety_claim() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_alignment");
+    let temp = TempDir::new("unsafe-review-repo-e2e")?;
+
+    let repo = run_success([
+        os("repo"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--format"),
+        os("json"),
+    ])?;
+    let repo = parse_json(&stdout_text(&repo)?)?;
+    assert_eq!(repo["scope"], "repo");
+    assert_eq!(repo["mode"], "repo");
+    assert_eq!(repo["policy"], "advisory");
+    assert_eq!(repo["summary"]["cards"], 1);
+    assert_eq!(repo["summary"]["open_actionable_gaps"], 1);
+    assert_eq!(repo["summary"]["guard_missing"], 1);
+    assert_eq!(repo["cards"][0]["operation_family"], "raw_pointer_read");
+    assert!(
+        repo["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("not UB-free status")
+    );
+
+    let badge_dir = temp.path().join("badges");
+    let badges = run_success([
+        os("badges"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--out"),
+        badge_dir.as_os_str().to_os_string(),
+    ])?;
+    assert!(stdout_text(&badges)?.contains("wrote badges"));
+
+    let main_badge = parse_json(&fs::read_to_string(badge_dir.join("unsafe-review.json"))?)?;
+    assert_eq!(main_badge["label"], "unsafe-review");
+    assert_eq!(main_badge["message"], "1 open gaps");
+    assert_ne!(main_badge["message"], "safe");
+
+    let plus_badge = parse_json(&fs::read_to_string(
+        badge_dir.join("unsafe-review-plus.json"),
+    )?)?;
+    assert_eq!(plus_badge["label"], "unsafe-review+");
+    assert_eq!(plus_badge["message"], "0 contract / 1 guard / 0 witness");
+    assert_ne!(plus_badge["message"], "UB-free");
+
+    Ok(())
+}
+
 fn run_success<I, S>(args: I) -> Result<Output, Box<dyn Error>>
 where
     I: IntoIterator<Item = S>,
