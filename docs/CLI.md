@@ -43,6 +43,22 @@ unsafe-review check --base origin/main --policy no-new-debt
 
 Blocking policy is not implemented.
 
+Generate a non-blocking no-new-debt policy report without changing command exit
+behavior:
+
+```bash
+unsafe-review policy report \
+  --root . \
+  --base origin/main \
+  --format markdown \
+  --out target/unsafe-review/policy-report.md
+```
+
+The policy report compares current `ReviewCard`s with exact baseline and
+suppression ledgers. It counts new gaps, baseline-known cards, suppressed cards,
+resolved baseline entries, and expired suppressions. It does not block, execute
+witnesses, or create broad suppression authority.
+
 ## Output Formats
 
 All output formats project the same `ReviewCard`s. They must not reclassify

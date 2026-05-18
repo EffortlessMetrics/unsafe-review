@@ -1,7 +1,8 @@
 use crate::analysis::{pipeline, receipts};
 use crate::domain::{CardId, ReviewCard};
 use crate::output::{
-    agent, comment_plan, human, json, lsp, markdown, outcome, receipt_audit, sarif, witness_plan,
+    agent, comment_plan, human, json, lsp, markdown, outcome, policy_report, receipt_audit, sarif,
+    witness_plan,
 };
 use std::path::PathBuf;
 
@@ -120,6 +121,12 @@ pub fn audit_witness_receipts(input: AnalyzeInput) -> Result<ReceiptAuditReport,
     receipts::audit_receipts(&output)
 }
 
+pub fn evaluate_policy_report(mut input: AnalyzeInput) -> Result<PolicyReport, String> {
+    input.policy = PolicyMode::Advisory;
+    let output = pipeline::analyze(input)?;
+    policy_report::evaluate(&output)
+}
+
 pub fn render_json(output: &AnalyzeOutput) -> String {
     json::render(output)
 }
@@ -172,6 +179,14 @@ pub fn render_receipt_audit_markdown(report: &ReceiptAuditReport) -> String {
     receipt_audit::render_markdown(report)
 }
 
+pub fn render_policy_report_json(report: &PolicyReport) -> String {
+    policy_report::render_json(report)
+}
+
+pub fn render_policy_report_markdown(report: &PolicyReport) -> String {
+    policy_report::render_markdown(report)
+}
+
 pub fn explain_card(output: &AnalyzeOutput, id: &CardId) -> Option<String> {
     output
         .cards
@@ -189,4 +204,5 @@ pub fn collect_context(output: &AnalyzeOutput, id: &CardId) -> Option<String> {
 }
 
 pub use outcome::OutcomeReport;
+pub use policy_report::PolicyReport;
 pub use receipts::ReceiptAuditReport;

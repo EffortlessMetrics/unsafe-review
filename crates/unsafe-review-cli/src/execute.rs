@@ -10,10 +10,11 @@ use unsafe_review_core::{
     AnalysisMode, AnalyzeInput, CardId, CargoCarefulReceiptInput, ConcurrencyReceiptInput,
     DiffSource, MiriReceiptInput, PolicyMode, ProofReceiptInput, SanitizerReceiptInput, Scope,
     WITNESS_RECEIPT_SCHEMA_VERSION, WitnessReceipt, analyze, audit_witness_receipts,
-    collect_context, compare_outcome_json, explain_card, render_comment_plan, render_human,
-    render_json, render_lsp, render_markdown, render_outcome_json, render_outcome_markdown,
-    render_pr_summary, render_receipt_audit_json, render_receipt_audit_markdown, render_sarif,
-    render_witness_plan, validate_witness_receipts,
+    collect_context, compare_outcome_json, evaluate_policy_report, explain_card,
+    render_comment_plan, render_human, render_json, render_lsp, render_markdown,
+    render_outcome_json, render_outcome_markdown, render_policy_report_json,
+    render_policy_report_markdown, render_pr_summary, render_receipt_audit_json,
+    render_receipt_audit_markdown, render_sarif, render_witness_plan, validate_witness_receipts,
 };
 
 pub(crate) fn execute(command: Command) -> Result<(), String> {
@@ -42,6 +43,7 @@ pub(crate) fn execute(command: Command) -> Result<(), String> {
         Command::ReceiptImportConcurrency(options) => receipt_import_concurrency(options),
         Command::ReceiptImportProof(options) => receipt_import_proof(options),
         Command::Outcome(options) => outcome(options),
+        Command::PolicyReport(options) => policy_report(options),
     }
 }
 
@@ -344,6 +346,41 @@ fn outcome(options: OutcomeOptions) -> Result<(), String> {
     Ok(())
 }
 
+fn policy_report(options: CheckOptions) -> Result<(), String> {
+    let scope = if options.base.is_some() || options.diff.is_some() {
+        Scope::Diff
+    } else {
+        Scope::Repo
+    };
+    let mode = match &scope {
+        Scope::Diff => AnalysisMode::Draft,
+        Scope::Repo => AnalysisMode::Repo,
+    };
+    let diff = diff_source(&options)?;
+    let report = evaluate_policy_report(AnalyzeInput {
+        root: options.root,
+        scope,
+        diff,
+        mode,
+        policy: PolicyMode::Advisory,
+        include_unchanged_tests: true,
+        max_cards: options.max_cards,
+    })?;
+    let rendered = match options.format {
+        Format::Json => render_policy_report_json(&report),
+        Format::Markdown => render_policy_report_markdown(&report),
+        _ => return Err("policy report only supports json or markdown output".to_string()),
+    };
+    if let Some(path) = options.out {
+        ensure_parent_dir(&path)?;
+        fs::write(&path, rendered)
+            .map_err(|err| format!("write {} failed: {err}", path.display()))?;
+    } else {
+        println!("{rendered}");
+    }
+    Ok(())
+}
+
 fn receipt_import_miri(options: SavedOutputReceiptOptions) -> Result<(), String> {
     let output = fs::read_to_string(&options.log)
         .map_err(|err| format!("read {} failed: {err}", options.log.display()))?;
@@ -484,6 +521,9 @@ fn print_help() {
     println!("  context [--root .] [--json|--format json] <card-id>");
     println!(
         "  outcome --before <cards.json> --after <cards.json> [--format json|markdown] [--out file]"
+    );
+    println!(
+        "  policy report [--root .] [--base origin/main|--diff file] [--format json|markdown] [--out file] [--max-cards N]"
     );
     println!(
         "  receipt template <card-id> --tool <lane> --strength <level> --author <owner> --recorded-at <utc> --expires-at <date> [--summary text] [--command text] [--limitation text] [--out file]"

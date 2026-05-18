@@ -25,12 +25,39 @@ pub(crate) fn parse(args: Vec<String>) -> Result<Command, String> {
         "explain" => parse_explain(rest),
         "context" => parse_context(rest),
         "outcome" => parse_outcome(rest).map(Command::Outcome),
+        "policy" => parse_policy_command(rest),
         "receipt" => parse_receipt(rest),
         "receipt-template" => parse_receipt_template(rest).map(Command::ReceiptTemplate),
         other => Err(format!(
             "unknown command `{other}`. Run `unsafe-review --help`."
         )),
     }
+}
+
+fn parse_policy_command(args: Vec<String>) -> Result<Command, String> {
+    let mut rest = args;
+    let Some(subcommand) = rest.first() else {
+        return Err("missing policy subcommand `report`".to_string());
+    };
+    let subcommand = subcommand.clone();
+    rest.remove(0);
+    match subcommand.as_str() {
+        "report" => parse_policy_report(rest).map(Command::PolicyReport),
+        other => Err(format!("unknown policy subcommand `{other}`")),
+    }
+}
+
+fn parse_policy_report(args: Vec<String>) -> Result<CheckOptions, String> {
+    let mut options = parse_check(args)?;
+    if !matches!(options.format, Format::Human) {
+        options.format = parse_policy_report_format(format_name(&options.format))?;
+    } else {
+        options.format = Format::Json;
+    }
+    if options.policy != PolicyMode::Advisory {
+        return Err("policy report is advisory-only".to_string());
+    }
+    Ok(options)
 }
 
 fn parse_doctor(args: Vec<String>) -> Result<Command, String> {
@@ -530,6 +557,17 @@ fn parse_receipt_audit_format(raw: &str) -> Result<Format, String> {
         Format::Markdown => Ok(Format::Markdown),
         other => Err(format!(
             "receipt audit only supports json or markdown output, got `{}`",
+            format_name(&other)
+        )),
+    }
+}
+
+fn parse_policy_report_format(raw: &str) -> Result<Format, String> {
+    match parse_format(raw)? {
+        Format::Json => Ok(Format::Json),
+        Format::Markdown => Ok(Format::Markdown),
+        other => Err(format!(
+            "policy report only supports json or markdown output, got `{}`",
             format_name(&other)
         )),
     }
@@ -1396,6 +1434,75 @@ mod tests {
             command,
             Err("receipt audit only supports json or markdown output, got `sarif`".to_string())
         );
+    }
+
+    #[test]
+    fn parses_policy_report_command() -> Result<(), String> {
+        let command = parse(args([
+            "unsafe-review",
+            "policy",
+            "report",
+            "--root=fixtures/raw_pointer_alignment",
+            "--diff=change.diff",
+            "--format=markdown",
+            "--out=target/policy-report.md",
+            "--max-cards=5",
+        ]))?;
+
+        let Command::PolicyReport(options) = command else {
+            return Err("expected policy report command".to_string());
+        };
+        assert_eq!(
+            options.root,
+            PathBuf::from("fixtures/raw_pointer_alignment")
+        );
+        assert_eq!(
+            options.diff,
+            Some(DiffInput::File(PathBuf::from("change.diff")))
+        );
+        assert_eq!(options.format, Format::Markdown);
+        assert_eq!(options.out, Some(PathBuf::from("target/policy-report.md")));
+        assert_eq!(options.max_cards, Some(5));
+        Ok(())
+    }
+
+    #[test]
+    fn policy_report_defaults_to_json_and_stays_advisory() -> Result<(), String> {
+        let command = parse(args(["unsafe-review", "policy", "report"]))?;
+
+        let Command::PolicyReport(options) = command else {
+            return Err("expected policy report command".to_string());
+        };
+        assert_eq!(options.format, Format::Json);
+        assert_eq!(options.policy, PolicyMode::Advisory);
+        Ok(())
+    }
+
+    #[test]
+    fn policy_report_rejects_non_report_format() {
+        let command = parse(args([
+            "unsafe-review",
+            "policy",
+            "report",
+            "--format=sarif",
+        ]));
+
+        assert_eq!(
+            command,
+            Err("policy report only supports json or markdown output, got `sarif`".to_string())
+        );
+    }
+
+    #[test]
+    fn policy_report_rejects_non_advisory_policy() {
+        let command = parse(args([
+            "unsafe-review",
+            "policy",
+            "report",
+            "--policy=no-new-debt",
+        ]));
+
+        assert_eq!(command, Err("policy report is advisory-only".to_string()));
     }
 
     fn args<const N: usize>(values: [&str; N]) -> Vec<String> {
