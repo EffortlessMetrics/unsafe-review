@@ -20,32 +20,53 @@ unsafe-review:
 
 `unsafe-review` is **static unsafe contract review**. It reports missing or present
 review evidence. It is not a proof of memory safety, not a claim that the repository is
-UB-free, and not a Miri result unless a witness receipt is attached.
+UB-free, and not a Miri result unless a witness receipt is attached. The tool does
+not execute Miri, `cargo-careful`, sanitizers, Loom, Shuttle, Kani, or Crux; it
+routes cards toward those witnesses when their evidence would be useful.
 
 ## Quick start
 
-```bash
-cargo install unsafe-review
+Run from a workspace checkout:
 
+```bash
+cargo run -q -p unsafe-review -- check --base origin/main
+```
+
+If you have installed the package, drop the `cargo run` prefix:
+
+```bash
+unsafe-review check --base origin/main
+```
+
+Common commands:
+
+```bash
 # Review the current diff against origin/main
 unsafe-review check --base origin/main
 
-# Review a supplied unified diff
+# Review a supplied unified diff and emit JSON
 unsafe-review check --diff change.diff --format json
 
-# Try the bundled smoke fixture
-unsafe-review check --root fixtures/raw_pointer_alignment \
+# Try the bundled smoke fixture from a source checkout
+cargo run -q -p unsafe-review -- check \
+  --root fixtures/raw_pointer_alignment \
   --diff fixtures/raw_pointer_alignment/change.diff \
   --format json
 
 # Full repo inventory and badge data
-unsafe-review repo --format json
+unsafe-review repo --format json --out unsafe-review.repo.json
 unsafe-review badges --out badges/
 
 # Explain one card and produce an LLM-ready packet
 unsafe-review explain UR-src-lib-rs-42-raw-pointer-read
-unsafe-review context UR-src-lib-rs-42-raw-pointer-read --json
+unsafe-review context UR-src-lib-rs-42-raw-pointer-read
+
+# Check local prerequisites and policy posture
+unsafe-review doctor --root .
 ```
+
+See the [usage guide](docs/USAGE.md) for output formats, rollout patterns, card
+interpretation, and troubleshooting.
 
 ## Current implementation status
 
@@ -88,6 +109,7 @@ cargo xtask check-pr
 
 ## Documentation map
 
+- [Usage guide](docs/USAGE.md)
 - [Mission and vision](docs/MISSION.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Architecture](docs/ARCHITECTURE.md)
