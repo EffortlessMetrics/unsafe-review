@@ -1,6 +1,6 @@
 use crate::command::{CheckOptions, Command, Format};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use unsafe_review_core::{
     AnalysisMode, AnalyzeInput, CardId, DiffSource, PolicyMode, Scope, analyze, collect_context,
@@ -28,6 +28,12 @@ pub(crate) fn execute(command: Command) -> Result<(), String> {
 }
 
 fn run_check(options: CheckOptions, scope: Scope, mode: AnalysisMode) -> Result<(), String> {
+    if !options.root.is_dir() {
+        return Err(format!(
+            "root {} is not a directory",
+            options.root.display()
+        ));
+    }
     let diff = diff_source(&options)?;
     let output = analyze(AnalyzeInput {
         root: options.root,
@@ -39,6 +45,7 @@ fn run_check(options: CheckOptions, scope: Scope, mode: AnalysisMode) -> Result<
         max_cards: options.max_cards,
     })?;
     let rendered = render_with_format(&output, &options.format);
+    let open_actionable_gaps = output.summary.open_actionable_gaps;
     if let Some(path) = options.out {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
@@ -49,12 +56,17 @@ fn run_check(options: CheckOptions, scope: Scope, mode: AnalysisMode) -> Result<
     } else {
         println!("{rendered}");
     }
+    if options.fail_on_gaps && open_actionable_gaps > 0 {
+        return Err(format!(
+            "unsafe-review found {open_actionable_gaps} open actionable gap(s)"
+        ));
+    }
     Ok(())
 }
 
 fn diff_source(options: &CheckOptions) -> Result<DiffSource, String> {
     if let Some(path) = &options.diff {
-        return Ok(DiffSource::File(path.clone()));
+        return Ok(DiffSource::File(resolve_diff_path(&options.root, path)));
     }
     if let Some(base) = &options.base {
         let output = ProcessCommand::new("git")
@@ -74,6 +86,14 @@ fn diff_source(options: &CheckOptions) -> Result<DiffSource, String> {
         ));
     }
     Ok(DiffSource::NoneRepoScan)
+}
+
+fn resolve_diff_path(root: &Path, path: &Path) -> PathBuf {
+    if path.is_absolute() || path.exists() {
+        path.to_path_buf()
+    } else {
+        root.join(path)
+    }
 }
 
 fn render_with_format(output: &unsafe_review_core::AnalyzeOutput, format: &Format) -> String {
@@ -190,14 +210,17 @@ fn print_help() {
     println!();
     println!("Commands:");
     println!(
-        "  check   [--root .] [--base origin/main | --diff file] [--format human|json|markdown]"
+        "  check   [--root .] [--base origin/main | --diff file] [--format human|json|markdown] [--fail-on-gaps]"
     );
-    println!("  repo    [--root .] [--format json]");
-    println!("  pilot   [--root .] [--base origin/main] [--max-cards 5]");
+    println!("  repo    [--root .] [--format json] [--fail-on-gaps]");
+    println!("  pilot   [--root .] [--base origin/main] [--max-cards 5] [--fail-on-gaps]");
     println!("  badges  [--root .] [--out badges]");
     println!("  explain [--root .] <card-id>");
-    println!("  context [--root .] <card-id>");
+    println!("  context [--root .] <card-id> [--json]");
     println!("  doctor  [--root .]");
     println!();
     println!("Trust boundary: static review evidence, not soundness proof.");
+    println!(
+        "Exit policy: advisory by default; --fail-on-gaps exits non-zero when actionable gaps remain."
+    );
 }

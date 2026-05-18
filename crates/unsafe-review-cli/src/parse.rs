@@ -69,6 +69,7 @@ fn parse_check(args: Vec<String>) -> Result<CheckOptions, String> {
                 idx += 1;
                 options.out = Some(PathBuf::from(value(&args, idx, "--out")?));
             }
+            "--fail-on-gaps" => options.fail_on_gaps = true,
             "--max-cards" => {
                 idx += 1;
                 let raw = value(&args, idx, "--max-cards")?;
@@ -81,7 +82,15 @@ fn parse_check(args: Vec<String>) -> Result<CheckOptions, String> {
         }
         idx += 1;
     }
+    validate_check_options(&options)?;
     Ok(options)
+}
+
+fn validate_check_options(options: &CheckOptions) -> Result<(), String> {
+    if options.base.is_some() && options.diff.is_some() {
+        return Err("--base and --diff cannot be used together".to_string());
+    }
+    Ok(())
 }
 
 fn parse_badges(args: Vec<String>) -> Result<Command, String> {
@@ -123,7 +132,7 @@ fn parse_explain(args: Vec<String>) -> Result<Command, String> {
             value if value.starts_with('-') => {
                 return Err(format!("unknown explain argument `{value}`"));
             }
-            value => id = Some(value.to_string()),
+            value => set_id(&mut id, value, "explain")?,
         }
         idx += 1;
     }
@@ -144,10 +153,18 @@ fn parse_context(args: Vec<String>) -> Result<Command, String> {
                 idx += 1;
                 root = PathBuf::from(value(&args, idx, "--root")?);
             }
+            "--json" => {}
+            "--format" => {
+                idx += 1;
+                let format = parse_format(value(&args, idx, "--format")?)?;
+                if format != Format::Json {
+                    return Err("context only supports json format".to_string());
+                }
+            }
             value if value.starts_with('-') => {
                 return Err(format!("unknown context argument `{value}`"));
             }
-            value => id = Some(value.to_string()),
+            value => set_id(&mut id, value, "context")?,
         }
         idx += 1;
     }
@@ -155,6 +172,13 @@ fn parse_context(args: Vec<String>) -> Result<Command, String> {
         root,
         id: id.ok_or_else(|| "missing card id".to_string())?,
     })
+}
+
+fn set_id(id: &mut Option<String>, value: &str, command: &str) -> Result<(), String> {
+    if id.replace(value.to_string()).is_some() {
+        return Err(format!("multiple card ids supplied to {command}"));
+    }
+    Ok(())
 }
 
 fn parse_format(raw: &str) -> Result<Format, String> {
@@ -170,4 +194,99 @@ fn value<'a>(args: &'a [String], idx: usize, flag: &str) -> Result<&'a str, Stri
     args.get(idx)
         .map(|value| value.as_str())
         .ok_or_else(|| format!("missing value for {flag}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse_cli(args: &[&str]) -> Result<Command, String> {
+        parse(args.iter().map(|arg| (*arg).to_string()).collect())
+    }
+
+    #[test]
+    fn check_accepts_fail_on_gaps() -> Result<(), String> {
+        let command = parse_cli(&["unsafe-review", "check", "--fail-on-gaps"])?;
+        let Command::Check(options) = command else {
+            return Err("expected check command".to_string());
+        };
+        assert!(options.fail_on_gaps);
+        Ok(())
+    }
+
+    #[test]
+    fn check_rejects_base_and_diff_together() -> Result<(), String> {
+        let result = parse_cli(&[
+            "unsafe-review",
+            "check",
+            "--base",
+            "origin/main",
+            "--diff",
+            "change.diff",
+        ]);
+        let Err(err) = result else {
+            return Err("conflicting diff sources should fail".to_string());
+        };
+        assert!(err.contains("--base and --diff cannot be used together"));
+        Ok(())
+    }
+
+    #[test]
+    fn context_accepts_json_aliases() -> Result<(), String> {
+        let command = parse_cli(&[
+            "unsafe-review",
+            "context",
+            "UR-src-lib-rs-1-example",
+            "--json",
+        ])?;
+        assert_eq!(
+            command,
+            Command::Context {
+                root: PathBuf::from("."),
+                id: "UR-src-lib-rs-1-example".to_string(),
+            }
+        );
+
+        let command = parse_cli(&[
+            "unsafe-review",
+            "context",
+            "--format",
+            "json",
+            "UR-src-lib-rs-1-example",
+        ])?;
+        assert_eq!(
+            command,
+            Command::Context {
+                root: PathBuf::from("."),
+                id: "UR-src-lib-rs-1-example".to_string(),
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn context_rejects_non_json_format() -> Result<(), String> {
+        let result = parse_cli(&[
+            "unsafe-review",
+            "context",
+            "--format",
+            "markdown",
+            "UR-src-lib-rs-1-example",
+        ]);
+        let Err(err) = result else {
+            return Err("context markdown should fail".to_string());
+        };
+        assert!(err.contains("context only supports json format"));
+        Ok(())
+    }
+
+    #[test]
+    fn explain_rejects_multiple_card_ids() -> Result<(), String> {
+        let result = parse_cli(&["unsafe-review", "explain", "first", "second"]);
+        let Err(err) = result else {
+            return Err("multiple ids should fail".to_string());
+        };
+        assert!(err.contains("multiple card ids supplied to explain"));
+        Ok(())
+    }
 }

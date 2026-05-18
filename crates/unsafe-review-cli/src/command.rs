@@ -15,6 +15,7 @@ pub(crate) struct CheckOptions {
     pub format: Format,
     pub out: Option<PathBuf>,
     pub max_cards: Option<usize>,
+    pub fail_on_gaps: bool,
 }
 
 impl Default for CheckOptions {
@@ -26,6 +27,7 @@ impl Default for CheckOptions {
             format: Format::Human,
             out: None,
             max_cards: None,
+            fail_on_gaps: false,
         }
     }
 }

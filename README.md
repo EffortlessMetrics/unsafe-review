@@ -30,6 +30,9 @@ cargo install unsafe-review
 # Review the current diff against origin/main
 unsafe-review check --base origin/main
 
+# Opt into a non-zero exit when actionable review gaps remain
+unsafe-review check --base origin/main --fail-on-gaps
+
 # Review a supplied unified diff
 unsafe-review check --diff change.diff --format json
 
