@@ -39,13 +39,16 @@ fn main() {
 fn run(args: Vec<String>) -> Result<(), String> {
     match args.get(1).map(|arg| arg.as_str()) {
         None | Some("help") | Some("--help") => {
-            println!("xtask commands: check-pr, check-docs, check-policy, check-support-tiers");
+            println!(
+                "xtask commands: check-pr, check-docs, check-fixtures, check-policy, check-support-tiers"
+            );
             Ok(())
         }
         Some("check-pr") => {
             check_docs()?;
             check_policy()?;
             check_support_tiers()?;
+            check_fixtures()?;
             check_tracked_generated_artifacts()?;
             println!("check-pr: ok");
             Ok(())
@@ -53,6 +56,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
         Some("check-docs") => check_docs(),
         Some("check-policy") => check_policy(),
         Some("check-support-tiers") => check_support_tiers(),
+        Some("check-fixtures") => check_fixtures(),
         Some(other) => Err(format!("unknown xtask command `{other}`")),
     }
 }
@@ -118,6 +122,49 @@ fn check_support_tiers() -> Result<(), String> {
         return Err(format!("{path} has no support-tier rows"));
     }
     println!("check-support-tiers: ok");
+    Ok(())
+}
+
+fn check_fixtures() -> Result<(), String> {
+    let root = Path::new("fixtures");
+    if !root.is_dir() {
+        return Err("fixtures directory is missing".to_string());
+    }
+
+    let mut count = 0usize;
+    for dir in fixture_dirs(root)? {
+        count += 1;
+        check_fixture_dir(&dir)?;
+    }
+    if count == 0 {
+        return Err("fixtures directory has no fixture cases".to_string());
+    }
+    println!("check-fixtures: ok");
+    Ok(())
+}
+
+fn check_fixture_dir(dir: &Path) -> Result<(), String> {
+    let Some(name) = dir.file_name().and_then(|name| name.to_str()) else {
+        return Err(format!(
+            "non-UTF-8 fixture directory name: {}",
+            dir.display()
+        ));
+    };
+    if !is_snake_case_name(name) {
+        return Err(format!(
+            "{} must use a lowercase snake_case fixture name",
+            dir.display()
+        ));
+    }
+
+    require_file_in_dir(dir, "Cargo.toml")?;
+    require_file_in_dir(dir, "change.diff")?;
+    require_file_in_dir(dir, "expected.cards.json")?;
+    require_file_in_dir(dir, "src/lib.rs")?;
+
+    parse_toml_file(&dir.join("Cargo.toml"))?;
+    parse_fixture_cards(&dir.join("expected.cards.json"))?;
+    require_non_empty_file(&dir.join("change.diff"))?;
     Ok(())
 }
 
@@ -188,6 +235,65 @@ fn check_tracked_generated_artifacts() -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+fn parse_fixture_cards(path: &Path) -> Result<serde_json::Value, String> {
+    let text = read_to_string(path)?;
+    let value = serde_json::from_str::<serde_json::Value>(&text)
+        .map_err(|err| format!("{} is not valid JSON: {err}", path.display()))?;
+    if value.as_array().is_none() {
+        return Err(format!("{} must contain a JSON array", path.display()));
+    }
+    Ok(value)
+}
+
+fn require_file_in_dir(dir: &Path, relative: &str) -> Result<(), String> {
+    let path = dir.join(relative);
+    if path.is_file() {
+        Ok(())
+    } else {
+        Err(format!("fixture {} is missing {relative}", dir.display()))
+    }
+}
+
+fn require_non_empty_file(path: &Path) -> Result<(), String> {
+    let text = read_to_string(path)?;
+    if text.trim().is_empty() {
+        Err(format!("{} must not be empty", path.display()))
+    } else {
+        Ok(())
+    }
+}
+
+fn fixture_dirs(root: &Path) -> Result<Vec<PathBuf>, String> {
+    let entries =
+        fs::read_dir(root).map_err(|err| format!("read {} failed: {err}", root.display()))?;
+    let mut dirs = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|err| format!("read_dir entry failed: {err}"))?;
+        let path = entry.path();
+        if path.is_dir() {
+            dirs.push(path);
+        }
+    }
+    dirs.sort();
+    Ok(dirs)
+}
+
+fn is_snake_case_name(name: &str) -> bool {
+    let mut previous_underscore = false;
+    let mut has_segment_char = false;
+    for ch in name.chars() {
+        match ch {
+            'a'..='z' | '0'..='9' => {
+                previous_underscore = false;
+                has_segment_char = true;
+            }
+            '_' if has_segment_char && !previous_underscore => previous_underscore = true,
+            _ => return false,
+        }
+    }
+    has_segment_char && !previous_underscore
 }
 
 fn parse_toml_file(path: &Path) -> Result<toml::Value, String> {
@@ -299,5 +405,14 @@ mod tests {
         assert!(is_forbidden_generated_path("reports/cards.sarif"));
         assert!(!is_forbidden_generated_path("Cargo.lock"));
         assert!(!is_forbidden_generated_path("docs/status/SUPPORT_TIERS.md"));
+    }
+
+    #[test]
+    fn fixture_names_must_be_snake_case() {
+        assert!(is_snake_case_name("raw_pointer_deref"));
+        assert!(is_snake_case_name("ffi_sanitizer_route"));
+        assert!(!is_snake_case_name("RawPointerDeref"));
+        assert!(!is_snake_case_name("raw-pointer-deref"));
+        assert!(!is_snake_case_name("raw_pointer_deref_"));
     }
 }
