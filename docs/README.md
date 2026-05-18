@@ -9,6 +9,7 @@
 | Specs | behavior contracts | `docs/specs/` |
 | ADRs | durable architecture decisions | `docs/adr/` |
 | Implementation plans | PR-sized sequence and proof commands | `plans/` |
+| Active lane | current dogfood-calibrated evidence loop | `docs/status/DOGFOOD_CALIBRATED_EVIDENCE_LANE.md` |
 | Support tiers | product claim to proof mapping | `docs/status/SUPPORT_TIERS.md` |
 | Objective audit | current objective evidence and remaining gaps | `docs/status/OBJECTIVE_AUDIT.md` |
 | Policies | ledgers, baselines, suppressions | `policy/` |
