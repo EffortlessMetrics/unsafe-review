@@ -40,10 +40,11 @@ pub(crate) fn scan_file(
     for (idx, raw) in lines.iter().enumerate() {
         let line_no = idx + 1;
         let trimmed = raw.trim();
-        if trimmed.starts_with("//") {
+        let code_trimmed = mask_non_code_segments(raw).trim().to_string();
+        if code_trimmed.is_empty() {
             continue;
         }
-        let Some((kind, family)) = detect_site(trimmed) else {
+        let Some((kind, family)) = detect_site(&code_trimmed) else {
             continue;
         };
         if kind == UnsafeSiteKind::UnsafeBlock
@@ -59,15 +60,15 @@ pub(crate) fn scan_file(
             continue;
         }
         let owner = find_owner(&lines, idx);
-        let visibility = if trimmed.starts_with("pub ") || trimmed.contains(" pub ") {
+        let visibility = if code_trimmed.starts_with("pub ") || code_trimmed.contains(" pub ") {
             "public"
         } else {
             "private"
         }
         .to_string();
-        let public_api_surface = trimmed.contains("pub unsafe fn")
-            || trimmed.contains("pub unsafe trait")
-            || trimmed.contains("pub unsafe impl");
+        let public_api_surface = code_trimmed.contains("pub unsafe fn")
+            || code_trimmed.contains("pub unsafe trait")
+            || code_trimmed.contains("pub unsafe impl");
         let context_before = context_slice(&lines, idx.saturating_sub(8), idx);
         let context_after = context_slice(&lines, idx + 1, (idx + 8).min(lines.len()));
         out.push(ScannedSite {
@@ -138,6 +139,131 @@ pub(crate) fn scan_file(
             .then(left.site.location.column.cmp(&right.site.location.column))
     });
     Ok(out)
+}
+
+fn mask_non_code_segments(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut chars = line.char_indices().peekable();
+    let mut in_string = false;
+    let mut in_char = false;
+    let mut escaped = false;
+
+    while let Some((idx, ch)) = chars.next() {
+        if in_string {
+            out.push(' ');
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+
+        if in_char {
+            out.push(' ');
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '\'' {
+                in_char = false;
+            }
+            continue;
+        }
+
+        if ch == '/' && matches!(chars.peek(), Some((_next_idx, '/'))) {
+            out.extend(std::iter::repeat_n(' ', line[idx..].chars().count()));
+            break;
+        }
+
+        if let ('r', Some(hashes)) = (ch, raw_string_hashes(line, idx)) {
+            out.push(' ');
+            for _ in 0..hashes {
+                let _ = chars.next();
+                out.push(' ');
+            }
+            let _ = chars.next();
+            out.push(' ');
+
+            let terminator = format!("\"{}", "#".repeat(hashes));
+            while let Some((raw_idx, raw_ch)) = chars.next() {
+                out.push(' ');
+                if line[raw_idx..].starts_with(&terminator) {
+                    for _ in 0..hashes {
+                        let _ = chars.next();
+                        out.push(' ');
+                    }
+                    break;
+                }
+                if raw_ch == '\n' {
+                    break;
+                }
+            }
+            continue;
+        }
+
+        if ch == '"' {
+            in_string = true;
+            out.push(' ');
+            continue;
+        }
+
+        if ch == '\'' && looks_like_char_literal(line, idx) {
+            in_char = true;
+            out.push(' ');
+            continue;
+        }
+
+        out.push(ch);
+    }
+
+    out
+}
+
+fn raw_string_hashes(line: &str, idx: usize) -> Option<usize> {
+    let rest = line.get(idx..)?;
+    let mut chars = rest.chars();
+    if chars.next()? != 'r' {
+        return None;
+    }
+    let mut hashes = 0usize;
+    for ch in chars {
+        match ch {
+            '#' => hashes += 1,
+            '"' => return Some(hashes),
+            _ => return None,
+        }
+    }
+    None
+}
+
+fn looks_like_char_literal(line: &str, idx: usize) -> bool {
+    let Some(rest) = line.get(idx + '\''.len_utf8()..) else {
+        return false;
+    };
+    let mut escaped = false;
+    for (offset, ch) in rest.char_indices() {
+        if offset > 8 {
+            return false;
+        }
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if ch == '\'' {
+            return true;
+        }
+        if ch.is_whitespace() {
+            return false;
+        }
+    }
+    false
 }
 
 fn first_non_ws_column(line: &str) -> usize {
@@ -298,22 +424,23 @@ fn detect_syntax_site(
     if compact.starts_with("//") {
         return None;
     }
+    let declaration = declaration_prefix(&compact);
     match fact.kind.as_str() {
-        "FN" if compact.contains("unsafe fn") => {
+        "FN" if declaration.contains("unsafe fn") => {
             Some((UnsafeSiteKind::UnsafeFn, OperationFamily::Unknown))
         }
-        "TRAIT" if compact.contains("unsafe trait") => {
+        "TRAIT" if declaration.contains("unsafe trait") => {
             Some((UnsafeSiteKind::UnsafeTrait, OperationFamily::Unknown))
         }
-        "IMPL" if compact.contains("unsafe impl") && compact.contains(" Send") => Some((
+        "IMPL" if declaration.contains("unsafe impl") && declaration.contains(" Send") => Some((
             UnsafeSiteKind::UnsafeImplSend,
             OperationFamily::UnsafeImplSendSync,
         )),
-        "IMPL" if compact.contains("unsafe impl") && compact.contains(" Sync") => Some((
+        "IMPL" if declaration.contains("unsafe impl") && declaration.contains(" Sync") => Some((
             UnsafeSiteKind::UnsafeImplSync,
             OperationFamily::UnsafeImplSendSync,
         )),
-        "IMPL" if compact.contains("unsafe impl") => {
+        "IMPL" if declaration.contains("unsafe impl") => {
             Some((UnsafeSiteKind::UnsafeImpl, OperationFamily::Unknown))
         }
         "EXTERN_BLOCK" if compact.contains("extern") => {
@@ -357,6 +484,12 @@ fn card_snippet_for(fact: &SyntaxNodeFact, kind: &UnsafeSiteKind) -> String {
         UnsafeSiteKind::Operation => normalize_call_spacing(&compact),
         _ => compact,
     }
+}
+
+fn declaration_prefix(compact: &str) -> &str {
+    compact
+        .split_once('{')
+        .map_or(compact, |(declaration, _body)| declaration.trim())
 }
 
 fn is_unknown_unsafe_block(compact: &str) -> bool {
@@ -527,4 +660,70 @@ fn parse_ident(rest: &str) -> Option<String> {
         }
     }
     (!name.is_empty()).then_some(name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{env, fs, time::SystemTime};
+
+    #[test]
+    fn masks_unsafe_keywords_inside_non_code_segments() {
+        let masked = mask_non_code_segments(
+            "let text = \"unsafe { ptr::read(x) }\"; // unsafe fn fake() {}",
+        );
+
+        assert!(!masked.contains("unsafe"));
+        assert!(!masked.contains("ptr::read"));
+        assert!(masked.contains("let text ="));
+    }
+
+    #[test]
+    fn masks_raw_strings_before_line_fallback_detection() {
+        let masked = mask_non_code_segments("let text = r#\"unsafe { core::ptr::read(ptr) }\"#;");
+
+        assert_eq!(detect_site(masked.trim()), None);
+    }
+
+    #[test]
+    fn scan_file_ignores_unsafe_text_in_literals_and_comments() -> Result<(), String> {
+        let root = temp_fixture_dir()?;
+        let src_dir = root.join("src");
+        fs::create_dir_all(&src_dir).map_err(|err| err.to_string())?;
+        fs::write(
+            src_dir.join("lib.rs"),
+            r##"
+pub fn describe() -> &'static str {
+    "unsafe { core::ptr::read(ptr) }"
+}
+
+pub fn raw_describe() -> &'static str {
+    r#"pub unsafe fn fake() {}"# // unsafe impl Send for Fake {}
+}
+"##,
+        )
+        .map_err(|err| err.to_string())?;
+
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+
+        assert!(
+            sites.is_empty(),
+            "unexpected false-positive sites: {sites:#?}"
+        );
+        fs::remove_dir_all(root).map_err(|err| err.to_string())?;
+        Ok(())
+    }
+
+    fn temp_fixture_dir() -> Result<PathBuf, String> {
+        let nanos = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|err| err.to_string())?
+            .as_nanos();
+        let path = env::temp_dir().join(format!(
+            "unsafe-review-scanner-test-{}-{nanos}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&path).map_err(|err| err.to_string())?;
+        Ok(path)
+    }
 }
