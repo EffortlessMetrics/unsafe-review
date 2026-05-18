@@ -31,7 +31,7 @@ witnesses by default.
 | Repo posture and badges count open review gaps, not raw unsafe or safety status | Handoff `2026-05-18-repo-policy-v0.4.md` and support tiers cover repo JSON and badge JSON | Experimental | No outcome comparison; not release-grade posture |
 | Baselines and suppressions use exact counted identity | Repo policy handoff records exact baseline/suppression matching and explicit no-new-debt mode | Experimental | Exact identity only; no broad suppressions; no calibrated blocking |
 | Witness routing recommends cheap next action | Support tiers cover route-table tests and fixture routes for raw pointer, FFI, unsafe impl Send, Pin, and invalid-value cases | Experimental | Recommendation only unless a receipt is attached |
-| Witness receipts attach external evidence without executing tools | Receipt docs and tests cover exact-card JSON import, metadata validation, tool/strength validation, DTO shape, template, validate command, Miri saved-output adapter, cargo-careful saved-output adapter, and witness-plan output | Experimental | Saved-output adapters read success logs only; no sanitizer/Loom/Kani parser yet |
+| Witness receipts attach external evidence without executing tools | Receipt docs and tests cover exact-card JSON import, metadata validation, tool/strength validation, DTO shape, template, validate command, Miri saved-output adapter, cargo-careful saved-output adapter, sanitizer saved-output adapter, and witness-plan output | Experimental | Saved-output adapters read success logs only; no Loom/Kani parser yet |
 | Explicit receipts can be authored and validated safely | `receipt template` and `receipt validate` are covered by CLI e2e tests and support tiers | Experimental | Template output does not verify that the recorded command ran |
 | Public claims map to proof | `SUPPORT_TIERS.md` maps every current surface to proof and limits | In place | Keep updating for every new lane |
 | No soundness, UB-free, Miri-clean, site-execution, or default-blocking claim | Trust-boundary text is enforced across artifacts; support tiers and handoffs repeat limits | In place | Must remain part of all new projections |
@@ -41,8 +41,8 @@ witnesses by default.
 These are not failures; they are the next unsupported or weakly verified areas:
 
 - Live LSP server and editor extension remain planned.
-- The first native adapters only import saved Miri and cargo-careful success
-  logs. Native sanitizer, Loom, Shuttle, Kani, and Crux adapters are not
+- The first native adapters only import saved Miri, cargo-careful, and sanitizer
+  success logs. Native Loom, Shuttle, Kani, and Crux adapters are not
   implemented.
 - Witness tools are not executed by `unsafe-review`, and no lane should add
   default execution without a separate plan.

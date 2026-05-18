@@ -44,6 +44,13 @@ require `test result: ok`, and emit a normal `WitnessReceipt` with
 `tool = "cargo-careful"` and `strength = "ran"`. It must not execute
 `cargo-careful`, infer site reach, or create a card.
 
+The CLI may import a receipt from saved sanitizer output. The adapter must read
+an existing log file, require an explicit sanitizer `tool` of `asan`, `msan`,
+`tsan`, or `lsan`, reject empty output, reject failure-looking output, require
+`test result: ok`, and emit a normal `WitnessReceipt` with that sanitizer tool
+and `strength = "ran"`. It must not execute a sanitizer, infer site reach, or
+create a card.
+
 The CLI may also validate receipt files without running analysis. Validation must
 use the same importer checks as normal card analysis so users do not get a
 separate receipt truth.
@@ -126,6 +133,9 @@ after the `recorded_at` date.
   log and rejects failure-looking output.
 - The CLI `cargo-careful` saved-output adapter writes a receipt from a
   success-looking `cargo-careful` log and rejects failure-looking output.
+- The CLI sanitizer saved-output adapter writes a receipt from a success-looking
+  sanitizer log, rejects unsupported sanitizer tools, and rejects
+  failure-looking output.
 - The CLI receipt-validate command counts importable receipts and rejects the
   same invalid receipt files as normal analysis.
 

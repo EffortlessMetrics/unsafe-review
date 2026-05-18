@@ -198,6 +198,27 @@ The `cargo-careful` adapter reads saved output and writes a
 contains `test result: ok` and no failure marker. It does not run
 `cargo-careful`, parse diagnostics into cards, or claim site reach.
 
+Import a receipt from saved sanitizer output after the sanitizer run happened
+outside `unsafe-review`:
+
+```bash
+unsafe-review receipt import-sanitizer <card-id> \
+  --tool asan \
+  --log target/asan-read-header.log \
+  --author core/fixtures \
+  --recorded-at 2026-05-18T00:00:00Z \
+  --expires-at 2026-08-18 \
+  --command "RUSTFLAGS='-Z sanitizer=address' cargo +nightly test read_header" \
+  --limitation "fixture only" \
+  --out .unsafe-review/receipts/asan.json
+```
+
+The sanitizer adapter accepts `asan`, `msan`, `tsan`, or `lsan` as the explicit
+receipt tool. It reads saved output and writes a receipt with `strength = "ran"`
+only when the output contains `test result: ok` and no failure marker. It does
+not run a sanitizer, parse sanitizer diagnostics into cards, or claim site
+reach.
+
 Validate imported receipt files without running analysis:
 
 ```bash

@@ -221,7 +221,7 @@ fn parse_receipt(args: Vec<String>) -> Result<Command, String> {
     let mut rest = args;
     let Some(subcommand) = rest.first() else {
         return Err(
-            "missing receipt subcommand `import-miri`, `import-careful`, `template`, or `validate`"
+            "missing receipt subcommand `import-miri`, `import-careful`, `import-sanitizer`, `template`, or `validate`"
                 .to_string(),
         );
     };
@@ -229,11 +229,14 @@ fn parse_receipt(args: Vec<String>) -> Result<Command, String> {
     rest.remove(0);
     match subcommand.as_str() {
         "import-careful" | "import-cargo-careful" => {
-            parse_saved_output_receipt(rest, "import-careful").map(Command::ReceiptImportCareful)
+            parse_saved_output_receipt(rest, "import-careful", false)
+                .map(Command::ReceiptImportCareful)
         }
         "import-miri" => {
-            parse_saved_output_receipt(rest, "import-miri").map(Command::ReceiptImportMiri)
+            parse_saved_output_receipt(rest, "import-miri", false).map(Command::ReceiptImportMiri)
         }
+        "import-sanitizer" => parse_saved_output_receipt(rest, "import-sanitizer", true)
+            .map(Command::ReceiptImportSanitizer),
         "template" => parse_receipt_template(rest).map(Command::ReceiptTemplate),
         "validate" => parse_receipt_validate(rest),
         other => Err(format!("unknown receipt subcommand `{other}`")),
@@ -243,12 +246,20 @@ fn parse_receipt(args: Vec<String>) -> Result<Command, String> {
 fn parse_saved_output_receipt(
     args: Vec<String>,
     command_name: &str,
+    allow_tool: bool,
 ) -> Result<SavedOutputReceiptOptions, String> {
     let mut options = SavedOutputReceiptOptions::default();
     let mut id: Option<String> = None;
     let mut idx = 0usize;
     while idx < args.len() {
         match args[idx].as_str() {
+            "--tool" if allow_tool => {
+                idx += 1;
+                options.tool = Some(value(&args, idx, "--tool")?.to_string());
+            }
+            arg if allow_tool && arg.starts_with("--tool=") => {
+                options.tool = Some(inline_value(arg, "--tool")?.to_string());
+            }
             "--log" => {
                 idx += 1;
                 options.log = PathBuf::from(value(&args, idx, "--log")?);
@@ -317,6 +328,9 @@ fn parse_saved_output_receipt(
     validate_required_cli_value(&options.recorded_at, "--recorded-at")?;
     validate_required_cli_value(&options.expires_at, "--expires-at")?;
     validate_required_cli_value(&options.command, "--command")?;
+    if allow_tool && options.tool.as_deref().unwrap_or("").trim().is_empty() {
+        return Err("missing value for --tool".to_string());
+    }
     Ok(options)
 }
 
@@ -907,6 +921,52 @@ mod tests {
     }
 
     #[test]
+    fn parses_receipt_import_sanitizer_command() -> Result<(), String> {
+        let command = parse(args([
+            "unsafe-review",
+            "receipt",
+            "import-sanitizer",
+            "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1",
+            "--tool",
+            "asan",
+            "--log",
+            "fixtures/raw_pointer_alignment_receipted/asan.success.log",
+            "--author",
+            "core/fixtures",
+            "--recorded-at",
+            "2026-05-18T00:00:00Z",
+            "--expires-at",
+            "2026-08-18",
+            "--command",
+            "RUSTFLAGS='-Z sanitizer=address' cargo +nightly test read_header",
+            "--limitation",
+            "fixture only",
+            "--out",
+            "target/asan.json",
+        ]))?;
+
+        let Command::ReceiptImportSanitizer(options) = command else {
+            return Err("expected receipt import-sanitizer command".to_string());
+        };
+        assert_eq!(
+            options.card_id,
+            "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1"
+        );
+        assert_eq!(options.tool.as_deref(), Some("asan"));
+        assert_eq!(
+            options.log,
+            PathBuf::from("fixtures/raw_pointer_alignment_receipted/asan.success.log")
+        );
+        assert_eq!(options.author, "core/fixtures");
+        assert_eq!(
+            options.command,
+            "RUSTFLAGS='-Z sanitizer=address' cargo +nightly test read_header"
+        );
+        assert_eq!(options.limitations, vec!["fixture only".to_string()]);
+        Ok(())
+    }
+
+    #[test]
     fn receipt_import_miri_requires_command() {
         let command = parse(args([
             "unsafe-review",
@@ -944,6 +1004,28 @@ mod tests {
         ]));
 
         assert_eq!(command, Err("missing value for --command".to_string()));
+    }
+
+    #[test]
+    fn receipt_import_sanitizer_requires_tool() {
+        let command = parse(args([
+            "unsafe-review",
+            "receipt",
+            "import-sanitizer",
+            "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1",
+            "--log",
+            "asan.log",
+            "--author",
+            "core/fixtures",
+            "--recorded-at",
+            "2026-05-18T00:00:00Z",
+            "--expires-at",
+            "2026-08-18",
+            "--command",
+            "RUSTFLAGS='-Z sanitizer=address' cargo +nightly test read_header",
+        ]));
+
+        assert_eq!(command, Err("missing value for --tool".to_string()));
     }
 
     #[test]

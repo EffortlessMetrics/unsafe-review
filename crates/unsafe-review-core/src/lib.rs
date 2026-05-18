@@ -21,6 +21,7 @@ pub use api::{
 pub use domain::{
     CardId, CargoCarefulReceiptInput, Confidence, ContractEvidence, DischargeEvidence, HazardKind,
     MiriReceiptInput, MissingEvidence, NextAction, Priority, ReachEvidence, RelatedTest,
-    ReviewCard, ReviewClass, SafetyObligation, SourceLocation, UnsafeOperation, UnsafeSite,
-    WITNESS_RECEIPT_SCHEMA_VERSION, WitnessEvidence, WitnessKind, WitnessReceipt, WitnessRoute,
+    ReviewCard, ReviewClass, SafetyObligation, SanitizerReceiptInput, SourceLocation,
+    UnsafeOperation, UnsafeSite, WITNESS_RECEIPT_SCHEMA_VERSION, WitnessEvidence, WitnessKind,
+    WitnessReceipt, WitnessRoute,
 };
