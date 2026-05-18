@@ -17,6 +17,7 @@ Merged PRs:
 - `#138 receipts: import exact card witness receipts`
 - `#140 receipts: validate witness receipt metadata`
 - `#141 test(fixtures): add receipted review card golden`
+- `#146 test(cli): cover receipted fixture output`
 
 The receipt importer:
 
@@ -35,6 +36,8 @@ The receipt importer:
 - removes the `witness` missing-evidence item for exact matches
 - has a committed `raw_pointer_alignment_receipted` fixture/golden proving rendered
   card output
+- has CLI e2e coverage proving `check --format json` imports the receipt,
+  removes missing witness evidence, and keeps the guard gap visible
 
 Receipt import does not create analyzer truth. It attaches external witness
 evidence to an existing `ReviewCard`.
@@ -50,6 +53,7 @@ Targeted local validation added during this slice included:
 rtk cargo test -p unsafe-review-core receipt --locked
 rtk cargo test -p unsafe-review-core imported_receipt --locked
 rtk cargo test -p unsafe-review-core fixture_card_goldens_match_rendered_json --locked
+rtk cargo test -p unsafe-review --test e2e check_json_imports_witness_receipts_without_hiding_guard_gaps --locked
 rtk cargo run --locked -p xtask -- check-fixtures
 ```
 
@@ -79,6 +83,7 @@ The repo may claim:
   visible in imported evidence summaries
 - the `raw_pointer_alignment_receipted` golden proves a receipt does not hide
   the still-missing alignment guard
+- CLI JSON output preserves the same behavior end to end
 
 The repo must not claim:
 
