@@ -2,7 +2,7 @@
 
 Date: 2026-05-18
 Status: current-lane candidate intake drained; later-lane candidates parked
-Base snapshot: `main` at `0cd47e8`
+Base snapshot: `main` at `fa9584f`
 
 ## Operating model
 
@@ -43,6 +43,7 @@ Already landed in this lane:
 - repo-mode dogfood false-positive hardening for deref assignments in product code
 - CLI parser hardening for `--flag=value` artifact commands and missing values
 - core property-test hardening for diff-coordinate and identity-token invariants
+- mutation-sensitive test extraction for obligation mappings and scanner scope behavior
 
 Do not use candidate intake as permission to jump to LSP, agent packets, repo
 badges, receipts, Miri execution, or blocking policy.
@@ -76,7 +77,8 @@ candidate PRs in the theme inventory below.
 | Focused unit coverage | #44, #61, #86, #87 | merged as #93 | closed | current hardening | #93 is the canonical core-only slice for classifier, evidence, and diff parser invariants. |
 | Property testing | #43, #60, #84, #85 | merged as #115 | closed | later hardening | #115 extracted the narrow core invariant slice: unified-diff new-file coordinates, removed-only file tracking, slug token stability, and path-display normalization. It added no fuzz workflow, mutation workflow, product surface, or policy authority. |
 | Fuzzing | #42, #59, #82, #83 | none yet | park | later hardening | Keep as candidate inventory. Avoid scheduled or blocking fuzz workflows in the current lane. |
-| Mutation testing | #41, #57, #78, #79 | none yet | park | later hardening | Useful after the card and PR artifact surfaces settle. Keep non-blocking and manual/scheduled later. |
+| Mutation-sensitive tests | #41, #79 | merged as #119 | closed | current hardening | #119 extracted the current-lane-safe tests for obligation/hazard mapping, concrete-operation suppression, and diff-vs-repo scanner filtering. #41 and #79 were closed as superseded. |
+| Mutation workflow/config | #57, #78 | none yet | park | later hardening | Keep optional mutation config and workflow work parked until a later hardening lane. Do not add mutation workflow surface to the advisory PR artifact loop. |
 | CLI ergonomics and diff handling | #31, #45, #46, #47 | merged as #104 and #112 | closed | current PR/CI projection | #104 kept current-lane fixes: stdin diffs, root-relative diff files, current-directory `--out`, JSON aliases, duplicate card-id rejection, and no `--fail-on-gaps` policy behavior. #112 extracted the useful current-lane slice from stale #46: `--flag=value` parsing, stricter missing-value handling, and help text aligned with advisory artifact outputs. #46 was closed as superseded. |
 | Documentation usage guides | #36, #37, #53, #56, #72, #73, #76, #77 | choose one only after doc-map review | park or rework | later docs | Pick one canonical CLI usage guide. Avoid multiple overlapping docs pages. |
 | Diataxis docs structure | #35, #54, #70, #71 | none yet | park | later docs | Broad docs restructuring is not active-lane work. |
@@ -88,9 +90,10 @@ candidate PRs in the theme inventory below.
 
 ## Immediate intake order
 
-1. The current-lane candidate intake is drained through #112.
-2. #46 is closed as superseded by the narrower #112 extraction.
-3. Leave fuzz, mutation, broad docs, spec expansion, and broad refactor
+1. The current-lane candidate intake is drained through #119.
+2. #46, #41, and #79 are closed as superseded by narrower current-lane
+   extractions.
+3. Leave fuzz, mutation workflow/config, broad docs, spec expansion, and broad refactor
    candidates parked until their target lanes open.
 4. Next current-lane work should dogfood the advisory artifacts on real PRs
    before opening LSP, agent packet, receipt, repo badge, baseline, or blocking
