@@ -283,6 +283,32 @@ the changed raw pointer write inside `extend_from_iter`, recognizes visible
 guard evidence, and routes the remaining missing contract/witness work to the
 owner-specific Miri/cargo-careful path.
 
+### `arrayvec#288`
+
+PR: `https://github.com/bluss/arrayvec/pull/288`
+
+The PR reduces `unsafe` usage in `ArrayString` and adds safety comments around
+remaining `set_len` uses.
+
+Dogfood output:
+
+```text
+elapsed_seconds: 5.34
+changed_rust_files: 1
+cards: 9
+contract_missing: 0
+guard_missing: 9
+operation families: vec_set_len, unknown
+```
+
+This run did not receive a scanner patch. It captured a real limitation in the
+current guard model: `Vec::set_len` evidence remains sparse for initialization
+patterns such as `MaybeUninit::new` loops, const-generic `CAP` capacity facts,
+and shrink operations like `truncate`, `clear`, and `pop` where the initialized
+range obligation is not the right shape. The cards are still useful as advisory
+review prompts, but this sample should not be used as support-tier promotion
+evidence.
+
 ## Proof
 
 Targeted local validation:
@@ -306,6 +332,7 @@ rtk cargo run --locked -p unsafe-review -- repo --root target/dogfood-work/memch
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/memchr --diff target/dogfood-work/memchr-pr215.raw.diff --format json --max-cards 20 --out target/dogfood-work/memchr-pr215.owner-contract.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/smallvec --diff target/dogfood-work/smallvec-pr407.raw.diff --format json --max-cards 20 --out target/dogfood-work/smallvec-pr407.owner-fix.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr308.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr308.unsafe-review.json
+rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.unsafe-review.json
 ```
 
 The dogfood reruns used a temporary `CARGO_TARGET_DIR` to avoid a Windows file
@@ -320,7 +347,7 @@ The repo may claim:
 - the first real-crate dogfood slice was run on `rust-smallvec` and `arrayvec`
 - a capped `memchr` dogfood snapshot now completes
 - real PR-diff dogfood runs on `memchr#215`, `rust-smallvec#407`, and
-  `arrayvec#308` produce card output
+  `arrayvec#308`, and `arrayvec#288` produce card output
 - dogfood found and fixed import/declaration and `cfg(target_feature)`
   false positives
 - capped repo scans stop after the requested card cap
@@ -335,7 +362,7 @@ The repo must not claim:
 - usable-alpha support-tier promotion
 - full-repository coverage from top-50 capped snapshots
 - uncapped repo-scan performance
-- general PR-diff usefulness from three PRs
+- general PR-diff usefulness from four PRs
 - memory-safety proof
 - UB-free status
 - witness execution
@@ -349,6 +376,9 @@ The repo must not claim:
 - `memchr` completion depends on capped-scan behavior; uncapped performance is
   still unmeasured.
 - No human audit was performed for every emitted card.
+- `arrayvec#288` shows that `Vec::set_len` guard evidence needs better
+  modeling for initialization loops, const capacity facts, and shrink
+  operations.
 - These runs do not prove absence of missed unsafe seams.
 
 ## Next useful work
@@ -358,6 +388,8 @@ Continue dogfood before promotion:
 - run uncapped or sampled repo inventories on additional unsafe-heavy crates
 - measure card usefulness on real PR diffs, not only whole-repo snapshots
 - record repeated false-positive categories as fixture regressions
+- improve `Vec::set_len` obligation/evidence modeling before support-tier
+  promotion
 - keep support tiers experimental until dogfood evidence justifies promotion
 
 Defer:
