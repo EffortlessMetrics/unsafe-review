@@ -242,6 +242,7 @@ mod tests {
         "raw_pointer_read_len_capacity_assert",
         "raw_pointer_write_assignment",
         "raw_pointer_write_bytes",
+        "raw_pointer_write_maybeuninit",
         "pointer_arithmetic_num_ctrl_bytes_guard",
         "slice_from_raw_parts_mut",
         "slice_from_raw_parts_mut_maybeuninit",
