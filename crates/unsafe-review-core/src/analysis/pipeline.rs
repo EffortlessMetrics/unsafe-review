@@ -245,6 +245,48 @@ mod tests {
     }
 
     #[test]
+    fn raw_pointer_assignment_is_classified_as_write() -> Result<(), String> {
+        let root = temp_fixture(
+            "raw_pointer_assignment_is_classified_as_write",
+            r#"pub fn write_byte(ptr: *mut u8, len: usize) {
+    if !ptr.is_null() && len >= 1 {
+        unsafe {
+            *ptr = 1;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn reaches_write_byte() {
+        let mut value = 0u8;
+        super::write_byte(&mut value, 1);
+    }
+}
+"#,
+        )?;
+        let output = analyze(AnalyzeInput {
+            root: root.clone(),
+            scope: Scope::Repo,
+            diff: DiffSource::NoneRepoScan,
+            mode: AnalysisMode::Repo,
+            policy: PolicyMode::Advisory,
+            include_unchanged_tests: true,
+            max_cards: None,
+        });
+        let _ = std::fs::remove_dir_all(&root);
+        let output = output?;
+        let card = single_card("raw_pointer_assignment_is_classified_as_write", &output)?;
+
+        assert_eq!(card.operation.family, OperationFamily::RawPointerWrite);
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.site.snippet, "*ptr = 1;");
+        assert_no_unknown_wrapper_card("raw_pointer_assignment_is_classified_as_write", &output);
+        Ok(())
+    }
+
+    #[test]
     fn raw_pointer_v1_negative_cases_stay_pinned() -> Result<(), String> {
         let safe_reference = fixture_output("safe_reference_deref_no_cards")?;
         assert_eq!(safe_reference.summary.cards, 0);
@@ -256,6 +298,21 @@ mod tests {
         assert_eq!(card.operation.family, OperationFamily::Unknown);
         assert_eq!(card.class, ReviewClass::ContractMissing);
         Ok(())
+    }
+
+    fn temp_fixture(name: &str, source: &str) -> Result<PathBuf, String> {
+        let root =
+            std::env::temp_dir().join(format!("unsafe-review-core-{name}-{}", std::process::id()));
+        if root.exists() {
+            std::fs::remove_dir_all(&root)
+                .map_err(|err| format!("remove {} failed: {err}", root.display()))?;
+        }
+        let src = root.join("src");
+        std::fs::create_dir_all(&src)
+            .map_err(|err| format!("create {} failed: {err}", src.display()))?;
+        std::fs::write(src.join("lib.rs"), source)
+            .map_err(|err| format!("write temp fixture failed: {err}"))?;
+        Ok(root)
     }
 
     fn fixture_output(name: &str) -> Result<AnalyzeOutput, String> {

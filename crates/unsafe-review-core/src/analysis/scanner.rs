@@ -265,13 +265,16 @@ fn detect_syntax_sites(parsed: &ParsedSource) -> Vec<DetectedSyntaxSite> {
     let unsafe_block_ranges = unsafe_block_ranges(parsed);
     let operation_block_ranges = operation_block_ranges(parsed, &unsafe_block_ranges);
     for fact in &parsed.nodes {
-        let Some((kind, family)) =
-            detect_syntax_site(fact, &unsafe_block_ranges, &operation_block_ranges)
-        else {
+        let Some((kind, family)) = detect_syntax_site(
+            fact,
+            &parsed.text,
+            &unsafe_block_ranges,
+            &operation_block_ranges,
+        ) else {
             continue;
         };
         let _span_len = fact.end.saturating_sub(fact.start);
-        let card_snippet = card_snippet_for(fact, &kind);
+        let card_snippet = card_snippet_for(fact, &kind, &family, &parsed.text);
         sites.push(DetectedSyntaxSite {
             line: fact.line,
             column: fact.column,
@@ -291,6 +294,7 @@ fn detect_syntax_sites(parsed: &ParsedSource) -> Vec<DetectedSyntaxSite> {
 
 fn detect_syntax_site(
     fact: &SyntaxNodeFact,
+    source: &str,
     unsafe_block_ranges: &[(usize, usize)],
     operation_block_ranges: &BTreeSet<(usize, usize)>,
 ) -> Option<(UnsafeSiteKind, OperationFamily)> {
@@ -331,7 +335,12 @@ fn detect_syntax_site(
         "PREFIX_EXPR"
             if is_raw_pointer_deref(&compact) && is_inside_range(fact, unsafe_block_ranges) =>
         {
-            Some((UnsafeSiteKind::Operation, OperationFamily::RawPointerDeref))
+            let family = if prefix_deref_is_assignment_target(fact, source) {
+                OperationFamily::RawPointerWrite
+            } else {
+                OperationFamily::RawPointerDeref
+            };
+            Some((UnsafeSiteKind::Operation, family))
         }
         "CALL_EXPR" | "METHOD_CALL_EXPR" | "MACRO_EXPR" => {
             detect_site(&normalize_call_spacing(&compact))
@@ -340,7 +349,12 @@ fn detect_syntax_site(
     }
 }
 
-fn card_snippet_for(fact: &SyntaxNodeFact, kind: &UnsafeSiteKind) -> String {
+fn card_snippet_for(
+    fact: &SyntaxNodeFact,
+    kind: &UnsafeSiteKind,
+    family: &OperationFamily,
+    source: &str,
+) -> String {
     let compact = compact_whitespace(&fact.snippet);
     match kind {
         UnsafeSiteKind::UnsafeBlock => "unsafe {".to_string(),
@@ -354,9 +368,41 @@ fn card_snippet_for(fact: &SyntaxNodeFact, kind: &UnsafeSiteKind) -> String {
             .map_or(compact.clone(), |(head, _tail)| {
                 format!("{} {{", head.trim())
             }),
+        UnsafeSiteKind::Operation if family == &OperationFamily::RawPointerWrite => {
+            source_line_at(source, fact.start)
+                .map(|line| compact_whitespace(line.trim()))
+                .filter(|line| !line.is_empty())
+                .unwrap_or_else(|| normalize_call_spacing(&compact))
+        }
         UnsafeSiteKind::Operation => normalize_call_spacing(&compact),
         _ => compact,
     }
+}
+
+fn prefix_deref_is_assignment_target(fact: &SyntaxNodeFact, source: &str) -> bool {
+    let Some(rest) = source.get(fact.end..) else {
+        return false;
+    };
+    let mut rest = rest.trim_start();
+    while let Some(after_paren) = rest.strip_prefix(')') {
+        rest = after_paren.trim_start();
+    }
+    if ["+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>="]
+        .iter()
+        .any(|operator| rest.starts_with(operator))
+    {
+        return true;
+    }
+    rest.starts_with('=') && !rest.starts_with("==") && !rest.starts_with("=>")
+}
+
+fn source_line_at(source: &str, offset: usize) -> Option<&str> {
+    let offset = offset.min(source.len());
+    let start = source[..offset].rfind('\n').map_or(0, |idx| idx + 1);
+    let end = source[offset..]
+        .find('\n')
+        .map_or(source.len(), |idx| offset + idx);
+    source.get(start..end)
 }
 
 fn is_unknown_unsafe_block(compact: &str) -> bool {
