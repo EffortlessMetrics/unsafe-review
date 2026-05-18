@@ -22,6 +22,7 @@ Merged PRs:
 - `#150 receipts: validate witness tool lanes`
 - `#153 receipts: expose sdk receipt dto`
 - `#155 receipts: add receipt template command`
+- `#157 receipts: add receipt validate command`
 
 The receipt importer:
 
@@ -51,6 +52,8 @@ The receipt importer:
   adapters share the same schema as the importer
 - adds `unsafe-review receipt template` as a validated JSON authoring aid for
   explicit witness receipts
+- adds `unsafe-review receipt validate` as a receipt-only validation command
+  that reuses the importer checks without running analysis or witnesses
 
 Receipt import does not create analyzer truth. It attaches external witness
 evidence to an existing `ReviewCard`.
@@ -88,6 +91,13 @@ rtk cargo test -p unsafe-review-cli receipt_template --locked
 rtk cargo test -p unsafe-review --test e2e receipt_template --locked
 ```
 
+The receipt-validate follow-up also passed:
+
+```bash
+rtk cargo test -p unsafe-review-cli receipt_validate --locked
+rtk cargo test -p unsafe-review --test e2e receipt_validate --locked
+```
+
 The recurring workspace gate also passed:
 
 ```bash
@@ -116,6 +126,8 @@ The repo may claim:
 - the receipt JSON shape is backed by `unsafe_review_core::WitnessReceipt`
 - `unsafe-review receipt template` can render a validated receipt JSON object
   from explicit user metadata
+- `unsafe-review receipt validate` can count importable receipt files through
+  the same validation path used by card analysis
 - the `raw_pointer_alignment_receipted` golden proves a receipt does not hide
   the still-missing alignment guard
 - CLI JSON output preserves the same behavior end to end
@@ -144,6 +156,8 @@ The repo must not claim:
   or clock freshness against the current date.
 - Receipt template output is an authoring aid only; it does not run or validate
   the recorded witness command.
+- Receipt validation does not analyze cards, run witnesses, or prove witness
+  success.
 
 ## Next useful work
 
