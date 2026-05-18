@@ -20,6 +20,14 @@ impl DiffIndex {
             .get(path)
             .is_some_and(|lines| lines.iter().any(|changed| changed.abs_diff(line) <= 6))
     }
+
+    pub(crate) fn contains_in_range(&self, path: &PathBuf, start: usize, end: usize) -> bool {
+        self.changed_lines.get(path).is_some_and(|lines| {
+            lines
+                .iter()
+                .any(|changed| start <= *changed && *changed <= end)
+        })
+    }
 }
 
 pub(crate) fn parse_unified_diff(input: &str) -> DiffIndex {
@@ -121,6 +129,8 @@ index 1111111..2222222 100644
         assert!(!index.changed_lines[&path].contains(&10));
         assert!(index.contains_near(&path, 15));
         assert!(!index.contains_near(&path, 18));
+        assert!(index.contains_in_range(&path, 8, 12));
+        assert!(!index.contains_in_range(&path, 12, 15));
     }
 
     #[test]

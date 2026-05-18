@@ -56,7 +56,14 @@ pub(crate) fn scan_file(
             continue;
         }
         seen.insert(site_key(line_no, &kind, &family));
-        let changed = diff.is_none_or(|d| repo_mode || d.contains_near(rel, line_no));
+        let changed = diff.is_none_or(|d| {
+            repo_mode
+                || if syntax_site_uses_exact_range(&kind) {
+                    d.contains_in_range(rel, line_no, line_no)
+                } else {
+                    d.contains_near(rel, line_no)
+                }
+        });
         if !changed && !repo_mode {
             continue;
         }
@@ -94,7 +101,14 @@ pub(crate) fn scan_file(
         if !seen.insert(site_key(detected.line, &detected.kind, &detected.family)) {
             continue;
         }
-        let changed = diff.is_none_or(|d| repo_mode || d.contains_near(rel, detected.line));
+        let changed = diff.is_none_or(|d| {
+            repo_mode
+                || if syntax_site_uses_exact_range(&detected.kind) {
+                    d.contains_in_range(rel, detected.line, detected.end_line)
+                } else {
+                    d.contains_near(rel, detected.line)
+                }
+        });
         if !changed && !repo_mode {
             continue;
         }
@@ -557,6 +571,19 @@ fn syntax_site_covers_fallback(
     syntax_sites.iter().any(|site| {
         site.kind == *kind && site.family == *family && site.line <= line && line <= site.end_line
     })
+}
+
+fn syntax_site_uses_exact_range(kind: &UnsafeSiteKind) -> bool {
+    matches!(
+        kind,
+        UnsafeSiteKind::UnsafeFn
+            | UnsafeSiteKind::UnsafeTrait
+            | UnsafeSiteKind::UnsafeImpl
+            | UnsafeSiteKind::UnsafeImplSend
+            | UnsafeSiteKind::UnsafeImplSync
+            | UnsafeSiteKind::ExternBlock
+            | UnsafeSiteKind::StaticMut
+    )
 }
 
 fn detect_syntax_site(

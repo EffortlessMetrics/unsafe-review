@@ -1,0 +1,4 @@
+[package]
+name = "adjacent-unchanged-unsafe-fn-no-card-fixture"
+version = "0.0.0"
+edition = "2024"

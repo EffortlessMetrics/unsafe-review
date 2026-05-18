@@ -664,6 +664,17 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn adjacent_unchanged_unsafe_fn_is_not_reported_by_neighboring_change() -> Result<(), String> {
+        let output = fixture_output("adjacent_unchanged_unsafe_fn_no_card")?;
+
+        assert!(
+            output.cards.is_empty(),
+            "neighboring safe-code changes should not report an unchanged unsafe declaration"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn slice_from_raw_parts_mut_uses_slice_operation_family() -> Result<(), String> {
         let output = fixture_output("slice_from_raw_parts_mut")?;
         let card = single_card("slice_from_raw_parts_mut", &output)?;

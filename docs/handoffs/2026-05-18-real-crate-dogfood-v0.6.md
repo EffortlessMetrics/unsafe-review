@@ -16,7 +16,7 @@ Dogfood repositories:
 | `servo/rust-smallvec` | `bc8a854926a8d940164f6c4ad4fc6efe51962e93` | completed with `--max-cards 50` |
 | `bluss/arrayvec` | `1bc606d8c83a34b8fae9dd117bfeab10f90d2ca7` | completed with `--max-cards 50` |
 | `BurntSushi/memchr` | `db1a77d4b556a1321e136ca0514e43e74ea5fcc3` | completed with `--max-cards 50` after capped-scan hardening |
-| `rust-lang/hashbrown` | `7b3bba6eb4b2f03636155c918552b5f30c1a05b3` | PR-diff dogfood completed for `hashbrown#657`, `hashbrown#667`, `hashbrown#692`, and `hashbrown#693` |
+| `rust-lang/hashbrown` | `7b3bba6eb4b2f03636155c918552b5f30c1a05b3` | PR-diff dogfood completed for `hashbrown#501`, `hashbrown#657`, `hashbrown#667`, `hashbrown#692`, and `hashbrown#693` |
 
 The first two completed runs exposed two noisy false positives:
 
@@ -97,6 +97,8 @@ core operation classification gap:
   generic `unknown` wrapper cards
 - nested unsafe operation calls do not also emit duplicate parent-call cards for
   the same operation family
+- neighboring unchanged unsafe declarations are not reported just because a
+  nearby safe function changed
 - `&'static mut ...` lifetime/type text is not classified as a `static mut`
   item
 
@@ -109,7 +111,8 @@ case without changing the older `SAFETY:`-comment helper behavior. An
 `unwrap_unchecked_result` fixture pins unchecked unwrap detection. A
 `multiline_unsafe_fn_call_wrapper` fixture pins multi-line unsafe-call wrapper
 classification. A `nested_unsafe_operation_call_dedupe` fixture pins parent-call
-dedupe for nested unsafe operations.
+dedupe for nested unsafe operations. An `adjacent_unchanged_unsafe_fn_no_card`
+fixture pins diff-range handling for unchanged unsafe declarations.
 
 ## Dogfood observations
 
@@ -930,6 +933,46 @@ The improved cards are still advisory only. The dedupe only removes parent
 syntax nodes that contain a smaller operation of the same family; it does not
 infer stronger `NonNull` validity evidence or execute a witness.
 
+### `hashbrown#501`
+
+PR: `https://github.com/rust-lang/hashbrown/pull/501`
+
+The PR reduces unsafe code by replacing `NonNull::new_unchecked(...cast())` with
+`NonNull::cast()`.
+
+Initial dogfood output:
+
+```text
+changed_rust_files: 1
+cards: 1
+contract_missing: 1
+operation families: unknown
+```
+
+The single card was an adjacent unchanged declaration:
+
+```text
+data_start  line 945  unsafe_fn/unknown  contract_missing
+```
+
+This run exposed a diff-precision gap: declaration cards used the same
+neighborhood matching as operation cards, so an unchanged unsafe function could
+be reported because a nearby safe function changed.
+
+Follow-up rerun after making unsafe declaration cards require a changed line in
+their syntax range:
+
+```text
+changed_rust_files: 1
+cards: 0
+contract_missing: 0
+operation families: none
+```
+
+The improved behavior is still advisory only. Operation cards continue to use
+diff-neighborhood matching, while unsafe declarations use exact syntax-range
+matching so neighboring declaration cards do not create review noise.
+
 ## Proof
 
 Targeted local validation:
@@ -951,6 +994,7 @@ rtk cargo test -p unsafe-review-core private_unsafe_helper_can_use_local_safety_
 rtk cargo test -p unsafe-review-core unwrap_unchecked_uses_concrete_operation_family --locked
 rtk cargo test -p unsafe-review-core multiline_unsafe_call_wrapper_uses_concrete_operation_family --locked
 rtk cargo test -p unsafe-review-core nested_unsafe_operation_does_not_emit_parent_duplicate --locked
+rtk cargo test -p unsafe-review-core adjacent_unchanged_unsafe_fn_is_not_reported_by_neighboring_change --locked
 rtk cargo test -p unsafe-review-core fixture_card_goldens_match_rendered_json --locked
 rtk cargo run --locked -p xtask -- check-calibration
 ```
@@ -984,6 +1028,7 @@ rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hash
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr693.raw.diff --format json --max-cards 30 --out target/dogfood-work/hashbrown-pr693.after-unwrap-unchecked.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr657.raw.diff --format json --max-cards 40 --out target/dogfood-work/hashbrown-pr657.after-multiline-unsafe-call.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr667.raw.diff --format json --max-cards 40 --out target/dogfood-work/hashbrown-pr667.after-nested-dedupe.json
+rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr501.raw.diff --format json --max-cards 40 --out target/dogfood-work/hashbrown-pr501.after-declaration-range.json
 ```
 
 The dogfood reruns used a temporary `CARGO_TARGET_DIR` to avoid a Windows file
@@ -1002,8 +1047,8 @@ The repo may claim:
 - real PR-diff dogfood runs on `memchr#215`, `rust-smallvec#407`,
   `rust-smallvec#277`, `rust-smallvec#64`, `rust-smallvec#254`,
   `arrayvec#308`, `arrayvec#138`, `arrayvec#187`, `arrayvec#174`, and
-  `arrayvec#288`, `hashbrown#657`, `hashbrown#667`, `hashbrown#692`, and
-  `hashbrown#693` produce card output
+  `arrayvec#288`, `hashbrown#501`, `hashbrown#657`, `hashbrown#667`,
+  `hashbrown#692`, and `hashbrown#693` produce card output
 - dogfood found and fixed import/declaration and `cfg(target_feature)`
   false positives
 - `&'static mut` type/lifetime text is not classified as a `static mut` item
@@ -1058,6 +1103,8 @@ The repo may claim:
   `unsafe_fn_call`
 - one fixture-backed parent-call dedupe improvement removed one duplicate
   `hashbrown#667` `nonnull_unchecked` parent-call card
+- one fixture-backed diff-precision improvement changed `hashbrown#501` from one
+  adjacent unchanged unsafe declaration card to zero cards
 - attributed unsafe function declarations are deduped between syntax-backed
   extraction and fallback line scanning
 - false-positive regression coverage exists in fixtures and calibration
@@ -1069,7 +1116,7 @@ The repo must not claim:
 - usable-alpha support-tier promotion
 - full-repository coverage from top-50 capped snapshots
 - uncapped repo-scan performance
-- general PR-diff usefulness from fourteen PRs
+- general PR-diff usefulness from fifteen PRs
 - memory-safety proof
 - UB-free status
 - witness execution
@@ -1080,7 +1127,7 @@ The repo must not claim:
 - Only three real crates completed capped repo snapshots in this slice; four
   crates have at least one snapshot or PR-diff receipt.
 - The successful dogfood snapshots were capped at 50 cards.
-- Only fourteen real PR diffs were measured.
+- Only fifteen real PR diffs were measured.
 - `memchr` completion depends on capped-scan behavior; uncapped performance is
   still unmeasured.
 - No human audit was performed for every emitted card.
@@ -1122,6 +1169,9 @@ The repo must not claim:
 - `hashbrown#667` now dedupes parent calls that contain a smaller unsafe
   operation of the same family, but broader nested-operation attribution remains
   source-syntax heuristic work.
+- `hashbrown#501` now avoids adjacent unchanged unsafe declaration cards when a
+  neighboring safe function changes, but fallback declaration range handling is
+  intentionally stricter than operation neighborhood matching.
 - These runs do not prove absence of missed unsafe seams.
 
 ## Next useful work
