@@ -1,0 +1,10 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,0 +1,6 @@
++use core::pin::Pin;
++
++pub fn pin_mut_unchecked(value: &mut u8) -> Pin<&mut u8> {
++    // SAFETY: fixture names the pinning contract but does not prove it locally.
++    unsafe { Pin::new_unchecked(value) }
++}

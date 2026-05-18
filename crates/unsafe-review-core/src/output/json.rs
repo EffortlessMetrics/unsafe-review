@@ -298,6 +298,8 @@ mod tests {
         "transmute_invalid_value",
         "unsafe_impl_send",
         "ffi_sanitizer_route",
+        "get_unchecked_mut_bounds",
+        "pin_new_unchecked",
     ];
 
     #[test]

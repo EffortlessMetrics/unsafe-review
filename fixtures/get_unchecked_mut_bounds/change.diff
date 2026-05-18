@@ -1,0 +1,8 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,0 +1,4 @@
++pub fn pick_unchecked_mut(values: &mut [u8], index: usize) -> &mut u8 {
++    // SAFETY: caller must ensure `index` is in bounds; this fixture has no guard.
++    unsafe { values.get_unchecked_mut(index) }
++}
