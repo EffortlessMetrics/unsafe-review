@@ -250,6 +250,23 @@ fn repo_inventory_and_badges_count_open_gaps_without_safety_claim() -> Result<()
     assert_eq!(plus_badge["message"], "0 contract / 1 guard / 0 witness");
     assert_ne!(plus_badge["message"], "UB-free");
 
+    let repo_markdown = run_success([
+        os("repo"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--format"),
+        os("markdown"),
+    ])?;
+    let repo_markdown = stdout_text(&repo_markdown)?;
+    assert!(repo_markdown.contains("# unsafe-review repo posture"));
+    assert!(repo_markdown.contains("## Top classes"));
+    assert!(repo_markdown.contains("| `guard_missing` | 1 |"));
+    assert!(repo_markdown.contains("## Top operation families"));
+    assert!(repo_markdown.contains("| `raw_pointer_read` | 1 |"));
+    assert!(repo_markdown.contains("## Trust boundary"));
+    assert!(repo_markdown.contains("not raw unsafe usage"));
+    assert!(repo_markdown.contains("not UB-free status"));
+
     Ok(())
 }
 

@@ -1,8 +1,13 @@
 use crate::api::AnalyzeOutput;
+use crate::api::Scope;
 use crate::domain::ReviewCard;
 use crate::util::path_display;
+use std::collections::BTreeMap;
 
 pub(crate) fn render(output: &AnalyzeOutput) -> String {
+    if matches!(output.scope, Scope::Repo) {
+        return render_repo_posture(output);
+    }
     let mut out = String::new();
     out.push_str("# unsafe-review\n\n");
     out.push_str(&format!(
@@ -40,6 +45,105 @@ pub(crate) fn render(output: &AnalyzeOutput) -> String {
     out.push_str("\n## Trust boundary\n\n");
     out.push_str("This is static unsafe contract review. It is not a proof of memory safety and not a Miri result unless a witness receipt is attached.\n");
     out
+}
+
+fn render_repo_posture(output: &AnalyzeOutput) -> String {
+    let mut out = String::new();
+    out.push_str("# unsafe-review repo posture\n\n");
+    out.push_str("Static repo-scope unsafe-review evidence projected from ReviewCards.\n\n");
+    out.push_str("## Summary\n\n");
+    out.push_str("| Cards | Open gaps | Contract missing | Guard missing | Guarded unwitnessed | Requires Loom | Miri unsupported | Static unknown |\n");
+    out.push_str("|---:|---:|---:|---:|---:|---:|---:|---:|\n");
+    out.push_str(&format!(
+        "| {} | {} | {} | {} | {} | {} | {} | {} |\n\n",
+        output.summary.cards,
+        output.summary.open_actionable_gaps,
+        output.summary.contract_missing,
+        output.summary.guard_missing,
+        output.summary.guarded_unwitnessed,
+        output.summary.requires_loom,
+        output.summary.miri_unsupported,
+        output.summary.static_unknown
+    ));
+
+    out.push_str("## Top classes\n\n");
+    render_counts_table(&mut out, "Class", class_counts(output));
+
+    out.push_str("## Top operation families\n\n");
+    render_counts_table(&mut out, "Operation family", operation_counts(output));
+
+    out.push_str("## Witness routes\n\n");
+    render_counts_table(&mut out, "Route", route_counts(output));
+
+    out.push_str("## Cards\n\n");
+    if output.cards.is_empty() {
+        out.push_str("No repo-scope unsafe-review cards found.\n\n");
+    } else {
+        out.push_str("| ID | Class | Operation | Missing evidence | Route |\n");
+        out.push_str("|---|---|---|---|---|\n");
+        for card in &output.cards {
+            let route = card
+                .routes
+                .first()
+                .map_or("human-deep-review", |route| route.kind.as_str());
+            out.push_str(&format!(
+                "| `{}` | `{}` | `{}` | {} | `{}` |\n",
+                md_cell(&card.id.to_string()),
+                card.class.as_str(),
+                card.operation.family.as_str(),
+                md_cell(&missing_summary(card)),
+                route
+            ));
+        }
+        out.push('\n');
+    }
+
+    out.push_str("## Trust boundary\n\n");
+    out.push_str("This is static repo posture evidence from unsafe-review cards. It counts open review gaps, not raw unsafe usage, not memory-safety proof, not UB-free status, and not a Miri result unless a witness receipt is attached.\n");
+    out
+}
+
+fn class_counts(output: &AnalyzeOutput) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::new();
+    for card in &output.cards {
+        *counts.entry(card.class.as_str().to_string()).or_default() += 1;
+    }
+    counts
+}
+
+fn operation_counts(output: &AnalyzeOutput) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::new();
+    for card in &output.cards {
+        *counts
+            .entry(card.operation.family.as_str().to_string())
+            .or_default() += 1;
+    }
+    counts
+}
+
+fn route_counts(output: &AnalyzeOutput) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::new();
+    for card in &output.cards {
+        let route = card
+            .routes
+            .first()
+            .map_or("human-deep-review", |route| route.kind.as_str());
+        *counts.entry(route.to_string()).or_default() += 1;
+    }
+    counts
+}
+
+fn render_counts_table(out: &mut String, label: &str, counts: BTreeMap<String, usize>) {
+    if counts.is_empty() {
+        out.push_str("No cards to summarize.\n\n");
+        return;
+    }
+    out.push_str(&format!("| {label} | Count |\n"));
+    out.push_str("|---|---:|\n");
+    for (value, count) in counts {
+        out.push_str(&format!("| `{}` | {} |\n", md_cell(&value), count));
+    }
+    out.push('\n');
 }
 
 pub(crate) fn render_pr_summary(output: &AnalyzeOutput) -> String {
@@ -291,6 +395,25 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn repo_posture_markdown_counts_open_gaps_without_safety_claim() -> Result<(), String> {
+        let output = repo_fixture_output("raw_pointer_alignment")?;
+        let rendered = render(&output);
+
+        assert!(rendered.contains("# unsafe-review repo posture"));
+        assert!(rendered.contains("## Summary"));
+        assert!(rendered.contains("| 1 | 1 | 0 | 1 | 0 | 0 | 0 | 0 |"));
+        assert!(rendered.contains("## Top classes"));
+        assert!(rendered.contains("| `guard_missing` | 1 |"));
+        assert!(rendered.contains("## Top operation families"));
+        assert!(rendered.contains("| `raw_pointer_read` | 1 |"));
+        assert!(rendered.contains("## Witness routes"));
+        assert!(rendered.contains("## Trust boundary"));
+        assert!(rendered.contains("not raw unsafe usage"));
+        assert!(rendered.contains("not UB-free status"));
+        Ok(())
+    }
+
     fn fixture_output(name: &str) -> Result<AnalyzeOutput, String> {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../fixtures")
@@ -300,6 +423,21 @@ mod tests {
             scope: Scope::Diff,
             diff: DiffSource::File(root.join("change.diff")),
             mode: AnalysisMode::Draft,
+            policy: PolicyMode::Advisory,
+            include_unchanged_tests: true,
+            max_cards: None,
+        })
+    }
+
+    fn repo_fixture_output(name: &str) -> Result<AnalyzeOutput, String> {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures")
+            .join(name);
+        analyze(AnalyzeInput {
+            root,
+            scope: Scope::Repo,
+            diff: DiffSource::NoneRepoScan,
+            mode: AnalysisMode::Repo,
             policy: PolicyMode::Advisory,
             include_unchanged_tests: true,
             max_cards: None,
