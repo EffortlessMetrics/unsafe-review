@@ -24,11 +24,7 @@ pub(crate) fn scan_file(
         fs::read_to_string(&abs).map_err(|err| format!("read {} failed: {err}", abs.display()))?;
     let lines: Vec<&str> = text.lines().collect();
     let parsed = super::syntax::parse_source(text.as_str());
-    let syntax_sites = if parsed.parse_errors.is_empty() {
-        detect_syntax_sites(&parsed)
-    } else {
-        Vec::new()
-    };
+    let syntax_sites = detect_syntax_sites(&parsed);
     let syntax_operation_lines = syntax_sites
         .iter()
         .filter(|site| site.kind == UnsafeSiteKind::Operation)
@@ -819,6 +815,39 @@ mod tests {
 
         fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
         assert!(sites.is_empty(), "unexpected sites: {sites:#?}");
+        Ok(())
+    }
+
+    #[test]
+    fn syntax_detection_survives_unrelated_parse_errors() -> Result<(), String> {
+        let root = unique_temp_dir()?;
+        fs::create_dir_all(root.join("src"))
+            .map_err(|err| format!("create temp src failed: {err}"))?;
+        fs::write(
+            root.join("src/lib.rs"),
+            "pub fn read_byte(ptr: *const u8) -> u8 {\n    // SAFETY: caller provides a valid pointer.\n    unsafe {\n        ptr\n            .read ()\n    }\n}\n\npub fn broken( {\n",
+        )
+        .map_err(|err| format!("write temp source failed: {err}"))?;
+
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        let operations = sites
+            .iter()
+            .filter(|site| site.site.kind == UnsafeSiteKind::Operation)
+            .collect::<Vec<_>>();
+        assert_eq!(operations.len(), 1, "unexpected sites: {sites:#?}");
+        assert_eq!(
+            operations[0].operation.family,
+            OperationFamily::RawPointerRead
+        );
+        assert!(
+            sites.iter().all(|site| {
+                !(site.site.kind == UnsafeSiteKind::UnsafeBlock
+                    && site.operation.family == OperationFamily::Unknown)
+            }),
+            "concrete syntax operation should suppress wrapper unknown unsafe block"
+        );
         Ok(())
     }
 
