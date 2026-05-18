@@ -1,5 +1,7 @@
+use super::syntax::{ParsedSource, SyntaxNodeFact};
 use crate::domain::{OperationFamily, SourceLocation, UnsafeOperation, UnsafeSite, UnsafeSiteKind};
 use crate::input::diff::DiffIndex;
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -21,7 +23,14 @@ pub(crate) fn scan_file(
     let text =
         fs::read_to_string(&abs).map_err(|err| format!("read {} failed: {err}", abs.display()))?;
     let lines: Vec<&str> = text.lines().collect();
+    let parsed = super::syntax::parse_source(text.as_str());
+    let syntax_sites = if parsed.parse_errors.is_empty() {
+        detect_syntax_sites(&parsed)
+    } else {
+        Vec::new()
+    };
     let mut out = Vec::new();
+    let mut seen = BTreeSet::new();
     for (idx, raw) in lines.iter().enumerate() {
         let line_no = idx + 1;
         let trimmed = raw.trim();
@@ -31,6 +40,7 @@ pub(crate) fn scan_file(
         let Some((kind, family)) = detect_site(trimmed) else {
             continue;
         };
+        seen.insert(site_key(line_no, &kind, &family));
         let changed = diff.is_none_or(|d| repo_mode || d.contains_near(rel, line_no));
         if !changed && !repo_mode {
             continue;
@@ -65,6 +75,55 @@ pub(crate) fn scan_file(
             context_after,
         });
     }
+
+    for detected in syntax_sites {
+        if !seen.insert(site_key(detected.line, &detected.kind, &detected.family)) {
+            continue;
+        }
+        let changed = diff.is_none_or(|d| repo_mode || d.contains_near(rel, detected.line));
+        if !changed && !repo_mode {
+            continue;
+        }
+        let idx = detected.line.saturating_sub(1);
+        let owner = parse_fn_name(&detected.source_snippet).or_else(|| find_owner(&lines, idx));
+        let visibility = if is_public_surface(&detected.source_snippet) {
+            "public"
+        } else {
+            "private"
+        }
+        .to_string();
+        let public_api_surface = is_public_api_surface(&detected.kind, &detected.source_snippet);
+        let context_before = context_slice(&lines, idx.saturating_sub(8), idx.min(lines.len()));
+        let context_after = context_slice(
+            &lines,
+            (idx + 1).min(lines.len()),
+            (idx + 8).min(lines.len()),
+        );
+        out.push(ScannedSite {
+            site: UnsafeSite {
+                location: SourceLocation::new(rel.clone(), detected.line, detected.column),
+                kind: detected.kind,
+                owner,
+                visibility,
+                public_api_surface,
+                changed,
+                snippet: detected.card_snippet.clone(),
+            },
+            operation: UnsafeOperation {
+                family: detected.family,
+                expression: detected.card_snippet,
+            },
+            context_before,
+            context_after,
+        });
+    }
+    out.sort_by(|left, right| {
+        left.site
+            .location
+            .line
+            .cmp(&right.site.location.line)
+            .then(left.site.location.column.cmp(&right.site.location.column))
+    });
     Ok(out)
 }
 
@@ -176,6 +235,120 @@ fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
         return Some((UnsafeSiteKind::UnsafeBlock, OperationFamily::Unknown));
     }
     None
+}
+
+#[derive(Clone, Debug)]
+struct DetectedSyntaxSite {
+    line: usize,
+    column: usize,
+    kind: UnsafeSiteKind,
+    family: OperationFamily,
+    card_snippet: String,
+    source_snippet: String,
+}
+
+fn detect_syntax_sites(parsed: &ParsedSource) -> Vec<DetectedSyntaxSite> {
+    let mut sites = Vec::new();
+    for fact in &parsed.nodes {
+        let Some((kind, family)) = detect_syntax_site(fact) else {
+            continue;
+        };
+        let _span_len = fact.end.saturating_sub(fact.start);
+        let card_snippet = card_snippet_for(fact, &kind);
+        sites.push(DetectedSyntaxSite {
+            line: fact.line,
+            column: fact.column,
+            kind,
+            family,
+            card_snippet,
+            source_snippet: fact.snippet.clone(),
+        });
+    }
+    sites.sort_by(|left, right| {
+        left.line
+            .cmp(&right.line)
+            .then(left.column.cmp(&right.column))
+    });
+    sites
+}
+
+fn detect_syntax_site(fact: &SyntaxNodeFact) -> Option<(UnsafeSiteKind, OperationFamily)> {
+    let compact = compact_whitespace(&fact.snippet);
+    match fact.kind.as_str() {
+        "FN" if compact.contains("unsafe fn") => {
+            Some((UnsafeSiteKind::UnsafeFn, OperationFamily::Unknown))
+        }
+        "TRAIT" if compact.contains("unsafe trait") => {
+            Some((UnsafeSiteKind::UnsafeTrait, OperationFamily::Unknown))
+        }
+        "IMPL" if compact.contains("unsafe impl") && compact.contains(" Send") => Some((
+            UnsafeSiteKind::UnsafeImplSend,
+            OperationFamily::UnsafeImplSendSync,
+        )),
+        "IMPL" if compact.contains("unsafe impl") && compact.contains(" Sync") => Some((
+            UnsafeSiteKind::UnsafeImplSync,
+            OperationFamily::UnsafeImplSendSync,
+        )),
+        "IMPL" if compact.contains("unsafe impl") => {
+            Some((UnsafeSiteKind::UnsafeImpl, OperationFamily::Unknown))
+        }
+        "EXTERN_BLOCK" if compact.contains("extern") => {
+            Some((UnsafeSiteKind::ExternBlock, OperationFamily::Ffi))
+        }
+        "STATIC" if compact.contains("static mut") => {
+            Some((UnsafeSiteKind::StaticMut, OperationFamily::StaticMut))
+        }
+        "CALL_EXPR" | "METHOD_CALL_EXPR" | "MACRO_EXPR" => detect_site(&compact),
+        _ => None,
+    }
+}
+
+fn card_snippet_for(fact: &SyntaxNodeFact, kind: &UnsafeSiteKind) -> String {
+    let compact = compact_whitespace(&fact.snippet);
+    match kind {
+        UnsafeSiteKind::UnsafeFn
+        | UnsafeSiteKind::UnsafeTrait
+        | UnsafeSiteKind::UnsafeImpl
+        | UnsafeSiteKind::UnsafeImplSend
+        | UnsafeSiteKind::UnsafeImplSync
+        | UnsafeSiteKind::ExternBlock => compact
+            .split_once('{')
+            .map_or(compact.clone(), |(head, _tail)| {
+                format!("{} {{", head.trim())
+            }),
+        _ => compact,
+    }
+}
+
+fn compact_whitespace(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn site_key(
+    line: usize,
+    kind: &UnsafeSiteKind,
+    family: &OperationFamily,
+) -> (usize, String, String) {
+    (line, kind.as_str().to_string(), family.as_str().to_string())
+}
+
+fn is_public_surface(snippet: &str) -> bool {
+    let compact = compact_whitespace(snippet);
+    compact.starts_with("pub ") || compact.contains(" pub ")
+}
+
+fn is_public_api_surface(kind: &UnsafeSiteKind, snippet: &str) -> bool {
+    if !matches!(
+        kind,
+        UnsafeSiteKind::UnsafeFn
+            | UnsafeSiteKind::UnsafeTrait
+            | UnsafeSiteKind::UnsafeImpl
+            | UnsafeSiteKind::UnsafeImplSend
+            | UnsafeSiteKind::UnsafeImplSync
+    ) {
+        return false;
+    }
+    is_public_surface(snippet)
 }
 
 fn find_owner(lines: &[&str], idx: usize) -> Option<String> {
