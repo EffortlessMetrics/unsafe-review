@@ -30,6 +30,9 @@ cargo install unsafe-review
 # Review the current diff against origin/main
 unsafe-review check --base origin/main
 
+# Fail only when explicit no-new-debt mode finds unbaselined actionable gaps
+unsafe-review check --base origin/main --policy no-new-debt
+
 # Review a supplied unified diff from a file or stdin
 unsafe-review check --diff change.diff --format json
 git diff origin/main...HEAD | unsafe-review check --diff - --format json
@@ -88,9 +91,9 @@ The current PR projection renders `cards.json`, `pr-summary.md`, `cards.sarif`, 
 `comment-plan.json` as advisory artifacts. It does not post comments, run witness
 tools, or enable blocking policy. Support tiers stay conservative: fixture-backed
 surfaces are experimental, the saved editor/LSP projection and bounded agent
-packets are read-only and experimental, repo posture and exact policy-ledger
-matching are experimental, and receipts, no-new-debt, blocking policy, and broad
-suppression controls remain later lanes until they have proof.
+packets are read-only and experimental, repo posture, exact policy-ledger
+matching, and explicit no-new-debt mode are experimental, and receipts, blocking
+policy, and broad suppression controls remain later lanes until they have proof.
 
 ## Crate surface
 

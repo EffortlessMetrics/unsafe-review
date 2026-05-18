@@ -35,8 +35,13 @@ gap counts. When it exactly matches a suppression entry, the card class is
 `suppressed`, priority is lowered, and the card is excluded from actionable gap
 counts.
 
-No-new-debt and blocking modes remain later policy work. Matching is exact and
-counted; broad path, owner, or operation-family suppression is not supported.
+No-new-debt is available only when explicitly requested through
+`--policy no-new-debt`. It exits nonzero after rendering output if open
+actionable gaps remain. Exact baseline and suppression matches are excluded from
+the actionable-gap count.
+
+Blocking mode remains later policy work. Matching is exact and counted; broad
+path, owner, or operation-family suppression is not supported.
 
 ## Non-goals
 
@@ -44,7 +49,8 @@ counted; broad path, owner, or operation-family suppression is not supported.
 - no hidden blocking unless policy mode explicitly enables it
 - no duplicate truth outside this spec and linked policy files
 - no broad baseline or suppression patterns
-- no no-new-debt or blocking behavior from ledger validation alone
+- no default no-new-debt or blocking behavior
+- no calibrated blocking behavior yet
 
 ## Required evidence
 
@@ -52,6 +58,7 @@ counted; broad path, owner, or operation-family suppression is not supported.
 - JSON output contract coverage
 - xtask policy-ledger schema tests
 - analyzer tests for exact baseline and suppression matches
+- CLI tests for explicit no-new-debt behavior
 - policy documentation when behavior is configurable
 
 ## Acceptance examples
@@ -64,6 +71,9 @@ counted; broad path, owner, or operation-family suppression is not supported.
 - Uncounted card identities are rejected.
 - Exact baseline matches classify cards as `baseline_known`.
 - Exact suppression matches classify cards as `suppressed`.
+- `--policy no-new-debt` exits nonzero when unbaselined actionable gaps remain.
+- `--policy no-new-debt` succeeds when exact baseline matches clear actionable
+  gaps.
 
 ## CI proof
 
@@ -73,6 +83,8 @@ cargo test --workspace
 cargo test -p xtask ledger
 cargo test -p unsafe-review-core baseline_policy
 cargo test -p unsafe-review-core suppression_policy
+cargo test -p unsafe-review-cli no_new_debt
+cargo test -p unsafe-review --test e2e no_new_debt_policy_fails_only_for_unbaselined_actionable_gaps
 ```
 
 ## Promotion rule

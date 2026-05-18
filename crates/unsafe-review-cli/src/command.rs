@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use unsafe_review_core::PolicyMode;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum DiffInput {
@@ -23,6 +24,7 @@ pub(crate) struct CheckOptions {
     pub base: Option<String>,
     pub diff: Option<DiffInput>,
     pub format: Format,
+    pub policy: PolicyMode,
     pub out: Option<PathBuf>,
     pub max_cards: Option<usize>,
 }
@@ -34,6 +36,7 @@ impl Default for CheckOptions {
             base: None,
             diff: None,
             format: Format::Human,
+            policy: PolicyMode::Advisory,
             out: None,
             max_cards: None,
         }
