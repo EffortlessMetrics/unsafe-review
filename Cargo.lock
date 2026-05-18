@@ -562,6 +562,7 @@ dependencies = [
  "ra_ap_syntax",
  "serde",
  "serde_json",
+ "toml",
 ]
 
 [[package]]

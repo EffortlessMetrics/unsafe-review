@@ -88,8 +88,9 @@ The current PR projection renders `cards.json`, `pr-summary.md`, `cards.sarif`, 
 `comment-plan.json` as advisory artifacts. It does not post comments, run witness
 tools, or enable blocking policy. Support tiers stay conservative: fixture-backed
 surfaces are experimental, the saved editor/LSP projection and bounded agent
-packets are read-only and experimental, and repo posture, receipts, baselines, and
-suppressions remain later lanes until they have proof.
+packets are read-only and experimental, repo posture and exact policy-ledger
+matching are experimental, and receipts, no-new-debt, blocking policy, and broad
+suppression controls remain later lanes until they have proof.
 
 ## Crate surface
 

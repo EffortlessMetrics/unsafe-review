@@ -12,4 +12,4 @@ status = "empty"
 # evidence = "review link, issue, or receipt"
 # review_after = "2026-08-01"
 #
-# check-policy validates the shape only. Analysis does not consume baselines yet.
+# check-policy validates the shape. Analysis matches exact card_id values only.
