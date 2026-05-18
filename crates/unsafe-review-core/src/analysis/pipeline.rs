@@ -715,6 +715,19 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn vec_from_raw_parts_uses_vec_operation_family() -> Result<(), String> {
+        let output = fixture_output("vec_from_raw_parts")?;
+        let card = single_card("vec_from_raw_parts", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::VecFromRawParts);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(card.hazards.contains(&HazardKind::DropOrDeallocation));
+        assert!(card.id.0.contains("from-raw-parts"));
+        Ok(())
+    }
+
+    #[test]
     fn pointer_arithmetic_num_ctrl_bytes_guard_is_discharged() -> Result<(), String> {
         let output = fixture_output("pointer_arithmetic_num_ctrl_bytes_guard")?;
         let card = single_card("pointer_arithmetic_num_ctrl_bytes_guard", &output)?;

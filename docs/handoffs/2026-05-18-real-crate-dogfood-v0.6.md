@@ -17,6 +17,7 @@ Dogfood repositories:
 | `bluss/arrayvec` | `1bc606d8c83a34b8fae9dd117bfeab10f90d2ca7` | completed with `--max-cards 50` |
 | `BurntSushi/memchr` | `db1a77d4b556a1321e136ca0514e43e74ea5fcc3` | completed with `--max-cards 50` after capped-scan hardening |
 | `rust-lang/hashbrown` | `7b3bba6eb4b2f03636155c918552b5f30c1a05b3` | completed with `--max-cards 50` after syntax-scan performance hardening; PR-diff dogfood completed for `hashbrown#469`, `hashbrown#501`, `hashbrown#556`, `hashbrown#657`, `hashbrown#667`, `hashbrown#692`, and `hashbrown#693` |
+| `tokio-rs/bytes` | `245adff079eb0cb1a706d35bab5f68b2d51919f6` | completed with `--max-cards 50`; PR-diff dogfood completed for `bytes#826` |
 
 The first two completed runs exposed two noisy false positives:
 
@@ -1161,6 +1162,45 @@ The performance fix does not change analyzer truth, policy behavior, or witness
 execution. It makes large changed files practical enough for PR-time review, and
 the resulting cards remain source-level unsafe contract review evidence.
 
+### `bytes#826` and capped `bytes` scan
+
+PR: `https://github.com/tokio-rs/bytes/pull/826`
+
+The PR changes `Bytes` vtable data passing so consumed `Bytes` values pass
+`*mut ()` by value into unsafe vtable functions. The diff changes unsafe function
+pointer fields, unsafe wrapper calls, unsafe helper signatures, and a
+`Vec::from_raw_parts` ownership transfer.
+
+Initial dogfood exposed one card-correctness issue: `Vec::from_raw_parts(buf,
+len, cap)` was classified as `slice_from_raw_parts`, which names the wrong
+review contract for a Vec ownership/deallocation operation.
+
+Follow-up rerun after adding a fixture-backed `vec_from_raw_parts` operation
+family:
+
+```text
+bytes#826 changed_rust_files: 2
+bytes#826 cards: 30
+bytes#826 contract_missing: 30
+bytes#826 operation families:
+  unknown: 18
+  slice_from_raw_parts: 6
+  unsafe_fn_call: 3
+  vec_from_raw_parts: 1
+  box_from_raw: 1
+  pointer_arithmetic: 1
+
+capped bytes repo cards: 50
+capped bytes repo contract_missing: 32
+capped bytes repo guard_missing: 14
+capped bytes repo guarded_unwitnessed: 3
+capped bytes repo unsafe_unreached: 1
+```
+
+The `vec_from_raw_parts` card is still advisory only. It improves the operation
+label and obligations but does not prove allocator compatibility, layout,
+initialization, ownership, or absence of double free.
+
 ### `hashbrown#469`
 
 PR: `https://github.com/rust-lang/hashbrown/pull/469`
@@ -1387,6 +1427,9 @@ rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hash
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr501.raw.diff --format json --max-cards 40 --out target/dogfood-work/hashbrown-pr501.after-declaration-range.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr556.raw.diff --format json --max-cards 30 --out target/dogfood-work/hashbrown-pr556.after-syntax-scan-performance.json
 rtk cargo run --locked -p unsafe-review -- repo --root target/dogfood-work/hashbrown --format json --max-cards 50 --out target/dogfood-work/hashbrown.unsafe-review.after-syntax-scan-performance.json
+rtk proxy gh pr diff 826 -R tokio-rs/bytes > target/dogfood-work/bytes-pr826.raw.diff
+rtk cargo run --locked -p unsafe-review -- repo --root target/dogfood-work/bytes --format json --max-cards 50 --out target/dogfood-work/bytes.unsafe-review.after-vec-from-raw-parts.json
+rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/bytes --diff target/dogfood-work/bytes-pr826.raw.diff --format json --max-cards 30 --out target/dogfood-work/bytes-pr826.after-vec-from-raw-parts.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr469.raw.diff --format json --max-cards 60 --out target/dogfood-work/hashbrown-pr469.after-unreachable-unchecked.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr469.raw.diff --format json --max-cards 60 --out target/dogfood-work/hashbrown-pr469.after-owner-impl-trait.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr693.raw.diff --format json --max-cards 30 --out target/dogfood-work/hashbrown-pr693.after-infallible-unwrap-evidence.json
@@ -1403,14 +1446,14 @@ Real-crate dogfood is experimental.
 The repo may claim:
 
 - the first real-crate dogfood slice includes capped repo snapshots on
-  `rust-smallvec`, `arrayvec`, `memchr`, and `hashbrown`
+  `rust-smallvec`, `arrayvec`, `memchr`, `hashbrown`, and `bytes`
 - a capped `memchr` dogfood snapshot now completes
 - real PR-diff dogfood runs on `memchr#215`, `rust-smallvec#407`,
   `rust-smallvec#277`, `rust-smallvec#64`, `rust-smallvec#254`,
   `arrayvec#308`, `arrayvec#138`, `arrayvec#187`, `arrayvec#174`, and
   `arrayvec#288`, `hashbrown#469`, `hashbrown#501`, `hashbrown#657`,
-  `hashbrown#556`, `hashbrown#667`, `hashbrown#692`, and `hashbrown#693`
-  produce card output
+  `hashbrown#556`, `hashbrown#667`, `hashbrown#692`, `hashbrown#693`, and
+  `bytes#826` produce card output
 - dogfood found and fixed import/declaration and `cfg(target_feature)`
   false positives
 - `&'static mut` type/lifetime text is not classified as a `static mut` item
@@ -1519,6 +1562,9 @@ The repo may claim:
 - one syntax-scan performance improvement changed capped full-repo `hashbrown`
   and `hashbrown#556` dogfood from local timeout to completed output without
   changing analyzer truth
+- one fixture-backed `Vec::from_raw_parts` classification improvement changed
+  one `bytes#826` card from `slice_from_raw_parts` to `vec_from_raw_parts`
+  without claiming allocator, layout, initialization, or ownership proof
 - attributed unsafe function declarations are deduped between syntax-backed
   extraction and fallback line scanning
 - false-positive regression coverage exists in fixtures and calibration
@@ -1530,7 +1576,7 @@ The repo must not claim:
 - usable-alpha support-tier promotion
 - full-repository coverage from top-50 capped snapshots
 - uncapped repo-scan performance
-- general PR-diff usefulness from seventeen PRs
+- general PR-diff usefulness from eighteen PRs
 - memory-safety proof
 - UB-free status
 - witness execution
@@ -1538,9 +1584,9 @@ The repo must not claim:
 
 ## Known limits
 
-- Four real crates completed capped repo snapshots in this slice.
+- Five real crates completed capped repo snapshots in this slice.
 - The successful dogfood snapshots were capped at 50 cards.
-- Only seventeen real PR diffs were measured.
+- Only eighteen real PR diffs were measured.
 - `memchr` completion depends on capped-scan behavior; uncapped performance is
   still unmeasured.
 - No human audit was performed for every emitted card.
@@ -1614,6 +1660,9 @@ The repo must not claim:
 - Capped full-repo `hashbrown` and `hashbrown#556` now complete after syntax
   scanning performance hardening, but the capped repo output still contains many
   contract prompts that require human review before calibration claims.
+- `bytes#826` now distinguishes `Vec::from_raw_parts` from
+  `slice::from_raw_parts`, but the new card remains source-level and does not
+  discharge allocator, layout, capacity, initialization, or ownership evidence.
 - These runs do not prove absence of missed unsafe seams.
 
 ## Next useful work

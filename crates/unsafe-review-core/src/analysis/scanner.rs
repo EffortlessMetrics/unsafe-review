@@ -306,6 +306,9 @@ fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
             OperationFamily::CopyNonOverlapping,
         ));
     }
+    if is_vec_from_raw_parts_call(line) {
+        return Some((UnsafeSiteKind::Operation, OperationFamily::VecFromRawParts));
+    }
     if contains_call_name(line, "from_raw_parts") || contains_call_name(line, "from_raw_parts_mut")
     {
         return Some((
@@ -474,6 +477,11 @@ fn is_target_feature_attribute(line: &str) -> bool {
 
 fn is_nonnull_new_unchecked_call(line: &str) -> bool {
     compact_whitespace(line).contains("NonNull::new_unchecked")
+}
+
+fn is_vec_from_raw_parts_call(line: &str) -> bool {
+    let compact = compact_whitespace(line);
+    compact.contains("Vec::from_raw_parts") || compact.contains("vec::Vec::from_raw_parts")
 }
 
 #[derive(Clone, Debug)]
