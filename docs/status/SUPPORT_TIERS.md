@@ -5,7 +5,7 @@ All tiers describe static review evidence. None means memory-safety proof.
 | Capability | Tier | Surface | Proof | Known limits |
 |---|---|---|---|---|
 | Diff unsafe site inventory | experimental | CLI JSON/human | syntax-backed fixture goldens for unsafe blocks, split unsafe blocks, raw pointer operations, and negative safe-code cases | source-based, not MIR |
-| Review-card JSON schema | experimental | CLI JSON | serde-backed DTOs, `schema_version`, site visibility/public API surface fields, and `fixture_card_goldens_match_rendered_json` | fixture corpus is still small; no dogfood receipts yet |
+| Review-card JSON schema | experimental | CLI JSON | serde-backed DTOs, `schema_version`, top-level trust boundary, site visibility/public API surface fields, and `fixture_card_goldens_match_rendered_json` | fixture corpus is still small; no schema compatibility promise yet |
 | Review-card identity | experimental | card `id` | `card_identity` tests cover line drift and duplicate counted identities | baseline and suppression policy do not consume identities yet |
 | Raw pointer card slice | experimental | cards | `raw_pointer_alignment`, `raw_pointer_deref`, `raw_pointer_read_unaligned`, `raw_pointer_write_assignment`, `split_raw_pointer_read_call`, `split_unsafe_block`, and safe-reference negative fixtures | source-level review evidence only |
 | Core operation smoke slice | experimental | cards | `maybeuninit_assume_init`, `vec_set_len`, `transmute_invalid_value`, `get_unchecked_mut_bounds`, and `pin_new_unchecked` fixture goldens | curated fixtures, not broad semantic proof |
@@ -15,7 +15,7 @@ All tiers describe static review evidence. None means memory-safety proof.
 | Repo inventory | scaffold | repo JSON / badges | compile gate only | badge is not UB-free claim |
 | PR Markdown summary | experimental | PR artifact Markdown | `pr_summary` renderer tests, CLI `--format pr-summary`, CLI e2e, and advisory workflow upload | advisory artifact only; no comments or blocking policy |
 | SARIF projection | experimental | PR artifact SARIF | `sarif` renderer tests, CLI `--format sarif`, CLI e2e, and advisory workflow upload | advisory static review evidence; no default blocking |
-| Advisory PR workflow | experimental | GitHub Actions artifacts | workflow renders and uploads cards JSON, PR summary, SARIF, and comment plan; `cargo xtask check-advisory-artifacts <dir>` verifies the downloaded artifact contract and projection card identity consistency | no comments, witnesses, or blocking policy |
+| Advisory PR workflow | experimental | GitHub Actions artifacts | workflow renders and uploads cards JSON, PR summary, SARIF, and comment plan; `cargo xtask check-advisory-artifacts <dir>` verifies the downloaded artifact contract, cards JSON trust boundary, and projection card identity consistency | no comments, witnesses, or blocking policy |
 | Inline comment plan | experimental | PR artifact JSON | `comment_plan` renderer tests, CLI `--format comment-plan`, CLI e2e, and advisory workflow upload | artifact-only; no posting by default |
 | LSP projection | planned | editor | saved-card fixtures | read-only first |
 | Agent packets | planned | JSON packet | packet schema tests | agents still require review |
