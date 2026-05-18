@@ -1,5 +1,6 @@
 use crate::command::{CheckOptions, Command, DiffInput, Format};
 use std::path::PathBuf;
+use unsafe_review_core::PolicyMode;
 
 pub(crate) fn parse(args: Vec<String>) -> Result<Command, String> {
     let mut rest = args.into_iter().skip(1).collect::<Vec<_>>();
@@ -77,6 +78,13 @@ fn parse_check(args: Vec<String>) -> Result<CheckOptions, String> {
             }
             arg if arg.starts_with("--format=") => {
                 options.format = parse_format(inline_value(arg, "--format")?)?;
+            }
+            "--policy" => {
+                idx += 1;
+                options.policy = parse_policy(value(&args, idx, "--policy")?)?;
+            }
+            arg if arg.starts_with("--policy=") => {
+                options.policy = parse_policy(inline_value(arg, "--policy")?)?;
             }
             "--json" => options.format = Format::Json,
             "--markdown" => options.format = Format::Markdown,
@@ -245,6 +253,15 @@ fn parse_format(raw: &str) -> Result<Format, String> {
     }
 }
 
+fn parse_policy(raw: &str) -> Result<PolicyMode, String> {
+    match raw {
+        "advisory" => Ok(PolicyMode::Advisory),
+        "no-new-debt" | "no_new_debt" => Ok(PolicyMode::NoNewDebt),
+        "blocking" => Err("blocking policy is not implemented".to_string()),
+        other => Err(format!("unknown policy `{other}`")),
+    }
+}
+
 fn value<'a>(args: &'a [String], idx: usize, flag: &str) -> Result<&'a str, String> {
     let Some(value) = args.get(idx).map(|value| value.as_str()) else {
         return Err(format!("missing value for {flag}"));
@@ -325,6 +342,26 @@ mod tests {
         };
         assert_eq!(options.format, Format::Lsp);
         Ok(())
+    }
+
+    #[test]
+    fn parses_no_new_debt_policy_for_check() -> Result<(), String> {
+        let command = parse(args(["unsafe-review", "check", "--policy", "no-new-debt"]))?;
+        let Command::Check(options) = command else {
+            return Err("expected check command".to_string());
+        };
+        assert_eq!(options.policy, PolicyMode::NoNewDebt);
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_unimplemented_blocking_policy() {
+        let command = parse(args(["unsafe-review", "check", "--policy=blocking"]));
+
+        assert_eq!(
+            command,
+            Err("blocking policy is not implemented".to_string())
+        );
     }
 
     #[test]

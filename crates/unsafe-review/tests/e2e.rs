@@ -235,12 +235,88 @@ fn repo_inventory_and_badges_count_open_gaps_without_safety_claim() -> Result<()
     Ok(())
 }
 
+#[test]
+fn no_new_debt_policy_fails_only_for_unbaselined_actionable_gaps() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_alignment");
+    let failing = run_failure([
+        os("check"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        fixture.join("change.diff").into_os_string(),
+        os("--format"),
+        os("json"),
+        os("--policy"),
+        os("no-new-debt"),
+    ])?;
+    let failing_json = parse_json(&stdout_text(&failing)?)?;
+    assert_eq!(failing_json["policy"], "no-new-debt");
+    assert_eq!(failing_json["summary"]["open_actionable_gaps"], 1);
+    assert!(
+        String::from_utf8(failing.stderr)?
+            .contains("no-new-debt policy found 1 open actionable gap(s)")
+    );
+
+    let temp = TempDir::new("unsafe-review-no-new-debt-e2e")?;
+    let copied = temp.path().join("fixture");
+    copy_dir_all(&fixture, &copied)?;
+    let advisory = run_success([
+        os("check"),
+        os("--root"),
+        copied.as_os_str().to_os_string(),
+        os("--diff"),
+        copied.join("change.diff").into_os_string(),
+        os("--format"),
+        os("json"),
+    ])?;
+    let advisory = parse_json(&stdout_text(&advisory)?)?;
+    let card_id = json_str(&advisory["cards"][0]["id"], "cards[0].id")?;
+    write_baseline(&copied, card_id)?;
+
+    let passing = run_success([
+        os("check"),
+        os("--root"),
+        copied.as_os_str().to_os_string(),
+        os("--diff"),
+        copied.join("change.diff").into_os_string(),
+        os("--format"),
+        os("json"),
+        os("--policy"),
+        os("no-new-debt"),
+    ])?;
+    let passing = parse_json(&stdout_text(&passing)?)?;
+    assert_eq!(passing["policy"], "no-new-debt");
+    assert_eq!(passing["summary"]["open_actionable_gaps"], 0);
+    assert_eq!(passing["cards"][0]["class"], "baseline_known");
+
+    Ok(())
+}
+
 fn run_success<I, S>(args: I) -> Result<Output, Box<dyn Error>>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
     checked_output(Command::new(env!("CARGO_BIN_EXE_unsafe-review")).args(args))
+}
+
+fn run_failure<I, S>(args: I) -> Result<Output, Box<dyn Error>>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let output = Command::new(env!("CARGO_BIN_EXE_unsafe-review"))
+        .args(args)
+        .output()?;
+    if output.status.success() {
+        return Err(format!(
+            "expected command to fail\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
+        .into());
+    }
+    Ok(output)
 }
 
 fn run_success_in_dir<I, S>(args: I, current_dir: &Path) -> Result<Output, Box<dyn Error>>
@@ -313,6 +389,42 @@ fn fixture_root(name: &str) -> PathBuf {
 
 fn os(value: &str) -> OsString {
     OsString::from(value)
+}
+
+fn copy_dir_all(source: &Path, target: &Path) -> Result<(), Box<dyn Error>> {
+    fs::create_dir_all(target)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let source_path = entry.path();
+        let target_path = target.join(entry.file_name());
+        if source_path.is_dir() {
+            copy_dir_all(&source_path, &target_path)?;
+        } else {
+            fs::copy(&source_path, &target_path)?;
+        }
+    }
+    Ok(())
+}
+
+fn write_baseline(root: &Path, card_id: &str) -> Result<(), Box<dyn Error>> {
+    let policy = root.join("policy");
+    fs::create_dir_all(&policy)?;
+    fs::write(
+        policy.join("unsafe-review-baseline.toml"),
+        format!(
+            r#"schema_version = "0.1"
+status = "active"
+
+[[entries]]
+card_id = "{card_id}"
+owner = "core/policy"
+reason = "e2e no-new-debt baseline"
+evidence = "fixture card"
+review_after = "2026-08-01"
+"#
+        ),
+    )?;
+    Ok(())
 }
 
 struct TempDir {

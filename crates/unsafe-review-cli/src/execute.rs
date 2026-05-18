@@ -31,12 +31,13 @@ pub(crate) fn execute(command: Command) -> Result<(), String> {
 
 fn run_check(options: CheckOptions, scope: Scope, mode: AnalysisMode) -> Result<(), String> {
     let diff = diff_source(&options)?;
+    let policy = options.policy.clone();
     let output = analyze(AnalyzeInput {
         root: options.root,
         scope,
         diff,
         mode,
-        policy: PolicyMode::Advisory,
+        policy,
         include_unchanged_tests: true,
         max_cards: options.max_cards,
     })?;
@@ -48,7 +49,25 @@ fn run_check(options: CheckOptions, scope: Scope, mode: AnalysisMode) -> Result<
     } else {
         println!("{rendered}");
     }
+    enforce_policy(&output)?;
     Ok(())
+}
+
+fn enforce_policy(output: &unsafe_review_core::AnalyzeOutput) -> Result<(), String> {
+    match output.policy {
+        PolicyMode::Advisory => Ok(()),
+        PolicyMode::NoNewDebt => {
+            if output.summary.open_actionable_gaps == 0 {
+                Ok(())
+            } else {
+                Err(format!(
+                    "no-new-debt policy found {} open actionable gap(s)",
+                    output.summary.open_actionable_gaps
+                ))
+            }
+        }
+        PolicyMode::Blocking => Err("blocking policy is not implemented".to_string()),
+    }
 }
 
 fn diff_source(options: &CheckOptions) -> Result<DiffSource, String> {
@@ -222,10 +241,10 @@ fn print_help() {
     println!();
     println!("Commands:");
     println!(
-        "  check   [--root .] [--base origin/main | --diff file|-] [--format human|json|markdown|pr-summary|sarif|comment-plan|lsp] [--out file]"
+        "  check   [--root .] [--base origin/main | --diff file|-] [--format human|json|markdown|pr-summary|sarif|comment-plan|lsp] [--policy advisory|no-new-debt] [--out file]"
     );
     println!(
-        "  repo    [--root .] [--format human|json|markdown|pr-summary|sarif|comment-plan|lsp] [--out file]"
+        "  repo    [--root .] [--format human|json|markdown|pr-summary|sarif|comment-plan|lsp] [--policy advisory|no-new-debt] [--out file]"
     );
     println!("  pilot   [--root .] [--base origin/main] [--max-cards 5]");
     println!("  badges  [--root .] [--out badges]");
