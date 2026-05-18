@@ -75,6 +75,15 @@ impl WitnessReceipt {
         }
         summary
     }
+
+    pub fn to_pretty_json(&self) -> Result<String, String> {
+        serde_json::to_string_pretty(self)
+            .map(|mut text| {
+                text.push('\n');
+                text
+            })
+            .map_err(|err| format!("serialize witness receipt failed: {err}"))
+    }
 }
 
 fn is_supported_receipt_strength(value: &str) -> bool {
@@ -207,8 +216,7 @@ mod tests {
         let receipt = fixture_receipt();
         receipt.validate()?;
 
-        let json = serde_json::to_string_pretty(&receipt)
-            .map_err(|err| format!("serialize receipt failed: {err}"))?;
+        let json = receipt.to_pretty_json()?;
         let decoded: WitnessReceipt = serde_json::from_str(&json)
             .map_err(|err| format!("deserialize receipt failed: {err}"))?;
 

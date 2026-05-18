@@ -1,12 +1,13 @@
-use crate::command::{CheckOptions, Command, DiffInput, Format};
+use crate::command::{CheckOptions, Command, DiffInput, Format, ReceiptTemplateOptions};
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use unsafe_review_core::{
-    AnalysisMode, AnalyzeInput, CardId, DiffSource, PolicyMode, Scope, analyze, collect_context,
-    explain_card, render_comment_plan, render_human, render_json, render_lsp, render_markdown,
-    render_pr_summary, render_sarif, render_witness_plan,
+    AnalysisMode, AnalyzeInput, CardId, DiffSource, PolicyMode, Scope,
+    WITNESS_RECEIPT_SCHEMA_VERSION, WitnessReceipt, analyze, collect_context, explain_card,
+    render_comment_plan, render_human, render_json, render_lsp, render_markdown, render_pr_summary,
+    render_sarif, render_witness_plan,
 };
 
 pub(crate) fn execute(command: Command) -> Result<(), String> {
@@ -26,6 +27,7 @@ pub(crate) fn execute(command: Command) -> Result<(), String> {
         Command::Badges { root, out } => badges(&root, &out),
         Command::Explain { root, id, format } => explain(&root, &id, format),
         Command::Context { root, id } => context(&root, &id),
+        Command::ReceiptTemplate(options) => receipt_template(options),
     }
 }
 
@@ -237,6 +239,35 @@ fn context(root: &Path, id: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn receipt_template(options: ReceiptTemplateOptions) -> Result<(), String> {
+    let receipt = WitnessReceipt {
+        schema_version: WITNESS_RECEIPT_SCHEMA_VERSION.to_string(),
+        card_id: options.card_id,
+        tool: options.tool,
+        strength: options.strength,
+        author: Some(options.author),
+        recorded_at: Some(options.recorded_at),
+        expires_at: Some(options.expires_at),
+        summary: options.summary,
+        command: options.command,
+        limitations: if options.limitations.is_empty() {
+            None
+        } else {
+            Some(options.limitations)
+        },
+    };
+    receipt.validate()?;
+    let rendered = receipt.to_pretty_json()?;
+    if let Some(path) = options.out {
+        ensure_parent_dir(&path)?;
+        fs::write(&path, rendered)
+            .map_err(|err| format!("write {} failed: {err}", path.display()))?;
+    } else {
+        print!("{rendered}");
+    }
+    Ok(())
+}
+
 fn print_help() {
     println!("unsafe-review: cheap unsafe contract review for Rust");
     println!();
@@ -251,6 +282,9 @@ fn print_help() {
     println!("  badges  [--root .] [--out badges]");
     println!("  explain [--root .] [--json|--format json] <card-id>");
     println!("  context [--root .] [--json|--format json] <card-id>");
+    println!(
+        "  receipt template <card-id> --tool <lane> --strength <level> --author <owner> --recorded-at <utc> --expires-at <date> [--summary text] [--command text] [--limitation text] [--out file]"
+    );
     println!("  doctor  [--root .]");
     println!();
     println!("Flags may be passed as `--flag value` or `--flag=value`.");

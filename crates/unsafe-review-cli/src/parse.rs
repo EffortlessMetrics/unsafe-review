@@ -1,4 +1,4 @@
-use crate::command::{CheckOptions, Command, DiffInput, Format};
+use crate::command::{CheckOptions, Command, DiffInput, Format, ReceiptTemplateOptions};
 use std::path::PathBuf;
 use unsafe_review_core::PolicyMode;
 
@@ -21,6 +21,8 @@ pub(crate) fn parse(args: Vec<String>) -> Result<Command, String> {
         "badges" => parse_badges(rest),
         "explain" => parse_explain(rest),
         "context" => parse_context(rest),
+        "receipt" => parse_receipt(rest),
+        "receipt-template" => parse_receipt_template(rest).map(Command::ReceiptTemplate),
         other => Err(format!(
             "unknown command `{other}`. Run `unsafe-review --help`."
         )),
@@ -213,6 +215,107 @@ fn parse_context(args: Vec<String>) -> Result<Command, String> {
     })
 }
 
+fn parse_receipt(args: Vec<String>) -> Result<Command, String> {
+    let mut rest = args;
+    let Some(subcommand) = rest.first() else {
+        return Err("missing receipt subcommand `template`".to_string());
+    };
+    if subcommand != "template" {
+        return Err(format!("unknown receipt subcommand `{subcommand}`"));
+    }
+    rest.remove(0);
+    parse_receipt_template(rest).map(Command::ReceiptTemplate)
+}
+
+fn parse_receipt_template(args: Vec<String>) -> Result<ReceiptTemplateOptions, String> {
+    let mut options = ReceiptTemplateOptions::default();
+    let mut id: Option<String> = None;
+    let mut idx = 0usize;
+    while idx < args.len() {
+        match args[idx].as_str() {
+            "--tool" => {
+                idx += 1;
+                options.tool = value(&args, idx, "--tool")?.to_string();
+            }
+            arg if arg.starts_with("--tool=") => {
+                options.tool = inline_value(arg, "--tool")?.to_string();
+            }
+            "--strength" => {
+                idx += 1;
+                options.strength = value(&args, idx, "--strength")?.to_string();
+            }
+            arg if arg.starts_with("--strength=") => {
+                options.strength = inline_value(arg, "--strength")?.to_string();
+            }
+            "--author" => {
+                idx += 1;
+                options.author = value(&args, idx, "--author")?.to_string();
+            }
+            arg if arg.starts_with("--author=") => {
+                options.author = inline_value(arg, "--author")?.to_string();
+            }
+            "--recorded-at" => {
+                idx += 1;
+                options.recorded_at = value(&args, idx, "--recorded-at")?.to_string();
+            }
+            arg if arg.starts_with("--recorded-at=") => {
+                options.recorded_at = inline_value(arg, "--recorded-at")?.to_string();
+            }
+            "--expires-at" => {
+                idx += 1;
+                options.expires_at = value(&args, idx, "--expires-at")?.to_string();
+            }
+            arg if arg.starts_with("--expires-at=") => {
+                options.expires_at = inline_value(arg, "--expires-at")?.to_string();
+            }
+            "--summary" => {
+                idx += 1;
+                options.summary = Some(value(&args, idx, "--summary")?.to_string());
+            }
+            arg if arg.starts_with("--summary=") => {
+                options.summary = Some(inline_value(arg, "--summary")?.to_string());
+            }
+            "--command" => {
+                idx += 1;
+                options.command = Some(value(&args, idx, "--command")?.to_string());
+            }
+            arg if arg.starts_with("--command=") => {
+                options.command = Some(inline_value(arg, "--command")?.to_string());
+            }
+            "--limitation" => {
+                idx += 1;
+                options
+                    .limitations
+                    .push(value(&args, idx, "--limitation")?.to_string());
+            }
+            arg if arg.starts_with("--limitation=") => {
+                options
+                    .limitations
+                    .push(inline_value(arg, "--limitation")?.to_string());
+            }
+            "--out" => {
+                idx += 1;
+                options.out = Some(PathBuf::from(value(&args, idx, "--out")?));
+            }
+            arg if arg.starts_with("--out=") => {
+                options.out = Some(PathBuf::from(inline_value(arg, "--out")?));
+            }
+            value if value.starts_with('-') => {
+                return Err(format!("unknown receipt template argument `{value}`"));
+            }
+            value => set_card_id(&mut id, value)?,
+        }
+        idx += 1;
+    }
+    options.card_id = id.ok_or_else(|| "missing card id".to_string())?;
+    validate_required_cli_value(&options.tool, "--tool")?;
+    validate_required_cli_value(&options.strength, "--strength")?;
+    validate_required_cli_value(&options.author, "--author")?;
+    validate_required_cli_value(&options.recorded_at, "--recorded-at")?;
+    validate_required_cli_value(&options.expires_at, "--expires-at")?;
+    Ok(options)
+}
+
 fn parse_diff_input(raw: &str) -> DiffInput {
     if raw == "-" {
         DiffInput::Stdin
@@ -226,6 +329,14 @@ fn validate_check_options(options: &CheckOptions) -> Result<(), String> {
         return Err("choose only one of --base or --diff".to_string());
     }
     Ok(())
+}
+
+fn validate_required_cli_value(value: &str, flag: &str) -> Result<(), String> {
+    if value.trim().is_empty() {
+        Err(format!("missing value for {flag}"))
+    } else {
+        Ok(())
+    }
 }
 
 fn set_card_id(id: &mut Option<String>, value: &str) -> Result<(), String> {
@@ -537,6 +648,61 @@ mod tests {
 
         assert_eq!(explain, Err("expected exactly one card id".to_string()));
         assert_eq!(context, Err("expected exactly one card id".to_string()));
+    }
+
+    #[test]
+    fn parses_receipt_template_command() -> Result<(), String> {
+        let command = parse(args([
+            "unsafe-review",
+            "receipt",
+            "template",
+            "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1",
+            "--tool=miri",
+            "--strength=ran",
+            "--author",
+            "core/fixtures",
+            "--recorded-at",
+            "2026-05-18T00:00:00Z",
+            "--expires-at=2026-08-18",
+            "--summary",
+            "focused witness passed",
+            "--command",
+            "cargo +nightly miri test read_header",
+            "--limitation",
+            "fixture only",
+            "--out",
+            "target/receipt.json",
+        ]))?;
+
+        let Command::ReceiptTemplate(options) = command else {
+            return Err("expected receipt template command".to_string());
+        };
+        assert_eq!(options.tool, "miri");
+        assert_eq!(options.strength, "ran");
+        assert_eq!(options.author, "core/fixtures");
+        assert_eq!(options.recorded_at, "2026-05-18T00:00:00Z");
+        assert_eq!(options.expires_at, "2026-08-18");
+        assert_eq!(options.summary.as_deref(), Some("focused witness passed"));
+        assert_eq!(
+            options.command.as_deref(),
+            Some("cargo +nightly miri test read_header")
+        );
+        assert_eq!(options.limitations, vec!["fixture only".to_string()]);
+        assert_eq!(options.out, Some(PathBuf::from("target/receipt.json")));
+        Ok(())
+    }
+
+    #[test]
+    fn receipt_template_requires_metadata() {
+        let command = parse(args([
+            "unsafe-review",
+            "receipt-template",
+            "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1",
+            "--tool",
+            "miri",
+        ]));
+
+        assert_eq!(command, Err("missing value for --strength".to_string()));
     }
 
     fn args<const N: usize>(values: [&str; N]) -> Vec<String> {

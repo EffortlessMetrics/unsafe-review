@@ -44,6 +44,20 @@ impl Default for CheckOptions {
     }
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ReceiptTemplateOptions {
+    pub card_id: String,
+    pub tool: String,
+    pub strength: String,
+    pub author: String,
+    pub recorded_at: String,
+    pub expires_at: String,
+    pub summary: Option<String>,
+    pub command: Option<String>,
+    pub limitations: Vec<String>,
+    pub out: Option<PathBuf>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Command {
     Help,
@@ -67,4 +81,5 @@ pub(crate) enum Command {
         root: PathBuf,
         id: String,
     },
+    ReceiptTemplate(ReceiptTemplateOptions),
 }

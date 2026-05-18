@@ -312,6 +312,54 @@ fn check_json_imports_witness_receipts_without_hiding_guard_gaps() -> Result<(),
 }
 
 #[test]
+fn receipt_template_writes_valid_receipt_json_without_running_witnesses()
+-> Result<(), Box<dyn Error>> {
+    let temp = TempDir::new("unsafe-review-receipt-template-e2e")?;
+    let receipt_path = temp.path().join("miri.json");
+    let card_id =
+        "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1";
+
+    let output = run_success([
+        os("receipt"),
+        os("template"),
+        os(card_id),
+        os("--tool"),
+        os("miri"),
+        os("--strength"),
+        os("ran"),
+        os("--author"),
+        os("core/fixtures"),
+        os("--recorded-at"),
+        os("2026-05-18T00:00:00Z"),
+        os("--expires-at"),
+        os("2026-08-18"),
+        os("--summary"),
+        os("focused witness passed"),
+        os("--command"),
+        os("cargo +nightly miri test read_header"),
+        os("--limitation"),
+        os("fixture only"),
+        os("--out"),
+        receipt_path.as_os_str().to_os_string(),
+    ])?;
+
+    assert_eq!(stdout_text(&output)?.trim(), "");
+    let receipt = parse_json(&fs::read_to_string(receipt_path)?)?;
+    assert_eq!(receipt["schema_version"], "0.1");
+    assert_eq!(receipt["card_id"], card_id);
+    assert_eq!(receipt["tool"], "miri");
+    assert_eq!(receipt["strength"], "ran");
+    assert_eq!(receipt["author"], "core/fixtures");
+    assert_eq!(receipt["recorded_at"], "2026-05-18T00:00:00Z");
+    assert_eq!(receipt["expires_at"], "2026-08-18");
+    assert_eq!(receipt["summary"], "focused witness passed");
+    assert_eq!(receipt["command"], "cargo +nightly miri test read_header");
+    assert_eq!(receipt["limitations"][0], "fixture only");
+
+    Ok(())
+}
+
+#[test]
 fn no_new_debt_policy_fails_only_for_unbaselined_actionable_gaps() -> Result<(), Box<dyn Error>> {
     let fixture = fixture_root("raw_pointer_alignment");
     let failing = run_failure([
