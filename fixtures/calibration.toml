@@ -6,6 +6,7 @@ required_core_fixtures = [
   "public_unsafe_fn_missing_safety",
   "maybeuninit_assume_init",
   "vec_set_len",
+  "vec_set_len_initialized_loop",
   "transmute_invalid_value",
   "unsafe_impl_send",
   "ffi_sanitizer_route",
@@ -50,6 +51,16 @@ claim = "Vec::set_len reports missing initialized-range and capacity evidence"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_initialized_loop"
+kind = "positive"
+claim = "Vec::set_len recognizes visible MaybeUninit::new initialization and const CAP capacity evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
 expected_operation_family = "vec_set_len"
 expected_hazard = "initialized_memory"
 

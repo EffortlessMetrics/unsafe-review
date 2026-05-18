@@ -1,18 +1,18 @@
 [
   {
-    "id": "UR-vec-set-len-src-lib-rs-extend-len-operation-vec_set_len-set-len-1b63c93d2803-initialized_memory-c1",
-    "class": "guard_missing",
-    "priority": "high",
+    "id": "UR-vec-set-len-initialized-loop-src-lib-rs-from-array-operation-vec_set_len-set-len-3ba2e696cbd8-initialized_memory-c1",
+    "class": "guarded_unwitnessed",
+    "priority": "medium",
     "confidence": "medium",
     "site": {
       "file": "src/lib.rs",
-      "line": 4,
-      "column": 5,
+      "line": 20,
+      "column": 13,
       "kind": "operation",
-      "owner": "extend_len",
+      "owner": "from_array",
       "visibility": "private",
       "public_api_surface": false,
-      "snippet": "unsafe { values.set_len(new_len) }"
+      "snippet": "out.set_len(CAP);"
     },
     "operation_family": "vec_set_len",
     "hazards": [
@@ -40,7 +40,7 @@
         "reach": {
           "present": true,
           "state": "present",
-          "summary": "1 related test file(s) mention owner `extend_len`"
+          "summary": "1 related test file(s) mention owner `from_array`"
         },
         "witness": {
           "present": false,
@@ -57,14 +57,14 @@
           "summary": "Nearby `SAFETY:` comment was detected"
         },
         "discharge": {
-          "present": false,
-          "state": "missing",
-          "summary": "No initialization evidence was detected"
+          "present": true,
+          "state": "present",
+          "summary": "Initialization evidence was detected"
         },
         "reach": {
           "present": true,
           "state": "present",
-          "summary": "1 related test file(s) mention owner `extend_len`"
+          "summary": "1 related test file(s) mention owner `from_array`"
         },
         "witness": {
           "present": false,
@@ -74,16 +74,15 @@
       }
     ],
     "contract": "Nearby `SAFETY:` comment was detected",
-    "discharge": "Some inferred safety obligations are missing local guard evidence",
-    "reach": "1 related test file(s) mention owner `extend_len`",
+    "discharge": "All inferred safety obligations have visible local guard evidence",
+    "reach": "1 related test file(s) mention owner `from_array`",
     "witness": "No imported witness receipt was found",
     "missing": [
-      "Missing visible local guard for inferred safety obligations",
       "No witness receipt imported for this card"
     ],
     "verify_commands": [
-      "cargo +nightly miri test extend_len",
-      "cargo +nightly careful test extend_len"
+      "cargo +nightly miri test from_array",
+      "cargo +nightly careful test from_array"
     ]
   }
 ]
