@@ -206,7 +206,18 @@ fn is_documented_private_unsafe_contract_obligation(
 
 fn has_length_or_bounds_guard(lower: &str) -> bool {
     let has_comparison = lower.contains(">=") || lower.contains('<');
-    has_comparison && (lower.contains("len") || lower.contains("num_ctrl_bytes"))
+    (has_comparison && (lower.contains("len") || lower.contains("num_ctrl_bytes")))
+        || has_len_capacity_equality_guard(lower)
+}
+
+fn has_len_capacity_equality_guard(lower: &str) -> bool {
+    let compact = compact_code(lower);
+    let has_equality = compact.contains("==")
+        || compact.contains("assert_eq!(")
+        || compact.contains("debug_assert_eq!(");
+    has_equality
+        && compact.contains("len")
+        && (compact.contains("capacity") || contains_word(&compact, "cap"))
 }
 
 fn has_capacity_guard(family: &OperationFamily, lower: &str) -> bool {
@@ -794,6 +805,29 @@ mod tests {
         let evidence = obligation_evidence(&set_len, &obligations, &contract, &reach);
 
         assert!(evidence.iter().all(|item| !item.discharge.present));
+    }
+
+    #[test]
+    fn len_capacity_equality_discharges_bounds_obligation() {
+        let obligations = vec![SafetyObligation::new(
+            "bounds",
+            "buffer has enough bytes for the accessed type",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let raw_read = site_with_family(
+            OperationFamily::RawPointerRead,
+            vec!["debug_assert_eq!(self.len(), self.capacity());"],
+            "ptr::read(self.as_ptr() as *const [T; CAP])",
+            vec![],
+        );
+
+        let evidence = obligation_evidence(&raw_read, &obligations, &contract, &reach);
+
+        assert!(evidence[0].discharge.present);
     }
 
     #[test]

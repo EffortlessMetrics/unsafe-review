@@ -502,6 +502,23 @@ the raw `ptr::read` operation now inherit contract evidence from the
 `Safety:` docs. The safe `into_inner` wrapper still lacks local contract prose,
 and the raw pointer read still needs visible local guard/discharge evidence.
 
+Follow-up rerun after recognizing len/capacity equality assertions as raw-read
+bounds evidence:
+
+```text
+changed_rust_files: 2
+cards: 3
+contract_missing: 1
+guard_missing: 1
+unsafe_unreached: 1
+```
+
+The raw pointer read card is still advisory only and remains `guard_missing`.
+The improvement is narrower: `debug_assert_eq!(self.len(), self.capacity())`
+now discharges the raw-read `bounds` obligation, while alignment,
+initialization, pointer-live, same-allocation, and witness evidence remain
+separate obligations.
+
 ### `arrayvec#174`
 
 PR: `https://github.com/bluss/arrayvec/pull/174`
@@ -1109,6 +1126,7 @@ rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arra
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr138.raw.diff --format json --max-cards 30 --out target/dogfood-work/arrayvec-pr138.after-safety-colon-docs.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr187.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr187.unsafe-review.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr187.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr187.after-safety-colon-docs.json
+rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr187.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr187.after-len-capacity-bounds.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr174.raw.diff --format json --max-cards 30 --out target/dogfood-work/arrayvec-pr174.after-inline-dedupe.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr174.raw.diff --format json --max-cards 30 --out target/dogfood-work/arrayvec-pr174.after-drop-in-place.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.unsafe-review.json
@@ -1193,6 +1211,9 @@ The repo may claim:
 - one fixture-backed contract-evidence improvement changed two `arrayvec#187`
   cards away from `contract_missing` by recognizing `Safety:` doc prose on
   `into_inner_unchecked`
+- one fixture-backed bounds-evidence improvement recognized the
+  `arrayvec#187` `debug_assert_eq!(self.len(), self.capacity())` guard as
+  raw-read bounds evidence without discharging the other raw-read obligations
 - one fixture-backed mutable slice improvement changed the `hashbrown#692`
   `slice::from_raw_parts_mut` card from generic `unsafe_fn_call` to
   `slice_from_raw_parts`
@@ -1259,10 +1280,11 @@ The repo must not claim:
   blocks, even though the public `encode_utf8` `Safety:` docs are now contract
   evidence.
 - `arrayvec#187` shows `Safety:` docs can now satisfy public unsafe API
-  contract evidence, but the safe wrapper and raw pointer read still need
-  separate contract/discharge evidence.
-- Public unsafe API declarations with recognized `# Safety` docs no longer ask
-  or `Safety:` docs no longer ask for local declaration guards, but static reach
+  contract evidence and len/capacity equality assertions can discharge raw-read
+  bounds evidence, but the safe wrapper and the other raw pointer read
+  obligations still need separate contract/discharge evidence.
+- Public unsafe API declarations with recognized `# Safety` or doc-comment
+  `Safety:` docs no longer ask for local declaration guards, but static reach
   remains a heuristic name search.
 - `arrayvec#288` now labels the `encode_utf8` wrapper as `unsafe_fn_call`, but
   callee-specific safety contract inference remains future work.
