@@ -271,6 +271,7 @@ mod tests {
         "transmute_copy_invalid_value",
         "multiline_transmute_copy_invalid_value",
         "unsafe_impl_send",
+        "unsafe_impl_send_generic_owner",
         "ffi_sanitizer_route",
         "get_unchecked_mut_bounds",
         "pin_new_unchecked",

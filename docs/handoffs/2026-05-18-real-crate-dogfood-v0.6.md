@@ -1567,12 +1567,17 @@ The repo may claim:
   one `bytes#826` card from `slice_from_raw_parts` to `vec_from_raw_parts`
   without claiming allocator, layout, initialization, or ownership proof
 - one capped `crossbeam-rs/crossbeam` repo snapshot completed with 50 cards
-  across 123 Rust files, adding concurrency-heavy dogfood for unsafe Send/Sync,
-  atomic-ordering witness routes, raw pointer dereference, and ownership-transfer
-  card shapes
+  across 123 Rust files, adding concurrency-heavy dogfood for unsafe Send/Sync
+  generic owner inference, atomic-ordering witness routes, raw pointer
+  dereference, and ownership-transfer card shapes
+- one fixture-backed generic unsafe impl owner improvement changed capped
+  `crossbeam` unsafe impl Send/Sync owners from nearby functions such as `tick`
+  and `fmt` to implemented types such as `Sender` and `Receiver`, improving
+  witness command routing
 - one fixture-backed `transmute_copy` classification improvement changed eight
   capped `crossbeam` cards from generic `unsafe_fn_call` operation cards to
-  `transmute` invalid-value/layout cards, including multi-line call snippets, without claiming value validity proof
+  `transmute` invalid-value/layout cards, including multi-line call snippets,
+  without claiming value validity proof
 - attributed unsafe function declarations are deduped between syntax-backed
   extraction and fallback line scanning
 - false-positive regression coverage exists in fixtures and calibration
