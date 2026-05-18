@@ -82,3 +82,65 @@ fn parse_new_start(header: &str) -> Option<usize> {
     let start = new.split(',').next()?;
     start.parse::<usize>().ok()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+    use std::collections::BTreeSet;
+
+    #[derive(Clone, Copy, Debug)]
+    enum DiffLine {
+        Context,
+        Addition,
+        Removal,
+    }
+
+    prop_compose! {
+        fn diff_lines()(lines in proptest::collection::vec(
+            prop_oneof![
+                Just(DiffLine::Context),
+                Just(DiffLine::Addition),
+                Just(DiffLine::Removal),
+            ],
+            0..64,
+        )) -> Vec<DiffLine> {
+            lines
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_unified_diff_additions_map_to_new_file_line_numbers(
+            new_start in 1usize..500,
+            lines in diff_lines(),
+        ) {
+            let path = PathBuf::from("src/lib.rs");
+            let mut diff = String::from("diff --git a/src/lib.rs b/src/lib.rs\n");
+            diff.push_str("--- a/src/lib.rs\n");
+            diff.push_str("+++ b/src/lib.rs\n");
+            diff.push_str(&format!("@@ -1,1 +{new_start},1 @@\n"));
+
+            let mut expected = BTreeSet::new();
+            let mut new_line = new_start;
+            for line in lines {
+                match line {
+                    DiffLine::Context => {
+                        diff.push_str(" unchanged\n");
+                        new_line = new_line.saturating_add(1);
+                    }
+                    DiffLine::Addition => {
+                        diff.push_str("+added\n");
+                        expected.insert(new_line);
+                        new_line = new_line.saturating_add(1);
+                    }
+                    DiffLine::Removal => diff.push_str("-removed\n"),
+                }
+            }
+
+            let index = parse_unified_diff(&diff);
+
+            prop_assert_eq!(index.changed_lines.get(&path), Some(&expected));
+        }
+    }
+}

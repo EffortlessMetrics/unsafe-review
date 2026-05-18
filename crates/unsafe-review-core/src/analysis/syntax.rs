@@ -95,6 +95,7 @@ fn text_size_to_usize(size: ra_ap_syntax::TextSize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     #[test]
     fn parses_complete_rust_source_without_errors() {
@@ -126,6 +127,27 @@ mod tests {
         assert_eq!(call.column, 14);
         assert_eq!(call.snippet, "core::ptr::read(0 as *const u8)");
         Ok(())
+    }
+
+    proptest! {
+        #[test]
+        fn prop_parsed_node_spans_are_valid_slices(chars in proptest::collection::vec(any::<char>(), 0..512)) {
+            let text = chars.into_iter().collect::<String>();
+            let parsed = parse_source(text.clone());
+
+            prop_assert_eq!(parsed.text.as_str(), text.as_str());
+            prop_assert!(!parsed.nodes.is_empty());
+
+            for node in &parsed.nodes {
+                prop_assert!(node.start <= node.end);
+                prop_assert!(node.end <= parsed.text.len());
+                prop_assert!(parsed.text.is_char_boundary(node.start));
+                prop_assert!(parsed.text.is_char_boundary(node.end));
+                prop_assert_eq!(parsed.text.get(node.start..node.end), Some(node.snippet.as_str()));
+                prop_assert!(node.line >= 1);
+                prop_assert!(node.column >= 1);
+            }
+        }
     }
 
     #[test]
