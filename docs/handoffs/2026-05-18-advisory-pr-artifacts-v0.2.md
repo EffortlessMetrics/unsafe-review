@@ -330,6 +330,49 @@ change, and its top-level `trust_boundary` field contained:
 Static unsafe contract review only; this is not a proof of memory safety, not UB-free status, and not a Miri result unless a witness receipt is attached.
 ```
 
+### Mutation-sensitive analyzer invariant tests
+
+The `#119 test: add obligation and scanner invariants` PR extracted the useful
+test-only slice from mutation-testing candidates without adding mutation
+workflow surface. It changed Rust analyzer files and added unsafe-looking test
+snippets, but those snippets were not unsafe-adjacent product changes that
+should produce PR artifact cards.
+
+The advisory workflow artifact for `#119` was downloaded and verified:
+
+- PR: `#119 test: add obligation and scanner invariants`
+- Workflow: `unsafe-review`
+- Run: `26015190073`
+- Branch: `test/obligation-scanner-invariants`
+- Artifact: `unsafe-review`
+- Artifact id: `7050129880`
+- Artifact digest: `sha256:f627208d940d1caa766fdee8752880de56988a2e057886ba5fa5fb88ca375857`
+
+Verification command:
+
+```bash
+rtk cargo run --locked -p xtask -- check-advisory-artifacts target/advisory-artifact-119
+```
+
+Result:
+
+```text
+check-advisory-artifacts: ok (target/advisory-artifact-119)
+```
+
+The downloaded `cards.json` summary reported:
+
+```text
+changed_rust_files: 2
+cards: 0
+open_actionable_gaps: 0
+```
+
+This receipt is useful because it exercises the advisory workflow on a real
+Rust PR with analyzer test fixtures and unsafe-looking snippets while keeping
+the artifact loop quiet. It does not promote mutation testing, enable a
+mutation workflow, or prove analyzer completeness.
+
 ## Current support posture
 
 The PR artifact surfaces are experimental and advisory. They are suitable for
