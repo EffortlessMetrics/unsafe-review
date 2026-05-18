@@ -34,6 +34,7 @@ pub(crate) fn scan_file(
         .filter(|site| site.kind == UnsafeSiteKind::Operation)
         .map(|site| site.line)
         .collect::<BTreeSet<_>>();
+    let syntax_operation_block_lines = operation_block_start_lines(&parsed);
     let mut out = Vec::new();
     let mut seen = BTreeSet::new();
     for (idx, raw) in lines.iter().enumerate() {
@@ -47,7 +48,8 @@ pub(crate) fn scan_file(
         };
         if kind == UnsafeSiteKind::UnsafeBlock
             && family == OperationFamily::Unknown
-            && syntax_operation_lines.contains(&line_no)
+            && (syntax_operation_lines.contains(&line_no)
+                || syntax_operation_block_lines.contains(&line_no))
         {
             continue;
         }
@@ -328,7 +330,9 @@ fn detect_syntax_site(
         {
             Some((UnsafeSiteKind::Operation, OperationFamily::RawPointerDeref))
         }
-        "CALL_EXPR" | "METHOD_CALL_EXPR" | "MACRO_EXPR" => detect_site(&compact),
+        "CALL_EXPR" | "METHOD_CALL_EXPR" | "MACRO_EXPR" => {
+            detect_site(&normalize_call_spacing(&compact))
+        }
         _ => None,
     }
 }
@@ -347,6 +351,7 @@ fn card_snippet_for(fact: &SyntaxNodeFact, kind: &UnsafeSiteKind) -> String {
             .map_or(compact.clone(), |(head, _tail)| {
                 format!("{} {{", head.trim())
             }),
+        UnsafeSiteKind::Operation => normalize_call_spacing(&compact),
         _ => compact,
     }
 }
@@ -381,11 +386,42 @@ fn operation_block_ranges(
     parsed
         .nodes
         .iter()
-        .filter(|fact| {
-            fact.kind == "PREFIX_EXPR" && is_raw_pointer_deref(&compact_whitespace(&fact.snippet))
-        })
+        .filter(|fact| syntax_operation_in_unsafe_block(fact, unsafe_block_ranges))
         .filter_map(|fact| containing_range(fact, unsafe_block_ranges))
         .collect()
+}
+
+fn operation_block_start_lines(parsed: &ParsedSource) -> BTreeSet<usize> {
+    let unsafe_block_ranges = unsafe_block_ranges(parsed);
+    let operation_block_ranges = operation_block_ranges(parsed, &unsafe_block_ranges);
+    parsed
+        .nodes
+        .iter()
+        .filter(|fact| {
+            fact.kind == "BLOCK_EXPR" && operation_block_ranges.contains(&(fact.start, fact.end))
+        })
+        .map(|fact| fact.line)
+        .collect()
+}
+
+fn syntax_operation_in_unsafe_block(
+    fact: &SyntaxNodeFact,
+    unsafe_block_ranges: &[(usize, usize)],
+) -> bool {
+    if !is_inside_range(fact, unsafe_block_ranges) {
+        return false;
+    }
+    let compact = compact_whitespace(&fact.snippet);
+    match fact.kind.as_str() {
+        "PREFIX_EXPR" => is_raw_pointer_deref(&compact),
+        "CALL_EXPR" | "METHOD_CALL_EXPR" | "MACRO_EXPR" => {
+            matches!(
+                detect_site(&normalize_call_spacing(&compact)),
+                Some((UnsafeSiteKind::Operation, _family))
+            )
+        }
+        _ => false,
+    }
 }
 
 fn containing_range(fact: &SyntaxNodeFact, ranges: &[(usize, usize)]) -> Option<(usize, usize)> {
@@ -403,6 +439,10 @@ fn is_inside_range(fact: &SyntaxNodeFact, ranges: &[(usize, usize)]) -> bool {
 
 fn compact_whitespace(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn normalize_call_spacing(text: &str) -> String {
+    text.replace(" (", "(")
 }
 
 fn site_key(
