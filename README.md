@@ -84,6 +84,9 @@ cargo check --workspace --all-targets
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo xtask check-pr
+
+# Slow mutation-testing lane (local or scheduled CI)
+cargo mutants --workspace
 ```
 
 ## Documentation map
@@ -96,3 +99,4 @@ cargo xtask check-pr
 - [Implementation plan](plans/0.1.0/implementation-plan.md)
 - [Support tiers](docs/status/SUPPORT_TIERS.md)
 - [Policy ledgers](policy/)
+- [Mutation testing](docs/ci/MUTATION_TESTING.md)

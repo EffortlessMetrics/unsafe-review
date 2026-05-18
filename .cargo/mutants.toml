@@ -1,0 +1,24 @@
+# cargo-mutants configuration for local and scheduled mutation testing.
+# Keep PR CI cheap; run `cargo mutants --workspace` from the repository root
+# before larger refactors and in the scheduled mutation-testing workflow.
+gitignore = true
+minimum_test_timeout = 20
+build_timeout_multiplier = 3.0
+timeout_multiplier = 4.0
+
+# Generated and policy/documentation fixtures do not contain Rust test targets that
+# improve the product mutation signal.
+exclude_globs = [
+  "fixtures/**",
+  "docs/**",
+  "plans/**",
+  "policy/**",
+  "target/**",
+]
+
+# Start with product crates; add xtask explicitly when changing repo automation.
+examine_globs = [
+  "crates/unsafe-review/src/**/*.rs",
+  "crates/unsafe-review-cli/src/**/*.rs",
+  "crates/unsafe-review-core/src/**/*.rs",
+]

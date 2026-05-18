@@ -528,3 +528,104 @@ fn parse_ident(rest: &str) -> Option<String> {
     }
     (!name.is_empty()).then_some(name)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detect_site_prioritizes_specific_unsafe_operations() {
+        assert_eq!(
+            detect_site("unsafe impl Send for Owner {}"),
+            Some((
+                UnsafeSiteKind::UnsafeImplSend,
+                OperationFamily::UnsafeImplSendSync
+            ))
+        );
+        assert_eq!(
+            detect_site("let value = core::mem::transmute::<u8, bool>(byte);"),
+            Some((UnsafeSiteKind::Operation, OperationFamily::Transmute))
+        );
+        assert_eq!(
+            detect_site("let item = slice.get_unchecked(index);"),
+            Some((UnsafeSiteKind::Operation, OperationFamily::GetUnchecked))
+        );
+        assert_eq!(detect_site("let ordinary = safe_call();"), None);
+    }
+
+    #[test]
+    fn raw_pointer_write_detection_covers_common_forms() {
+        for line in [
+            "core::ptr::write(dst, value)",
+            "ptr.write(value)",
+            "buf.as_mut_ptr().write(value)",
+            "ptr.cast_mut().write(value)",
+            "ptr.cast::<u8>().write(value)",
+        ] {
+            assert!(is_raw_pointer_write(line));
+        }
+        assert!(!is_raw_pointer_write("writer.write_all(bytes)"));
+    }
+
+    #[test]
+    fn card_snippets_trim_large_surfaces_but_keep_operations() -> Result<(), String> {
+        let parsed = super::super::syntax::parse_source(
+            "pub unsafe fn read(ptr: *const u8) -> u8 {\n    core::ptr::read(ptr)\n}\n",
+        );
+        let Some(function) = parsed.nodes.iter().find(|node| node.kind == "FN") else {
+            return Err("expected function node".to_string());
+        };
+        let Some(call) = parsed.nodes.iter().find(|node| node.kind == "CALL_EXPR") else {
+            return Err("expected call node".to_string());
+        };
+
+        assert_eq!(
+            card_snippet_for(function, &UnsafeSiteKind::UnsafeFn),
+            "pub unsafe fn read(ptr: *const u8) -> u8 {"
+        );
+        assert_eq!(
+            card_snippet_for(call, &UnsafeSiteKind::Operation),
+            "core::ptr::read(ptr)"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn public_api_surface_is_limited_to_public_unsafe_declarations() {
+        assert!(is_public_api_surface(
+            &UnsafeSiteKind::UnsafeFn,
+            "pub unsafe fn exposed() {}",
+        ));
+        assert!(!is_public_api_surface(
+            &UnsafeSiteKind::Operation,
+            "pub unsafe fn exposed() {}",
+        ));
+        assert!(!is_public_api_surface(
+            &UnsafeSiteKind::UnsafeFn,
+            "unsafe fn private() {}",
+        ));
+    }
+
+    #[test]
+    fn owner_parsing_prefers_impl_targets_and_nearby_functions() {
+        assert_eq!(
+            parse_impl_owner("unsafe impl Send for Wrapper {}"),
+            Some("Wrapper".to_string())
+        );
+        assert_eq!(
+            parse_impl_owner("impl Wrapper {"),
+            Some("Wrapper".to_string())
+        );
+        assert_eq!(
+            parse_fn_name("pub unsafe fn read_ptr(ptr: *const u8) -> u8 {"),
+            Some("read_ptr".to_string())
+        );
+
+        let lines = [
+            "impl Wrapper {",
+            "    pub fn read(&self) {",
+            "        unsafe { self.ptr.read() }",
+        ];
+        assert_eq!(find_owner(&lines, 2), Some("read".to_string()));
+    }
+}

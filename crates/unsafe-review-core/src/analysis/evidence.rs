@@ -255,3 +255,258 @@ fn visit(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> 
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{
+        OperationFamily, SourceLocation, UnsafeOperation, UnsafeSite, UnsafeSiteKind,
+    };
+
+    fn site_with_context(before: &[&str], snippet: &str, after: &[&str]) -> ScannedSite {
+        ScannedSite {
+            site: UnsafeSite {
+                location: SourceLocation::new(PathBuf::from("src/lib.rs"), 1, 1),
+                kind: UnsafeSiteKind::Operation,
+                owner: Some("checked_read".to_string()),
+                visibility: "private".to_string(),
+                public_api_surface: false,
+                changed: true,
+                snippet: snippet.to_string(),
+            },
+            operation: UnsafeOperation {
+                family: OperationFamily::RawPointerRead,
+                expression: snippet.to_string(),
+            },
+            context_before: before.iter().map(|line| (*line).to_string()).collect(),
+            context_after: after.iter().map(|line| (*line).to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn contract_evidence_accepts_safety_docs_and_inline_comments() {
+        let documented = site_with_context(
+            &["/// # Safety", "/// caller validates ptr"],
+            "unsafe { *ptr }",
+            &[],
+        );
+        let commented = site_with_context(&[], "unsafe { *ptr } // SAFETY: ptr checked above", &[]);
+        let missing = site_with_context(&["// ordinary comment"], "unsafe { *ptr }", &[]);
+
+        assert!(contract_evidence(&documented).present);
+        assert!(contract_evidence(&commented).present);
+        assert!(!contract_evidence(&missing).present);
+    }
+
+    #[test]
+    fn guard_detection_ignores_comment_only_alignment_claims() {
+        let site = site_with_context(
+            &["// ptr.is_aligned() would be nice", "if len >= 1 {"],
+            "core::ptr::read(ptr)",
+            &["}"],
+        );
+        let obligations = vec![
+            SafetyObligation::new("alignment", "pointer is aligned"),
+            SafetyObligation::new("bounds", "pointer has enough bytes"),
+        ];
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "test reaches owner".to_string(),
+        };
+        let evidence = obligation_evidence(
+            &site,
+            &obligations,
+            &ContractEvidence::present("contract"),
+            &reach,
+        );
+
+        assert_eq!(evidence.len(), 2);
+        assert!(!evidence[0].discharge.present);
+        assert!(evidence[1].discharge.present);
+    }
+
+    #[test]
+    fn summarize_discharge_requires_every_obligation_to_be_present() {
+        let obligation = SafetyObligation::new("bounds", "bounds checked");
+        let present = ObligationEvidence {
+            obligation: obligation.clone(),
+            contract: EvidenceState::present("contract"),
+            discharge: EvidenceState::present("guard"),
+            reach: EvidenceState::present("reach"),
+            witness: EvidenceState::missing("witness"),
+        };
+        let missing = ObligationEvidence {
+            obligation,
+            contract: EvidenceState::present("contract"),
+            discharge: EvidenceState::missing("guard"),
+            reach: EvidenceState::present("reach"),
+            witness: EvidenceState::missing("witness"),
+        };
+
+        assert!(!summarize_discharge(&[]).present);
+        assert!(summarize_discharge(std::slice::from_ref(&present)).present);
+        assert!(!summarize_discharge(&[present, missing]).present);
+    }
+
+    #[test]
+    fn discharge_detection_covers_guard_variants() {
+        for guard in [
+            "ptr.is_aligned()",
+            "ptr.align_offset(align) == 0",
+            "core::mem::align_of::<u32>()",
+            "ptr.addr() % 4 == 0",
+            "ptr as usize % 4 == 0",
+        ] {
+            assert!(discharge_state_for("alignment", guard).present);
+        }
+
+        assert!(discharge_state_for("bounds", "if index < slice.len() {}").present);
+        assert!(discharge_state_for("valid-range", "if slice.len() >= needed {}").present);
+        assert!(!discharge_state_for("bounds", "let len = slice.len();").present);
+        assert!(!discharge_state_for("bounds", "if index < limit {}").present);
+
+        assert!(discharge_state_for("capacity", "if vec.capacity() >= needed {}").present);
+        assert!(discharge_state_for("capacity", "if vec.cap() >= needed {}").present);
+        assert!(discharge_state_for("non-null", "if !ptr.is_null() {}").present);
+        assert!(discharge_state_for("pointer-live", "let ptr = non_null::new(ptr);").present);
+        assert!(discharge_state_for("pointer-live", "let ptr: nonnull<u8> = ptr;").present);
+        assert!(!discharge_state_for("unknown", "if ptr.is_null() {}").present);
+    }
+
+    #[test]
+    fn reach_evidence_reports_related_tests_with_precise_lines() -> Result<(), String> {
+        let root = TempRoot::create()?;
+        fs::create_dir_all(root.path.join("tests"))
+            .map_err(|err| format!("create tests dir failed: {err}"))?;
+        fs::write(
+            root.path.join("tests/reach.rs"),
+            "#[test]\nfn integration_reaches_owner() {\n    checked_read();\n}\n",
+        )
+        .map_err(|err| format!("write reach.rs failed: {err}"))?;
+        fs::write(
+            root.path.join("tests/mention.rs"),
+            "// helper\n// mention only\nchecked_read();\n",
+        )
+        .map_err(|err| format!("write mention.rs failed: {err}"))?;
+        fs::write(
+            root.path.join("tests/attribute_only.rs"),
+            "#[test]\nchecked_read();\n",
+        )
+        .map_err(|err| format!("write attribute_only.rs failed: {err}"))?;
+
+        let owner = "checked_read".to_string();
+        let (reach, tests) = reach_evidence(&root.path, Some(&owner));
+
+        assert_eq!(reach.state, "owner_reached");
+        assert_eq!(tests.len(), 3);
+        assert!(tests.iter().any(|test| {
+            test.file == "tests/reach.rs"
+                && test.name == "integration_reaches_owner"
+                && test.line == 2
+        }));
+        assert!(tests.iter().any(|test| {
+            test.file == "tests/mention.rs"
+                && test.name == "mentions checked_read"
+                && test.line == 3
+        }));
+        assert!(tests.iter().any(|test| {
+            test.file == "tests/attribute_only.rs" && test.name == "test" && test.line == 1
+        }));
+        Ok(())
+    }
+
+    #[test]
+    fn collect_test_files_includes_inline_unit_tests_outside_test_paths() -> Result<(), String> {
+        let root = TempRoot::create()?;
+        fs::create_dir_all(root.path.join("src"))
+            .map_err(|err| format!("create src dir failed: {err}"))?;
+        fs::write(
+            root.path.join("src/lib.rs"),
+            "pub fn helper() {}\n#[test]\nfn helper_is_reachable() {}\n",
+        )
+        .map_err(|err| format!("write lib.rs failed: {err}"))?;
+        fs::create_dir_all(root.path.join("testdata"))
+            .map_err(|err| format!("create testdata dir failed: {err}"))?;
+        fs::write(
+            root.path.join("testdata/helper.rs"),
+            "pub fn fixture_helper() {}\n",
+        )
+        .map_err(|err| format!("write helper.rs failed: {err}"))?;
+
+        let files = collect_test_files(&root.path)?;
+        assert_eq!(
+            files,
+            vec![
+                PathBuf::from("src/lib.rs"),
+                PathBuf::from("testdata/helper.rs")
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn reach_evidence_handles_unknown_and_unmentioned_owners() -> Result<(), String> {
+        let root = TempRoot::create()?;
+        fs::create_dir_all(root.path.join("tests"))
+            .map_err(|err| format!("create tests dir failed: {err}"))?;
+        fs::write(
+            root.path.join("tests/other.rs"),
+            "#[test]\nfn unrelated() {\n    assert!(true);\n}\n",
+        )
+        .map_err(|err| format!("write other.rs failed: {err}"))?;
+
+        let (unknown, unknown_tests) = reach_evidence(&root.path, None);
+        assert_eq!(unknown.state, "unknown");
+        assert!(unknown_tests.is_empty());
+
+        let owner = "checked_read".to_string();
+        let (unreached, unreached_tests) = reach_evidence(&root.path, Some(&owner));
+        assert_eq!(unreached.state, "unreached");
+        assert!(unreached_tests.is_empty());
+        Ok(())
+    }
+
+    struct TempRoot {
+        path: PathBuf,
+    }
+
+    impl TempRoot {
+        fn create() -> Result<Self, String> {
+            let mut path = std::env::temp_dir();
+            path.push(format!(
+                "unsafe-review-evidence-test-{}-{}",
+                std::process::id(),
+                unique_suffix()
+            ));
+            fs::create_dir_all(&path)
+                .map_err(|err| format!("create temp root {} failed: {err}", path.display()))?;
+            Ok(Self { path })
+        }
+    }
+
+    impl Drop for TempRoot {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn unique_suffix() -> u128 {
+        match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+            Ok(duration) => duration.as_nanos(),
+            Err(_err) => 0,
+        }
+    }
+
+    #[test]
+    fn parse_test_name_accepts_public_and_private_test_fns_only() {
+        assert_eq!(
+            parse_test_name("fn reaches_owner() {"),
+            Some("reaches_owner".to_string())
+        );
+        assert_eq!(
+            parse_test_name("pub fn reaches_owner() {"),
+            Some("reaches_owner".to_string())
+        );
+        assert_eq!(parse_test_name("async fn reaches_owner() {"), None);
+    }
+}
