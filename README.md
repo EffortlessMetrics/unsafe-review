@@ -120,6 +120,7 @@ cargo xtask check-pr
 
 ## Documentation map
 
+- [First-use guide](docs/FIRST_USE.md)
 - [Mission and vision](docs/MISSION.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Architecture](docs/ARCHITECTURE.md)

@@ -4,6 +4,7 @@
 |---|---|---|
 | Mission / vision | product purpose and end state | `docs/MISSION.md`, `docs/VISION.md` |
 | Roadmap | release direction | `docs/ROADMAP.md` |
+| First-use guide | install and first useful local run from crates.io | `docs/FIRST_USE.md` |
 | CLI guide | current user-facing commands and artifact surfaces | `docs/CLI.md` |
 | Proposals | why a workstream exists | `docs/proposals/` |
 | Specs | behavior contracts | `docs/specs/` |
