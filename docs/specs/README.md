@@ -21,3 +21,21 @@ Specs define behavior. They do not carry the PR queue.
 15. [Public API and crate surface](UNSAFE-REVIEW-SPEC-0015-public-api-crate-surface.md)
 16. [Fixtures, calibration, support tiers](UNSAFE-REVIEW-SPEC-0016-fixtures-calibration-support.md)
 17. [Security and file policy](UNSAFE-REVIEW-SPEC-0017-security-file-policy.md)
+
+## Implementation backlog map
+
+These specs are accepted behavior contracts, not a PR queue. The following map
+highlights the specs that still describe planned or partially implemented work:
+
+| Spec | Implementation state | Remaining implementation scope |
+|---|---|---|
+| [Witness receipts](UNSAFE-REVIEW-SPEC-0009-witness-receipts.md) | planned | receipt schema, importers for Miri/cargo-careful/sanitizers/Loom/Kani/Crux, conservative receipt-to-card matching |
+| [Policy, baseline, suppressions](UNSAFE-REVIEW-SPEC-0010-policy-baseline-suppressions.md) | planned | policy decisions, baseline drift detection, suppression validation, policy exit codes |
+| [PR and CI output](UNSAFE-REVIEW-SPEC-0011-pr-ci-output.md) | partially implemented | SARIF, GitHub summary, inline comment selection, policy artifact emission |
+| [LSP and editor projection](UNSAFE-REVIEW-SPEC-0012-lsp-editor-projection.md) | planned | saved-workspace diagnostics, hover cards, read-only code actions, timeout/partial-analysis reporting |
+| [Agent packets](UNSAFE-REVIEW-SPEC-0013-agent-packets.md) | partially implemented | hardened packet schema, redaction, schema tests, CLI/LSP packet parity |
+| [Fixtures, calibration, support tiers](UNSAFE-REVIEW-SPEC-0016-fixtures-calibration-support.md) | partially implemented | golden harness, calibration classes, support-tier promotion checks, false-positive/false-negative ledger |
+
+Implementation should keep JSON review cards as the canonical truth and treat
+Markdown, SARIF, LSP diagnostics, PR comments, and agent packets as projections.
+
