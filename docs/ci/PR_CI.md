@@ -43,6 +43,12 @@ target/unsafe-review/cards.sarif
 target/unsafe-review/comment-plan.json
 ```
 
+Before upload, the workflow runs:
+
+```text
+cargo run --locked -p xtask -- check-advisory-artifacts target/unsafe-review
+```
+
 The comment plan is an artifact of candidate high-signal inline comments. It is
 not posted by the workflow.
 

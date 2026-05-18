@@ -29,7 +29,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.95.0
 
       - name: Build unsafe-review
-        run: cargo build -p unsafe-review
+        run: cargo build --locked -p unsafe-review
 
       - name: Render unsafe-review artifacts
         env:
@@ -40,6 +40,9 @@ jobs:
           ./target/debug/unsafe-review check --base "origin/${BASE_REF}" --format pr-summary --out target/unsafe-review/pr-summary.md
           ./target/debug/unsafe-review check --base "origin/${BASE_REF}" --format sarif --out target/unsafe-review/cards.sarif
           ./target/debug/unsafe-review check --base "origin/${BASE_REF}" --format comment-plan --out target/unsafe-review/comment-plan.json
+
+      - name: Verify unsafe-review artifacts
+        run: cargo run --locked -p xtask -- check-advisory-artifacts target/unsafe-review
 
       - name: Upload unsafe-review artifacts
         uses: actions/upload-artifact@v4

@@ -54,6 +54,9 @@ those comments by default.
 - The advisory workflow uploads `cards.json`, `pr-summary.md`, `cards.sarif`,
   and `comment-plan.json` as artifacts without running Miri, posting comments,
   or enabling blocking policy.
+- The advisory workflow runs `cargo xtask check-advisory-artifacts` before
+  upload so malformed artifacts fail the advisory job instead of being published
+  as trusted dogfood evidence.
 - Empty output states no actionable cards and does not imply the repository is
   safe or UB-free.
 
