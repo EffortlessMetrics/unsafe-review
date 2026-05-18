@@ -24,7 +24,7 @@
 - saved-workspace LSP diagnostics
 - hover cards
 - code actions for copying packets and witness commands
-- agent repair packets
+- copy-only bounded agent packets
 
 ## 0.4.0 — Repo posture and policy
 
