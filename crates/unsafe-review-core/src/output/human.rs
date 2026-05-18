@@ -44,6 +44,9 @@ pub(crate) fn render(output: &AnalyzeOutput) -> String {
         out.push_str(&format!("  contract: {}\n", card.contract.summary));
         out.push_str(&format!("  discharge: {}\n", card.discharge.summary));
         out.push_str(&format!("  reach: {}\n", card.reach.summary));
+        out.push_str(
+            "  reach note: static reach evidence only; it does not prove site execution.\n",
+        );
         if !card.obligation_evidence.is_empty() {
             out.push_str("  obligation evidence:\n");
             for evidence in &card.obligation_evidence {
@@ -105,6 +108,7 @@ mod tests {
         assert!(rendered.contains("alignment: contract present, guard missing"));
         assert!(rendered.contains("witness routes:"));
         assert!(rendered.contains("miri: Pure-Rust UB-adjacent hazard"));
+        assert!(rendered.contains("does not prove site execution"));
         assert!(rendered.contains("Trust boundary: static unsafe contract review"));
         Ok(())
     }
