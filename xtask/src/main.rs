@@ -165,9 +165,22 @@ fn check_advisory_artifacts(dir: &Path) -> Result<(), String> {
     require_json_str(&cards, "tool", "unsafe-review", "cards.json")?;
     require_json_str(&cards, "policy", "advisory", "cards.json")?;
     require_json_array(&cards, "cards", "cards.json")?;
+    let card_ids = advisory_card_ids(&cards)?;
+    let card_count = card_ids.len();
+    let summary_cards = json_usize_at(&cards, "/summary/cards", "cards.json")?;
+    if summary_cards != card_count {
+        return Err(format!(
+            "cards.json summary.cards is {summary_cards}, but cards array has {card_count}"
+        ));
+    }
 
     let pr_summary_path = dir.join("pr-summary.md");
     let pr_summary = read_to_string(&pr_summary_path)?;
+    require_text_contains(
+        &pr_summary,
+        &format!("- Review cards: {card_count}"),
+        &pr_summary_path,
+    )?;
     require_text_contains(
         &pr_summary,
         "static unsafe contract review",
@@ -184,6 +197,26 @@ fn check_advisory_artifacts(dir: &Path) -> Result<(), String> {
     let sarif = parse_json_file(&dir.join("cards.sarif"))?;
     require_json_str(&sarif, "version", "2.1.0", "cards.sarif")?;
     require_json_array(&sarif, "runs", "cards.sarif")?;
+    let sarif_results = json_array_at(&sarif, "/runs/0/results", "cards.sarif")?;
+    if sarif_results.len() != card_count {
+        return Err(format!(
+            "cards.sarif has {} result(s), but cards.json has {card_count} card(s)",
+            sarif_results.len()
+        ));
+    }
+    for result in sarif_results {
+        let Some(card_id) = result
+            .pointer("/properties/cardId")
+            .and_then(serde_json::Value::as_str)
+        else {
+            return Err("cards.sarif result is missing properties.cardId".to_string());
+        };
+        if !card_ids.contains(card_id) {
+            return Err(format!(
+                "cards.sarif result references unknown card id `{card_id}`"
+            ));
+        }
+    }
     let sarif_boundary = sarif
         .pointer("/runs/0/properties/trustBoundary")
         .and_then(serde_json::Value::as_str)
@@ -194,6 +227,16 @@ fn check_advisory_artifacts(dir: &Path) -> Result<(), String> {
     require_json_str(&comment_plan, "mode", "plan_only", "comment-plan.json")?;
     require_json_str(&comment_plan, "policy", "advisory", "comment-plan.json")?;
     require_json_array(&comment_plan, "comments", "comment-plan.json")?;
+    for comment in json_array_at(&comment_plan, "/comments", "comment-plan.json")? {
+        let Some(card_id) = comment.get("card_id").and_then(serde_json::Value::as_str) else {
+            return Err("comment-plan.json comment is missing card_id".to_string());
+        };
+        if !card_ids.contains(card_id) {
+            return Err(format!(
+                "comment-plan.json references unknown card id `{card_id}`"
+            ));
+        }
+    }
     let comment_boundary = comment_plan
         .get("trust_boundary")
         .and_then(serde_json::Value::as_str)
@@ -337,6 +380,38 @@ fn parse_json_file(path: &Path) -> Result<serde_json::Value, String> {
     let text = read_to_string(path)?;
     serde_json::from_str(&text)
         .map_err(|err| format!("{} is not valid JSON: {err}", path.display()))
+}
+
+fn advisory_card_ids(cards: &serde_json::Value) -> Result<BTreeSet<String>, String> {
+    let mut ids = BTreeSet::new();
+    for card in json_array_at(cards, "/cards", "cards.json")? {
+        let Some(id) = card.get("id").and_then(serde_json::Value::as_str) else {
+            return Err("cards.json card is missing id".to_string());
+        };
+        if !ids.insert(id.to_string()) {
+            return Err(format!("cards.json contains duplicate card id `{id}`"));
+        }
+    }
+    Ok(ids)
+}
+
+fn json_array_at<'a>(
+    value: &'a serde_json::Value,
+    pointer: &str,
+    path: &str,
+) -> Result<&'a Vec<serde_json::Value>, String> {
+    value
+        .pointer(pointer)
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| format!("{path} is missing array at `{pointer}`"))
+}
+
+fn json_usize_at(value: &serde_json::Value, pointer: &str, path: &str) -> Result<usize, String> {
+    let Some(number) = value.pointer(pointer).and_then(serde_json::Value::as_u64) else {
+        return Err(format!("{path} is missing unsigned integer at `{pointer}`"));
+    };
+    usize::try_from(number)
+        .map_err(|err| format!("{path} integer at `{pointer}` is too large: {err}"))
 }
 
 fn require_toml_string(value: &toml::Value, key: &str, path: &str) -> Result<(), String> {
@@ -620,7 +695,7 @@ mod tests {
         let dir = unique_temp_dir("unsafe-review-artifacts-missing-boundary")?;
         fs::create_dir_all(&dir).map_err(|err| format!("create temp dir failed: {err}"))?;
         write_valid_artifacts(&dir)?;
-        fs::write(dir.join("pr-summary.md"), "# unsafe-review PR summary\n")
+        fs::write(dir.join("pr-summary.md"), "- Review cards: 1\n")
             .map_err(|err| format!("write pr summary failed: {err}"))?;
 
         let result = check_advisory_artifacts(&dir);
@@ -635,25 +710,43 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn advisory_artifact_checker_rejects_unknown_projection_card_ids() -> Result<(), String> {
+        let dir = unique_temp_dir("unsafe-review-artifacts-unknown-id")?;
+        fs::create_dir_all(&dir).map_err(|err| format!("create temp dir failed: {err}"))?;
+        write_valid_artifacts(&dir)?;
+        fs::write(
+            dir.join("comment-plan.json"),
+            r#"{"mode":"plan_only","policy":"advisory","comments":[{"card_id":"missing"}],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}"#,
+        )
+        .map_err(|err| format!("write comment plan failed: {err}"))?;
+
+        let result = check_advisory_artifacts(&dir);
+
+        fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        assert!(result.err().unwrap_or_default().contains("unknown card id"));
+        Ok(())
+    }
+
     fn write_valid_artifacts(dir: &Path) -> Result<(), String> {
         fs::write(
             dir.join("cards.json"),
-            r#"{"tool":"unsafe-review","policy":"advisory","cards":[]}"#,
+            r#"{"tool":"unsafe-review","policy":"advisory","summary":{"cards":1},"cards":[{"id":"card-1"}]}"#,
         )
         .map_err(|err| format!("write cards failed: {err}"))?;
         fs::write(
             dir.join("pr-summary.md"),
-            "This artifact is static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result unless a witness receipt is attached.\n",
+            "- Review cards: 1\n\nThis artifact is static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result unless a witness receipt is attached.\n",
         )
         .map_err(|err| format!("write pr summary failed: {err}"))?;
         fs::write(
             dir.join("cards.sarif"),
-            r#"{"version":"2.1.0","runs":[{"properties":{"trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}]}"#,
+            r#"{"version":"2.1.0","runs":[{"results":[{"properties":{"cardId":"card-1"}}],"properties":{"trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}]}"#,
         )
         .map_err(|err| format!("write sarif failed: {err}"))?;
         fs::write(
             dir.join("comment-plan.json"),
-            r#"{"mode":"plan_only","policy":"advisory","comments":[],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}"#,
+            r#"{"mode":"plan_only","policy":"advisory","comments":[{"card_id":"card-1"}],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}"#,
         )
         .map_err(|err| format!("write comment plan failed: {err}"))?;
         Ok(())

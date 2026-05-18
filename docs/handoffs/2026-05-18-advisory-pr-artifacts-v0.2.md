@@ -119,7 +119,8 @@ rtk cargo xtask check-advisory-artifacts target/unsafe-review
 ```
 
 This verifies the four-file artifact contract, advisory policy, plan-only
-comment mode, JSON/SARIF parseability, and trust-boundary text.
+comment mode, JSON/SARIF parseability, projection card IDs, result counts, and
+trust-boundary text.
 
 ## Next lane
 
