@@ -123,6 +123,7 @@ cargo xtask check-pr
 - [Mission and vision](docs/MISSION.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Architecture](docs/ARCHITECTURE.md)
+- [CLI guide](docs/CLI.md)
 - [Specifications](docs/specs/README.md)
 - [ADRs](docs/adr/README.md)
 - [Implementation plan](plans/0.1.0/implementation-plan.md)

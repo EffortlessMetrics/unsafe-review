@@ -1,0 +1,163 @@
+# CLI guide
+
+`unsafe-review` is a cheap PR-time unsafe contract review tool. It emits
+`ReviewCard`s and projects those same cards into human output, JSON, PR
+artifacts, saved editor data, agent packets, repo posture, badges, and receipt
+evidence.
+
+Every command is advisory by default. The tool does not prove memory safety, does
+not claim UB-free status, does not run witness tools by default, and does not
+post PR comments.
+
+## Review A Diff
+
+Review the current branch against `origin/main`:
+
+```bash
+unsafe-review check --base origin/main
+```
+
+Review a supplied unified diff:
+
+```bash
+unsafe-review check --diff change.diff --format json
+git diff origin/main...HEAD | unsafe-review check --diff - --format json
+```
+
+Use `--root` when reviewing a fixture or another workspace:
+
+```bash
+unsafe-review check \
+  --root fixtures/raw_pointer_alignment \
+  --diff change.diff \
+  --format json
+```
+
+The default policy is `advisory`; it reports cards but does not fail the
+command. The explicit no-new-debt mode exits nonzero when unbaselined actionable
+gaps remain:
+
+```bash
+unsafe-review check --base origin/main --policy no-new-debt
+```
+
+Blocking policy is not implemented.
+
+## Output Formats
+
+All output formats project the same `ReviewCard`s. They must not reclassify
+findings independently.
+
+| Format | Command | Use |
+|---|---|---|
+| `human` | `unsafe-review check --base origin/main` | terminal review |
+| `json` | `unsafe-review check --base origin/main --format json` | canonical machine-readable cards |
+| `markdown` | `unsafe-review check --diff change.diff --format markdown` | local report |
+| `pr-summary` | `unsafe-review check --base origin/main --format pr-summary --out target/unsafe-review/pr-summary.md` | sparse reviewer-facing PR artifact |
+| `sarif` | `unsafe-review check --base origin/main --format sarif --out target/unsafe-review/cards.sarif` | code-scanning-compatible artifact |
+| `comment-plan` | `unsafe-review check --base origin/main --format comment-plan --out target/unsafe-review/comment-plan.json` | artifact-only inline comment candidates |
+| `lsp` | `unsafe-review check --base origin/main --format lsp --out target/unsafe-review/lsp.json` | saved editor diagnostics and hovers |
+
+`comment-plan` is plan-only. It does not post comments.
+
+`lsp` writes saved JSON only. There is no editor extension or live LSP server in
+this surface.
+
+## PR Artifacts
+
+The advisory workflow renders:
+
+```text
+target/unsafe-review/cards.json
+target/unsafe-review/pr-summary.md
+target/unsafe-review/cards.sarif
+target/unsafe-review/comment-plan.json
+```
+
+Verify a local or downloaded artifact set with:
+
+```bash
+cargo xtask check-advisory-artifacts target/unsafe-review
+```
+
+That verifier checks parseability, advisory policy, plan-only comment mode,
+projected card identity consistency, result counts, and trust-boundary text. It
+does not prove the analyzer found every unsafe issue.
+
+## Explain And Context
+
+Use `explain` for a human-readable explanation of one card:
+
+```bash
+unsafe-review explain --root fixtures/raw_pointer_alignment <card-id>
+```
+
+Use `context` for the bounded agent packet:
+
+```bash
+unsafe-review context --root fixtures/raw_pointer_alignment <card-id> --json
+```
+
+The context packet is copy-only. It includes a card-scoped task, missing
+evidence, allowed repairs, do-not-do rules, verify commands, stop conditions,
+and the static-review trust boundary. It does not execute an agent and does not
+edit source.
+
+## Repo Posture And Badges
+
+Repo mode scans the workspace and reports static open unsafe-review gaps:
+
+```bash
+unsafe-review repo --format json
+```
+
+Badge JSON reports open review gaps, not raw unsafe usage and not safety status:
+
+```bash
+unsafe-review badges --out badges/
+```
+
+The badge output is repo posture evidence only. It is not a safety badge.
+
+## Witness Receipts
+
+Imported receipts attach external witness evidence to exact `ReviewCard`
+identities:
+
+```text
+.unsafe-review/receipts/*.json
+```
+
+A receipt must include exact counted `card_id`, `tool`, `strength`, `author`,
+`recorded_at`, `expires_at`, and optional command/limitations details. Matching
+receipts mark witness evidence present, but they do not discharge missing
+contracts, guards, or reach evidence.
+
+`unsafe-review` imports receipts. It does not run Miri, `cargo-careful`,
+sanitizers, Loom, Shuttle, Kani, or Crux by default.
+
+## Doctor
+
+Run a lightweight environment check:
+
+```bash
+unsafe-review doctor
+```
+
+`doctor` reports availability signals. Missing witness tools are reported, not
+treated as a default failure.
+
+## Flag Forms
+
+Flags may use either form:
+
+```bash
+unsafe-review check --root fixtures/raw_pointer_alignment --format json
+unsafe-review check --root=fixtures/raw_pointer_alignment --format=json
+```
+
+Use `--out` to write artifacts without printing them:
+
+```bash
+unsafe-review check --diff change.diff --format sarif --out target/unsafe-review/cards.sarif
+```
