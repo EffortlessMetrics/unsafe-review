@@ -53,7 +53,7 @@ These are not failures; they are the next unsupported or weakly verified areas:
 - Schema compatibility is not yet a public promise.
 - Broader calibration on real unsafe-heavy crates is still needed before any
   support tier promotion toward usable alpha. The first dogfood slice covered
-  six top-50 capped repo snapshots and eighteen PR diffs across six crates;
+  seven top-50 capped repo snapshots and eighteen PR diffs across seven crates;
   the fixture calibration manifest remains a proof index, not real-world
   calibration.
 - No default no-new-debt or blocking branch-protection policy is justified yet.
