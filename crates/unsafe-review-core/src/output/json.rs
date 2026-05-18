@@ -236,6 +236,7 @@ mod tests {
         "maybeuninit_assume_init",
         "vec_set_len",
         "vec_set_len_initialized_loop",
+        "vec_set_len_shrink",
         "vec_set_len_zero_clear",
         "transmute_invalid_value",
         "unsafe_impl_send",
