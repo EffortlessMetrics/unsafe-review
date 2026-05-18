@@ -102,4 +102,5 @@ pub(crate) enum Command {
     ReceiptImportCareful(SavedOutputReceiptOptions),
     ReceiptImportSanitizer(SavedOutputReceiptOptions),
     ReceiptImportConcurrency(SavedOutputReceiptOptions),
+    ReceiptImportProof(SavedOutputReceiptOptions),
 }
