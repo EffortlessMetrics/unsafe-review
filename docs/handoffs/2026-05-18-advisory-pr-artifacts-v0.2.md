@@ -498,6 +498,22 @@ The repo must not claim:
 - No receipt import, baseline, suppression, repo badge, LSP, or agent packet
   surface is part of this lane.
 
+## Completion audit
+
+The advisory PR artifact stabilization lane is closed at experimental support.
+It is dogfoodable, not policy-ready.
+
+| Done criterion | Evidence | Remaining limit |
+|---|---|---|
+| Advisory workflow artifacts are stable and dogfoodable | `#125` runs `cargo run --locked -p xtask -- check-advisory-artifacts target/unsafe-review` before upload; `#126` records run `26015915336`, artifact id `7050382836`, and a downloaded-artifact verifier pass | Artifact correctness still depends on underlying `ReviewCard` quality |
+| Workflow uploads `cards.json`, `pr-summary.md`, `cards.sarif`, and `comment-plan.json` | `#104`, `#112`, `#117`, `#119`, and `#125` receipts record downloaded artifacts containing all four files | Uploading artifacts is not code-scanning approval or a safety proof |
+| Docs-only and no-risk PRs stay quiet | `#109`, `#120`, `#121`, `#122`, `#123`, `#124`, `#126`, `#127`, and `#128` docs-only branches had no advisory workflow run; `#119` Rust test-only analyzer invariant PR produced zero cards | Path filters should still be watched during dogfood |
+| Comment plan remains artifact-only | `comment-plan.json` is verified as `mode = plan_only` and `policy = advisory`; no workflow step posts comments | Comment planning is not a posting policy |
+| SARIF and PR summary project the same review cards | `check-advisory-artifacts` verifies SARIF result card IDs and comment-plan card IDs against `cards.json` and verifies result counts | SARIF remains advisory static review evidence |
+| Trust boundary appears in every PR artifact surface | `check-advisory-artifacts` verifies trust-boundary text in `cards.json`, `pr-summary.md`, `cards.sarif`, and `comment-plan.json` | No artifact may claim memory-safety proof, UB-free status, Miri success, or site execution without a receipt |
+| Support tiers stay experimental/advisory | `docs/status/SUPPORT_TIERS.md` keeps PR summary, SARIF, workflow, and comment plan as `experimental`; repo inventory stays `scaffold` | No baseline, no-new-debt, blocking, receipt, LSP, or agent-packet promotion happened in this lane |
+| The repo can dogfood without reviewer noise | Current repo-mode dogfood at `e57785b` reported `cards: 23`, `fixture_cards: 23`, and `product_code_cards: 0` | Repo-mode counts fixtures and is not a promoted repo posture surface |
+
 ## Dogfood path
 
 Use real PRs to inspect artifact usefulness before adding more product surface:
