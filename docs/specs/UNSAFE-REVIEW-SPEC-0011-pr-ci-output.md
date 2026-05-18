@@ -13,6 +13,10 @@ Linked plan: ../../plans/0.1.0/implementation-plan.md
 ## Behavior
 
 PR output must be sparse: summary first, at most a few high-confidence inline comments, durable JSON/Markdown/SARIF artifacts.
+The first supported PR projection is a local Markdown summary artifact rendered
+from existing `ReviewCard`s. It includes counts, a top card, a card table, a
+witness plan, and the trust boundary. It does not post comments, run witness
+tools, or change policy mode.
 
 ## Non-goals
 
@@ -32,6 +36,10 @@ PR output must be sparse: summary first, at most a few high-confidence inline co
 - A changed unsafe seam produces one review card with stable identity.
 - The card includes missing evidence and a next action.
 - If evidence is not knowable statically, the card names the limitation instead of overclaiming.
+- `unsafe-review check --format pr-summary --out target/unsafe-review/pr-summary.md`
+  writes a GitHub-ready Markdown artifact.
+- Empty output states no actionable cards and does not imply the repository is
+  safe or UB-free.
 
 ## CI proof
 

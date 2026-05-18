@@ -13,7 +13,8 @@ All tiers describe static review evidence. None means memory-safety proof.
 | Guard evidence mining | experimental | cards | raw-pointer alignment and comment-not-guard fixtures prove bounds evidence does not discharge alignment | obligation-specific patterns are still sparse |
 | Witness routing | experimental | cards | route-table tests plus raw pointer, FFI, unsafe impl Send, Pin, and invalid-value fixture routes | route recommendation only; no witness receipts |
 | Repo inventory | scaffold | repo JSON / badges | compile gate only | badge is not UB-free claim |
-| PR / SARIF projection | planned | PR artifacts | review-card projection fixtures | summary-only first; no default blocking |
+| PR Markdown summary | experimental | PR artifact Markdown | `pr_summary` renderer tests and CLI `--format pr-summary` | local artifact only; no workflow wiring or comments yet |
+| SARIF projection | planned | PR artifact SARIF | SARIF fixture tests | no default blocking |
 | LSP projection | planned | editor | saved-card fixtures | read-only first |
 | Agent packets | planned | JSON packet | packet schema tests | agents still require review |
 | Receipt import | planned | witness receipts | Miri/careful/sanitizer fixtures | receipt strength must be explicit |

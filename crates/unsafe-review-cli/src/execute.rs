@@ -4,7 +4,7 @@ use std::path::Path;
 use std::process::Command as ProcessCommand;
 use unsafe_review_core::{
     AnalysisMode, AnalyzeInput, CardId, DiffSource, PolicyMode, Scope, analyze, collect_context,
-    explain_card, render_human, render_json, render_markdown,
+    explain_card, render_human, render_json, render_markdown, render_pr_summary,
 };
 
 pub(crate) fn execute(command: Command) -> Result<(), String> {
@@ -81,6 +81,7 @@ fn render_with_format(output: &unsafe_review_core::AnalyzeOutput, format: &Forma
         Format::Human => render_human(output),
         Format::Json => render_json(output),
         Format::Markdown => render_markdown(output),
+        Format::PrSummary => render_pr_summary(output),
     }
 }
 
@@ -190,7 +191,7 @@ fn print_help() {
     println!();
     println!("Commands:");
     println!(
-        "  check   [--root .] [--base origin/main | --diff file] [--format human|json|markdown]"
+        "  check   [--root .] [--base origin/main | --diff file] [--format human|json|markdown|pr-summary]"
     );
     println!("  repo    [--root .] [--format json]");
     println!("  pilot   [--root .] [--base origin/main] [--max-cards 5]");

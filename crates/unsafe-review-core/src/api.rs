@@ -121,6 +121,10 @@ pub fn render_markdown(output: &AnalyzeOutput) -> String {
     markdown::render(output)
 }
 
+pub fn render_pr_summary(output: &AnalyzeOutput) -> String {
+    markdown::render_pr_summary(output)
+}
+
 pub fn explain_card(output: &AnalyzeOutput, id: &CardId) -> Option<String> {
     output
         .cards

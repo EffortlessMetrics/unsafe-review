@@ -162,6 +162,7 @@ fn parse_format(raw: &str) -> Result<Format, String> {
         "human" => Ok(Format::Human),
         "json" | "repo-json" => Ok(Format::Json),
         "markdown" | "md" => Ok(Format::Markdown),
+        "pr-summary" | "github-summary" | "github-markdown" => Ok(Format::PrSummary),
         other => Err(format!("unknown format `{other}`")),
     }
 }
@@ -170,4 +171,38 @@ fn value<'a>(args: &'a [String], idx: usize, flag: &str) -> Result<&'a str, Stri
     args.get(idx)
         .map(|value| value.as_str())
         .ok_or_else(|| format!("missing value for {flag}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_pr_summary_format_for_check() -> Result<(), String> {
+        let command = parse(args(["unsafe-review", "check", "--format", "pr-summary"]))?;
+        let Command::Check(options) = command else {
+            return Err("expected check command".to_string());
+        };
+        assert_eq!(options.format, Format::PrSummary);
+        Ok(())
+    }
+
+    #[test]
+    fn parses_github_summary_alias_for_check() -> Result<(), String> {
+        let command = parse(args([
+            "unsafe-review",
+            "check",
+            "--format",
+            "github-summary",
+        ]))?;
+        let Command::Check(options) = command else {
+            return Err("expected check command".to_string());
+        };
+        assert_eq!(options.format, Format::PrSummary);
+        Ok(())
+    }
+
+    fn args<const N: usize>(values: [&str; N]) -> Vec<String> {
+        values.iter().map(|value| (*value).to_string()).collect()
+    }
 }
