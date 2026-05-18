@@ -38,6 +38,12 @@ existing log file, reject empty output, reject failure-looking output, require
 `strength = "ran"`. It must not execute Miri, infer site reach, or create a
 card.
 
+The CLI may import a receipt from saved `cargo-careful` output. The adapter must
+read an existing log file, reject empty output, reject failure-looking output,
+require `test result: ok`, and emit a normal `WitnessReceipt` with
+`tool = "cargo-careful"` and `strength = "ran"`. It must not execute
+`cargo-careful`, infer site reach, or create a card.
+
 The CLI may also validate receipt files without running analysis. Validation must
 use the same importer checks as normal card analysis so users do not get a
 separate receipt truth.
@@ -118,6 +124,8 @@ after the `recorded_at` date.
   not execute the recorded command.
 - The CLI Miri saved-output adapter writes a receipt from a success-looking Miri
   log and rejects failure-looking output.
+- The CLI `cargo-careful` saved-output adapter writes a receipt from a
+  success-looking `cargo-careful` log and rejects failure-looking output.
 - The CLI receipt-validate command counts importable receipts and rejects the
   same invalid receipt files as normal analysis.
 

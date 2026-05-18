@@ -1,5 +1,5 @@
 use crate::command::{
-    CheckOptions, Command, DiffInput, Format, MiriReceiptOptions, ReceiptTemplateOptions,
+    CheckOptions, Command, DiffInput, Format, ReceiptTemplateOptions, SavedOutputReceiptOptions,
 };
 use std::path::PathBuf;
 use unsafe_review_core::PolicyMode;
@@ -221,21 +221,30 @@ fn parse_receipt(args: Vec<String>) -> Result<Command, String> {
     let mut rest = args;
     let Some(subcommand) = rest.first() else {
         return Err(
-            "missing receipt subcommand `import-miri`, `template`, or `validate`".to_string(),
+            "missing receipt subcommand `import-miri`, `import-careful`, `template`, or `validate`"
+                .to_string(),
         );
     };
     let subcommand = subcommand.clone();
     rest.remove(0);
     match subcommand.as_str() {
-        "import-miri" => parse_miri_receipt(rest).map(Command::ReceiptImportMiri),
+        "import-careful" | "import-cargo-careful" => {
+            parse_saved_output_receipt(rest, "import-careful").map(Command::ReceiptImportCareful)
+        }
+        "import-miri" => {
+            parse_saved_output_receipt(rest, "import-miri").map(Command::ReceiptImportMiri)
+        }
         "template" => parse_receipt_template(rest).map(Command::ReceiptTemplate),
         "validate" => parse_receipt_validate(rest),
         other => Err(format!("unknown receipt subcommand `{other}`")),
     }
 }
 
-fn parse_miri_receipt(args: Vec<String>) -> Result<MiriReceiptOptions, String> {
-    let mut options = MiriReceiptOptions::default();
+fn parse_saved_output_receipt(
+    args: Vec<String>,
+    command_name: &str,
+) -> Result<SavedOutputReceiptOptions, String> {
+    let mut options = SavedOutputReceiptOptions::default();
     let mut id: Option<String> = None;
     let mut idx = 0usize;
     while idx < args.len() {
@@ -294,7 +303,7 @@ fn parse_miri_receipt(args: Vec<String>) -> Result<MiriReceiptOptions, String> {
                 options.out = Some(PathBuf::from(inline_value(arg, "--out")?));
             }
             value if value.starts_with('-') => {
-                return Err(format!("unknown receipt import-miri argument `{value}`"));
+                return Err(format!("unknown receipt {command_name} argument `{value}`"));
             }
             value => set_card_id(&mut id, value)?,
         }
@@ -836,6 +845,68 @@ mod tests {
     }
 
     #[test]
+    fn parses_receipt_import_careful_command() -> Result<(), String> {
+        let command = parse(args([
+            "unsafe-review",
+            "receipt",
+            "import-careful",
+            "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1",
+            "--log",
+            "fixtures/raw_pointer_alignment_receipted/careful.success.log",
+            "--author",
+            "core/fixtures",
+            "--recorded-at",
+            "2026-05-18T00:00:00Z",
+            "--expires-at",
+            "2026-08-18",
+            "--command",
+            "cargo +nightly careful test read_header",
+            "--limitation",
+            "fixture only",
+            "--out",
+            "target/careful.json",
+        ]))?;
+
+        let Command::ReceiptImportCareful(options) = command else {
+            return Err("expected receipt import-careful command".to_string());
+        };
+        assert_eq!(
+            options.card_id,
+            "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1"
+        );
+        assert_eq!(
+            options.log,
+            PathBuf::from("fixtures/raw_pointer_alignment_receipted/careful.success.log")
+        );
+        assert_eq!(options.author, "core/fixtures");
+        assert_eq!(options.command, "cargo +nightly careful test read_header");
+        assert_eq!(options.limitations, vec!["fixture only".to_string()]);
+        Ok(())
+    }
+
+    #[test]
+    fn parses_receipt_import_cargo_careful_alias() -> Result<(), String> {
+        let command = parse(args([
+            "unsafe-review",
+            "receipt",
+            "import-cargo-careful",
+            "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1",
+            "--log=fixtures/raw_pointer_alignment_receipted/careful.success.log",
+            "--author=core/fixtures",
+            "--recorded-at=2026-05-18T00:00:00Z",
+            "--expires-at=2026-08-18",
+            "--command=cargo +nightly careful test read_header",
+        ]))?;
+
+        let Command::ReceiptImportCareful(options) = command else {
+            return Err("expected receipt import-careful command".to_string());
+        };
+        assert_eq!(options.author, "core/fixtures");
+        assert_eq!(options.command, "cargo +nightly careful test read_header");
+        Ok(())
+    }
+
+    #[test]
     fn receipt_import_miri_requires_command() {
         let command = parse(args([
             "unsafe-review",
@@ -844,6 +915,26 @@ mod tests {
             "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1",
             "--log",
             "miri.log",
+            "--author",
+            "core/fixtures",
+            "--recorded-at",
+            "2026-05-18T00:00:00Z",
+            "--expires-at",
+            "2026-08-18",
+        ]));
+
+        assert_eq!(command, Err("missing value for --command".to_string()));
+    }
+
+    #[test]
+    fn receipt_import_careful_requires_command() {
+        let command = parse(args([
+            "unsafe-review",
+            "receipt",
+            "import-careful",
+            "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1",
+            "--log",
+            "careful.log",
             "--author",
             "core/fixtures",
             "--recorded-at",
