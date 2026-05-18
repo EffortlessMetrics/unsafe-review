@@ -35,6 +35,7 @@ impl UnsafeSiteKind {
 pub enum OperationFamily {
     RawPointerDeref,
     RawPointerRead,
+    RawPointerReadUnaligned,
     RawPointerWrite,
     PointerArithmetic,
     CopyNonOverlapping,
@@ -61,6 +62,7 @@ impl OperationFamily {
         match self {
             Self::RawPointerDeref => "raw_pointer_deref",
             Self::RawPointerRead => "raw_pointer_read",
+            Self::RawPointerReadUnaligned => "raw_pointer_read_unaligned",
             Self::RawPointerWrite => "raw_pointer_write",
             Self::PointerArithmetic => "pointer_arithmetic",
             Self::CopyNonOverlapping => "copy_nonoverlapping",
