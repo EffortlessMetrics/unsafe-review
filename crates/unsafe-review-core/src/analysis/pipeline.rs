@@ -742,6 +742,20 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn documented_target_feature_declaration_is_guarded() -> Result<(), String> {
+        let output = fixture_output("target_feature_safety_docs")?;
+        let card = single_card("target_feature_safety_docs", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::TargetFeature);
+        assert_eq!(card.class, ReviewClass::GuardedUnwitnessed);
+        assert!(card.contract.present);
+        assert!(card.discharge.present);
+        assert!(obligation_discharge_present(card, "target-feature"));
+        Ok(())
+    }
+
+    #[test]
     fn unwrap_unchecked_uses_concrete_operation_family() -> Result<(), String> {
         let output = fixture_output("unwrap_unchecked_result")?;
         let card = single_card("unwrap_unchecked_result", &output)?;

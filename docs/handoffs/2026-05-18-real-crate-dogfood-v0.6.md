@@ -1229,6 +1229,36 @@ one-past-the-end pointer for the same slice. It does not prove arbitrary pointer
 arithmetic, pointer provenance, or target-specific call contracts, and it does
 not execute a witness.
 
+Follow-up capped `memchr` repo rerun after treating documented target-feature
+attributes as caller-contract sites:
+
+```text
+cards: 50
+guard_missing: 11
+guarded_unwitnessed: 39
+target_feature cards: 10
+```
+
+The ten target-feature cards are still advisory only:
+
+```text
+new             line 61   target_feature  guarded_unwitnessed
+count_raw       line 267  target_feature  guarded_unwitnessed
+find_raw_impl   line 287  target_feature  guarded_unwitnessed
+rfind_raw_impl  line 307  target_feature  guarded_unwitnessed
+new             line 421  target_feature  guarded_unwitnessed
+rfind_raw       line 578  target_feature  guarded_unwitnessed
+find_raw_impl   line 598  target_feature  guarded_unwitnessed
+new             line 703  target_feature  guarded_unwitnessed
+rfind_raw       line 868  target_feature  guarded_unwitnessed
+find_raw_impl   line 888  target_feature  guarded_unwitnessed
+```
+
+They moved out of `guard_missing` because the target-feature declarations have
+nearby `# Safety` contract docs. The card still prompts for witness evidence;
+this does not prove target-feature availability, site execution, or arbitrary
+callee-specific target-feature correctness.
+
 Follow-up rerun after making owner inference ignore multi-line `impl Trait`
 bounds:
 
@@ -1285,6 +1315,7 @@ rtk cargo run --locked -p unsafe-review -- repo --root target/dogfood-work/array
 rtk cargo run --locked -p unsafe-review -- repo --root target/dogfood-work/memchr --format json --max-cards 50 --out target/dogfood-work/memchr.unsafe-review.after-cap-targetfeature.json
 rtk cargo run --locked -p unsafe-review -- repo --root target/dogfood-work/memchr --format json --max-cards 50 --out target/dogfood-work/memchr.unsafe-review.after-unchecked-constructor-evidence.json
 rtk cargo run --locked -p unsafe-review -- repo --root target/dogfood-work/memchr --format json --max-cards 50 --out target/dogfood-work/memchr.unsafe-review.after-slice-end-pointer-evidence.json
+rtk cargo run --locked -p unsafe-review -- repo --root target/dogfood-work/memchr --format json --max-cards 50 --out target/dogfood-work/memchr.unsafe-review.after-target-feature-contract-evidence.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/memchr --diff target/dogfood-work/memchr-pr215.raw.diff --format json --max-cards 20 --out target/dogfood-work/memchr-pr215.owner-contract.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/smallvec --diff target/dogfood-work/smallvec-pr407.raw.diff --format json --max-cards 20 --out target/dogfood-work/smallvec-pr407.owner-fix.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/smallvec --diff target/dogfood-work/smallvec-pr277.raw.diff --format json --max-cards 30 --out target/dogfood-work/smallvec-pr277.after-start-bound-shrink.json
@@ -1431,6 +1462,9 @@ The repo may claim:
   capped `memchr` repo snapshot's `count` pointer-arithmetic card from
   `guard_missing` to `guarded_unwitnessed` for the local `as_ptr()` plus
   same-slice `len()` shape
+- one fixture-backed target-feature contract improvement changed ten capped
+  `memchr` target-feature attribute cards from `guard_missing` to
+  `guarded_unwitnessed` when nearby `# Safety` docs state the caller contract
 - one fixture-backed owner-inference improvement changed two `hashbrown#469`
   card owners from `Fn` to the real enclosing function names
 - one fixture-backed multi-line unsafe-call wrapper improvement changed five
@@ -1524,6 +1558,9 @@ The repo must not claim:
 - The capped `memchr` repo rerun recognizes the narrow same-slice
   `as_ptr()`/`len()` end-pointer pattern, but broader pointer-arithmetic guard
   naming and provenance modeling remain future work.
+- The capped `memchr` repo rerun now treats documented target-feature
+  declarations as caller-contract sites, but this remains contract evidence
+  only; it does not prove target-feature availability or execute a witness.
 - `hashbrown#667` now dedupes parent calls that contain a smaller unsafe
   operation of the same family, but broader nested-operation attribution remains
   source-syntax heuristic work.

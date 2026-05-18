@@ -251,6 +251,7 @@ mod tests {
         "safe_reference_deref_no_cards",
         "imports_not_unsafe_operations",
         "cfg_target_feature_not_operation",
+        "target_feature_safety_docs",
         "split_raw_pointer_read_call",
         "maybeuninit_assume_init",
         "vec_set_len",
