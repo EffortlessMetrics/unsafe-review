@@ -232,6 +232,7 @@ mod tests {
         "unsafe_fn_call_wrapper",
         "multiline_unsafe_fn_call_wrapper",
         "nested_unsafe_operation_call_dedupe",
+        "adjacent_unchanged_unsafe_fn_no_card",
         "split_unsafe_block",
         "raw_pointer_deref",
         "raw_pointer_read_unaligned",
