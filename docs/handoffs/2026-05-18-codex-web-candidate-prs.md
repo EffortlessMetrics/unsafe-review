@@ -1,8 +1,8 @@
 # Codex web candidate PR intake
 
 Date: 2026-05-18
-Status: candidate intake mostly drained; later-lane candidates parked
-Base snapshot: `main` at `fa9584f`
+Status: active candidate queue parked for dogfood-calibrated evidence lane
+Base snapshot: `main` at `a9274c2` after `docs: define dogfood-calibrated evidence lane`
 
 ## Operating model
 
@@ -29,8 +29,13 @@ Disposition choices:
 
 The original intake snapshot covered PR/CI projection from existing review
 cards. The repo has since closed PR/CI projection, saved LSP/agent projection,
-repo policy, and first witness receipt import slices. This document remains the
-candidate inventory ledger; newer lane handoffs own the current product state.
+repo policy, first witness receipt import slices, fixture calibration, real-crate
+dogfood, and the first saved-snapshot outcome comparison. The active lane is now
+defined in `docs/status/DOGFOOD_CALIBRATED_EVIDENCE_LANE.md`.
+
+This document remains the candidate inventory ledger. It does not authorize
+merging stale candidate branches as-is. Useful slices should be rebuilt narrowly
+on current `main` when their target lane opens.
 
 Already landed in this lane:
 
@@ -48,8 +53,10 @@ Already landed in this lane:
 - core property-test hardening for diff-coordinate and identity-token invariants
 - mutation-sensitive test extraction for obligation mappings and scanner scope behavior
 
-Do not use candidate intake as permission to jump to LSP, agent packets, repo
-badges, receipts, Miri execution, or blocking policy.
+Do not use candidate intake as permission to jump to release work, default
+blocking, automatic comments, witness execution by default, broad workflow
+surface, or broad refactors. Receipt audit and outcome movement work belongs in
+explicit dogfood-calibration PRs, not stale candidate branches.
 
 ## Candidate labels
 
@@ -91,16 +98,35 @@ candidate PRs in the theme inventory below.
 | Public JSON/visibility API | #28 | merged as #101 | closed | current hardening | `UnsafeSite` already tracked visibility and public API surface; #101 projected those fields into JSON and updated fixture goldens. |
 | Unaligned raw pointer read behavior | #30 | merged as #102 | closed | current hardening | #102 kept the useful distinction that `read_unaligned` does not require alignment evidence while preserving other raw pointer read obligations. |
 
+## Open candidate disposition
+
+No remaining Codex-web candidate PR is an active merge candidate for the
+dogfood-calibrated evidence lane. The open queue is parked option inventory:
+
+| Open PRs | Theme | Disposition | Target lane | Reason |
+|---:|---|---|---|---|
+| #42, #59, #82, #83 | Fuzzing | park | later hardening | Fuzz harnesses may be useful, but scheduled or blocking fuzz workflow surface is outside the current repeatable dogfood evidence loop. |
+| #57, #78 | Mutation workflow/config | park | later hardening | Mutation testing should remain optional/manual until the evidence loop is stable and its maintenance cost is justified. |
+| #76 | Documentation overview | park | later docs | The current lane already has a source-of-truth charter; broad overview docs should wait until dogfood evidence and outcome reports settle. |
+| #35, #54, #70, #71 | Diataxis docs structure | park | later docs | Broad documentation restructuring is not active-lane work and risks creating competing source-of-truth pages. |
+| #38, #52, #68, #69 | Spec expansion | park | later source-of-truth | Specs should follow concrete behavior gaps and proof artifacts, not outrun implementation. |
+| #40, #55, #74, #75 | Broad module refactors | park | later refactor | Avoid scanner/module churn unless it directly unlocks a reviewed implementation slice in the active lane. |
+
+If any parked candidate becomes useful, choose one canonical PR for that theme,
+rebase or rebuild it on current `main`, and land only the narrow slice that maps
+to the active lane.
+
 ## Immediate intake order
 
-1. The current-lane candidate intake is drained through #144 for PR artifacts,
-   projection docs, and CLI guide coverage.
-2. Direct duplicate CLI/usage docs candidates are closed as superseded by #143
-   and #144.
-3. Leave fuzz, mutation workflow/config, broad docs, spec expansion, and broad
-   refactor candidates parked until their target lanes open.
-4. Continue using candidate branches as option inventory. Rebuild useful slices
-   narrowly on current `main` instead of merging stale broad branches.
+1. Candidate intake for review cards, PR artifacts, projections, repo posture,
+   receipt foundation, fixture calibration, and first dogfood slices is drained.
+2. All remaining open candidate branches are parked option inventory for later
+   lanes.
+3. Do not merge parked branches as-is.
+4. Rebuild useful slices narrowly on current `main` when they directly support
+   the dogfood-calibrated evidence loop.
+5. Close duplicate or superseded PRs only after a canonical replacement or
+   durable issue captures the useful idea.
 
 ## Review protocol
 
