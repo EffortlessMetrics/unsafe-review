@@ -58,6 +58,18 @@ pub(crate) struct ReceiptTemplateOptions {
     pub out: Option<PathBuf>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct MiriReceiptOptions {
+    pub card_id: String,
+    pub log: PathBuf,
+    pub author: String,
+    pub recorded_at: String,
+    pub expires_at: String,
+    pub command: String,
+    pub limitations: Vec<String>,
+    pub out: Option<PathBuf>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Command {
     Help,
@@ -85,4 +97,5 @@ pub(crate) enum Command {
     ReceiptValidate {
         root: PathBuf,
     },
+    ReceiptImportMiri(MiriReceiptOptions),
 }
