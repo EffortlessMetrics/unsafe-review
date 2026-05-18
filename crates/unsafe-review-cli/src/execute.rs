@@ -190,14 +190,16 @@ fn print_help() {
     println!();
     println!("Commands:");
     println!(
-        "  check   [--root .] [--base origin/main | --diff file] [--format human|json|markdown]"
+        "  check   [--root .] [--base origin/main | --diff file] [--format human|json|markdown] [--out file]"
     );
-    println!("  repo    [--root .] [--format json]");
+    println!("  repo    [--root .] [--format human|json|markdown] [--out file]");
     println!("  pilot   [--root .] [--base origin/main] [--max-cards 5]");
     println!("  badges  [--root .] [--out badges]");
-    println!("  explain [--root .] <card-id>");
-    println!("  context [--root .] <card-id>");
+    println!("  explain [--root .] [--json|--markdown] <card-id>");
+    println!("  context [--root .] [--json] <card-id>");
     println!("  doctor  [--root .]");
+    println!();
+    println!("Flags may be passed as `--flag value` or `--flag=value`.");
     println!();
     println!("Trust boundary: static review evidence, not soundness proof.");
 }
