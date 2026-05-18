@@ -263,6 +263,7 @@ mod tests {
         "vec_set_len_start_bound_shrink",
         "vec_set_len_zero_clear",
         "drop_in_place_deallocation",
+        "atomic_pointer_state_swap",
         "unwrap_unchecked_result",
         "unwrap_unchecked_infallible_result",
         "unreachable_unchecked_path",

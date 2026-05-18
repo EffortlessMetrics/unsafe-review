@@ -25,9 +25,9 @@ local artifact is needed.
 | Measure | Count |
 |---|---:|
 | Repositories | 7 |
-| Total targets | 27 |
+| Total targets | 28 |
 | Capped repo snapshots | 7 |
-| PR diff targets | 20 |
+| PR diff targets | 21 |
 | Checked-in scan outputs | 0 |
 
 ## Repository Coverage
@@ -39,7 +39,7 @@ local artifact is needed.
 | `BurntSushi/memchr` | 1 | 1 | SIMD target-feature contracts, pointer arithmetic, unchecked constructors |
 | `rust-lang/hashbrown` | 1 | 8 | Large-file syntax scanning, `MaybeUninit`, pointer arithmetic, unchecked/infallible operations, unsafe-call contract gaps, dedupe |
 | `tokio-rs/bytes` | 1 | 1 | `Vec::from_raw_parts`, slice construction, ownership-transfer review cards |
-| `crossbeam-rs/crossbeam` | 1 | 1 | Unsafe Send/Sync, atomics, raw pointer, ownership-transfer, and strict-provenance Miri cfg cards |
+| `crossbeam-rs/crossbeam` | 1 | 2 | Unsafe Send/Sync, atomics, raw pointer, ownership-transfer, strict-provenance Miri cfg cards, and atomic pointer state transitions |
 | `tokio-rs/mio` | 1 | 0 | Unsafe function call contracts, `Vec::set_len`, zeroed values, pointer operations, and unsafe Send/Sync route cards |
 
 ## Recorded Outcome Movement
@@ -82,6 +82,7 @@ local artifact is needed.
 - `hashbrown-pr693`
 - `bytes-pr826`
 - `crossbeam-pr1226`
+- `crossbeam-pr1187`
 
 ## Local Workflow
 
