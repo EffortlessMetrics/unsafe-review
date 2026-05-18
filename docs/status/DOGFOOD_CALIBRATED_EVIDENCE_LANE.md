@@ -44,6 +44,7 @@ These surfaces have landed and are no longer the active lane:
 
 The authoritative proof and limits remain in:
 
+- `docs/status/SUPPORT_SUMMARY.md`
 - `docs/status/SUPPORT_TIERS.md`
 - `docs/status/OBJECTIVE_AUDIT.md`
 - `docs/handoffs/2026-05-18-real-crate-dogfood-v0.6.md`
