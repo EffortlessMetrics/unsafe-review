@@ -103,3 +103,8 @@ rtk cargo run --locked -p unsafe-review -- outcome \
 Update this index only when the corpus manifest or recorded outcome evidence
 changes. Do not use it to claim calibrated precision, safety, or policy
 readiness.
+
+For `pr-diff` targets, make sure the target checkout under `root` matches the
+saved diff's expected source tree. A zero-card result from checkout drift is not
+dogfood evidence; record zero-card PR diffs only as explicit false-positive
+controls.

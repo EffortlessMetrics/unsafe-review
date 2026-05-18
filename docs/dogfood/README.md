@@ -10,3 +10,14 @@ claim, not calibrated precision/recall measurement, and not memory-safety proof.
 The manifest is [`corpus.toml`](corpus.toml). The human-facing index is
 [`index.md`](index.md), with a machine-readable companion at
 [`index.json`](index.json).
+
+## PR Diff Targets
+
+`pr-diff` targets are repeatable only when the `root` checkout matches the
+source tree expected by the saved diff. Do not record an exploratory historical
+PR diff if it only produced zero cards because the local checkout had drifted
+away from that PR's files or line ranges.
+
+Record a zero-card PR diff only when the zero-card result is the intended
+evidence, such as a false-positive control, and explain that in the target
+`purpose`.
