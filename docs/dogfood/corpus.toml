@@ -69,6 +69,19 @@ artifact_status = "local_untracked"
 artifacts = ["target/dogfood-work/bytes.unsafe-review.after-vec-from-raw-parts.json"]
 
 [[targets]]
+id = "crossbeam-capped"
+crate = "crossbeam"
+repository = "crossbeam-rs/crossbeam"
+kind = "repo-snapshot"
+status = "active"
+commit = "03919fedb43cdbd0866aee0c77e0d6df8976b12f"
+root = "target/dogfood-work/crossbeam"
+purpose = "capped repo snapshot for unsafe Send/Sync, atomics, raw pointer, and ownership-transfer review cards"
+command = "rtk cargo run --locked -p unsafe-review -- repo --root target/dogfood-work/crossbeam --format json --max-cards 50 --out target/dogfood-work/crossbeam.unsafe-review.capped.json"
+artifact_status = "local_untracked"
+artifacts = ["target/dogfood-work/crossbeam.unsafe-review.capped.json"]
+
+[[targets]]
 id = "memchr-pr215"
 crate = "memchr"
 repository = "BurntSushi/memchr"
