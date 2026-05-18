@@ -25,9 +25,9 @@ local artifact is needed.
 | Measure | Count |
 |---|---:|
 | Repositories | 7 |
-| Total targets | 25 |
+| Total targets | 26 |
 | Capped repo snapshots | 7 |
-| PR diff targets | 18 |
+| PR diff targets | 19 |
 | Checked-in scan outputs | 0 |
 
 ## Repository Coverage
@@ -37,7 +37,7 @@ local artifact is needed.
 | `servo/rust-smallvec` | 1 | 4 | Raw pointer reads/writes, `Vec::set_len`, pointer arithmetic, unsafe impls, owner inference |
 | `bluss/arrayvec` | 1 | 5 | `MaybeUninit`, `Vec::set_len`, raw pointer reads/writes, UTF-8, drop/deallocation cards |
 | `BurntSushi/memchr` | 1 | 1 | SIMD target-feature contracts, pointer arithmetic, unchecked constructors |
-| `rust-lang/hashbrown` | 1 | 7 | Large-file syntax scanning, `MaybeUninit`, pointer arithmetic, unchecked/infallible operations, dedupe |
+| `rust-lang/hashbrown` | 1 | 8 | Large-file syntax scanning, `MaybeUninit`, pointer arithmetic, unchecked/infallible operations, unsafe-call contract gaps, dedupe |
 | `tokio-rs/bytes` | 1 | 1 | `Vec::from_raw_parts`, slice construction, ownership-transfer review cards |
 | `crossbeam-rs/crossbeam` | 1 | 0 | Unsafe Send/Sync, atomics, raw pointer, and ownership-transfer cards |
 | `tokio-rs/mio` | 1 | 0 | Unsafe function call contracts, `Vec::set_len`, zeroed values, pointer operations, and unsafe Send/Sync route cards |
@@ -78,6 +78,7 @@ local artifact is needed.
 - `hashbrown-pr657`
 - `hashbrown-pr667`
 - `hashbrown-pr692`
+- `hashbrown-pr681`
 - `hashbrown-pr693`
 - `bytes-pr826`
 
@@ -107,4 +108,5 @@ readiness.
 For `pr-diff` targets, make sure the target checkout under `root` matches the
 saved diff's expected source tree. A zero-card result from checkout drift is not
 dogfood evidence; record zero-card PR diffs only as explicit false-positive
-controls.
+controls. When saving a raw diff from GitHub, use `rtk proxy gh pr diff ...`
+so RTK does not compact away `diff --git` headers.

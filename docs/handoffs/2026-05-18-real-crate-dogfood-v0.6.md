@@ -16,7 +16,7 @@ Dogfood repositories:
 | `servo/rust-smallvec` | `bc8a854926a8d940164f6c4ad4fc6efe51962e93` | completed with `--max-cards 50` |
 | `bluss/arrayvec` | `1bc606d8c83a34b8fae9dd117bfeab10f90d2ca7` | completed with `--max-cards 50` |
 | `BurntSushi/memchr` | `db1a77d4b556a1321e136ca0514e43e74ea5fcc3` | completed with `--max-cards 50` after capped-scan hardening |
-| `rust-lang/hashbrown` | `7b3bba6eb4b2f03636155c918552b5f30c1a05b3` | completed with `--max-cards 50` after syntax-scan performance hardening; PR-diff dogfood completed for `hashbrown#469`, `hashbrown#501`, `hashbrown#556`, `hashbrown#657`, `hashbrown#667`, `hashbrown#692`, and `hashbrown#693` |
+| `rust-lang/hashbrown` | `7b3bba6eb4b2f03636155c918552b5f30c1a05b3` | completed with `--max-cards 50` after syntax-scan performance hardening; PR-diff dogfood completed for `hashbrown#469`, `hashbrown#501`, `hashbrown#556`, `hashbrown#657`, `hashbrown#667`, `hashbrown#692`, `hashbrown#681`, and `hashbrown#693` |
 | `tokio-rs/bytes` | `245adff079eb0cb1a706d35bab5f68b2d51919f6` | completed with `--max-cards 50`; PR-diff dogfood completed for `bytes#826` |
 | `crossbeam-rs/crossbeam` | `03919fedb43cdbd0866aee0c77e0d6df8976b12f` | completed with `--max-cards 50`; capped output recorded 45 `contract_missing`, 4 `requires_loom`, and 1 `guard_missing` cards |
 | `tokio-rs/mio` | `0d82f2a51a57d435f79f9cf77f1c6e3f84a587de` | completed with `--max-cards 50`; capped output recorded 42 `contract_missing`, 4 `guard_missing`, 3 `requires_loom`, and 1 `unsafe_unreached` cards |
@@ -1454,7 +1454,8 @@ The repo may claim:
   `rust-smallvec#277`, `rust-smallvec#64`, `rust-smallvec#254`,
   `arrayvec#308`, `arrayvec#138`, `arrayvec#187`, `arrayvec#174`, and
   `arrayvec#288`, `hashbrown#469`, `hashbrown#501`, `hashbrown#657`,
-  `hashbrown#556`, `hashbrown#667`, `hashbrown#692`, `hashbrown#693`, and
+  `hashbrown#556`, `hashbrown#667`, `hashbrown#692`, `hashbrown#681`,
+  `hashbrown#693`, and
   `bytes#826` produce card output
 - dogfood found and fixed import/declaration and `cfg(target_feature)`
   false positives
@@ -1583,6 +1584,10 @@ The repo may claim:
 - one capped `tokio-rs/mio` repo snapshot completed with 50 cards across 80
   Rust files, adding dogfood for unsafe function call contracts, `Vec::set_len`,
   zeroed values, pointer operations, and unsafe Send/Sync route cards
+- one PR-diff dogfood pass on `rust-lang/hashbrown#681` completed with 14 cards
+  across two changed Rust files, adding repeatable coverage for safe wrappers
+  around unchecked key replacement, unsafe-call contract gaps, guard-missing
+  local calls, and a raw pointer dereference card
 - attributed unsafe function declarations are deduped between syntax-backed
   extraction and fallback line scanning
 - false-positive regression coverage exists in fixtures and calibration
@@ -1594,7 +1599,7 @@ The repo must not claim:
 - usable-alpha support-tier promotion
 - full-repository coverage from top-50 capped snapshots
 - uncapped repo-scan performance
-- general PR-diff usefulness from eighteen PRs
+- general PR-diff usefulness from nineteen PRs
 - memory-safety proof
 - UB-free status
 - witness execution
@@ -1604,7 +1609,7 @@ The repo must not claim:
 
 - Seven real crates completed capped repo snapshots in this slice.
 - The successful dogfood snapshots were capped at 50 cards.
-- Only eighteen real PR diffs were measured.
+- Only nineteen real PR diffs were measured.
 - `memchr` completion depends on capped-scan behavior; uncapped performance is
   still unmeasured.
 - No human audit was performed for every emitted card.
