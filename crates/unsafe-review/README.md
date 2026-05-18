@@ -8,3 +8,6 @@ unsafe-review check --base origin/main
 ```
 
 For embedding, use `unsafe-review-core`.
+
+For command examples and artifact guidance, see the repository
+[`docs/CLI.md`](../../docs/CLI.md).
