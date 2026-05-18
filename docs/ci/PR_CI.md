@@ -1,12 +1,14 @@
 # PR and CI model
 
-Default PR runs cheap static review:
+Default PR runs cheap static review on the pinned Rust toolchain:
 
 ```text
 cargo fmt --check
-cargo check --workspace --all-targets
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+cargo check --workspace --all-targets --locked
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --all-targets --locked
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
+cargo run --locked -p xtask -- check-pr
 unsafe-review check --base origin/main --format json
 unsafe-review check --base origin/main \
   --format pr-summary \
@@ -18,6 +20,10 @@ unsafe-review check --base origin/main \
   --format comment-plan \
   --out target/unsafe-review/comment-plan.json
 ```
+
+The CI workflow keeps repository permissions read-only, avoids persisted checkout
+credentials, cancels superseded pull request runs, supports manual dispatch for
+ad hoc verification, and bounds the Rust job with a timeout.
 
 The PR summary artifact is Markdown for GitHub job summaries or uploaded
 artifacts. It projects existing review cards only: counts, top card, card table,
