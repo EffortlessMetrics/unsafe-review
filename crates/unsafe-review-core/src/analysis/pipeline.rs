@@ -185,14 +185,82 @@ fn card_id(scanned: &scanner::ScannedSite) -> CardId {
 mod tests {
     use super::*;
     use crate::api::{AnalysisMode, DiffSource, PolicyMode};
-    use crate::domain::{HazardKind, ReviewClass};
+    use crate::domain::{HazardKind, OperationFamily, ReviewCard, ReviewClass, UnsafeSiteKind};
     use std::path::PathBuf;
 
     #[test]
-    fn raw_pointer_alignment_fixture_emits_guard_missing_card() -> Result<(), String> {
-        let root =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/raw_pointer_alignment");
-        let output = analyze(AnalyzeInput {
+    fn raw_pointer_v1_operation_cards_are_concrete() -> Result<(), String> {
+        let cases = [
+            ("raw_pointer_alignment", OperationFamily::RawPointerRead),
+            ("raw_pointer_deref", OperationFamily::RawPointerDeref),
+            (
+                "split_raw_pointer_read_call",
+                OperationFamily::RawPointerRead,
+            ),
+        ];
+
+        for (fixture, expected_family) in cases {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
+
+            assert_eq!(
+                card.operation.family, expected_family,
+                "{fixture} should emit the concrete operation family"
+            );
+            assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+            assert_eq!(card.class, ReviewClass::GuardMissing);
+            assert!(card.hazards.contains(&HazardKind::Alignment));
+            assert!(card.contract.present);
+            assert_eq!(card.reach.state, "owner_reached");
+            assert!(card.missing.iter().any(|missing| missing.kind == "guard"));
+            assert!(
+                card.next_action
+                    .verify_commands
+                    .iter()
+                    .any(|command| command.contains("miri test")),
+                "{fixture} should recommend a concrete Miri witness"
+            );
+            assert_no_unknown_wrapper_card(fixture, &output);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn raw_pointer_v1_evidence_stays_obligation_specific() -> Result<(), String> {
+        for fixture in ["raw_pointer_alignment", "comment_alignment_not_guard"] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
+
+            assert!(
+                obligation_discharge_present(card, "bounds"),
+                "{fixture} should keep length or bounds evidence"
+            );
+            assert!(
+                !obligation_discharge_present(card, "alignment"),
+                "{fixture} should not let comments or length checks discharge alignment"
+            );
+            assert!(!card.discharge.present);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn raw_pointer_v1_negative_cases_stay_pinned() -> Result<(), String> {
+        let safe_reference = fixture_output("safe_reference_deref_no_cards")?;
+        assert_eq!(safe_reference.summary.cards, 0);
+        assert!(safe_reference.cards.is_empty());
+
+        let split_unknown = fixture_output("split_unsafe_block")?;
+        let card = single_card("split_unsafe_block", &split_unknown)?;
+        assert_eq!(card.site.kind, UnsafeSiteKind::UnsafeBlock);
+        assert_eq!(card.operation.family, OperationFamily::Unknown);
+        assert_eq!(card.class, ReviewClass::ContractMissing);
+        Ok(())
+    }
+
+    fn fixture_output(name: &str) -> Result<AnalyzeOutput, String> {
+        let root = fixture_root(name);
+        analyze(AnalyzeInput {
             root: root.clone(),
             scope: Scope::Diff,
             diff: DiffSource::File(root.join("change.diff")),
@@ -200,27 +268,39 @@ mod tests {
             policy: PolicyMode::Advisory,
             include_unchanged_tests: true,
             max_cards: None,
-        })?;
+        })
+    }
 
-        assert_eq!(output.summary.cards, 1);
-        assert_eq!(output.summary.guard_missing, 1);
-        assert_eq!(output.summary.unsafe_unreached, 0);
+    fn fixture_root(name: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures")
+            .join(name)
+    }
 
-        let card = &output.cards[0];
-        assert_eq!(card.class, ReviewClass::GuardMissing);
-        assert!(card.hazards.contains(&HazardKind::Alignment));
-        assert!(card.contract.present);
-        assert!(!card.discharge.present);
-        assert_eq!(card.reach.state, "owner_reached");
+    fn single_card<'a>(fixture: &str, output: &'a AnalyzeOutput) -> Result<&'a ReviewCard, String> {
+        if output.cards.len() != 1 {
+            return Err(format!(
+                "{fixture} should emit exactly one card, got {}",
+                output.cards.len()
+            ));
+        }
+        Ok(&output.cards[0])
+    }
+
+    fn obligation_discharge_present(card: &ReviewCard, key: &str) -> bool {
+        card.obligation_evidence
+            .iter()
+            .find(|evidence| evidence.obligation.key == key)
+            .is_some_and(|evidence| evidence.discharge.present)
+    }
+
+    fn assert_no_unknown_wrapper_card(fixture: &str, output: &AnalyzeOutput) {
         assert!(
-            card.obligation_evidence.iter().any(|evidence| {
-                evidence.obligation.key == "bounds" && evidence.discharge.present
-            })
+            output.cards.iter().all(|card| {
+                !(card.site.kind == UnsafeSiteKind::UnsafeBlock
+                    && card.operation.family == OperationFamily::Unknown)
+            }),
+            "{fixture} should suppress duplicate unknown unsafe-block wrapper cards"
         );
-        assert!(card.obligation_evidence.iter().any(|evidence| {
-            evidence.obligation.key == "alignment" && !evidence.discharge.present
-        }));
-        assert!(card.missing.iter().any(|missing| missing.kind == "guard"));
-        Ok(())
     }
 }
