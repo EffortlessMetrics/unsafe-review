@@ -70,6 +70,8 @@ separate policy surfaces and are not part of badge proof.
   `after_id` snapshot fingerprints, grouped `cards.new`, `cards.resolved`,
   `cards.improved`, `cards.regressed`, and `cards.unchanged` arrays, explicit
   limitations, and the trust boundary.
+- Each outcome card includes a reason that explains the snapshot movement, such
+  as a class change, missing-evidence count change, new card, or resolved card.
 - If evidence is not knowable statically, repo output and badges count the
   card state instead of overclaiming.
 

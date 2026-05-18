@@ -307,6 +307,12 @@ fn outcome_compares_existing_json_snapshots_without_safety_claim() -> Result<(),
     assert_eq!(outcome["summary"]["resolved"], 0);
     assert!(outcome["cards"]["new"][0]["card_id"].is_string());
     assert!(
+        outcome["cards"]["new"][0]["reason"]
+            .as_str()
+            .unwrap_or("")
+            .contains("after snapshot")
+    );
+    assert!(
         outcome["before_id"]
             .as_str()
             .unwrap_or("")
@@ -337,6 +343,7 @@ fn outcome_compares_existing_json_snapshots_without_safety_claim() -> Result<(),
     ])?;
     let markdown = stdout_text(&markdown)?;
     assert!(markdown.contains("# unsafe-review outcome"));
+    assert!(markdown.contains("| Status | Card | Reason | Before | After |"));
     assert!(markdown.contains("## Limitations"));
     assert!(markdown.contains("## Trust boundary"));
     assert!(markdown.contains("| 1 | 0 | 0 | 0 | 0 |"));

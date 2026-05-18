@@ -46,6 +46,7 @@ pub struct OutcomeCards {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct OutcomeCard {
     pub card_id: String,
+    pub reason: String,
     pub before: Option<OutcomeCardState>,
     pub after: Option<OutcomeCardState>,
 }
@@ -114,13 +115,14 @@ pub fn render_markdown(report: &OutcomeReport) -> String {
     if report.cards.is_empty() {
         out.push_str("No cards in either snapshot.\n\n");
     } else {
-        out.push_str("| Status | Card | Before | After |\n");
-        out.push_str("|---|---|---|---|\n");
+        out.push_str("| Status | Card | Reason | Before | After |\n");
+        out.push_str("|---|---|---|---|---|\n");
         for (status, cards) in report.cards.groups() {
             for card in cards {
                 out.push_str(&format!(
-                    "| `{status}` | `{}` | {} | {} |\n",
+                    "| `{status}` | `{}` | {} | {} | {} |\n",
                     card.card_id,
+                    card.reason,
                     markdown_state(card.before.as_ref()),
                     markdown_state(card.after.as_ref())
                 ));
@@ -175,8 +177,10 @@ fn compare_snapshots(before: Snapshot, after: Snapshot) -> Result<OutcomeReport,
         let before = before_cards.get(&id);
         let after = after_cards.get(&id);
         let status = outcome_status(before, after);
+        let reason = outcome_reason(status, before, after);
         let card = OutcomeCard {
             card_id: id,
+            reason,
             before: before.map(OutcomeCardState::from),
             after: after.map(OutcomeCardState::from),
         };
@@ -242,6 +246,50 @@ fn outcome_status(before: Option<&SnapshotCard>, after: Option<&SnapshotCard>) -
         (Some(before), Some(after)) => changed_status(before, after),
         (None, None) => "unchanged",
     }
+}
+
+fn outcome_reason(
+    status: &str,
+    before: Option<&SnapshotCard>,
+    after: Option<&SnapshotCard>,
+) -> String {
+    match (status, before, after) {
+        ("new", None, Some(after)) => format!(
+            "card appears in the after snapshot as `{}` with {} missing evidence item(s)",
+            after.class_name,
+            after.missing.len()
+        ),
+        ("resolved", Some(before), None) => format!(
+            "card was present in the before snapshot as `{}` and is absent from the after snapshot",
+            before.class_name
+        ),
+        ("improved" | "regressed", Some(before), Some(after)) => {
+            changed_reason(status, before, after)
+        }
+        ("unchanged", Some(before), Some(after)) => changed_reason(status, before, after),
+        _ => "snapshot membership did not match an expected outcome case".to_string(),
+    }
+}
+
+fn changed_reason(status: &str, before: &SnapshotCard, after: &SnapshotCard) -> String {
+    let mut reasons = Vec::new();
+    if before.class_name != after.class_name {
+        reasons.push(format!(
+            "class changed from `{}` to `{}`",
+            before.class_name, after.class_name
+        ));
+    }
+    let before_missing = before.missing.len();
+    let after_missing = after.missing.len();
+    if before_missing != after_missing {
+        reasons.push(format!(
+            "missing evidence count changed from {before_missing} to {after_missing}"
+        ));
+    }
+    if reasons.is_empty() {
+        reasons.push("class and missing evidence count are unchanged".to_string());
+    }
+    format!("{status}: {}", reasons.join("; "))
 }
 
 fn changed_status(before: &SnapshotCard, after: &SnapshotCard) -> &'static str {
@@ -396,6 +444,16 @@ mod tests {
         assert_eq!(report.cards.regressed.len(), 1);
         assert_eq!(report.cards.unchanged.len(), 1);
         assert!(
+            report.cards.improved[0]
+                .reason
+                .contains("missing evidence count changed from 2 to 1")
+        );
+        assert!(
+            report.cards.regressed[0]
+                .reason
+                .contains("class changed from `guarded_and_witnessed` to `guard_missing`")
+        );
+        assert!(
             report
                 .trust_boundary
                 .contains("compares existing ReviewCard snapshots")
@@ -414,6 +472,12 @@ mod tests {
         assert_eq!(value["mode"], "outcome");
         assert_eq!(value["summary"]["new"], 1);
         assert_eq!(value["cards"]["new"][0]["card_id"], "UR-new-c1");
+        assert!(
+            value["cards"]["new"][0]["reason"]
+                .as_str()
+                .unwrap_or("")
+                .contains("after snapshot")
+        );
         assert!(
             value["before_id"]
                 .as_str()
@@ -436,6 +500,7 @@ mod tests {
 
         let markdown = render_markdown(&report);
         assert!(markdown.contains("# unsafe-review outcome"));
+        assert!(markdown.contains("| Status | Card | Reason | Before | After |"));
         assert!(markdown.contains("## Limitations"));
         assert!(markdown.contains("## Trust boundary"));
         assert!(markdown.contains("UR-new-c1"));
