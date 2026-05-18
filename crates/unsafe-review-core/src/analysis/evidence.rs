@@ -144,7 +144,10 @@ fn discharge_state_for(
             }
         }
         "bounds" | "valid-range" => {
-            if has_length_or_bounds_guard(lower) {
+            if has_length_or_bounds_guard(lower)
+                || (family == &OperationFamily::PointerArithmetic
+                    && has_slice_end_pointer_arithmetic_evidence(lower))
+            {
                 EvidenceState::present("Length or bounds guard code was detected")
             } else {
                 EvidenceState::missing("No length or bounds guard code was detected")
@@ -260,6 +263,29 @@ fn has_len_capacity_equality_guard(lower: &str) -> bool {
     has_equality
         && compact.contains("len")
         && (compact.contains("capacity") || contains_word(&compact, "cap"))
+}
+
+fn has_slice_end_pointer_arithmetic_evidence(lower: &str) -> bool {
+    let compact = compact_code(lower);
+    for line in lower.lines() {
+        let line = compact_code(line);
+        let Some(after_let) = line.strip_prefix("let") else {
+            continue;
+        };
+        let Some((binding, expr)) = after_let.split_once('=') else {
+            continue;
+        };
+        let Some(slice_expr) = expr.strip_suffix(".as_ptr();") else {
+            continue;
+        };
+        if !binding.is_empty()
+            && !slice_expr.is_empty()
+            && compact.contains(&format!("{binding}.add({slice_expr}.len())"))
+        {
+            return true;
+        }
+    }
+    false
 }
 
 fn has_capacity_guard(family: &OperationFamily, lower: &str) -> bool {
@@ -635,6 +661,42 @@ mod tests {
         );
         assert!(
             obligation_evidence(&explicit_guard, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+    }
+
+    #[test]
+    fn slice_end_pointer_arithmetic_discharges_bounds() {
+        let obligations = vec![SafetyObligation::new(
+            "bounds",
+            "pointer arithmetic stays in-bounds or one-past inside the same allocation",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let slice_end = site_with_family(
+            OperationFamily::PointerArithmetic,
+            vec!["let start = haystack.as_ptr();"],
+            "let end = start.add(haystack.len());",
+            vec![],
+        );
+        let mismatched_len = site_with_family(
+            OperationFamily::PointerArithmetic,
+            vec!["let start = needle.as_ptr();"],
+            "let end = start.add(haystack.len());",
+            vec![],
+        );
+
+        assert!(
+            obligation_evidence(&slice_end, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
+            !obligation_evidence(&mismatched_len, &obligations, &contract, &reach)[0]
                 .discharge
                 .present
         );

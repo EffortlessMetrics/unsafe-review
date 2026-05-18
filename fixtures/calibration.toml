@@ -24,6 +24,7 @@ required_core_fixtures = [
   "raw_pointer_write_maybeuninit",
   "raw_pointer_read_len_capacity_assert",
   "pointer_arithmetic_num_ctrl_bytes_guard",
+  "pointer_arithmetic_slice_end",
   "slice_from_raw_parts_mut",
   "slice_from_raw_parts_mut_maybeuninit",
   "transmute_invalid_value",
@@ -256,6 +257,16 @@ expected_hazard = "pointer_validity"
 fixture = "pointer_arithmetic_num_ctrl_bytes_guard"
 kind = "positive"
 claim = "pointer arithmetic recognizes index < num_ctrl_bytes as bounds guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "pointer_arithmetic"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "pointer_arithmetic_slice_end"
+kind = "positive"
+claim = "pointer arithmetic recognizes slice start plus same-slice len end-pointer evidence"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guarded_unwitnessed"

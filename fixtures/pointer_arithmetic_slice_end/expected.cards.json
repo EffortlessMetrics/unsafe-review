@@ -1,0 +1,64 @@
+[
+  {
+    "id": "UR-pointer-arithmetic-slice-end-fixture-src-lib-rs-count-bytes-operation-pointer_arithmetic-add-b4b2995787cc-same_allocation-c1",
+    "class": "guarded_unwitnessed",
+    "priority": "medium",
+    "confidence": "medium",
+    "site": {
+      "file": "src/lib.rs",
+      "line": 6,
+      "column": 9,
+      "kind": "operation",
+      "owner": "count_bytes",
+      "visibility": "private",
+      "public_api_surface": false,
+      "snippet": "let end = start.add(haystack.len());"
+    },
+    "operation_family": "pointer_arithmetic",
+    "hazards": [
+      "same_allocation",
+      "bounds",
+      "aliasing_or_provenance"
+    ],
+    "obligations": [
+      "pointer arithmetic stays in-bounds or one-past inside the same allocation"
+    ],
+    "obligation_evidence": [
+      {
+        "key": "bounds",
+        "description": "pointer arithmetic stays in-bounds or one-past inside the same allocation",
+        "contract": {
+          "present": true,
+          "state": "present",
+          "summary": "Nearby `SAFETY:` comment was detected"
+        },
+        "discharge": {
+          "present": true,
+          "state": "present",
+          "summary": "Length or bounds guard code was detected"
+        },
+        "reach": {
+          "present": true,
+          "state": "present",
+          "summary": "1 related test file(s) mention owner `count_bytes`"
+        },
+        "witness": {
+          "present": false,
+          "state": "missing",
+          "summary": "No imported witness receipt was found"
+        }
+      }
+    ],
+    "contract": "Nearby `SAFETY:` comment was detected",
+    "discharge": "All inferred safety obligations have visible local guard evidence",
+    "reach": "1 related test file(s) mention owner `count_bytes`",
+    "witness": "No imported witness receipt was found",
+    "missing": [
+      "No witness receipt imported for this card"
+    ],
+    "verify_commands": [
+      "cargo +nightly miri test count_bytes",
+      "cargo +nightly careful test count_bytes"
+    ]
+  }
+]

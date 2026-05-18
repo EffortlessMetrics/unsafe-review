@@ -1207,6 +1207,28 @@ callee-contract evidence. This is still source-level advisory evidence; it does
 not prove the target feature is available at every call site and does not run a
 witness.
 
+Follow-up capped `memchr` repo rerun after adding fixture-backed slice end
+pointer-arithmetic evidence:
+
+```text
+cards: 50
+guard_missing: 21
+guarded_unwitnessed: 29
+pointer_arithmetic cards: 1
+```
+
+The improved pointer-arithmetic card is still advisory only:
+
+```text
+count line 127 pointer_arithmetic guarded_unwitnessed
+```
+
+The change recognizes the local binding shape `let start = haystack.as_ptr()`
+followed by `start.add(haystack.len())` as bounds evidence for computing a
+one-past-the-end pointer for the same slice. It does not prove arbitrary pointer
+arithmetic, pointer provenance, or target-specific call contracts, and it does
+not execute a witness.
+
 Follow-up rerun after making owner inference ignore multi-line `impl Trait`
 bounds:
 
@@ -1262,6 +1284,7 @@ rtk cargo run --locked -p unsafe-review -- repo --root target/dogfood-work/small
 rtk cargo run --locked -p unsafe-review -- repo --root target/dogfood-work/arrayvec --format json --max-cards 50 --out target/dogfood-work/arrayvec.unsafe-review.after.json
 rtk cargo run --locked -p unsafe-review -- repo --root target/dogfood-work/memchr --format json --max-cards 50 --out target/dogfood-work/memchr.unsafe-review.after-cap-targetfeature.json
 rtk cargo run --locked -p unsafe-review -- repo --root target/dogfood-work/memchr --format json --max-cards 50 --out target/dogfood-work/memchr.unsafe-review.after-unchecked-constructor-evidence.json
+rtk cargo run --locked -p unsafe-review -- repo --root target/dogfood-work/memchr --format json --max-cards 50 --out target/dogfood-work/memchr.unsafe-review.after-slice-end-pointer-evidence.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/memchr --diff target/dogfood-work/memchr-pr215.raw.diff --format json --max-cards 20 --out target/dogfood-work/memchr-pr215.owner-contract.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/smallvec --diff target/dogfood-work/smallvec-pr407.raw.diff --format json --max-cards 20 --out target/dogfood-work/smallvec-pr407.owner-fix.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/smallvec --diff target/dogfood-work/smallvec-pr277.raw.diff --format json --max-cards 30 --out target/dogfood-work/smallvec-pr277.after-start-bound-shrink.json
@@ -1404,6 +1427,10 @@ The repo may claim:
   target-specific constructors to zero such cards, while guarded
   `new_unchecked` wrappers became `unsafe_fn_call` cards with local
   `is_available()` evidence
+- one fixture-backed slice end pointer-arithmetic improvement changed the
+  capped `memchr` repo snapshot's `count` pointer-arithmetic card from
+  `guard_missing` to `guarded_unwitnessed` for the local `as_ptr()` plus
+  same-slice `len()` shape
 - one fixture-backed owner-inference improvement changed two `hashbrown#469`
   card owners from `Fn` to the real enclosing function names
 - one fixture-backed multi-line unsafe-call wrapper improvement changed five
@@ -1494,6 +1521,9 @@ The repo must not claim:
   constructors as `nonnull_unchecked`, and visible `is_available()` wrappers can
   discharge unsafe-call callee-contract evidence, but deeper callee-specific
   target-feature modeling remains future work.
+- The capped `memchr` repo rerun recognizes the narrow same-slice
+  `as_ptr()`/`len()` end-pointer pattern, but broader pointer-arithmetic guard
+  naming and provenance modeling remain future work.
 - `hashbrown#667` now dedupes parent calls that contain a smaller unsafe
   operation of the same family, but broader nested-operation attribution remains
   source-syntax heuristic work.

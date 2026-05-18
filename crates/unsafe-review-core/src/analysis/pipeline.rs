@@ -728,6 +728,20 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn pointer_arithmetic_slice_end_guard_is_discharged() -> Result<(), String> {
+        let output = fixture_output("pointer_arithmetic_slice_end")?;
+        let card = single_card("pointer_arithmetic_slice_end", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::PointerArithmetic);
+        assert_eq!(card.class, ReviewClass::GuardedUnwitnessed);
+        assert!(card.discharge.present);
+        assert!(obligation_discharge_present(card, "bounds"));
+        assert!(card.id.0.contains("add"));
+        Ok(())
+    }
+
+    #[test]
     fn unwrap_unchecked_uses_concrete_operation_family() -> Result<(), String> {
         let output = fixture_output("unwrap_unchecked_result")?;
         let card = single_card("unwrap_unchecked_result", &output)?;
