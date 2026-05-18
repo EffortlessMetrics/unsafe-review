@@ -59,7 +59,7 @@ unsafe-review check --root fixtures/raw_pointer_alignment \
   --diff fixtures/raw_pointer_alignment/change.diff \
   --format json
 
-# Scaffold repo inventory and badge JSON; not a safety badge
+# Static repo inventory and badge JSON; not a safety badge
 unsafe-review repo --format json
 unsafe-review badges --out badges/
 
