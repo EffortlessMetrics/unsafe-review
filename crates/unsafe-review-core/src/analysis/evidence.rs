@@ -255,3 +255,176 @@ fn visit(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> 
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{
+        OperationFamily, SourceLocation, UnsafeOperation, UnsafeSite, UnsafeSiteKind,
+    };
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn site_with_context(
+        context_before: Vec<&str>,
+        snippet: &str,
+        context_after: Vec<&str>,
+    ) -> ScannedSite {
+        ScannedSite {
+            site: UnsafeSite {
+                location: SourceLocation::new(PathBuf::from("src/lib.rs"), 1, 1),
+                kind: UnsafeSiteKind::Operation,
+                owner: Some("read_one".to_string()),
+                visibility: "private".to_string(),
+                public_api_surface: false,
+                changed: true,
+                snippet: snippet.to_string(),
+            },
+            operation: UnsafeOperation {
+                family: OperationFamily::RawPointerRead,
+                expression: snippet.to_string(),
+            },
+            context_before: context_before.into_iter().map(str::to_string).collect(),
+            context_after: context_after.into_iter().map(str::to_string).collect(),
+        }
+    }
+
+    #[test]
+    fn contract_evidence_accepts_safety_docs_and_safety_comments() {
+        let doc_site = site_with_context(
+            vec!["/// # Safety", "/// pointer must be valid"],
+            "ptr.read()",
+            vec![],
+        );
+        let comment_site = site_with_context(
+            vec!["// SAFETY: caller checked pointer"],
+            "ptr.read()",
+            vec![],
+        );
+        let missing_site = site_with_context(vec!["// ordinary comment"], "ptr.read()", vec![]);
+
+        assert!(contract_evidence(&doc_site).present);
+        assert!(contract_evidence(&comment_site).present);
+        assert!(!contract_evidence(&missing_site).present);
+    }
+
+    #[test]
+    fn obligation_evidence_ignores_guards_that_only_appear_in_comments() {
+        let obligations = vec![SafetyObligation::new(
+            "alignment",
+            "pointer is aligned for the accessed type",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let misleading_comment = site_with_context(
+            vec!["// SAFETY: checked elsewhere"],
+            "ptr.read() // align_of::<u32>() proves this",
+            vec![],
+        );
+        let local_guard = site_with_context(
+            vec!["if (ptr as usize) % std::mem::align_of::<u32>() != 0 { return None; }"],
+            "ptr.read()",
+            vec![],
+        );
+
+        assert!(
+            !obligation_evidence(&misleading_comment, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
+            obligation_evidence(&local_guard, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+    }
+
+    #[test]
+    fn summarize_discharge_distinguishes_none_some_and_all_present() {
+        let missing = EvidenceState::missing("missing");
+        let present = EvidenceState::present("present");
+        let base = |key: &str, discharge: EvidenceState| ObligationEvidence {
+            obligation: SafetyObligation::new(key, "obligation"),
+            contract: EvidenceState::present("contract"),
+            discharge,
+            reach: EvidenceState::present("reach"),
+            witness: EvidenceState::missing("witness"),
+        };
+
+        assert!(!summarize_discharge(&[]).present);
+        assert!(!summarize_discharge(&[base("bounds", missing.clone())]).present);
+        assert!(summarize_discharge(&[base("bounds", present.clone())]).present);
+        let partial = summarize_discharge(&[base("bounds", present), base("alignment", missing)]);
+        assert!(!partial.present);
+        assert!(partial.summary.contains("Some inferred"));
+    }
+
+    #[test]
+    fn reach_evidence_finds_unit_and_integration_tests_by_owner_name() -> Result<(), String> {
+        let root = unique_temp_dir()?;
+        fs::create_dir_all(root.join("src")).map_err(|err| err.to_string())?;
+        fs::create_dir_all(root.join("tests")).map_err(|err| err.to_string())?;
+        fs::write(
+            root.join("src/reach_test.rs"),
+            r#"
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn reaches_read_one_in_unit_test() {
+        read_one();
+    }
+}
+"#,
+        )
+        .map_err(|err| err.to_string())?;
+        fs::write(
+            root.join("tests/reach.rs"),
+            r#"
+#[test]
+fn reaches_read_one_in_integration_test() {
+    unsafe_review_fixture::read_one();
+}
+"#,
+        )
+        .map_err(|err| err.to_string())?;
+        let owner = "read_one".to_string();
+
+        let (reach, related_tests) = reach_evidence(&root, Some(&owner));
+
+        fs::remove_dir_all(&root).map_err(|err| err.to_string())?;
+        assert_eq!(reach.state, "owner_reached");
+        assert_eq!(related_tests.len(), 2);
+        assert!(
+            related_tests
+                .iter()
+                .any(|test| test.name == "reaches_read_one_in_unit_test")
+        );
+        assert!(
+            related_tests
+                .iter()
+                .any(|test| test.file == "tests/reach.rs"
+                    && test.name == "reaches_read_one_in_integration_test")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn reach_evidence_reports_unknown_when_owner_is_missing() {
+        let (reach, related_tests) = reach_evidence(Path::new("."), None);
+
+        assert_eq!(reach.state, "unknown");
+        assert!(related_tests.is_empty());
+    }
+
+    fn unique_temp_dir() -> Result<PathBuf, String> {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|err| err.to_string())?
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("unsafe-review-evidence-test-{nanos}"));
+        fs::create_dir_all(&root).map_err(|err| err.to_string())?;
+        Ok(root)
+    }
+}
