@@ -2,7 +2,7 @@
 
 Date: 2026-05-18
 Status: current-lane candidate intake drained; later-lane candidates parked
-Base snapshot: `main` at `364672d`
+Base snapshot: `main` at `0cd47e8`
 
 ## Operating model
 
@@ -42,6 +42,7 @@ Already landed in this lane:
 - CLI diff-input hardening for stdin diffs, root-relative diffs, and local `--out`
 - repo-mode dogfood false-positive hardening for deref assignments in product code
 - CLI parser hardening for `--flag=value` artifact commands and missing values
+- core property-test hardening for diff-coordinate and identity-token invariants
 
 Do not use candidate intake as permission to jump to LSP, agent packets, repo
 badges, receipts, Miri execution, or blocking policy.
@@ -73,7 +74,7 @@ candidate PRs in the theme inventory below.
 | xtask fixture validation | #33, #50, #63, #64 | merged as #92 | closed | current hardening | Fixture validation protects the support-tier proof mechanism by validating fixture layout, golden JSON shape, diff shape, and package naming without broad xtask policy changes. |
 | CLI e2e coverage | #39, #58, #80, #81 | merged as #94 | closed | current PR/CI projection | #94 kept #81's user-path shape but updated it for landed PR artifacts: JSON, PR summary, SARIF, comment plan, context, and explain. |
 | Focused unit coverage | #44, #61, #86, #87 | merged as #93 | closed | current hardening | #93 is the canonical core-only slice for classifier, evidence, and diff parser invariants. |
-| Property testing | #43, #60, #84, #85 | none yet | park | later hardening | Valuable later, but do not put property infrastructure ahead of current PR projection unless it is tiny and directly protects a current parser invariant. |
+| Property testing | #43, #60, #84, #85 | merged as #115 | closed | later hardening | #115 extracted the narrow core invariant slice: unified-diff new-file coordinates, removed-only file tracking, slug token stability, and path-display normalization. It added no fuzz workflow, mutation workflow, product surface, or policy authority. |
 | Fuzzing | #42, #59, #82, #83 | none yet | park | later hardening | Keep as candidate inventory. Avoid scheduled or blocking fuzz workflows in the current lane. |
 | Mutation testing | #41, #57, #78, #79 | none yet | park | later hardening | Useful after the card and PR artifact surfaces settle. Keep non-blocking and manual/scheduled later. |
 | CLI ergonomics and diff handling | #31, #45, #46, #47 | merged as #104 and #112 | closed | current PR/CI projection | #104 kept current-lane fixes: stdin diffs, root-relative diff files, current-directory `--out`, JSON aliases, duplicate card-id rejection, and no `--fail-on-gaps` policy behavior. #112 extracted the useful current-lane slice from stale #46: `--flag=value` parsing, stricter missing-value handling, and help text aligned with advisory artifact outputs. #46 was closed as superseded. |
@@ -89,7 +90,7 @@ candidate PRs in the theme inventory below.
 
 1. The current-lane candidate intake is drained through #112.
 2. #46 is closed as superseded by the narrower #112 extraction.
-3. Leave property, fuzz, mutation, broad docs, spec expansion, and broad refactor
+3. Leave fuzz, mutation, broad docs, spec expansion, and broad refactor
    candidates parked until their target lanes open.
 4. Next current-lane work should dogfood the advisory artifacts on real PRs
    before opening LSP, agent packet, receipt, repo badge, baseline, or blocking
