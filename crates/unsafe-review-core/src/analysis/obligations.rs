@@ -47,7 +47,9 @@ pub(crate) fn hazards_for(family: &OperationFamily) -> Vec<HazardKind> {
             HazardKind::InitializedMemory,
             HazardKind::DropOrDeallocation,
         ],
-        OperationFamily::UnwrapUnchecked => vec![HazardKind::InvalidValue],
+        OperationFamily::UnwrapUnchecked | OperationFamily::UnreachableUnchecked => {
+            vec![HazardKind::InvalidValue]
+        }
         OperationFamily::UnsafeFnCall => vec![HazardKind::Unknown],
         OperationFamily::BoxFromRaw => vec![
             HazardKind::PointerValidity,
@@ -130,6 +132,10 @@ pub(crate) fn obligations_for(family: &OperationFamily) -> Vec<SafetyObligation>
         OperationFamily::UnwrapUnchecked => vec![SafetyObligation::new(
             "valid-value",
             "value is known to be `Some` or `Ok` before `unwrap_unchecked`",
+        )],
+        OperationFamily::UnreachableUnchecked => vec![SafetyObligation::new(
+            "unreachable",
+            "control flow cannot reach this path before `unreachable_unchecked`",
         )],
         OperationFamily::UnsafeFnCall => vec![SafetyObligation::new(
             "callee-contract",
@@ -291,6 +297,14 @@ mod tests {
         assert_eq!(
             obligation_keys(&OperationFamily::UnsafeFnCall),
             vec!["callee-contract".to_string()]
+        );
+        assert_eq!(
+            hazards_for(&OperationFamily::UnreachableUnchecked),
+            vec![HazardKind::InvalidValue]
+        );
+        assert_eq!(
+            obligation_keys(&OperationFamily::UnreachableUnchecked),
+            vec!["unreachable".to_string()]
         );
     }
 }

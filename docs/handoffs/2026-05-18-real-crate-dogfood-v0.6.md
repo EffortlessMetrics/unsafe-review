@@ -16,7 +16,7 @@ Dogfood repositories:
 | `servo/rust-smallvec` | `bc8a854926a8d940164f6c4ad4fc6efe51962e93` | completed with `--max-cards 50` |
 | `bluss/arrayvec` | `1bc606d8c83a34b8fae9dd117bfeab10f90d2ca7` | completed with `--max-cards 50` |
 | `BurntSushi/memchr` | `db1a77d4b556a1321e136ca0514e43e74ea5fcc3` | completed with `--max-cards 50` after capped-scan hardening |
-| `rust-lang/hashbrown` | `7b3bba6eb4b2f03636155c918552b5f30c1a05b3` | PR-diff dogfood completed for `hashbrown#501`, `hashbrown#657`, `hashbrown#667`, `hashbrown#692`, and `hashbrown#693` |
+| `rust-lang/hashbrown` | `7b3bba6eb4b2f03636155c918552b5f30c1a05b3` | PR-diff dogfood completed for `hashbrown#469`, `hashbrown#501`, `hashbrown#657`, `hashbrown#667`, `hashbrown#692`, and `hashbrown#693` |
 
 The first two completed runs exposed two noisy false positives:
 
@@ -92,6 +92,9 @@ core operation classification gap:
   as caller-contract sites rather than local guard sites
 - `unwrap_unchecked` calls now use a concrete invalid-value operation family
   instead of generic `unsafe_fn_call`
+- `unreachable_unchecked` calls now use a concrete invalid-value operation
+  family with an unreachable-path obligation instead of generic
+  `unsafe_fn_call`
 - multi-line `unsafe { ... }` blocks containing call expressions now use the
   same `unsafe_fn_call` family as same-line unsafe-call wrappers instead of
   generic `unknown` wrapper cards
@@ -108,7 +111,8 @@ fixture coverage for `pointer_arithmetic_num_ctrl_bytes_guard`, plus scanner
 tests for `&'static mut` versus real `static mut` items. A
 `documented_private_unsafe_fn` fixture pins the private `# Safety` declaration
 case without changing the older `SAFETY:`-comment helper behavior. An
-`unwrap_unchecked_result` fixture pins unchecked unwrap detection. A
+`unwrap_unchecked_result` fixture pins unchecked unwrap detection. An
+`unreachable_unchecked_path` fixture pins unreachable-path detection. A
 `multiline_unsafe_fn_call_wrapper` fixture pins multi-line unsafe-call wrapper
 classification. A `nested_unsafe_operation_call_dedupe` fixture pins parent-call
 dedupe for nested unsafe operations. An `adjacent_unchanged_unsafe_fn_no_card`
@@ -973,6 +977,47 @@ The improved behavior is still advisory only. Operation cards continue to use
 diff-neighborhood matching, while unsafe declarations use exact syntax-range
 matching so neighboring declaration cards do not create review noise.
 
+### `hashbrown#469`
+
+PR: `https://github.com/rust-lang/hashbrown/pull/469`
+
+The PR documents and marks several `find_*` raw-table APIs unsafe.
+
+Initial dogfood output:
+
+```text
+changed_rust_files: 1
+cards: 16
+contract_missing: 0
+guard_missing: 13
+guarded_unwitnessed: 3
+operation families: raw_pointer_deref, unknown, unsafe_fn_call, unwrap_unchecked
+unsafe_fn_call cards: 8
+```
+
+This run exposed a classifier gap: `core::hint::unreachable_unchecked()` and
+`hint::unreachable_unchecked()` were labeled as generic `unsafe_fn_call`, which
+hid the narrower unreachable-path obligation.
+
+Follow-up rerun after adding fixture-backed `unreachable_unchecked` detection:
+
+```text
+changed_rust_files: 1
+cards: 15
+contract_missing: 0
+guard_missing: 12
+guarded_unwitnessed: 3
+operation families: raw_pointer_deref, unknown, unsafe_fn_call, unwrap_unchecked, unreachable_unchecked
+unsafe_fn_call cards: 5
+unreachable_unchecked cards: 2
+```
+
+The improved cards are still advisory only. They now carry an `invalid_value`
+hazard and the obligation that control flow cannot reach the path before
+`unreachable_unchecked`. This change does not infer the
+`Fallibility::Infallible` precondition, does not prove the match arm is
+unreachable, and does not execute a witness.
+
 ## Proof
 
 Targeted local validation:
@@ -992,6 +1037,7 @@ rtk cargo test -p unsafe-review-core pointer_arithmetic_num_ctrl_bytes_guard_is_
 rtk cargo test -p unsafe-review-core documented_private_unsafe_fn_does_not_require_local_guard --locked
 rtk cargo test -p unsafe-review-core private_unsafe_helper_can_use_local_safety_comment --locked
 rtk cargo test -p unsafe-review-core unwrap_unchecked_uses_concrete_operation_family --locked
+rtk cargo test -p unsafe-review-core unreachable_unchecked_uses_concrete_operation_family --locked
 rtk cargo test -p unsafe-review-core multiline_unsafe_call_wrapper_uses_concrete_operation_family --locked
 rtk cargo test -p unsafe-review-core nested_unsafe_operation_does_not_emit_parent_duplicate --locked
 rtk cargo test -p unsafe-review-core adjacent_unchanged_unsafe_fn_is_not_reported_by_neighboring_change --locked
@@ -1029,6 +1075,7 @@ rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hash
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr657.raw.diff --format json --max-cards 40 --out target/dogfood-work/hashbrown-pr657.after-multiline-unsafe-call.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr667.raw.diff --format json --max-cards 40 --out target/dogfood-work/hashbrown-pr667.after-nested-dedupe.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr501.raw.diff --format json --max-cards 40 --out target/dogfood-work/hashbrown-pr501.after-declaration-range.json
+rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr469.raw.diff --format json --max-cards 60 --out target/dogfood-work/hashbrown-pr469.after-unreachable-unchecked.json
 ```
 
 The dogfood reruns used a temporary `CARGO_TARGET_DIR` to avoid a Windows file
@@ -1047,7 +1094,8 @@ The repo may claim:
 - real PR-diff dogfood runs on `memchr#215`, `rust-smallvec#407`,
   `rust-smallvec#277`, `rust-smallvec#64`, `rust-smallvec#254`,
   `arrayvec#308`, `arrayvec#138`, `arrayvec#187`, `arrayvec#174`, and
-  `arrayvec#288`, `hashbrown#501`, `hashbrown#657`, `hashbrown#667`,
+  `arrayvec#288`, `hashbrown#469`, `hashbrown#501`, `hashbrown#657`,
+  `hashbrown#667`,
   `hashbrown#692`, and `hashbrown#693` produce card output
 - dogfood found and fixed import/declaration and `cfg(target_feature)`
   false positives
@@ -1098,6 +1146,10 @@ The repo may claim:
 - one fixture-backed operation classification improvement changed
   `hashbrown#693` `unwrap_unchecked` sites from generic `unsafe_fn_call` to
   `unwrap_unchecked` invalid-value cards
+- one fixture-backed operation classification improvement changed
+  `hashbrown#469` `unreachable_unchecked` sites from generic
+  `unsafe_fn_call` to `unreachable_unchecked` invalid-value cards and removed
+  one duplicate wrapper card
 - one fixture-backed multi-line unsafe-call wrapper improvement changed five
   `hashbrown#657` cards from generic `unknown` unsafe-block cards to
   `unsafe_fn_call`
@@ -1116,7 +1168,7 @@ The repo must not claim:
 - usable-alpha support-tier promotion
 - full-repository coverage from top-50 capped snapshots
 - uncapped repo-scan performance
-- general PR-diff usefulness from fifteen PRs
+- general PR-diff usefulness from sixteen PRs
 - memory-safety proof
 - UB-free status
 - witness execution
@@ -1127,7 +1179,7 @@ The repo must not claim:
 - Only three real crates completed capped repo snapshots in this slice; four
   crates have at least one snapshot or PR-diff receipt.
 - The successful dogfood snapshots were capped at 50 cards.
-- Only fifteen real PR diffs were measured.
+- Only sixteen real PR diffs were measured.
 - `memchr` completion depends on capped-scan behavior; uncapped performance is
   still unmeasured.
 - No human audit was performed for every emitted card.
@@ -1163,6 +1215,9 @@ The repo must not claim:
   contract inference remains future work.
 - `hashbrown#693` now labels `unwrap_unchecked` calls as invalid-value cards, but
   it does not infer `Fallibility::Infallible` or option/result state proofs.
+- `hashbrown#469` now labels `unreachable_unchecked` calls as invalid-value
+  cards, but it does not infer that a match arm or control-flow path is
+  unreachable.
 - `hashbrown#657` now labels multi-line unsafe call wrappers as
   `unsafe_fn_call`, but callee-specific contract inference and precise call-path
   extraction remain source-level heuristics.
