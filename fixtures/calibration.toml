@@ -32,6 +32,7 @@ required_core_fixtures = [
   "inline_unsafe_raw_pointer_deref_no_duplicate",
   "unsafe_fn_call_wrapper",
   "multiline_unsafe_fn_call_wrapper",
+  "unsafe_fn_call_encode_utf8_remaining_cap",
   "impl_trait_bound_owner_inference",
   "nested_unsafe_operation_call_dedupe",
   "adjacent_unchanged_unsafe_fn_no_card",
@@ -324,6 +325,16 @@ claim = "multi-line unsafe call wrappers emit unsafe_fn_call cards instead of un
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"
+expected_operation_family = "unsafe_fn_call"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "unsafe_fn_call_encode_utf8_remaining_cap"
+kind = "positive"
+claim = "unsafe encode_utf8 calls recognize remaining capacity argument evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
 expected_operation_family = "unsafe_fn_call"
 expected_hazard = "unknown"
 

@@ -174,6 +174,15 @@ fn discharge_state_for(
                 EvidenceState::missing("No nullability guard code was detected")
             }
         }
+        "callee-contract" => {
+            if family == &OperationFamily::UnsafeFnCall
+                && has_encode_utf8_remaining_capacity_evidence(lower)
+            {
+                EvidenceState::present("Unsafe call argument guard code was detected")
+            } else {
+                EvidenceState::missing("No obligation-specific guard code was detected")
+            }
+        }
         _ => EvidenceState::missing("No obligation-specific guard code was detected"),
     }
 }
@@ -241,6 +250,13 @@ fn has_set_len_call_result_initialization_evidence(lower: &str) -> bool {
     let compact = compact_code(lower);
     compact.contains("encode_utf8(")
         && (compact.contains(".set_len(len+n)") || compact.contains(".set_len(old_len+n)"))
+}
+
+fn has_encode_utf8_remaining_capacity_evidence(lower: &str) -> bool {
+    let compact = compact_code(lower);
+    compact.contains("encode_utf8(c,ptr,remaining_cap)")
+        && compact.contains("remaining_cap=self.capacity()-len")
+        && compact.contains("ptr")
 }
 
 fn has_set_len_shrink_evidence(lower: &str) -> bool {
@@ -826,6 +842,33 @@ mod tests {
         );
 
         let evidence = obligation_evidence(&raw_read, &obligations, &contract, &reach);
+
+        assert!(evidence[0].discharge.present);
+    }
+
+    #[test]
+    fn encode_utf8_remaining_capacity_discharges_unsafe_call_obligation() {
+        let obligations = vec![SafetyObligation::new(
+            "callee-contract",
+            "callee safety preconditions are satisfied",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let unsafe_call = site_with_family(
+            OperationFamily::UnsafeFnCall,
+            vec![
+                "let ptr = self.xs[len..].as_mut_ptr() as *mut u8;",
+                "let remaining_cap = self.capacity() - len;",
+                "// SAFETY: `ptr` points to `remaining_cap` bytes.",
+            ],
+            "match unsafe { encode_utf8(c, ptr, remaining_cap) } {",
+            vec![],
+        );
+
+        let evidence = obligation_evidence(&unsafe_call, &obligations, &contract, &reach);
 
         assert!(evidence[0].discharge.present);
     }

@@ -743,6 +743,31 @@ It moved from `unknown` to `unsafe_fn_call`, with the callee identity captured a
 tool does not infer the callee's full safety contract from the function name or
 nearby prose.
 
+Follow-up rerun after adding fixture-backed remaining-capacity argument
+evidence for `encode_utf8(c, ptr, remaining_cap)`:
+
+```text
+changed_rust_files: 1
+cards: 8
+contract_missing: 0
+guard_missing: 0
+guarded_unwitnessed: 7
+unsafe_unreached: 1
+operation families: vec_set_len, unsafe_fn_call
+```
+
+The improved unsafe-call card is still advisory only:
+
+```text
+try_push  line 244  unsafe_fn_call  guarded_unwitnessed
+```
+
+It moved out of `guard_missing` because the local context contains
+`remaining_cap = self.capacity() - len`, passes that value to `encode_utf8`, and
+documents that the pointer is writable for those bytes. This is narrow
+argument-shape evidence for this call pattern; it does not infer arbitrary
+callee contracts or execute a witness.
+
 ### `hashbrown#692`
 
 PR: `https://github.com/rust-lang/hashbrown/pull/692`
@@ -1136,6 +1161,7 @@ rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arra
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-public-unsafe-contract.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-call-result-init.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-unsafe-fn-call.json
+rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-encode-call-evidence.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr692.raw.diff --format json --max-cards 30 --out target/dogfood-work/hashbrown-pr692.after-slice-mut.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr692.raw.diff --format json --max-cards 30 --out target/dogfood-work/hashbrown-pr692.after-write-bytes.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr692.raw.diff --format json --max-cards 30 --out target/dogfood-work/hashbrown-pr692.after-num-ctrl-guard.json
@@ -1206,6 +1232,9 @@ The repo may claim:
 - one fixture-backed unsafe-call wrapper improvement changed the `arrayvec#288`
   `encode_utf8` unsafe block from `unknown` to `unsafe_fn_call` while preserving
   the missing-discharge prompt
+- one fixture-backed unsafe-call argument-evidence improvement changed the
+  `arrayvec#288` `encode_utf8(c, ptr, remaining_cap)` card from
+  `guard_missing` to `guarded_unwitnessed`
 - one fixture-backed contract-evidence improvement changed the `arrayvec#138`
   `encode_utf8` declaration from `contract_missing` to `guarded_unwitnessed`
 - one fixture-backed contract-evidence improvement changed two `arrayvec#187`
@@ -1286,8 +1315,10 @@ The repo must not claim:
 - Public unsafe API declarations with recognized `# Safety` or doc-comment
   `Safety:` docs no longer ask for local declaration guards, but static reach
   remains a heuristic name search.
-- `arrayvec#288` now labels the `encode_utf8` wrapper as `unsafe_fn_call`, but
-  callee-specific safety contract inference remains future work.
+- `arrayvec#288` now labels the `encode_utf8` wrapper as `unsafe_fn_call` and
+  recognizes the narrow `remaining_cap = self.capacity() - len` argument
+  evidence shape, but broader callee-specific safety contract inference remains
+  future work.
 - `arrayvec#174` now has a fixture-backed `ptr::drop_in_place` card, but broader
   drop/deallocation modeling beyond that operation remains narrow.
 - `hashbrown#692` now has a fixture-backed `slice::from_raw_parts_mut` card, but

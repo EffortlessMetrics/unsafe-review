@@ -232,6 +232,7 @@ mod tests {
         "inline_unsafe_raw_pointer_deref_no_duplicate",
         "unsafe_fn_call_wrapper",
         "multiline_unsafe_fn_call_wrapper",
+        "unsafe_fn_call_encode_utf8_remaining_cap",
         "impl_trait_bound_owner_inference",
         "nested_unsafe_operation_call_dedupe",
         "adjacent_unchanged_unsafe_fn_no_card",
