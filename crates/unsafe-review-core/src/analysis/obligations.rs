@@ -171,3 +171,79 @@ pub(crate) fn obligations_for(family: &OperationFamily) -> Vec<SafetyObligation>
         )],
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn obligation_keys(family: &OperationFamily) -> Vec<String> {
+        obligations_for(family)
+            .into_iter()
+            .map(|obligation| obligation.key)
+            .collect()
+    }
+
+    #[test]
+    fn raw_pointer_read_keeps_distinct_hazards_and_obligation_keys() {
+        assert_eq!(
+            hazards_for(&OperationFamily::RawPointerRead),
+            vec![
+                HazardKind::PointerValidity,
+                HazardKind::Alignment,
+                HazardKind::InitializedMemory,
+                HazardKind::SameAllocation,
+            ]
+        );
+        assert_eq!(
+            obligation_keys(&OperationFamily::RawPointerRead),
+            vec![
+                "pointer-live".to_string(),
+                "bounds".to_string(),
+                "alignment".to_string(),
+                "initialized".to_string(),
+                "allocation".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn unaligned_reads_do_not_require_alignment_obligation() {
+        assert_eq!(
+            hazards_for(&OperationFamily::RawPointerReadUnaligned),
+            vec![
+                HazardKind::PointerValidity,
+                HazardKind::InitializedMemory,
+                HazardKind::SameAllocation,
+            ]
+        );
+        assert_eq!(
+            obligation_keys(&OperationFamily::RawPointerReadUnaligned),
+            vec![
+                "pointer-live".to_string(),
+                "bounds".to_string(),
+                "initialized".to_string(),
+                "allocation".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn specialized_operations_map_to_targeted_obligations() {
+        assert_eq!(
+            hazards_for(&OperationFamily::VecSetLen),
+            vec![HazardKind::InitializedMemory, HazardKind::Bounds]
+        );
+        assert_eq!(
+            obligation_keys(&OperationFamily::VecSetLen),
+            vec!["capacity".to_string(), "initialized".to_string()]
+        );
+        assert_eq!(
+            hazards_for(&OperationFamily::UnsafeImplSendSync),
+            vec![HazardKind::SendSyncInvariant, HazardKind::AtomicOrdering]
+        );
+        assert_eq!(
+            obligation_keys(&OperationFamily::UnsafeImplSendSync),
+            vec!["thread-safety".to_string()]
+        );
+    }
+}

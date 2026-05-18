@@ -886,6 +886,61 @@ mod tests {
     }
 
     #[test]
+    fn scan_file_suppresses_unknown_wrapper_when_concrete_operation_exists() -> Result<(), String> {
+        let root = unique_temp_dir()?;
+        fs::create_dir_all(root.join("src"))
+            .map_err(|err| format!("create temp src failed: {err}"))?;
+        fs::write(
+            root.join("src/lib.rs"),
+            "pub fn read_byte(ptr: *const u8) -> u8 {\n    unsafe { *ptr }\n}\n",
+        )
+        .map_err(|err| format!("write temp source failed: {err}"))?;
+
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        assert_eq!(sites.len(), 1, "unexpected sites: {sites:#?}");
+        assert_eq!(sites[0].site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(sites[0].operation.family, OperationFamily::RawPointerDeref);
+        assert_eq!(sites[0].site.owner, Some("read_byte".to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn scan_file_filters_to_diff_neighborhood_unless_repo_mode() -> Result<(), String> {
+        let root = unique_temp_dir()?;
+        fs::create_dir_all(root.join("src"))
+            .map_err(|err| format!("create temp src failed: {err}"))?;
+        fs::write(
+            root.join("src/lib.rs"),
+            "pub fn first(ptr: *const u8) -> u8 {\n    unsafe { *ptr }\n}\n\n\n\n\n\n\n\n\npub fn second(ptr: *const u8) -> u8 {\n    unsafe { *ptr }\n}\n",
+        )
+        .map_err(|err| format!("write temp source failed: {err}"))?;
+        let diff = crate::input::diff::parse_unified_diff(
+            "diff --git a/src/lib.rs b/src/lib.rs\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1,2 +1,2 @@\n+pub fn first(ptr: *const u8) -> u8 {\n",
+        );
+
+        let rel = PathBuf::from("src/lib.rs");
+        let diff_sites = scan_file(&root, &rel, Some(&diff), false)?;
+        let repo_sites = scan_file(&root, &rel, Some(&diff), true)?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        assert_eq!(
+            diff_sites.len(),
+            1,
+            "unexpected diff sites: {diff_sites:#?}"
+        );
+        assert_eq!(diff_sites[0].site.owner, Some("first".to_string()));
+        assert_eq!(
+            repo_sites.len(),
+            2,
+            "unexpected repo sites: {repo_sites:#?}"
+        );
+        assert_eq!(repo_sites[1].site.owner, Some("second".to_string()));
+        Ok(())
+    }
+
+    #[test]
     fn syntax_detection_ignores_unsafe_declarations_inside_function_bodies() -> Result<(), String> {
         let root = unique_temp_dir()?;
         fs::create_dir_all(root.join("src"))
