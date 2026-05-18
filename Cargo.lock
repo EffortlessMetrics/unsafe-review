@@ -437,6 +437,7 @@ dependencies = [
 name = "unsafe-review-cli"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
  "unsafe-review-core",
 ]
 
