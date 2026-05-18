@@ -158,20 +158,91 @@ fn doctor(root: &Path) -> Result<(), String> {
     if !root.is_dir() {
         return Err(format!("root {} is not a directory", root.display()));
     }
+    let git_available = tool_available("git");
+    let git_repo = git_available && git_root_status(root).is_some();
+    let base_ref_available = git_repo && git_ref_available(root, "origin/main");
+
     println!("unsafe-review doctor");
-    println!("root: {}", root.display());
-    println!("git: {}", tool_available("git"));
-    println!("miri command available: {}", tool_available("cargo"));
+    println!("workspace root: {}", root.display());
+    println!("git command: {}", yes_no(git_available));
+    println!("git repository: {}", yes_no(git_repo));
+    println!("base ref origin/main: {}", yes_no(base_ref_available));
+    println!();
+    println!("Witness tool signals");
+    println!("miri: {}", yes_no(cargo_subcommand_available("miri")));
+    println!(
+        "cargo-careful: {}",
+        yes_no(cargo_subcommand_available("careful") || tool_available("cargo-careful"))
+    );
+    println!("sanitizers: configure externally with the appropriate Rust toolchain and RUSTFLAGS");
+    println!(
+        "loom: {}",
+        cargo_manifest_hint(root, "loom")
+            .unwrap_or("no Cargo.toml dependency hint detected".to_string())
+    );
+    println!(
+        "shuttle: {}",
+        cargo_manifest_hint(root, "shuttle")
+            .unwrap_or("no Cargo.toml dependency hint detected".to_string())
+    );
+    println!("kani: {}", yes_no(tool_available("kani")));
+    println!("crux: {}", yes_no(tool_available("crux")));
+    println!();
     println!("policy: advisory by default");
+    println!("witness execution: not run by doctor or by default");
+    println!("trust boundary: static review evidence, not soundness proof");
     Ok(())
 }
 
-fn tool_available(name: &str) -> &'static str {
-    if ProcessCommand::new(name).arg("--version").output().is_ok() {
-        "yes"
-    } else {
-        "no"
+fn tool_available(name: &str) -> bool {
+    ProcessCommand::new(name).arg("--version").output().is_ok()
+}
+
+fn cargo_subcommand_available(subcommand: &str) -> bool {
+    ProcessCommand::new("cargo")
+        .arg(subcommand)
+        .arg("--version")
+        .output()
+        .is_ok_and(|output| output.status.success())
+}
+
+fn git_root_status(root: &Path) -> Option<String> {
+    let output = ProcessCommand::new("git")
+        .arg("-C")
+        .arg(root)
+        .arg("rev-parse")
+        .arg("--show-toplevel")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
     }
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!text.is_empty()).then_some(text)
+}
+
+fn git_ref_available(root: &Path, reference: &str) -> bool {
+    ProcessCommand::new("git")
+        .arg("-C")
+        .arg(root)
+        .arg("rev-parse")
+        .arg("--verify")
+        .arg(reference)
+        .output()
+        .is_ok_and(|output| output.status.success())
+}
+
+fn cargo_manifest_hint(root: &Path, name: &str) -> Option<String> {
+    let text = fs::read_to_string(root.join("Cargo.toml")).ok()?;
+    if text.contains(name) {
+        Some("Cargo.toml dependency hint detected".to_string())
+    } else {
+        None
+    }
+}
+
+fn yes_no(value: bool) -> &'static str {
+    if value { "yes" } else { "no" }
 }
 
 fn badges(root: &Path, out: &Path) -> Result<(), String> {
