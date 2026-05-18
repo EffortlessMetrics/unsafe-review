@@ -20,6 +20,7 @@ Merged PRs:
 - `#146 test(cli): cover receipted fixture output`
 - `#148 output: add witness plan format`
 - `#150 receipts: validate witness tool lanes`
+- `#153 receipts: expose sdk receipt dto`
 
 The receipt importer:
 
@@ -44,6 +45,9 @@ The receipt importer:
 - adds `--format witness-plan` as a card-sourced route artifact that lists
   recommended witnesses, commands, imported receipt evidence, missing evidence,
   and the trust boundary
+- exposes the receipt JSON shape as the serde-backed
+  `unsafe_review_core::WitnessReceipt` DTO so SDK consumers and future native
+  adapters share the same schema as the importer
 
 Receipt import does not create analyzer truth. It attaches external witness
 evidence to an existing `ReviewCard`.
@@ -64,6 +68,14 @@ rtk cargo test -p unsafe-review-core witness_plan --locked
 rtk cargo test -p unsafe-review-cli witness_plan --locked
 rtk cargo test -p unsafe-review --test e2e check_artifact_formats_context_and_explain_work_end_to_end --locked
 rtk cargo run --locked -p xtask -- check-fixtures
+```
+
+The SDK receipt DTO follow-up also passed:
+
+```bash
+rtk cargo test -p unsafe-review-core receipt --locked
+rtk cargo test -p unsafe-review-core imported_receipt --locked
+rtk cargo test -p unsafe-review --test e2e check_json_imports_witness_receipts_without_hiding_guard_gaps --locked
 ```
 
 The recurring workspace gate also passed:
@@ -91,6 +103,7 @@ The repo may claim:
 - receipt author, recorded timestamp, expiry, command, and limitations remain
   visible in imported evidence summaries
 - receipt `tool` values must match known witness lanes
+- the receipt JSON shape is backed by `unsafe_review_core::WitnessReceipt`
 - the `raw_pointer_alignment_receipted` golden proves a receipt does not hide
   the still-missing alignment guard
 - CLI JSON output preserves the same behavior end to end
