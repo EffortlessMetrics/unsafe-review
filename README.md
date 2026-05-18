@@ -92,8 +92,9 @@ The current PR projection renders `cards.json`, `pr-summary.md`, `cards.sarif`, 
 tools, or enable blocking policy. Support tiers stay conservative: fixture-backed
 surfaces are experimental, the saved editor/LSP projection and bounded agent
 packets are read-only and experimental, repo posture, exact policy-ledger
-matching, and explicit no-new-debt mode are experimental, and receipts, blocking
-policy, and broad suppression controls remain later lanes until they have proof.
+matching, explicit no-new-debt mode, and exact witness receipt import are
+experimental. Witness tools are not executed by default, and blocking policy plus
+broad suppression controls remain later lanes until they have proof.
 
 ## Crate surface
 

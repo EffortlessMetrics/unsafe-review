@@ -54,4 +54,11 @@ impl WitnessEvidence {
             summary: "No imported witness receipt was found".to_string(),
         }
     }
+
+    pub fn present(summary: impl Into<String>) -> Self {
+        Self {
+            present: true,
+            summary: summary.into(),
+        }
+    }
 }

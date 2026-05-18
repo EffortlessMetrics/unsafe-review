@@ -12,32 +12,70 @@ Linked plan: ../../plans/0.1.0/implementation-plan.md
 
 ## Behavior
 
-Receipts record configured, ran, test-targeted, or site-reached witness strength and limitations.
+Receipts record configured, ran, test-targeted, or site-reached witness strength
+and limitations. The current implementation imports JSON receipts from:
+
+```text
+.unsafe-review/receipts/*.json
+```
+
+Each receipt is matched by exact counted `card_id`. A matching receipt marks the
+card's top-level witness evidence present and marks obligation-level witness
+evidence present. Receipt import does not discharge contracts, guards, or reach
+evidence.
+
+Receipt JSON fields:
+
+```json
+{
+  "schema_version": "0.1",
+  "card_id": "UR-...-c1",
+  "tool": "miri",
+  "strength": "ran",
+  "summary": "focused witness passed",
+  "command": "cargo +nightly miri test read_header",
+  "limitations": ["fixture only"]
+}
+```
+
+`strength` must be one of:
+
+- `configured`
+- `ran`
+- `test_targeted`
+- `site_reached`
 
 ## Non-goals
 
 - no soundness claim
 - no hidden blocking unless policy mode explicitly enables it
 - no duplicate truth outside this spec and linked policy files
+- no witness execution by `unsafe-review`
+- no receipt match without exact card identity
+- no claim that a receipt proves arbitrary callers or the whole repository safe
 
 ## Required evidence
 
 - fixture-backed examples for positive and negative cases
 - JSON output contract coverage
-- human output smoke coverage
+- analyzer tests for exact receipt import
+- receipt parser tests for strength and identity validation
 - policy documentation when behavior is configurable
 
 ## Acceptance examples
 
-- A changed unsafe seam produces one review card with stable identity.
-- The card includes missing evidence and a next action.
-- If evidence is not knowable statically, the card names the limitation instead of overclaiming.
+- A matching receipt removes the `witness` missing-evidence item.
+- A matching receipt marks obligation-level witness evidence present.
+- A receipt with unknown strength is rejected.
+- A receipt with uncounted card identity is rejected.
+- If receipt scope is limited, the receipt summary keeps that limitation visible.
 
 ## CI proof
 
 ```bash
 cargo xtask check-pr
 cargo test --workspace
+cargo test -p unsafe-review-core receipt
 ```
 
 ## Promotion rule
