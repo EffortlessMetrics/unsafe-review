@@ -40,6 +40,10 @@ const FIXTURE_PACKAGE_PREFIX_EXCEPTIONS: &[(&str, &str)] =
 const CALIBRATION_REQUIRED_KINDS: &[&str] = &["positive", "negative", "false_positive_control"];
 
 const KNOWN_SUPPORT_TIERS: &[&str] = &["scaffold", "experimental", "planned", "deferred"];
+const DOGFOOD_MANIFEST: &str = "docs/dogfood/corpus.toml";
+const DOGFOOD_TARGET_KINDS: &[&str] = &["repo-snapshot", "pr-diff"];
+const DOGFOOD_TARGET_STATUSES: &[&str] = &["active", "parked", "retired"];
+const DOGFOOD_ARTIFACT_STATUSES: &[&str] = &["checked_in", "local_untracked", "remote_manual"];
 
 fn main() {
     if let Err(err) = run(std::env::args().collect()) {
@@ -52,7 +56,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
     match args.get(1).map(|arg| arg.as_str()) {
         None | Some("help") | Some("--help") => {
             println!(
-                "xtask commands: check-pr, check-docs, check-policy, check-support-tiers, check-fixtures, check-calibration, check-advisory-artifacts <dir>"
+                "xtask commands: check-pr, check-docs, check-policy, check-support-tiers, check-fixtures, check-calibration, check-dogfood, check-advisory-artifacts <dir>"
             );
             Ok(())
         }
@@ -62,6 +66,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
             check_support_tiers()?;
             check_fixtures()?;
             check_calibration()?;
+            check_dogfood()?;
             check_tracked_generated_artifacts()?;
             println!("check-pr: ok");
             Ok(())
@@ -71,6 +76,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
         Some("check-support-tiers") => check_support_tiers(),
         Some("check-fixtures") => check_fixtures(),
         Some("check-calibration") => check_calibration(),
+        Some("check-dogfood") => check_dogfood(),
         Some("check-advisory-artifacts") => {
             let Some(dir) = args.get(2) else {
                 return Err("usage: cargo xtask check-advisory-artifacts <dir>".to_string());
@@ -363,6 +369,157 @@ fn check_calibration() -> Result<(), String> {
     }
 
     println!("check-calibration: ok ({} cases)", cases.len());
+    Ok(())
+}
+
+fn check_dogfood() -> Result<(), String> {
+    let value = parse_toml_file(&workspace_path(DOGFOOD_MANIFEST))?;
+    require_toml_string(&value, "schema_version", DOGFOOD_MANIFEST)?;
+    require_toml_string(&value, "status", DOGFOOD_MANIFEST)?;
+    require_toml_string(&value, "artifact_root", DOGFOOD_MANIFEST)?;
+    let boundary = required_toml_string(&value, "trust_boundary", DOGFOOD_MANIFEST)?;
+    require_boundary_text(boundary, DOGFOOD_MANIFEST)?;
+
+    let targets = value
+        .get("targets")
+        .and_then(toml::Value::as_array)
+        .ok_or_else(|| format!("{DOGFOOD_MANIFEST} is missing targets"))?;
+    if targets.is_empty() {
+        return Err(format!("{DOGFOOD_MANIFEST} has no dogfood targets"));
+    }
+
+    let mut ids = BTreeSet::new();
+    let mut repositories = BTreeSet::new();
+    let mut repo_snapshots = 0usize;
+    let mut pr_diffs = 0usize;
+    for (idx, target) in targets.iter().enumerate() {
+        let Some(target) = target.as_table() else {
+            return Err(format!(
+                "{DOGFOOD_MANIFEST} targets[{idx}] must be a TOML table"
+            ));
+        };
+        let id = required_target_string(target, "id", idx)?;
+        if !ids.insert(id.to_string()) {
+            return Err(format!(
+                "{DOGFOOD_MANIFEST} contains duplicate target id `{id}`"
+            ));
+        }
+        let repository = required_target_string(target, "repository", idx)?;
+        if !repository.contains('/') {
+            return Err(format!(
+                "{DOGFOOD_MANIFEST} targets[{idx}] repository `{repository}` must be owner/repo"
+            ));
+        }
+        repositories.insert(repository.to_string());
+        required_target_string(target, "crate", idx)?;
+        let kind = required_target_string(target, "kind", idx)?;
+        if !DOGFOOD_TARGET_KINDS.contains(&kind) {
+            return Err(format!(
+                "{DOGFOOD_MANIFEST} targets[{idx}] uses unknown kind `{kind}`"
+            ));
+        }
+        let status = required_target_string(target, "status", idx)?;
+        if !DOGFOOD_TARGET_STATUSES.contains(&status) {
+            return Err(format!(
+                "{DOGFOOD_MANIFEST} targets[{idx}] uses unknown status `{status}`"
+            ));
+        }
+        let purpose = required_target_string(target, "purpose", idx)?;
+        if purpose.len() < 24 {
+            return Err(format!(
+                "{DOGFOOD_MANIFEST} targets[{idx}] purpose is too terse"
+            ));
+        }
+        let command = required_target_string(target, "command", idx)?;
+        if !command.contains("unsafe-review") || !command.contains("--format json") {
+            return Err(format!(
+                "{DOGFOOD_MANIFEST} targets[{idx}] command must run unsafe-review JSON output"
+            ));
+        }
+        let artifact_status = required_target_string(target, "artifact_status", idx)?;
+        if !DOGFOOD_ARTIFACT_STATUSES.contains(&artifact_status) {
+            return Err(format!(
+                "{DOGFOOD_MANIFEST} targets[{idx}] uses unknown artifact_status `{artifact_status}`"
+            ));
+        }
+        let artifacts = target
+            .get("artifacts")
+            .and_then(toml::Value::as_array)
+            .ok_or_else(|| {
+                format!("{DOGFOOD_MANIFEST} targets[{idx}] is missing artifacts array")
+            })?;
+        if artifacts.is_empty() {
+            return Err(format!(
+                "{DOGFOOD_MANIFEST} targets[{idx}] artifacts array is empty"
+            ));
+        }
+        for (artifact_idx, artifact) in artifacts.iter().enumerate() {
+            let Some(artifact) = artifact.as_str() else {
+                return Err(format!(
+                    "{DOGFOOD_MANIFEST} targets[{idx}] artifacts[{artifact_idx}] must be a string"
+                ));
+            };
+            check_dogfood_path(artifact, idx, "artifacts")?;
+            if artifact_status == "checked_in" && !Path::new(artifact).is_file() {
+                return Err(format!(
+                    "{DOGFOOD_MANIFEST} targets[{idx}] checked-in artifact missing: {artifact}"
+                ));
+            }
+        }
+
+        match kind {
+            "repo-snapshot" => {
+                repo_snapshots += 1;
+                let commit = required_target_string(target, "commit", idx)?;
+                if commit.len() != 40 || !commit.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                    return Err(format!(
+                        "{DOGFOOD_MANIFEST} targets[{idx}] commit must be a full 40-character hex SHA"
+                    ));
+                }
+                let root = required_target_string(target, "root", idx)?;
+                check_dogfood_path(root, idx, "root")?;
+            }
+            "pr-diff" => {
+                pr_diffs += 1;
+                let Some(pr) = target.get("pr").and_then(toml::Value::as_integer) else {
+                    return Err(format!(
+                        "{DOGFOOD_MANIFEST} targets[{idx}] is missing integer pr"
+                    ));
+                };
+                if pr <= 0 {
+                    return Err(format!(
+                        "{DOGFOOD_MANIFEST} targets[{idx}] pr must be positive"
+                    ));
+                }
+                let root = required_target_string(target, "root", idx)?;
+                check_dogfood_path(root, idx, "root")?;
+                let diff = required_target_string(target, "diff", idx)?;
+                check_dogfood_path(diff, idx, "diff")?;
+            }
+            _ => {
+                return Err(format!(
+                    "{DOGFOOD_MANIFEST} targets[{idx}] uses unsupported kind `{kind}`"
+                ));
+            }
+        }
+    }
+
+    if repositories.len() < 5 {
+        return Err(format!(
+            "{DOGFOOD_MANIFEST} must cover at least 5 real repositories"
+        ));
+    }
+    if repo_snapshots == 0 || pr_diffs == 0 {
+        return Err(format!(
+            "{DOGFOOD_MANIFEST} must include repo-snapshot and pr-diff targets"
+        ));
+    }
+
+    println!(
+        "check-dogfood: ok ({} targets, {} repositories)",
+        targets.len(),
+        repositories.len()
+    );
     Ok(())
 }
 
@@ -699,6 +856,54 @@ fn require_toml_string(value: &toml::Value, key: &str, path: &str) -> Result<(),
     }
 }
 
+fn required_toml_string<'a>(
+    value: &'a toml::Value,
+    key: &str,
+    path: &str,
+) -> Result<&'a str, String> {
+    let Some(value) = value.get(key).and_then(toml::Value::as_str) else {
+        return Err(format!("{path} is missing string key `{key}`"));
+    };
+    if value.trim().is_empty() {
+        Err(format!("{path} string key `{key}` is empty"))
+    } else {
+        Ok(value)
+    }
+}
+
+fn required_target_string<'a>(
+    target: &'a toml::map::Map<String, toml::Value>,
+    key: &str,
+    idx: usize,
+) -> Result<&'a str, String> {
+    let Some(value) = target.get(key).and_then(toml::Value::as_str) else {
+        return Err(format!(
+            "{DOGFOOD_MANIFEST} targets[{idx}] is missing string `{key}`"
+        ));
+    };
+    if value.trim().is_empty() {
+        Err(format!(
+            "{DOGFOOD_MANIFEST} targets[{idx}] string `{key}` is empty"
+        ))
+    } else {
+        Ok(value)
+    }
+}
+
+fn check_dogfood_path(path: &str, idx: usize, key: &str) -> Result<(), String> {
+    if path.starts_with('/') || has_windows_path(path) {
+        return Err(format!(
+            "{DOGFOOD_MANIFEST} targets[{idx}] {key} path must be relative and use forward slashes: {path}"
+        ));
+    }
+    if path.contains("..") {
+        return Err(format!(
+            "{DOGFOOD_MANIFEST} targets[{idx}] {key} path must not contain `..`: {path}"
+        ));
+    }
+    Ok(())
+}
+
 fn required_case_string<'a>(
     case: &'a toml::map::Map<String, toml::Value>,
     key: &str,
@@ -990,6 +1195,11 @@ mod tests {
     #[test]
     fn calibration_manifest_validates_current_fixture_contract() -> Result<(), String> {
         check_calibration()
+    }
+
+    #[test]
+    fn dogfood_manifest_validates_current_corpus_contract() -> Result<(), String> {
+        check_dogfood()
     }
 
     #[test]
