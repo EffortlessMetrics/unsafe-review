@@ -21,7 +21,7 @@ witnesses by default.
 | Requirement | Current evidence | Status | Gap |
 |---|---|---|---|
 | Canonical product unit is `ReviewCard`; projections must not create parallel truth | JSON, PR summary, SARIF, comment-plan, saved LSP, agent packet, repo, badge, policy, and receipt surfaces are all listed in `SUPPORT_TIERS.md` as card projections; handoffs record lane boundaries | Experimental | Continue watching new surfaces for reclassification logic |
-| Card correctness before breadth | Fixture goldens cover raw pointer alignment/deref/read/write, split syntax, public unsafe contracts, `MaybeUninit`, `Vec::set_len`, `Vec::set_len` initialized-loop evidence, `Vec::set_len(0)` clear evidence, `transmute`, `get_unchecked_mut`, `Pin::new_unchecked`, FFI, unsafe impl Send, and negative safe/comment cases; `fixtures/calibration.toml` indexes the core positive, negative, and false-positive-control claims | Experimental | Fixture corpus is curated; no broad semantic proof |
+| Card correctness before breadth | Fixture goldens cover raw pointer alignment/deref/read/write, split syntax, public unsafe contracts, `MaybeUninit`, `Vec::set_len`, `Vec::set_len` initialized-loop evidence, `Vec::set_len` shrink evidence, `Vec::set_len(0)` clear evidence, `transmute`, `get_unchecked_mut`, `Pin::new_unchecked`, FFI, unsafe impl Send, and negative safe/comment cases; `fixtures/calibration.toml` indexes the core positive, negative, and false-positive-control claims | Experimental | Fixture corpus is curated; no broad semantic proof |
 | Obligation-level evidence | `ReviewCard` output and fixture goldens distinguish contract, discharge, reach, and witness evidence per obligation | Experimental | Guard patterns remain sparse |
 | Length guard does not discharge alignment; comments do not count as guards | Raw-pointer alignment and comment-not-guard fixtures are listed as proof in support tiers | Experimental | More real-world guard idioms need calibration |
 | Stable-first implementation; no mandatory MIR or `rustc_private` | Workspace uses stable source parsing and `ra_ap_syntax`; support tiers mark MIR/nightly facts as deferred | Met for current lanes | Optional adapters still need ADR before promotion |
@@ -57,8 +57,8 @@ These are not failures; they are the next unsupported or weakly verified areas:
 - Real PR-diff dogfood shows `Vec::set_len` guard evidence still needs broader
   modeling; visible `MaybeUninit::new` initialization loops and const `CAP`
   capacity facts now have fixture coverage and an `arrayvec#288` rerun receipt;
-  `set_len(0)` clear evidence also has fixture and dogfood-rerun coverage, while
-  other shrink operations remain weak.
+  non-zero shrink and `set_len(0)` clear evidence also have fixture and
+  dogfood-rerun coverage, while other `set_len` patterns remain weak.
 
 ## Current Gates
 

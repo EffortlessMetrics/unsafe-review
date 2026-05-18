@@ -1,0 +1,23 @@
+pub fn shrink_vec(values: &mut Vec<u8>, new_len: usize) {
+    if new_len <= values.len() {
+        // SAFETY: `new_len` is no greater than the current initialized length,
+        // so the call cannot exceed capacity and does not introduce an
+        // initialized extended range.
+        unsafe {
+            values.set_len(new_len);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shrink_vec;
+
+    #[test]
+    fn shrink_vec_keeps_prefix() {
+        let mut values = vec![1, 2, 3];
+        shrink_vec(&mut values, 2);
+        assert_eq!(values, vec![1, 2]);
+    }
+}
+

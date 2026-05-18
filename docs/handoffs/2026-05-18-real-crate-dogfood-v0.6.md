@@ -360,6 +360,35 @@ still need better modeling or reviewer inspection, especially non-zero
 shrink-style `set_len` uses, the `encode_utf8` write pattern, and the direct
 unsafe `set_len` API card.
 
+Follow-up rerun after adding fixture-backed non-zero shrink evidence:
+
+```text
+elapsed_seconds: 6.0
+changed_rust_files: 1
+cards: 9
+contract_missing: 0
+guard_missing: 3
+guarded_unwitnessed: 5
+unsafe_unreached: 1
+operation families: vec_set_len, unknown
+```
+
+The additional improved cards are still advisory only:
+
+```text
+pop       line 351  vec_set_len  guarded_unwitnessed
+truncate  line 387  vec_set_len  guarded_unwitnessed
+remove    line 426  vec_set_len  unsafe_unreached
+```
+
+They moved out of `guard_missing` because local code shows `new_len` is no
+greater than the current initialized length, so these calls do not introduce an
+initialized extended range and cannot exceed the current length. The `remove`
+card remains actionable as `unsafe_unreached` because the static reach search
+did not find a related test mention. The remaining three `guard_missing` cards
+are the `encode_utf8` unsafe block, the matching `set_len(len + n)` write
+pattern, and the direct public unsafe `set_len` API card.
+
 ## Proof
 
 Targeted local validation:
@@ -386,6 +415,7 @@ rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arra
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.unsafe-review.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-setlen-init.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-setlen-zero.json
+rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-setlen-shrink.json
 ```
 
 The dogfood reruns used a temporary `CARGO_TARGET_DIR` to avoid a Windows file
@@ -410,6 +440,9 @@ The repo may claim:
   two `arrayvec#288` cards from `guard_missing` to `guarded_unwitnessed`
 - one fixture-backed `set_len(0)` clear-evidence improvement changed another
   `arrayvec#288` card from `guard_missing` to `guarded_unwitnessed`
+- one fixture-backed non-zero shrink-evidence improvement changed two more
+  `arrayvec#288` cards from `guard_missing` to `guarded_unwitnessed` and one
+  card from `guard_missing` to `unsafe_unreached`
 - false-positive regression coverage exists in fixtures and calibration
 - dogfood output remains advisory static review evidence
 
@@ -436,8 +469,9 @@ The repo must not claim:
 - `arrayvec#288` shows that `Vec::set_len` guard evidence still needs better
   modeling; visible `MaybeUninit::new` initialization loops and const `CAP`
   capacity evidence now have fixture and dogfood-rerun coverage, and
-  `set_len(0)` clear evidence has fixture and dogfood-rerun coverage, while
-  other shrink operations and broader initialization patterns remain limited.
+  non-zero shrink and `set_len(0)` clear evidence have fixture and dogfood-rerun
+  coverage, while other `set_len` and broader initialization patterns remain
+  limited.
 - These runs do not prove absence of missed unsafe seams.
 
 ## Next useful work
