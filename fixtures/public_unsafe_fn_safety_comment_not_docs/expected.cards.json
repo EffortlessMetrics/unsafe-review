@@ -31,9 +31,9 @@
           "summary": "Public unsafe API is missing nearby `# Safety` documentation"
         },
         "discharge": {
-          "present": false,
-          "state": "missing",
-          "summary": "No obligation-specific guard code was detected"
+          "present": true,
+          "state": "present",
+          "summary": "Public unsafe API declaration is a caller-contract site; local guard evidence is not expected at the declaration"
         },
         "reach": {
           "present": false,
@@ -48,12 +48,11 @@
       }
     ],
     "contract": "Public unsafe API is missing nearby `# Safety` documentation",
-    "discharge": "No visible local guard detected",
+    "discharge": "Public unsafe API declaration is a caller-contract site; local guard evidence is not expected at the declaration",
     "reach": "No static test mention of owner `caller_must_read_docs` was found",
     "witness": "No imported witness receipt was found",
     "missing": [
       "Missing public `# Safety` documentation for unsafe API",
-      "Missing visible local guard for inferred safety obligations",
       "No related test path was found by static search",
       "No witness receipt imported for this card"
     ],

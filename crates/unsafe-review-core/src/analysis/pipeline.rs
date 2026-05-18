@@ -555,6 +555,26 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn documented_public_unsafe_api_does_not_require_local_guard() -> Result<(), String> {
+        let output = fixture_output("public_unsafe_fn_with_safety_docs")?;
+        let card = single_card("public_unsafe_fn_with_safety_docs", &output)?;
+
+        assert_eq!(card.class, ReviewClass::GuardedUnwitnessed);
+        assert!(card.site.public_api_surface);
+        assert!(card.contract.present);
+        assert!(card.discharge.present);
+        assert!(
+            !card.missing.iter().any(|missing| missing.kind == "guard"),
+            "public unsafe API declarations with # Safety docs should not ask for local guard evidence"
+        );
+        assert!(
+            card.missing.iter().any(|missing| missing.kind == "witness"),
+            "documented public unsafe APIs should still preserve witness prompts"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn private_unsafe_helper_can_use_local_safety_comment() -> Result<(), String> {
         let output = fixture_output("private_unsafe_helper_safety_comment")?;
         let card = single_card("private_unsafe_helper_safety_comment", &output)?;
