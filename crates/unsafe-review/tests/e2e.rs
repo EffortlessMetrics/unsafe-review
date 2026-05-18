@@ -245,13 +245,58 @@ fn repo_inventory_and_badges_count_open_gaps_without_safety_claim() -> Result<()
         os("json"),
     ])?;
     let repo = parse_json(&stdout_text(&repo)?)?;
+    assert_eq!(repo["schema_version"], "0.1");
+    assert_eq!(repo["tool"], "unsafe-review");
     assert_eq!(repo["scope"], "repo");
     assert_eq!(repo["mode"], "repo");
     assert_eq!(repo["policy"], "advisory");
-    assert_eq!(repo["summary"]["cards"], 1);
-    assert_eq!(repo["summary"]["open_actionable_gaps"], 1);
-    assert_eq!(repo["summary"]["guard_missing"], 1);
-    assert_eq!(repo["cards"][0]["operation_family"], "raw_pointer_read");
+    assert!(
+        repo["root"]
+            .as_str()
+            .unwrap_or("")
+            .ends_with("fixtures/raw_pointer_alignment")
+    );
+    let summary = &repo["summary"];
+    for key in [
+        "rust_files",
+        "changed_rust_files",
+        "unsafe_sites",
+        "cards",
+        "open_actionable_gaps",
+        "contract_missing",
+        "guard_missing",
+        "guarded_unwitnessed",
+        "unsafe_unreached",
+        "requires_loom",
+        "miri_unsupported",
+        "static_unknown",
+    ] {
+        assert!(summary.get(key).is_some(), "repo summary missing `{key}`");
+    }
+    assert_eq!(summary["cards"], 1);
+    assert_eq!(summary["open_actionable_gaps"], 1);
+    assert_eq!(summary["guard_missing"], 1);
+    let card = &repo["cards"][0];
+    for key in [
+        "id",
+        "class",
+        "priority",
+        "confidence",
+        "site",
+        "operation_family",
+        "hazards",
+        "obligations",
+        "obligation_evidence",
+        "contract",
+        "discharge",
+        "reach",
+        "witness",
+        "missing",
+        "verify_commands",
+    ] {
+        assert!(card.get(key).is_some(), "repo card missing `{key}`");
+    }
+    assert_eq!(card["operation_family"], "raw_pointer_read");
     assert!(
         repo["trust_boundary"]
             .as_str()
