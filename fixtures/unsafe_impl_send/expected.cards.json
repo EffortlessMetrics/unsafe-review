@@ -55,7 +55,8 @@
       "No witness receipt imported for this card"
     ],
     "verify_commands": [
-      "cargo test SharedCell_loom -- --nocapture"
+      "cargo test SharedCell_loom -- --nocapture",
+      "cargo test SharedCell_shuttle -- --nocapture"
     ]
   }
 ]
