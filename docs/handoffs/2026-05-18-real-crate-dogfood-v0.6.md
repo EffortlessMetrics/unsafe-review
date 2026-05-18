@@ -421,6 +421,39 @@ the changed raw pointer write inside `extend_from_iter`, recognizes visible
 guard evidence, and routes the remaining missing contract/witness work to the
 owner-specific Miri/cargo-careful path.
 
+### `arrayvec#137`
+
+PR: `https://github.com/bluss/arrayvec/pull/137`
+
+The PR replaces several `get_unchecked_mut`-derived references with a raw
+pointer accessor in a soundness fix around potentially uninitialized storage.
+
+Dogfood output from a PR-head checkout and unfiltered GitHub patch:
+
+```text
+changed_rust_files: 3
+cards: 15
+contract_missing: 15
+guard_missing: 0
+operation families:
+  raw_pointer_write: 2
+  vec_set_len: 4
+  unknown: 1
+  pointer_arithmetic: 2
+  raw_pointer_read: 4
+  slice_from_raw_parts: 1
+  drop_in_place: 1
+```
+
+This run is useful as a diff-capture and root-alignment check. An earlier
+exploratory run used an RTK-compacted diff and produced zero cards; the rerun
+uses `rtk proxy gh pr diff ...` so the saved input preserves `diff --git`
+headers. With the correct PR-head root and raw patch, `unsafe-review` emits the
+expected high-signal contract prompts for raw pointer reads/writes, pointer
+arithmetic, `Vec::set_len`, mutable slice construction, and drop/deallocation
+sites. The cards remain advisory: they do not claim the PR is wrong or safe,
+and they do not execute Miri or cargo-careful.
+
 ### `arrayvec#138`
 
 PR: `https://github.com/bluss/arrayvec/pull/138`
@@ -1417,6 +1450,8 @@ rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arra
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-call-result-init.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-unsafe-fn-call.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-encode-call-evidence.json
+rtk proxy gh pr diff 137 --repo bluss/arrayvec --patch > target/dogfood-work/arrayvec-pr137.raw.patch
+rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec-pr137-root --diff target/dogfood-work/arrayvec-pr137.raw.patch --format json --max-cards 40 --out target/dogfood-work/arrayvec-pr137.raw.head.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr692.raw.diff --format json --max-cards 30 --out target/dogfood-work/hashbrown-pr692.after-slice-mut.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr692.raw.diff --format json --max-cards 30 --out target/dogfood-work/hashbrown-pr692.after-write-bytes.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr692.raw.diff --format json --max-cards 30 --out target/dogfood-work/hashbrown-pr692.after-num-ctrl-guard.json
@@ -1453,8 +1488,9 @@ The repo may claim:
 - a capped `memchr` dogfood snapshot now completes
 - real PR-diff dogfood runs on `memchr#215`, `rust-smallvec#407`,
   `rust-smallvec#277`, `rust-smallvec#64`, `rust-smallvec#254`,
-  `arrayvec#308`, `arrayvec#138`, `arrayvec#187`, `arrayvec#174`, and
-  `arrayvec#288`, `hashbrown#469`, `hashbrown#501`, `hashbrown#657`,
+  `arrayvec#308`, `arrayvec#137`, `arrayvec#138`, `arrayvec#187`,
+  `arrayvec#174`, and `arrayvec#288`, `hashbrown#469`, `hashbrown#501`,
+  `hashbrown#657`,
   `hashbrown#556`, `hashbrown#667`, `hashbrown#692`, `hashbrown#681`,
   `hashbrown#693`, `bytes#826`, `crossbeam#1226`, and `crossbeam#1187`
   produce card output
@@ -1594,6 +1630,11 @@ The repo may claim:
 - one capped `tokio-rs/mio` repo snapshot completed with 50 cards across 80
   Rust files, adding dogfood for unsafe function call contracts, `Vec::set_len`,
   zeroed values, pointer operations, and unsafe Send/Sync route cards
+- one PR-diff dogfood pass on `bluss/arrayvec#137` completed with 15
+  contract-missing cards across three changed Rust files, adding focused
+  coverage for raw pointer accessor soundness fixes, raw pointer reads/writes,
+  pointer arithmetic, `Vec::set_len`, mutable slice construction, and
+  drop/deallocation cards
 - one PR-diff dogfood pass on `rust-lang/hashbrown#681` completed with 14 cards
   across two changed Rust files, adding repeatable coverage for safe wrappers
   around unchecked key replacement, unsafe-call contract gaps, guard-missing
@@ -1609,7 +1650,7 @@ The repo must not claim:
 - usable-alpha support-tier promotion
 - full-repository coverage from top-50 capped snapshots
 - uncapped repo-scan performance
-- general PR-diff usefulness from twenty-one PRs
+- general PR-diff usefulness from twenty-two PRs
 - memory-safety proof
 - UB-free status
 - witness execution
@@ -1619,7 +1660,7 @@ The repo must not claim:
 
 - Seven real crates completed capped repo snapshots in this slice.
 - The successful dogfood snapshots were capped at 50 cards.
-- Only twenty-one real PR diffs were measured.
+- Only twenty-two real PR diffs were measured.
 - `memchr` completion depends on capped-scan behavior; uncapped performance is
   still unmeasured.
 - No human audit was performed for every emitted card.
@@ -1648,6 +1689,11 @@ The repo must not claim:
   future work.
 - `arrayvec#174` now has a fixture-backed `ptr::drop_in_place` card, but broader
   drop/deallocation modeling beyond that operation remains narrow.
+- `arrayvec#137` shows the importance of matching the PR-head checkout and raw
+  unified diff: an RTK-compacted diff produced zero cards, while the raw patch
+  produced 15 contract-missing cards. It also shows that raw pointer accessor
+  soundness fixes can still need better contract and discharge evidence before
+  calibration claims.
 - `hashbrown#692` now has a fixture-backed `slice::from_raw_parts_mut` card, but
   broader slice range proof remains source-level and advisory. `MaybeUninit`
   slice element evidence can discharge the initialized-memory obligation, but

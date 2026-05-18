@@ -25,9 +25,9 @@ local artifact is needed.
 | Measure | Count |
 |---|---:|
 | Repositories | 7 |
-| Total targets | 28 |
+| Total targets | 29 |
 | Capped repo snapshots | 7 |
-| PR diff targets | 21 |
+| PR diff targets | 22 |
 | Checked-in scan outputs | 0 |
 
 ## Repository Coverage
@@ -35,7 +35,7 @@ local artifact is needed.
 | Repository | Snapshot targets | PR diff targets | Primary exercise |
 |---|---:|---:|---|
 | `servo/rust-smallvec` | 1 | 4 | Raw pointer reads/writes, `Vec::set_len`, pointer arithmetic, unsafe impls, owner inference |
-| `bluss/arrayvec` | 1 | 5 | `MaybeUninit`, `Vec::set_len`, raw pointer reads/writes, UTF-8, drop/deallocation cards |
+| `bluss/arrayvec` | 1 | 6 | `MaybeUninit`, `Vec::set_len`, raw pointer reads/writes, raw pointer accessor soundness fixes, UTF-8, drop/deallocation cards |
 | `BurntSushi/memchr` | 1 | 1 | SIMD target-feature contracts, pointer arithmetic, unchecked constructors |
 | `rust-lang/hashbrown` | 1 | 8 | Large-file syntax scanning, `MaybeUninit`, pointer arithmetic, unchecked/infallible operations, unsafe-call contract gaps, dedupe |
 | `tokio-rs/bytes` | 1 | 1 | `Vec::from_raw_parts`, slice construction, ownership-transfer review cards |
@@ -68,6 +68,7 @@ local artifact is needed.
 - `smallvec-pr64`
 - `smallvec-pr254`
 - `arrayvec-pr308`
+- `arrayvec-pr137`
 - `arrayvec-pr138`
 - `arrayvec-pr187`
 - `arrayvec-pr174`

@@ -6,12 +6,12 @@
   "trust_boundary": "Dogfood corpus records are static unsafe contract review evidence, not a proof of memory safety, not UB-free status, and not a Miri result unless an exact witness receipt is attached.",
   "summary": {
     "repositories": 7,
-    "targets": 28,
+    "targets": 29,
     "repo_snapshots": 7,
-    "pr_diffs": 21,
+    "pr_diffs": 22,
     "checked_in_scan_outputs": 0,
     "artifact_statuses": {
-      "local_untracked": 28
+      "local_untracked": 29
     }
   },
   "repositories": [
@@ -24,8 +24,8 @@
     {
       "repository": "bluss/arrayvec",
       "snapshot_targets": ["arrayvec-capped"],
-      "pr_diff_targets": ["arrayvec-pr308", "arrayvec-pr138", "arrayvec-pr187", "arrayvec-pr174", "arrayvec-pr288"],
-      "primary_exercise": "MaybeUninit, Vec::set_len, raw pointer reads/writes, UTF-8, drop/deallocation cards"
+      "pr_diff_targets": ["arrayvec-pr308", "arrayvec-pr137", "arrayvec-pr138", "arrayvec-pr187", "arrayvec-pr174", "arrayvec-pr288"],
+      "primary_exercise": "MaybeUninit, Vec::set_len, raw pointer reads/writes, raw pointer accessor soundness fixes, UTF-8, drop/deallocation cards"
     },
     {
       "repository": "BurntSushi/memchr",
