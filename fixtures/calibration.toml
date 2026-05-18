@@ -16,6 +16,7 @@ required_core_fixtures = [
   "vec_set_len_zero_clear",
   "drop_in_place_deallocation",
   "unwrap_unchecked_result",
+  "unreachable_unchecked_path",
   "raw_pointer_write_bytes",
   "pointer_arithmetic_num_ctrl_bytes_guard",
   "slice_from_raw_parts_mut",
@@ -170,6 +171,16 @@ support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"
 expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unreachable_unchecked_path"
+kind = "positive"
+claim = "unreachable_unchecked reports an unreachable-path obligation instead of a generic unsafe function call"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unreachable_unchecked"
 expected_hazard = "invalid_value"
 
 [[cases]]

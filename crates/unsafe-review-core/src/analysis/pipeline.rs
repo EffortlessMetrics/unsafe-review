@@ -279,6 +279,9 @@ fn operation_path(scanned: &scanner::ScannedSite) -> String {
     if scanned.operation.family == crate::domain::OperationFamily::RawPointerDeref {
         return "deref".to_string();
     }
+    if scanned.operation.family == crate::domain::OperationFamily::UnreachableUnchecked {
+        return "unreachable_unchecked".to_string();
+    }
     if scanned.operation.family == crate::domain::OperationFamily::UnsafeFnCall {
         return unsafe_call_path(&scanned.operation.expression);
     }
@@ -709,6 +712,19 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
         assert_eq!(card.class, ReviewClass::GuardMissing);
         assert!(card.hazards.contains(&HazardKind::InvalidValue));
         assert!(card.id.0.contains("unwrap-unchecked"));
+        Ok(())
+    }
+
+    #[test]
+    fn unreachable_unchecked_uses_concrete_operation_family() -> Result<(), String> {
+        let output = fixture_output("unreachable_unchecked_path")?;
+        let card = single_card("unreachable_unchecked_path", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::UnreachableUnchecked);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(card.hazards.contains(&HazardKind::InvalidValue));
+        assert!(card.id.0.contains("unreachable-unchecked"));
         Ok(())
     }
 
