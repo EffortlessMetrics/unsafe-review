@@ -47,6 +47,7 @@ pub(crate) fn hazards_for(family: &OperationFamily) -> Vec<HazardKind> {
             HazardKind::InitializedMemory,
             HazardKind::DropOrDeallocation,
         ],
+        OperationFamily::UnsafeFnCall => vec![HazardKind::Unknown],
         OperationFamily::BoxFromRaw => vec![
             HazardKind::PointerValidity,
             HazardKind::DropOrDeallocation,
@@ -125,6 +126,10 @@ pub(crate) fn obligations_for(family: &OperationFamily) -> Vec<SafetyObligation>
                 "value will not be dropped again or observed after drop",
             ),
         ],
+        OperationFamily::UnsafeFnCall => vec![SafetyObligation::new(
+            "callee-contract",
+            "callee safety preconditions are satisfied",
+        )],
         OperationFamily::CopyNonOverlapping => vec![
             SafetyObligation::new("non-overlap", "source and destination do not overlap"),
             SafetyObligation::new("valid-range", "both ranges are valid for count elements"),
@@ -273,6 +278,14 @@ mod tests {
                 "initialized".to_string(),
                 "ownership".to_string(),
             ]
+        );
+        assert_eq!(
+            hazards_for(&OperationFamily::UnsafeFnCall),
+            vec![HazardKind::Unknown]
+        );
+        assert_eq!(
+            obligation_keys(&OperationFamily::UnsafeFnCall),
+            vec!["callee-contract".to_string()]
         );
     }
 }

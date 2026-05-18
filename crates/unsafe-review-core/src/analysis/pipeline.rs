@@ -279,6 +279,9 @@ fn operation_path(scanned: &scanner::ScannedSite) -> String {
     if scanned.operation.family == crate::domain::OperationFamily::RawPointerDeref {
         return "deref".to_string();
     }
+    if scanned.operation.family == crate::domain::OperationFamily::UnsafeFnCall {
+        return unsafe_call_path(&scanned.operation.expression);
+    }
     if scanned.operation.family == crate::domain::OperationFamily::Unknown {
         return scanned
             .site
@@ -299,6 +302,31 @@ fn operation_path(scanned: &scanner::ScannedSite) -> String {
         return function.trim_matches(':').to_string();
     }
     scanned.operation.family.as_str().to_string()
+}
+
+fn unsafe_call_path(expression: &str) -> String {
+    let normalized = normalize_snippet(expression);
+    let call = normalized
+        .split_once("unsafe")
+        .and_then(|(_prefix, after_unsafe)| {
+            after_unsafe.split_once('{').map(|(_open, after)| after)
+        })
+        .unwrap_or(normalized.as_str())
+        .split('(')
+        .next()
+        .unwrap_or("unsafe_fn_call")
+        .trim()
+        .trim_start_matches("match")
+        .trim();
+    if call.is_empty() {
+        "unsafe_fn_call".to_string()
+    } else if let Some((_prefix, method)) = call.rsplit_once('.') {
+        method.trim_matches(':').to_string()
+    } else if let Some((_prefix, function)) = call.rsplit_once("::") {
+        function.trim_matches(':').to_string()
+    } else {
+        call.trim_matches(':').to_string()
+    }
 }
 
 #[cfg(test)]
@@ -571,6 +599,18 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
             card.missing.iter().any(|missing| missing.kind == "witness"),
             "documented public unsafe APIs should still preserve witness prompts"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn unsafe_call_wrapper_uses_concrete_operation_family() -> Result<(), String> {
+        let output = fixture_output("unsafe_fn_call_wrapper")?;
+        let card = single_card("unsafe_fn_call_wrapper", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::UnsafeFnCall);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(card.id.0.contains("encode-utf8"));
         Ok(())
     }
 

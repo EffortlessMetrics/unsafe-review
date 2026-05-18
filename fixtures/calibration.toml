@@ -22,6 +22,7 @@ required_core_fixtures = [
   "cfg_target_feature_not_operation",
   "attributed_unsafe_fn_no_duplicate",
   "inline_unsafe_raw_pointer_deref_no_duplicate",
+  "unsafe_fn_call_wrapper",
   "comment_alignment_not_guard",
 ]
 
@@ -213,6 +214,16 @@ expected_cards = 1
 expected_class = "guard_missing"
 expected_operation_family = "raw_pointer_deref"
 expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "unsafe_fn_call_wrapper"
+kind = "positive"
+claim = "unsafe call wrappers emit unsafe_fn_call cards instead of unknown unsafe-block cards"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unsafe_fn_call"
+expected_hazard = "unknown"
 
 [[cases]]
 fixture = "safe_reference_deref_no_cards"

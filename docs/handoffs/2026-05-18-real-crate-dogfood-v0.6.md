@@ -635,6 +635,29 @@ remaining `guard_missing` card is the `encode_utf8` unsafe-call wrapper, which
 still needs a future unsafe-call operation family or more specific contract
 modeling.
 
+Follow-up rerun after adding fixture-backed unsafe-call wrapper detection:
+
+```text
+changed_rust_files: 1
+cards: 9
+contract_missing: 0
+guard_missing: 1
+guarded_unwitnessed: 6
+unsafe_unreached: 2
+operation families: vec_set_len, unsafe_fn_call, unknown
+```
+
+The remaining `guard_missing` card is still advisory only:
+
+```text
+try_push  line 244  unsafe_fn_call  guard_missing
+```
+
+It moved from `unknown` to `unsafe_fn_call`, with the callee identity captured as
+`encode_utf8`. The card still asks for discharge/witness evidence because the
+tool does not infer the callee's full safety contract from the function name or
+nearby prose.
+
 ## Proof
 
 Targeted local validation:
@@ -670,6 +693,7 @@ rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arra
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-setlen-shrink.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-public-unsafe-contract.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-call-result-init.json
+rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-unsafe-fn-call.json
 ```
 
 The dogfood reruns used a temporary `CARGO_TARGET_DIR` to avoid a Windows file
@@ -718,6 +742,9 @@ The repo may claim:
 - one fixture-backed call-result initialization improvement changed the
   `arrayvec#288` `set_len(len + n)` card from `guard_missing` to
   `guarded_unwitnessed`
+- one fixture-backed unsafe-call wrapper improvement changed the `arrayvec#288`
+  `encode_utf8` unsafe block from `unknown` to `unsafe_fn_call` while preserving
+  the missing-discharge prompt
 - attributed unsafe function declarations are deduped between syntax-backed
   extraction and fallback line scanning
 - false-positive regression coverage exists in fixtures and calibration
@@ -759,9 +786,8 @@ The repo must not claim:
   `SAFETY:` evidence.
 - Public unsafe API declarations with recognized `# Safety` docs no longer ask
   for local declaration guards, but static reach remains a heuristic name search.
-- `arrayvec#288` still has an `encode_utf8` unsafe-call wrapper card that uses
-  the `unknown` operation family; unsafe-call-specific modeling remains future
-  work.
+- `arrayvec#288` now labels the `encode_utf8` wrapper as `unsafe_fn_call`, but
+  callee-specific safety contract inference remains future work.
 - `arrayvec#174` now has a fixture-backed `ptr::drop_in_place` card, but broader
   drop/deallocation modeling beyond that operation remains narrow.
 - These runs do not prove absence of missed unsafe seams.
