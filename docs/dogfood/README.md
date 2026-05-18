@@ -7,4 +7,6 @@ The corpus is advisory evidence. It records repeatable targets, commands, and
 expected artifact paths for real Rust crates and PR diffs. It is not a release
 claim, not calibrated precision/recall measurement, and not memory-safety proof.
 
-The manifest is `corpus.toml`.
+The manifest is [`corpus.toml`](corpus.toml). The human-facing index is
+[`index.md`](index.md), with a machine-readable companion at
+[`index.json`](index.json).
