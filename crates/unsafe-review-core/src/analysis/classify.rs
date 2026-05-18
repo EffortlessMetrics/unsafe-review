@@ -60,3 +60,103 @@ pub(crate) fn classify(
         Confidence::Medium,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn contract(present: bool) -> ContractEvidence {
+        ContractEvidence {
+            present,
+            summary: "contract".to_string(),
+        }
+    }
+
+    fn discharge(present: bool) -> DischargeEvidence {
+        DischargeEvidence {
+            present,
+            summary: "discharge".to_string(),
+        }
+    }
+
+    fn reach(state: &str) -> ReachEvidence {
+        ReachEvidence {
+            state: state.to_string(),
+            summary: "reach".to_string(),
+        }
+    }
+
+    #[test]
+    fn ffi_hazards_are_routed_before_generic_contract_gaps() {
+        let (class, priority, confidence) = classify(
+            &[HazardKind::FfiAbi],
+            &contract(false),
+            &discharge(false),
+            &reach("unreached"),
+        );
+
+        assert_eq!(class, ReviewClass::MiriUnsupported);
+        assert_eq!(priority, Priority::Medium);
+        assert_eq!(confidence, Confidence::Medium);
+    }
+
+    #[test]
+    fn concurrency_hazards_require_loom_before_generic_guard_gaps() {
+        let (class, priority, confidence) = classify(
+            &[HazardKind::SendSyncInvariant],
+            &contract(true),
+            &discharge(false),
+            &reach("owner_reached"),
+        );
+
+        assert_eq!(class, ReviewClass::RequiresLoom);
+        assert_eq!(priority, Priority::High);
+        assert_eq!(confidence, Confidence::Medium);
+    }
+
+    #[test]
+    fn ordinary_unsafe_sites_progress_through_evidence_states() {
+        let hazards = [HazardKind::PointerValidity];
+
+        assert_eq!(
+            classify(
+                &hazards,
+                &contract(false),
+                &discharge(false),
+                &reach("unreached")
+            )
+            .0,
+            ReviewClass::ContractMissing
+        );
+        assert_eq!(
+            classify(
+                &hazards,
+                &contract(true),
+                &discharge(false),
+                &reach("owner_reached")
+            )
+            .0,
+            ReviewClass::GuardMissing
+        );
+        assert_eq!(
+            classify(
+                &hazards,
+                &contract(true),
+                &discharge(true),
+                &reach("unreached")
+            )
+            .0,
+            ReviewClass::UnsafeUnreached
+        );
+        assert_eq!(
+            classify(
+                &hazards,
+                &contract(true),
+                &discharge(true),
+                &reach("owner_reached")
+            )
+            .0,
+            ReviewClass::GuardedUnwitnessed
+        );
+    }
+}
