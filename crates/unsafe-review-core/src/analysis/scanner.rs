@@ -98,7 +98,10 @@ pub(crate) fn scan_file(
             continue;
         }
         let idx = detected.line.saturating_sub(1);
-        let owner = parse_fn_name(&detected.source_snippet).or_else(|| find_owner(&lines, idx));
+        let owner = parse_fn_name(&detected.source_snippet)
+            .or_else(|| parse_trait_name(&detected.source_snippet))
+            .or_else(|| parse_impl_owner(&detected.source_snippet))
+            .or_else(|| find_owner(&lines, idx));
         let visibility = if is_public_surface(&detected.source_snippet) {
             "public"
         } else {
@@ -489,6 +492,9 @@ fn find_owner(lines: &[&str], idx: usize) -> Option<String> {
         if let Some(name) = parse_impl_owner(line) {
             return Some(name);
         }
+        if let Some(name) = parse_trait_name(line) {
+            return Some(name);
+        }
         if let Some(name) = parse_fn_name(line) {
             return Some(name);
         }
@@ -512,6 +518,13 @@ fn parse_impl_owner(line: &str) -> Option<String> {
 
 fn parse_fn_name(line: &str) -> Option<String> {
     let marker = "fn ";
+    let pos = line.find(marker)?;
+    let rest = &line[pos + marker.len()..];
+    parse_ident(rest)
+}
+
+fn parse_trait_name(line: &str) -> Option<String> {
+    let marker = "trait ";
     let pos = line.find(marker)?;
     let rest = &line[pos + marker.len()..];
     parse_ident(rest)
