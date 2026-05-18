@@ -9,6 +9,7 @@ required_core_fixtures = [
   "vec_set_len_initialized_loop",
   "vec_set_len_shrink",
   "vec_set_len_last_index_shrink",
+  "vec_set_len_start_bound_shrink",
   "vec_set_len_zero_clear",
   "transmute_invalid_value",
   "unsafe_impl_send",
@@ -82,6 +83,16 @@ expected_hazard = "initialized_memory"
 fixture = "vec_set_len_last_index_shrink"
 kind = "positive"
 claim = "Vec::set_len recognizes last_index = self.len - 1 after a non-empty guard as shrink evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_start_bound_shrink"
+kind = "positive"
+claim = "Vec::set_len recognizes start <= end <= len as shrink evidence"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guarded_unwitnessed"
