@@ -159,7 +159,13 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
         OsString::from(card_id),
     ])?;
     let packet = parse_json(&stdout_text(&context)?)?;
+    assert_eq!(packet["mode"], "bounded_repair_packet");
+    assert_eq!(packet["source"], "review_card");
+    assert_eq!(packet["policy"], "advisory");
     assert_eq!(packet["card_id"], card_id);
+    assert_eq!(packet["card"]["id"], card_id);
+    assert_eq!(packet["context"]["operation_family"], "raw_pointer_read");
+    assert!(packet["witness_routes"].is_array());
     assert!(packet["do_not_do"].is_array());
     assert!(packet["stop_conditions"].is_array());
 

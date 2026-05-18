@@ -1,6 +1,6 @@
 use crate::analysis::pipeline;
 use crate::domain::{CardId, ReviewCard};
-use crate::output::{comment_plan, human, json, lsp, markdown, sarif};
+use crate::output::{agent, comment_plan, human, json, lsp, markdown, sarif};
 use std::path::PathBuf;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -150,5 +150,5 @@ pub fn collect_context(output: &AnalyzeOutput, id: &CardId) -> Option<String> {
         .cards
         .iter()
         .find(|card| &card.id == id)
-        .map(json::render_agent_packet)
+        .map(agent::render)
 }

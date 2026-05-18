@@ -9,10 +9,6 @@ pub(crate) fn render(output: &AnalyzeOutput) -> String {
     render_pretty(&JsonAnalyzeOutput::from(output))
 }
 
-pub(crate) fn render_agent_packet(card: &ReviewCard) -> String {
-    render_pretty(&JsonAgentPacket::from(card))
-}
-
 fn render_pretty(value: &impl Serialize) -> String {
     match serde_json::to_string_pretty(value) {
         Ok(text) => text,
@@ -205,78 +201,6 @@ impl<'a> From<&'a ReviewCard> for JsonSite<'a> {
     }
 }
 
-#[derive(Serialize)]
-struct JsonAgentPacket<'a> {
-    schema_version: &'static str,
-    tool: &'static str,
-    card_id: &'a str,
-    task: &'a str,
-    context: JsonAgentContext<'a>,
-    required_safety_conditions: Vec<&'a str>,
-    obligation_evidence: Vec<JsonObligationEvidence<'a>>,
-    missing: Vec<&'a str>,
-    allowed_repairs: Vec<&'a str>,
-    verify_commands: &'a [String],
-    do_not_do: &'static [&'static str],
-    stop_conditions: &'static [&'static str],
-}
-
-impl<'a> From<&'a ReviewCard> for JsonAgentPacket<'a> {
-    fn from(card: &'a ReviewCard) -> Self {
-        Self {
-            schema_version: "0.1",
-            tool: "unsafe-review",
-            card_id: &card.id.0,
-            task: &card.next_action.summary,
-            context: JsonAgentContext::from(card),
-            required_safety_conditions: card
-                .obligations
-                .iter()
-                .map(|obligation| obligation.description.as_str())
-                .collect(),
-            obligation_evidence: card
-                .obligation_evidence
-                .iter()
-                .map(JsonObligationEvidence::from)
-                .collect(),
-            missing: card
-                .missing
-                .iter()
-                .map(|missing| missing.message.as_str())
-                .collect(),
-            allowed_repairs: vec![card.next_action.summary.as_str()],
-            verify_commands: &card.next_action.verify_commands,
-            do_not_do: &[
-                "do not widen unsafe code without reducing the missing evidence",
-                "do not add a broad suppression",
-                "do not claim Miri proof unless the witness command is run and attached",
-            ],
-            stop_conditions: &[
-                "the missing evidence is present or explicitly waived with owner and expiry",
-                "the focused test or witness command has been run or marked unavailable",
-                "no unrelated unsafe code was changed",
-            ],
-        }
-    }
-}
-
-#[derive(Serialize)]
-struct JsonAgentContext<'a> {
-    file: String,
-    line: usize,
-    operation: &'a str,
-}
-
-impl<'a> From<&'a ReviewCard> for JsonAgentContext<'a> {
-    fn from(card: &'a ReviewCard) -> Self {
-        Self {
-            file: path_display(&card.site.location.file),
-            line: card.site.location.line,
-            operation: &card.operation.expression,
-        }
-    }
-}
-
 fn scope_str(output: &AnalyzeOutput) -> &'static str {
     match output.scope {
         Scope::Diff => "diff",
@@ -337,25 +261,6 @@ mod tests {
         assert_eq!(value["cards"][0]["operation_family"], "raw_pointer_read");
         assert!(value["cards"][0]["obligation_evidence"].is_array());
         assert!(value["cards"][0]["verify_commands"].is_array());
-        Ok(())
-    }
-
-    #[test]
-    fn rendered_agent_packet_json_is_parseable_and_bounded() -> Result<(), String> {
-        let output = fixture_output("raw_pointer_alignment")?;
-        let Some(card) = output.cards.first() else {
-            return Err("fixture should emit one card".to_string());
-        };
-        let value = parse_json(&render_agent_packet(card))?;
-
-        assert_eq!(value["schema_version"], "0.1");
-        assert_eq!(value["tool"], "unsafe-review");
-        assert_eq!(value["card_id"], card.id.0);
-        assert!(value["required_safety_conditions"].is_array());
-        assert!(value["obligation_evidence"].is_array());
-        assert!(value["allowed_repairs"].is_array());
-        assert!(value["do_not_do"].is_array());
-        assert!(value["stop_conditions"].is_array());
         Ok(())
     }
 

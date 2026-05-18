@@ -87,9 +87,9 @@ contract evidence, looks for simple local guards, and routes cards to likely wit
 The current PR projection renders `cards.json`, `pr-summary.md`, `cards.sarif`, and
 `comment-plan.json` as advisory artifacts. It does not post comments, run witness
 tools, or enable blocking policy. Support tiers stay conservative: fixture-backed
-surfaces are experimental, the saved editor/LSP projection is read-only and
-experimental, and repo posture, agent packets, receipts, baselines, and suppressions
-remain later lanes until they have proof.
+surfaces are experimental, the saved editor/LSP projection and bounded agent
+packets are read-only and experimental, and repo posture, receipts, baselines, and
+suppressions remain later lanes until they have proof.
 
 ## Crate surface
 
