@@ -230,6 +230,7 @@ mod tests {
         "raw_pointer_read_unaligned",
         "raw_pointer_write_assignment",
         "safe_reference_deref_no_cards",
+        "imports_not_unsafe_operations",
         "split_raw_pointer_read_call",
         "maybeuninit_assume_init",
         "vec_set_len",

@@ -5,6 +5,8 @@ what not to do next. Do not put active specs here.
 
 | Handoff | Date | Scope |
 |---|---|---|
+| [Real-crate dogfood v0.6](2026-05-18-real-crate-dogfood-v0.6.md) | 2026-05-18 | first real-crate dogfood slice and import/declaration false-positive hardening |
+| [Fixture calibration v0.6](2026-05-18-fixture-calibration-v0.6.md) | 2026-05-18 | experimental fixture calibration proof index |
 | [Repo posture and policy v0.4](2026-05-18-repo-policy-v0.4.md) | 2026-05-18 | experimental repo posture, exact policy matching, and opt-in no-new-debt |
 | [LSP and agent projection v0.3](2026-05-18-lsp-agent-projection-v0.3.md) | 2026-05-18 | experimental saved LSP and bounded agent packet projections |
 | [Advisory PR artifacts v0.2](2026-05-18-advisory-pr-artifacts-v0.2.md) | 2026-05-18 | experimental PR artifact projection loop |
