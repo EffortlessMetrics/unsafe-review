@@ -33,12 +33,46 @@ pub(crate) fn render(output: &AnalyzeOutput) -> String {
         ));
         out.push_str(&format!("  id: {}\n", card.id));
         out.push_str(&format!("  operation: {}\n", card.operation.expression));
+        out.push_str("  hazards:\n");
+        for hazard in &card.hazards {
+            out.push_str(&format!("    - {}\n", hazard.as_str()));
+        }
+        out.push_str("  required safety conditions:\n");
+        for obligation in &card.obligations {
+            out.push_str(&format!("    - {}\n", obligation.description));
+        }
         out.push_str(&format!("  contract: {}\n", card.contract.summary));
         out.push_str(&format!("  discharge: {}\n", card.discharge.summary));
         out.push_str(&format!("  reach: {}\n", card.reach.summary));
+        if !card.obligation_evidence.is_empty() {
+            out.push_str("  obligation evidence:\n");
+            for evidence in &card.obligation_evidence {
+                out.push_str(&format!(
+                    "    - {}: contract {}, guard {}, reach {}, witness {}\n",
+                    evidence.obligation.key,
+                    evidence.contract.state,
+                    evidence.discharge.state,
+                    evidence.reach.state,
+                    evidence.witness.state
+                ));
+            }
+        }
         out.push_str("  missing:\n");
         for missing in &card.missing {
             out.push_str(&format!("    - {}\n", missing.message));
+        }
+        if !card.routes.is_empty() {
+            out.push_str("  witness routes:\n");
+            for route in &card.routes {
+                out.push_str(&format!(
+                    "    - {}: {}\n",
+                    route.kind.as_str(),
+                    route.reason
+                ));
+                if let Some(command) = &route.command {
+                    out.push_str(&format!("      command: {}\n", command));
+                }
+            }
         }
         out.push_str(&format!("  next: {}\n", card.next_action.summary));
         if !card.next_action.verify_commands.is_empty() {
@@ -52,4 +86,41 @@ pub(crate) fn render(output: &AnalyzeOutput) -> String {
 
     out.push_str("Trust boundary: static unsafe contract review; not a proof of memory safety and not a Miri result unless a witness receipt is attached.\n");
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::{AnalysisMode, AnalyzeInput, DiffSource, PolicyMode, Scope, analyze};
+    use std::path::PathBuf;
+
+    #[test]
+    fn human_output_names_conditions_evidence_and_routes() -> Result<(), String> {
+        let output = fixture_output("raw_pointer_alignment")?;
+        let rendered = render(&output);
+
+        assert!(rendered.contains("required safety conditions:"));
+        assert!(rendered.contains("pointer is aligned for the accessed type"));
+        assert!(rendered.contains("obligation evidence:"));
+        assert!(rendered.contains("alignment: contract present, guard missing"));
+        assert!(rendered.contains("witness routes:"));
+        assert!(rendered.contains("miri: Pure-Rust UB-adjacent hazard"));
+        assert!(rendered.contains("Trust boundary: static unsafe contract review"));
+        Ok(())
+    }
+
+    fn fixture_output(name: &str) -> Result<AnalyzeOutput, String> {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures")
+            .join(name);
+        analyze(AnalyzeInput {
+            root: root.clone(),
+            scope: Scope::Diff,
+            diff: DiffSource::File(root.join("change.diff")),
+            mode: AnalysisMode::Draft,
+            policy: PolicyMode::Advisory,
+            include_unchanged_tests: true,
+            max_cards: None,
+        })
+    }
 }
