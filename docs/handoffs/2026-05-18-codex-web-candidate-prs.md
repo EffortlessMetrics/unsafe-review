@@ -76,7 +76,7 @@ candidate PRs in the theme inventory below.
 | CI hardening | #34, #51, #65, #66 | reworked from #66 on current main | merge | current hardening | The current slice keeps the narrow workflow reliability pieces: read-only permissions, no persisted checkout credentials, locked Cargo commands, docs build, timeout, manual dispatch, and PR-run cancellation. |
 | Broad module refactors | #40, #55, #74, #75 | none yet | park | later refactor | Avoid broad SRP churn unless it directly unblocks a reviewed implementation slice. |
 | Public JSON/visibility API | #28 | reworked from #28 on current main | merge | current hardening | `UnsafeSite` already tracked visibility and public API surface; the reworked slice projects those fields into JSON and updates fixture goldens. |
-| Unaligned raw pointer read behavior | #30 | none yet | park or rework | later analyzer | Could be useful, but review after raw pointer write and fixture validation candidates. |
+| Unaligned raw pointer read behavior | #30 | reworked from #30 on current main | merge | current hardening | The current slice keeps the useful distinction that `read_unaligned` does not require alignment evidence while preserving other raw pointer read obligations. |
 
 ## Immediate intake order
 

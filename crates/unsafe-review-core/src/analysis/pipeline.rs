@@ -281,19 +281,30 @@ mod tests {
     #[test]
     fn raw_pointer_v1_operation_cards_are_concrete() -> Result<(), String> {
         let cases = [
-            ("raw_pointer_alignment", OperationFamily::RawPointerRead),
-            ("raw_pointer_deref", OperationFamily::RawPointerDeref),
+            (
+                "raw_pointer_alignment",
+                OperationFamily::RawPointerRead,
+                true,
+            ),
+            ("raw_pointer_deref", OperationFamily::RawPointerDeref, true),
+            (
+                "raw_pointer_read_unaligned",
+                OperationFamily::RawPointerReadUnaligned,
+                false,
+            ),
             (
                 "raw_pointer_write_assignment",
                 OperationFamily::RawPointerWrite,
+                true,
             ),
             (
                 "split_raw_pointer_read_call",
                 OperationFamily::RawPointerRead,
+                true,
             ),
         ];
 
-        for (fixture, expected_family) in cases {
+        for (fixture, expected_family, expects_alignment) in cases {
             let output = fixture_output(fixture)?;
             let card = single_card(fixture, &output)?;
 
@@ -303,7 +314,11 @@ mod tests {
             );
             assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
             assert_eq!(card.class, ReviewClass::GuardMissing);
-            assert!(card.hazards.contains(&HazardKind::Alignment));
+            assert_eq!(
+                card.hazards.contains(&HazardKind::Alignment),
+                expects_alignment,
+                "{fixture} alignment hazard expectation drifted"
+            );
             assert!(card.contract.present);
             assert_eq!(card.reach.state, "owner_reached");
             assert!(card.missing.iter().any(|missing| missing.kind == "guard"));
@@ -316,6 +331,30 @@ mod tests {
             );
             assert_no_unknown_wrapper_card(fixture, &output);
         }
+        Ok(())
+    }
+
+    #[test]
+    fn unaligned_raw_pointer_read_does_not_require_alignment_guard() -> Result<(), String> {
+        let output = fixture_output("raw_pointer_read_unaligned")?;
+        let card = single_card("raw_pointer_read_unaligned", &output)?;
+
+        assert_eq!(
+            card.operation.family,
+            OperationFamily::RawPointerReadUnaligned
+        );
+        assert!(!card.hazards.contains(&HazardKind::Alignment));
+        assert!(
+            card.obligations
+                .iter()
+                .all(|obligation| obligation.key != "alignment")
+        );
+        assert!(card.contract.present);
+        assert!(
+            obligation_discharge_present(card, "bounds"),
+            "length evidence should still satisfy the bounds obligation"
+        );
+        assert_eq!(card.class, ReviewClass::GuardMissing);
         Ok(())
     }
 

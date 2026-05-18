@@ -298,6 +298,7 @@ mod tests {
         "split_public_unsafe_fn_missing_safety",
         "split_unsafe_block",
         "raw_pointer_deref",
+        "raw_pointer_read_unaligned",
         "raw_pointer_write_assignment",
         "safe_reference_deref_no_cards",
         "split_raw_pointer_read_call",
