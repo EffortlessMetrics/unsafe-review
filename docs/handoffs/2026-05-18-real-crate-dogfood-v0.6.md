@@ -610,6 +610,31 @@ reach did not find a related test mention, and no witness receipt is attached.
 The remaining two `guard_missing` cards are the `encode_utf8` unsafe block and
 the matching `set_len(len + n)` write pattern.
 
+Follow-up rerun after adding fixture-backed call-result initialization evidence
+for `set_len(len + n)`:
+
+```text
+changed_rust_files: 1
+cards: 9
+contract_missing: 0
+guard_missing: 1
+guarded_unwitnessed: 6
+unsafe_unreached: 2
+operation families: vec_set_len, unknown
+```
+
+The additional improved card is still advisory only:
+
+```text
+try_push  line 249  vec_set_len  guarded_unwitnessed  self.set_len(len + n);
+```
+
+It moved out of `guard_missing` because the local code records the number of
+bytes returned from `encode_utf8` and extends the length by that value. The
+remaining `guard_missing` card is the `encode_utf8` unsafe-call wrapper, which
+still needs a future unsafe-call operation family or more specific contract
+modeling.
+
 ## Proof
 
 Targeted local validation:
@@ -644,6 +669,7 @@ rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arra
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-setlen-zero.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-setlen-shrink.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-public-unsafe-contract.json
+rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-call-result-init.json
 ```
 
 The dogfood reruns used a temporary `CARGO_TARGET_DIR` to avoid a Windows file
@@ -689,6 +715,9 @@ The repo may claim:
 - one fixture-backed public unsafe API evidence improvement changed the
   `arrayvec#288` documented `set_len` declaration from a missing local guard
   prompt to an `unsafe_unreached` contract/reach/witness prompt
+- one fixture-backed call-result initialization improvement changed the
+  `arrayvec#288` `set_len(len + n)` card from `guard_missing` to
+  `guarded_unwitnessed`
 - attributed unsafe function declarations are deduped between syntax-backed
   extraction and fallback line scanning
 - false-positive regression coverage exists in fixtures and calibration
@@ -730,6 +759,9 @@ The repo must not claim:
   `SAFETY:` evidence.
 - Public unsafe API declarations with recognized `# Safety` docs no longer ask
   for local declaration guards, but static reach remains a heuristic name search.
+- `arrayvec#288` still has an `encode_utf8` unsafe-call wrapper card that uses
+  the `unknown` operation family; unsafe-call-specific modeling remains future
+  work.
 - `arrayvec#174` now has a fixture-backed `ptr::drop_in_place` card, but broader
   drop/deallocation modeling beyond that operation remains narrow.
 - These runs do not prove absence of missed unsafe seams.

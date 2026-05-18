@@ -181,11 +181,18 @@ fn has_capacity_guard(family: &OperationFamily, lower: &str) -> bool {
 
 fn has_set_len_initialization_evidence(lower: &str) -> bool {
     has_set_len_shrink_evidence(lower)
+        || has_set_len_call_result_initialization_evidence(lower)
         || lower.contains("maybeuninit::new")
         || lower.contains(".write(")
         || lower.contains("ptr::write")
         || lower.contains("copy_nonoverlapping")
         || lower.contains("copy_to_nonoverlapping")
+}
+
+fn has_set_len_call_result_initialization_evidence(lower: &str) -> bool {
+    let compact = compact_code(lower);
+    compact.contains("encode_utf8(")
+        && (compact.contains(".set_len(len+n)") || compact.contains(".set_len(old_len+n)"))
 }
 
 fn has_set_len_shrink_evidence(lower: &str) -> bool {
@@ -565,6 +572,35 @@ mod tests {
             OperationFamily::VecSetLen,
             vec![],
             "values.set_len(0);",
+            vec![],
+        );
+
+        let evidence = obligation_evidence(&set_len, &obligations, &contract, &reach);
+
+        assert!(evidence.iter().all(|item| item.discharge.present));
+    }
+
+    #[test]
+    fn set_len_call_result_discharges_initialized_obligation() {
+        let obligations = vec![
+            SafetyObligation::new("capacity", "new length is at most capacity"),
+            SafetyObligation::new(
+                "initialized",
+                "elements in the extended range are initialized",
+            ),
+        ];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let set_len = site_with_family(
+            OperationFamily::VecSetLen,
+            vec![
+                "let remaining_cap = self.capacity() - len;",
+                "let n = encode_utf8(c, ptr, remaining_cap)?;",
+            ],
+            "self.set_len(len + n);",
             vec![],
         );
 
