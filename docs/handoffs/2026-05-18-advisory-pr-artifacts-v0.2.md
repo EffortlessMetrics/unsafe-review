@@ -168,6 +168,40 @@ cards: 0
 open_actionable_gaps: 0
 ```
 
+## Docs-only quieting receipt
+
+The advisory workflow is configured to skip docs-only pull requests:
+
+```yaml
+paths-ignore:
+  - "docs/**"
+  - "**/*.md"
+```
+
+The `#109 docs: record clean string-literal artifact dogfood` PR changed only:
+
+```text
+docs/handoffs/2026-05-18-advisory-pr-artifacts-v0.2.md
+```
+
+Its status rollup contained the CI, CodeRabbit, and GitGuardian checks, but no
+`unsafe-review advisory` workflow check. A run-list query for the branch also
+returned no `unsafe-review` workflow runs:
+
+```bash
+rtk gh run list --workflow unsafe-review --branch docs/string-literal-dogfood-receipt --json databaseId,headBranch,status,conclusion,event,displayTitle,url --limit 10
+```
+
+Result:
+
+```json
+[]
+```
+
+This receipt proves docs-only PRs can be quiet for the advisory artifact
+workflow. It does not change the advisory workflow's manual `workflow_dispatch`
+behavior, and it does not imply any policy gate.
+
 ## Current support posture
 
 The PR artifact surfaces are experimental and advisory. They are suitable for
