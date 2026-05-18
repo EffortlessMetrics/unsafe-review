@@ -163,6 +163,7 @@ fn parse_format(raw: &str) -> Result<Format, String> {
         "json" | "repo-json" => Ok(Format::Json),
         "markdown" | "md" => Ok(Format::Markdown),
         "pr-summary" | "github-summary" | "github-markdown" => Ok(Format::PrSummary),
+        "sarif" => Ok(Format::Sarif),
         other => Err(format!("unknown format `{other}`")),
     }
 }
@@ -199,6 +200,16 @@ mod tests {
             return Err("expected check command".to_string());
         };
         assert_eq!(options.format, Format::PrSummary);
+        Ok(())
+    }
+
+    #[test]
+    fn parses_sarif_format_for_check() -> Result<(), String> {
+        let command = parse(args(["unsafe-review", "check", "--format", "sarif"]))?;
+        let Command::Check(options) = command else {
+            return Err("expected check command".to_string());
+        };
+        assert_eq!(options.format, Format::Sarif);
         Ok(())
     }
 

@@ -13,7 +13,7 @@
 ## 0.2.0 — PR and CI projection
 
 - GitHub summary artifact
-- SARIF output
+- SARIF artifact
 - inline comment policy
 - baseline and suppression matching
 - no-new-debt mode
