@@ -737,6 +737,9 @@ fn is_public_api_surface(kind: &UnsafeSiteKind, snippet: &str) -> bool {
 fn find_owner(lines: &[&str], idx: usize) -> Option<String> {
     for raw in lines[..=idx].iter().rev().take(80) {
         let line = raw.trim();
+        if is_comment_line(line) {
+            continue;
+        }
         if let Some(name) = parse_impl_owner(line) {
             return Some(name);
         }
@@ -765,6 +768,9 @@ fn find_owner_declaration_index(lines: &[&str], idx: usize) -> Option<usize> {
     let limit = idx.min(lines.len().saturating_sub(1));
     for (line_idx, raw) in lines[..=limit].iter().enumerate().rev().take(120) {
         let line = raw.trim();
+        if is_comment_line(line) {
+            continue;
+        }
         if parse_impl_owner(line).is_some()
             || parse_trait_name(line).is_some()
             || parse_fn_name(line).is_some()
@@ -773,6 +779,10 @@ fn find_owner_declaration_index(lines: &[&str], idx: usize) -> Option<usize> {
         }
     }
     None
+}
+
+fn is_comment_line(line: &str) -> bool {
+    line.starts_with("//") || line.starts_with("/*") || line.starts_with('*')
 }
 
 fn owner_doc_start(lines: &[&str], decl_idx: usize) -> usize {
@@ -916,6 +926,20 @@ mod tests {
             ),
             Some((UnsafeSiteKind::Operation, OperationFamily::TargetFeature))
         );
+    }
+
+    #[test]
+    fn owner_inference_ignores_comment_text_when_scanning_backwards() {
+        let lines = [
+            "fn keep_rest(&mut self) {",
+            "    unsafe {",
+            "        // Normally `Drop` impl would drop [tail].",
+            "        let src = ptr.add(this.idx);",
+            "    }",
+            "}",
+        ];
+
+        assert_eq!(find_owner(&lines, 3), Some("keep_rest".to_string()));
     }
 
     #[test]
