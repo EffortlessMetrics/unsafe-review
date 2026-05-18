@@ -15,11 +15,13 @@ Merged PRs:
 - `#134 policy: validate ledger entry shape`
 - `#135 policy: match exact advisory ledgers`
 - `#136 policy: add explicit no-new-debt mode`
+- `#170 repo: add saved snapshot outcome comparison`
 
 The repo posture surface includes:
 
 - `unsafe-review repo --format json`
 - `unsafe-review badges --out <dir>`
+- `unsafe-review outcome --before <cards.json> --after <cards.json>`
 
 The policy surface includes:
 
@@ -28,6 +30,8 @@ The policy surface includes:
 - exact counted `card_id` matching for `baseline_known` and `suppressed`
   classifications
 - explicit opt-in `--policy no-new-debt`
+- saved-snapshot outcome comparison for new, resolved, improved, regressed, and
+  unchanged card identities
 
 ## Proof
 
@@ -44,6 +48,9 @@ rtk cargo test -p unsafe-review-core suppression_policy --locked
 rtk cargo test -p unsafe-review-core policy_state --locked
 rtk cargo test -p unsafe-review-cli no_new_debt --locked
 rtk cargo test -p unsafe-review --test e2e no_new_debt_policy_fails_only_for_unbaselined_actionable_gaps --locked
+rtk cargo test -p unsafe-review-core outcome --locked
+rtk cargo test -p unsafe-review-cli outcome --locked
+rtk cargo test -p unsafe-review --test e2e outcome_compares_existing_json_snapshots_without_safety_claim --locked
 ```
 
 The recurring workspace gate also passed for each code PR:
@@ -71,6 +78,8 @@ The repo may claim:
 - exact suppression matches become `suppressed`
 - explicit `--policy no-new-debt` exits nonzero when unbaselined actionable gaps
   remain
+- outcome comparison reports new, resolved, improved, regressed, and unchanged
+  card identities from two existing unsafe-review JSON snapshots
 
 The repo must not claim:
 
@@ -81,13 +90,15 @@ The repo must not claim:
 - default no-new-debt behavior
 - calibrated blocking policy
 - branch-protection readiness
+- outcome comparison that reruns analysis, executes witnesses, or makes policy
+  decisions
 
 ## Subsequent status
 
-This handoff preserves the state at repo posture and policy lane closeout. A
-later witness lane has since landed exact-card witness receipt import and
-witness-plan output. The "Known limits" below describe what was outside this
-lane at closeout, not the full current repo state.
+This handoff records the repo posture and policy slice plus the later
+saved-snapshot outcome follow-up. A later witness lane has also landed
+exact-card witness receipt import and witness-plan output. The "Known limits"
+below describe what remains outside the current repo posture proof.
 
 For current posture, read this handoff together with:
 
@@ -100,8 +111,8 @@ For current posture, read this handoff together with:
 - Line-stable identity exists, but broader drift behavior still needs dogfood.
 - Suppression and baseline ledgers do not support glob, owner, path, class, or
   operation-family patterns.
-- No outcome comparison exists yet.
-- No witness receipt import exists yet.
+- Outcome comparison reads saved snapshots only; it does not rerun analysis,
+  execute witnesses, or make policy decisions.
 - No calibrated blocking policy exists yet.
 
 ## Next useful work
@@ -110,8 +121,9 @@ Prefer dogfood before expanding policy authority:
 
 - run `--policy no-new-debt` against real unsafe-review PRs and inspect noise
 - record cases where exact identity is too brittle or too permissive
-- add outcome comparison before making repo posture more dashboard-like
-- add witness receipt import before claiming witness-backed resolution
+- dogfood outcome comparison on real repo snapshots before making repo posture
+  more dashboard-like
+- keep witness receipt import separate from policy promotion
 
 Defer:
 
