@@ -615,6 +615,18 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn slice_from_raw_parts_mut_uses_slice_operation_family() -> Result<(), String> {
+        let output = fixture_output("slice_from_raw_parts_mut")?;
+        let card = single_card("slice_from_raw_parts_mut", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::SliceFromRawParts);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(card.id.0.contains("from-raw-parts-mut"));
+        Ok(())
+    }
+
+    #[test]
     fn private_unsafe_helper_can_use_local_safety_comment() -> Result<(), String> {
         let output = fixture_output("private_unsafe_helper_safety_comment")?;
         let card = single_card("private_unsafe_helper_safety_comment", &output)?;
