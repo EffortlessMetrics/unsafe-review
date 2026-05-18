@@ -1,18 +1,18 @@
 [
   {
-    "id": "UR-public-unsafe-trait-missing-safety-src-lib-rs-callermustupholdcontract-unsafe_trait-unknown-callermustupholdcontract-5d304821b1ed-unknown-c1",
-    "class": "contract_missing",
-    "priority": "high",
-    "confidence": "high",
+    "id": "UR-public-unsafe-fn-with-safety-docs-src-lib-rs-caller-must-uphold-contract-unsafe_fn-unknown-caller-must-uphold-contract-cca3b740b7f7-unknown-c1",
+    "class": "guarded_unwitnessed",
+    "priority": "medium",
+    "confidence": "medium",
     "site": {
       "file": "src/lib.rs",
-      "line": 1,
+      "line": 6,
       "column": 1,
-      "kind": "unsafe_trait",
-      "owner": "CallerMustUpholdContract",
+      "kind": "unsafe_fn",
+      "owner": "caller_must_uphold_contract",
       "visibility": "public",
       "public_api_surface": true,
-      "snippet": "pub unsafe trait CallerMustUpholdContract {"
+      "snippet": "pub unsafe fn caller_must_uphold_contract(ptr: *const u8) -> usize {"
     },
     "operation_family": "unknown",
     "hazards": [
@@ -26,9 +26,9 @@
         "key": "unknown",
         "description": "unsafe contract could not be inferred from this syntax shape",
         "contract": {
-          "present": false,
-          "state": "missing",
-          "summary": "Public unsafe API is missing nearby `# Safety` documentation"
+          "present": true,
+          "state": "present",
+          "summary": "Nearby `# Safety` documentation was detected"
         },
         "discharge": {
           "present": true,
@@ -36,9 +36,9 @@
           "summary": "Public unsafe API declaration is a caller-contract site; local guard evidence is not expected at the declaration"
         },
         "reach": {
-          "present": false,
-          "state": "missing",
-          "summary": "No static test mention of owner `CallerMustUpholdContract` was found"
+          "present": true,
+          "state": "present",
+          "summary": "1 related test file(s) mention owner `caller_must_uphold_contract`"
         },
         "witness": {
           "present": false,
@@ -47,13 +47,11 @@
         }
       }
     ],
-    "contract": "Public unsafe API is missing nearby `# Safety` documentation",
+    "contract": "Nearby `# Safety` documentation was detected",
     "discharge": "Public unsafe API declaration is a caller-contract site; local guard evidence is not expected at the declaration",
-    "reach": "No static test mention of owner `CallerMustUpholdContract` was found",
+    "reach": "1 related test file(s) mention owner `caller_must_uphold_contract`",
     "witness": "No imported witness receipt was found",
     "missing": [
-      "Missing public `# Safety` documentation for unsafe API",
-      "No related test path was found by static search",
       "No witness receipt imported for this card"
     ],
     "verify_commands": []

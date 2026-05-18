@@ -584,6 +584,32 @@ did not find a related test mention. The remaining three `guard_missing` cards
 are the `encode_utf8` unsafe block, the matching `set_len(len + n)` write
 pattern, and the direct public unsafe `set_len` API card.
 
+Follow-up rerun after treating documented public unsafe API declarations as
+contract-only sites where local guard evidence is not expected:
+
+```text
+changed_rust_files: 1
+cards: 9
+contract_missing: 0
+guard_missing: 2
+guarded_unwitnessed: 5
+unsafe_unreached: 2
+operation families: vec_set_len, unknown
+```
+
+The improved card is still advisory only:
+
+```text
+set_len  line 452  unsafe_fn  unsafe_unreached
+```
+
+It moved out of `guard_missing` because the public unsafe API now has a
+recognized `# Safety` contract, and the declaration itself should not require a
+local guard. The card remains actionable as `unsafe_unreached` because static
+reach did not find a related test mention, and no witness receipt is attached.
+The remaining two `guard_missing` cards are the `encode_utf8` unsafe block and
+the matching `set_len(len + n)` write pattern.
+
 ## Proof
 
 Targeted local validation:
@@ -617,6 +643,7 @@ rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arra
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-setlen-init.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-setlen-zero.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-setlen-shrink.json
+rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-public-unsafe-contract.json
 ```
 
 The dogfood reruns used a temporary `CARGO_TARGET_DIR` to avoid a Windows file
@@ -659,6 +686,9 @@ The repo may claim:
 - one fixture-backed last-index shrink improvement changed the `rust-smallvec#64`
   `set_len(last_index)` card from missing local guard evidence to fully
   discharged guard evidence while preserving the contract/witness prompt
+- one fixture-backed public unsafe API evidence improvement changed the
+  `arrayvec#288` documented `set_len` declaration from a missing local guard
+  prompt to an `unsafe_unreached` contract/reach/witness prompt
 - attributed unsafe function declarations are deduped between syntax-backed
   extraction and fallback line scanning
 - false-positive regression coverage exists in fixtures and calibration
@@ -698,6 +728,8 @@ The repo must not claim:
 - `arrayvec#187` shows public unsafe helper APIs with `Safety:` prose remain
   contract prompts until they expose a recognized `# Safety` section or nearby
   `SAFETY:` evidence.
+- Public unsafe API declarations with recognized `# Safety` docs no longer ask
+  for local declaration guards, but static reach remains a heuristic name search.
 - `arrayvec#174` now has a fixture-backed `ptr::drop_in_place` card, but broader
   drop/deallocation modeling beyond that operation remains narrow.
 - These runs do not prove absence of missed unsafe seams.

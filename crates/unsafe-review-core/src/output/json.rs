@@ -221,6 +221,7 @@ mod tests {
         "comment_alignment_not_guard",
         "safe_code_no_cards",
         "public_unsafe_fn_missing_safety",
+        "public_unsafe_fn_with_safety_docs",
         "public_unsafe_trait_missing_safety",
         "public_unsafe_fn_safety_comment_not_docs",
         "private_unsafe_helper_safety_comment",
