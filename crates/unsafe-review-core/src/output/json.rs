@@ -292,6 +292,7 @@ mod tests {
         "raw_pointer_deref",
         "safe_reference_deref_no_cards",
         "split_raw_pointer_read_call",
+        "maybeuninit_assume_init",
     ];
 
     #[test]
