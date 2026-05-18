@@ -258,6 +258,39 @@ verify: cargo +nightly miri test keep_rest
 The card class did not change. The improvement is that the card now points the
 reviewer and witness route at the real owner instead of prose.
 
+### `rust-smallvec#277`
+
+PR: `https://github.com/servo/rust-smallvec/pull/277`
+
+The PR fixes Miri `-Ztag-raw-pointers` issues by changing raw-pointer aliasing
+patterns in `Drain` and `insert_many`.
+
+Before start-bound shrink evidence:
+
+```text
+changed_rust_files: 1
+cards: 9
+contract_missing: 9
+operation families: pointer_arithmetic, vec_set_len, slice_from_raw_parts, nonnull_unchecked
+drain set_len discharge: missing local guard evidence
+```
+
+After start-bound shrink evidence:
+
+```text
+changed_rust_files: 1
+cards: 9
+contract_missing: 9
+operation families: pointer_arithmetic, vec_set_len, slice_from_raw_parts, nonnull_unchecked
+drain set_len discharge: all inferred obligations have visible local guard evidence
+```
+
+The card class did not change because the changed unsafe block still lacks local
+`SAFETY:` contract text. The useful improvement is narrower: the `Vec::set_len`
+card for `self.set_len(start)` now recognizes the local `start <= end <= len`
+guard chain as shrink evidence, so the remaining prompt is contract/witness
+review instead of missing initialized-range guard evidence.
+
 ### `rust-smallvec#64`
 
 PR: `https://github.com/servo/rust-smallvec/pull/64`
@@ -529,6 +562,7 @@ rtk cargo run --locked -p unsafe-review -- repo --root target/dogfood-work/array
 rtk cargo run --locked -p unsafe-review -- repo --root target/dogfood-work/memchr --format json --max-cards 50 --out target/dogfood-work/memchr.unsafe-review.after-cap-targetfeature.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/memchr --diff target/dogfood-work/memchr-pr215.raw.diff --format json --max-cards 20 --out target/dogfood-work/memchr-pr215.owner-contract.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/smallvec --diff target/dogfood-work/smallvec-pr407.raw.diff --format json --max-cards 20 --out target/dogfood-work/smallvec-pr407.owner-fix.json
+rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/smallvec --diff target/dogfood-work/smallvec-pr277.raw.diff --format json --max-cards 30 --out target/dogfood-work/smallvec-pr277.after-start-bound-shrink.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/smallvec --diff target/dogfood-work/smallvec-pr64.raw.diff --format json --max-cards 20 --out target/dogfood-work/smallvec-pr64.after-last-index-shrink.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr308.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr308.unsafe-review.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr138.raw.diff --format json --max-cards 30 --out target/dogfood-work/arrayvec-pr138.after-attributed-dedupe.json
@@ -551,8 +585,9 @@ The repo may claim:
 - the first real-crate dogfood slice was run on `rust-smallvec` and `arrayvec`
 - a capped `memchr` dogfood snapshot now completes
 - real PR-diff dogfood runs on `memchr#215`, `rust-smallvec#407`,
-  `rust-smallvec#64`, `rust-smallvec#254`, `arrayvec#308`, `arrayvec#138`,
-  `arrayvec#187`, and `arrayvec#288` produce card output
+  `rust-smallvec#277`, `rust-smallvec#64`, `rust-smallvec#254`,
+  `arrayvec#308`, `arrayvec#138`, `arrayvec#187`, and `arrayvec#288` produce
+  card output
 - dogfood found and fixed import/declaration and `cfg(target_feature)`
   false positives
 - capped repo scans stop after the requested card cap
@@ -565,6 +600,10 @@ The repo may claim:
 - one fixture-backed non-zero shrink-evidence improvement changed two more
   `arrayvec#288` cards from `guard_missing` to `guarded_unwitnessed` and one
   card from `guard_missing` to `unsafe_unreached`
+- one fixture-backed start-bound shrink improvement changed the
+  `rust-smallvec#277` `self.set_len(start)` card from missing local guard
+  evidence to fully discharged guard evidence while preserving the
+  contract/witness prompt
 - one fixture-backed last-index shrink improvement changed the `rust-smallvec#64`
   `set_len(last_index)` card from missing local guard evidence to fully
   discharged guard evidence while preserving the contract/witness prompt
@@ -579,7 +618,7 @@ The repo must not claim:
 - usable-alpha support-tier promotion
 - full-repository coverage from top-50 capped snapshots
 - uncapped repo-scan performance
-- general PR-diff usefulness from eight PRs
+- general PR-diff usefulness from nine PRs
 - memory-safety proof
 - UB-free status
 - witness execution
@@ -589,7 +628,7 @@ The repo must not claim:
 
 - Only three real crates completed in this slice.
 - The successful dogfood snapshots were capped at 50 cards.
-- Only eight real PR diffs were measured.
+- Only nine real PR diffs were measured.
 - `memchr` completion depends on capped-scan behavior; uncapped performance is
   still unmeasured.
 - No human audit was performed for every emitted card.
@@ -597,6 +636,7 @@ The repo must not claim:
   modeling; visible `MaybeUninit::new` initialization loops and const `CAP`
   capacity evidence now have fixture and dogfood-rerun coverage, and
   non-zero shrink and `set_len(0)` clear evidence have fixture and dogfood-rerun
+  coverage, start-bound shrink evidence has fixture and `rust-smallvec#277`
   coverage, and last-index shrink evidence has fixture and `rust-smallvec#64`
   coverage, while other `set_len` and broader initialization patterns remain
   limited.

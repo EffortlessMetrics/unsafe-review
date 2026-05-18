@@ -186,6 +186,14 @@ fn has_set_len_shrink_evidence(lower: &str) -> bool {
     {
         return true;
     }
+    if compact.contains(".set_len(start)")
+        && (compact.contains("start<=len")
+            || (compact.contains("start<=end") && compact.contains("end<=len")))
+        && (compact.contains("len=self.len()")
+            || (compact.contains("letlen=") && compact.contains(".len()")))
+    {
+        return true;
+    }
     if !compact.contains(".set_len(new_len)") {
         return false;
     }
@@ -623,6 +631,62 @@ mod tests {
             OperationFamily::VecSetLen,
             vec!["let last_index = values.len() - 1;"],
             "values.set_len(last_index);",
+            vec![],
+        );
+
+        let evidence = obligation_evidence(&set_len, &obligations, &contract, &reach);
+
+        assert!(evidence.iter().all(|item| !item.discharge.present));
+    }
+
+    #[test]
+    fn set_len_start_bound_shrink_discharges_capacity_and_initialized_obligations() {
+        let obligations = vec![
+            SafetyObligation::new("capacity", "new length is at most capacity"),
+            SafetyObligation::new(
+                "initialized",
+                "elements in the extended range are initialized",
+            ),
+        ];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let set_len = site_with_family(
+            OperationFamily::VecSetLen,
+            vec![
+                "let len = values.len();",
+                "assert!(start <= end);",
+                "assert!(end <= len);",
+            ],
+            "values.set_len(start);",
+            vec![],
+        );
+
+        let evidence = obligation_evidence(&set_len, &obligations, &contract, &reach);
+
+        assert!(evidence.iter().all(|item| item.discharge.present));
+    }
+
+    #[test]
+    fn set_len_start_bound_shrink_requires_upper_bound() {
+        let obligations = vec![
+            SafetyObligation::new("capacity", "new length is at most capacity"),
+            SafetyObligation::new(
+                "initialized",
+                "elements in the extended range are initialized",
+            ),
+        ];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let set_len = site_with_family(
+            OperationFamily::VecSetLen,
+            vec!["let len = values.len();", "assert!(start <= end);"],
+            "values.set_len(start);",
             vec![],
         );
 
