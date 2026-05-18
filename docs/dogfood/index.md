@@ -24,9 +24,9 @@ local artifact is needed.
 
 | Measure | Count |
 |---|---:|
-| Repositories | 6 |
-| Total targets | 24 |
-| Capped repo snapshots | 6 |
+| Repositories | 7 |
+| Total targets | 25 |
+| Capped repo snapshots | 7 |
 | PR diff targets | 18 |
 | Checked-in scan outputs | 0 |
 
@@ -40,6 +40,7 @@ local artifact is needed.
 | `rust-lang/hashbrown` | 1 | 7 | Large-file syntax scanning, `MaybeUninit`, pointer arithmetic, unchecked/infallible operations, dedupe |
 | `tokio-rs/bytes` | 1 | 1 | `Vec::from_raw_parts`, slice construction, ownership-transfer review cards |
 | `crossbeam-rs/crossbeam` | 1 | 0 | Unsafe Send/Sync, atomics, raw pointer, and ownership-transfer cards |
+| `tokio-rs/mio` | 1 | 0 | Unsafe function call contracts, `Vec::set_len`, zeroed values, pointer operations, and unsafe Send/Sync route cards |
 
 ## Recorded Outcome Movement
 
@@ -57,6 +58,7 @@ local artifact is needed.
 - `hashbrown-capped`
 - `bytes-capped`
 - `crossbeam-capped`
+- `mio-capped`
 
 ### PR Diffs
 

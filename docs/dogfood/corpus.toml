@@ -82,6 +82,19 @@ artifact_status = "local_untracked"
 artifacts = ["target/dogfood-work/crossbeam.unsafe-review.capped.json"]
 
 [[targets]]
+id = "mio-capped"
+crate = "mio"
+repository = "tokio-rs/mio"
+kind = "repo-snapshot"
+status = "active"
+commit = "0d82f2a51a57d435f79f9cf77f1c6e3f84a587de"
+root = "target/dogfood-work/mio"
+purpose = "capped repo snapshot for unsafe fn call contracts, Vec::set_len, zeroed values, pointer operations, and unsafe Send/Sync route cards"
+command = "rtk cargo run --locked -p unsafe-review -- repo --root target/dogfood-work/mio --format json --max-cards 50 --out target/dogfood-work/mio.unsafe-review.capped.json"
+artifact_status = "local_untracked"
+artifacts = ["target/dogfood-work/mio.unsafe-review.capped.json"]
+
+[[targets]]
 id = "memchr-pr215"
 crate = "memchr"
 repository = "BurntSushi/memchr"

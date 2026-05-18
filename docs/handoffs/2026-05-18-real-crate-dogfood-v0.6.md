@@ -19,6 +19,7 @@ Dogfood repositories:
 | `rust-lang/hashbrown` | `7b3bba6eb4b2f03636155c918552b5f30c1a05b3` | completed with `--max-cards 50` after syntax-scan performance hardening; PR-diff dogfood completed for `hashbrown#469`, `hashbrown#501`, `hashbrown#556`, `hashbrown#657`, `hashbrown#667`, `hashbrown#692`, and `hashbrown#693` |
 | `tokio-rs/bytes` | `245adff079eb0cb1a706d35bab5f68b2d51919f6` | completed with `--max-cards 50`; PR-diff dogfood completed for `bytes#826` |
 | `crossbeam-rs/crossbeam` | `03919fedb43cdbd0866aee0c77e0d6df8976b12f` | completed with `--max-cards 50`; capped output recorded 45 `contract_missing`, 4 `requires_loom`, and 1 `guard_missing` cards |
+| `tokio-rs/mio` | `0d82f2a51a57d435f79f9cf77f1c6e3f84a587de` | completed with `--max-cards 50`; capped output recorded 42 `contract_missing`, 4 `guard_missing`, 3 `requires_loom`, and 1 `unsafe_unreached` cards |
 
 The first two completed runs exposed two noisy false positives:
 
@@ -1579,6 +1580,9 @@ The repo may claim:
   capped `crossbeam` cards from generic `unsafe_fn_call` operation cards to
   `transmute` invalid-value/layout cards, including multi-line call snippets,
   without claiming value validity proof
+- one capped `tokio-rs/mio` repo snapshot completed with 50 cards across 80
+  Rust files, adding dogfood for unsafe function call contracts, `Vec::set_len`,
+  zeroed values, pointer operations, and unsafe Send/Sync route cards
 - attributed unsafe function declarations are deduped between syntax-backed
   extraction and fallback line scanning
 - false-positive regression coverage exists in fixtures and calibration
@@ -1598,7 +1602,7 @@ The repo must not claim:
 
 ## Known limits
 
-- Six real crates completed capped repo snapshots in this slice.
+- Seven real crates completed capped repo snapshots in this slice.
 - The successful dogfood snapshots were capped at 50 cards.
 - Only eighteen real PR diffs were measured.
 - `memchr` completion depends on capped-scan behavior; uncapped performance is
