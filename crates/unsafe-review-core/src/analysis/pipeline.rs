@@ -8,12 +8,27 @@ use std::collections::BTreeMap;
 use std::fs;
 
 pub(crate) fn analyze(input: AnalyzeInput) -> Result<AnalyzeOutput, String> {
+    analyze_with_receipts(input, true)
+}
+
+pub(crate) fn analyze_without_receipts(input: AnalyzeInput) -> Result<AnalyzeOutput, String> {
+    analyze_with_receipts(input, false)
+}
+
+fn analyze_with_receipts(
+    input: AnalyzeInput,
+    import_receipts: bool,
+) -> Result<AnalyzeOutput, String> {
     let repo_mode = matches!(input.scope, Scope::Repo) || matches!(input.mode, AnalysisMode::Repo);
     let diff_index = load_diff_index(&input.diff)?;
     let all_rust_files = workspace::discover_rust_files(&input.root)?;
     let package = package_name(&input.root);
     let policy_state = PolicyState::load(&input.root)?;
-    let receipt_index = receipts::ReceiptIndex::load(&input.root)?;
+    let receipt_index = if import_receipts {
+        receipts::ReceiptIndex::load(&input.root)?
+    } else {
+        receipts::ReceiptIndex::default()
+    };
     let candidate_files = if repo_mode || diff_index.is_empty() {
         all_rust_files.clone()
     } else {

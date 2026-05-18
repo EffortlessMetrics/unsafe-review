@@ -284,6 +284,22 @@ unsafe-review receipt validate --root .
 This checks `.unsafe-review/receipts/*.json` with the same validation path used
 by `check` and reports how many receipts are importable.
 
+Audit imported receipts against the current ReviewCard set without running
+witnesses:
+
+```bash
+unsafe-review receipt audit \
+  --root . \
+  --base origin/main \
+  --format markdown \
+  --out target/unsafe-review/receipt-audit.md
+```
+
+The audit reports matched, unmatched, stale, expired, wrong-identity,
+wrong-tool, weaker-than-required, and invalid receipt metadata. It is advisory
+only: it does not execute witness commands, infer site reach, make policy
+decisions, or claim safety.
+
 `unsafe-review` imports receipts. It does not run Miri, `cargo-careful`,
 sanitizers, Loom, Shuttle, Kani, or Crux by default.
 
