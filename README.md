@@ -27,6 +27,9 @@ UB-free, and not a Miri result unless a witness receipt is attached.
 ```bash
 cargo install unsafe-review
 
+# Check basic environment assumptions
+unsafe-review doctor
+
 # Review the current diff against origin/main
 unsafe-review check --base origin/main
 
@@ -38,13 +41,16 @@ unsafe-review check --root fixtures/raw_pointer_alignment \
   --diff fixtures/raw_pointer_alignment/change.diff \
   --format json
 
+# Start with a bounded pilot during rollout
+unsafe-review pilot --base origin/main
+
 # Full repo inventory and badge data
 unsafe-review repo --format json
 unsafe-review badges --out badges/
 
 # Explain one card and produce an LLM-ready packet
 unsafe-review explain UR-src-lib-rs-42-raw-pointer-read
-unsafe-review context UR-src-lib-rs-42-raw-pointer-read --json
+unsafe-review context UR-src-lib-rs-42-raw-pointer-read
 ```
 
 ## Current implementation status
@@ -91,6 +97,7 @@ cargo xtask check-pr
 - [Mission and vision](docs/MISSION.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Architecture](docs/ARCHITECTURE.md)
+- [CLI reference](docs/CLI.md)
 - [Specifications](docs/specs/README.md)
 - [ADRs](docs/adr/README.md)
 - [Implementation plan](plans/0.1.0/implementation-plan.md)

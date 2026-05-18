@@ -7,4 +7,4 @@ cargo install unsafe-review
 unsafe-review check --base origin/main
 ```
 
-For embedding, use `unsafe-review-core`.
+For complete command usage, see the repository `docs/CLI.md`. For embedding, use `unsafe-review-core`.
