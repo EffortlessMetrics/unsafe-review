@@ -23,7 +23,10 @@ pub(crate) fn routes_for(hazards: &[HazardKind], owner: Option<&String>) -> Vec<
         return vec![WitnessRoute {
             kind: WitnessKind::AddressSanitizer,
             reason: "FFI boundary detected; sanitizer/cargo-careful is usually more suitable than Miri for foreign calls".to_string(),
-            command: owner.map(|name| format!("RUSTFLAGS='-Z sanitizer=address' cargo +nightly test {name}")),
+            command: Some(owner.map_or_else(
+                || "RUSTFLAGS='-Z sanitizer=address' cargo +nightly test".to_string(),
+                |name| format!("RUSTFLAGS='-Z sanitizer=address' cargo +nightly test {name}"),
+            )),
             required: false,
         }];
     }
