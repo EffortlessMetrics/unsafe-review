@@ -191,6 +191,17 @@ fn discharge_state_for(
                 EvidenceState::missing("No obligation-specific guard code was detected")
             }
         }
+        "valid-value" => {
+            if family == &OperationFamily::UnwrapUnchecked
+                && has_unwrap_unchecked_infallible_result_evidence(lower)
+            {
+                EvidenceState::present(
+                    "Infallible Result state evidence was detected before unwrap_unchecked",
+                )
+            } else {
+                EvidenceState::missing("No obligation-specific guard code was detected")
+            }
+        }
         _ => EvidenceState::missing("No obligation-specific guard code was detected"),
     }
 }
@@ -265,6 +276,11 @@ fn has_encode_utf8_remaining_capacity_evidence(lower: &str) -> bool {
     compact.contains("encode_utf8(c,ptr,remaining_cap)")
         && compact.contains("remaining_cap=self.capacity()-len")
         && compact.contains("ptr")
+}
+
+fn has_unwrap_unchecked_infallible_result_evidence(lower: &str) -> bool {
+    let compact = compact_code(lower);
+    compact.contains("fallibility::infallible") && compact.contains("result.unwrap_unchecked(")
 }
 
 fn has_maybeuninit_slice_context(lower: &str) -> bool {
@@ -938,6 +954,55 @@ mod tests {
 
         assert!(evidence[0].discharge.present);
         assert!(!evidence[1].discharge.present);
+    }
+
+    #[test]
+    fn unwrap_unchecked_infallible_result_discharges_valid_value_obligation() {
+        let obligations = vec![SafetyObligation::new(
+            "valid-value",
+            "value is known to be `Some` or `Ok` before `unwrap_unchecked`",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let unwrap = site_with_family(
+            OperationFamily::UnwrapUnchecked,
+            vec![
+                "let result = reserve_rehash(additional, Fallibility::Infallible);",
+                "// SAFETY: infallible mode converts allocation errors before this point.",
+            ],
+            "unsafe { result.unwrap_unchecked() }",
+            vec![],
+        );
+
+        let evidence = obligation_evidence(&unwrap, &obligations, &contract, &reach);
+
+        assert!(evidence[0].discharge.present);
+    }
+
+    #[test]
+    fn unwrap_unchecked_infallible_result_evidence_requires_result_receiver() {
+        let obligations = vec![SafetyObligation::new(
+            "valid-value",
+            "value is known to be `Some` or `Ok` before `unwrap_unchecked`",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let option_unwrap = site_with_family(
+            OperationFamily::UnwrapUnchecked,
+            vec!["let result = reserve_rehash(additional, Fallibility::Infallible);"],
+            "unsafe { option.unwrap_unchecked() }",
+            vec![],
+        );
+
+        let evidence = obligation_evidence(&option_unwrap, &obligations, &contract, &reach);
+
+        assert!(!evidence[0].discharge.present);
     }
 
     #[test]

@@ -726,6 +726,19 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn unwrap_unchecked_infallible_result_evidence_is_discharged() -> Result<(), String> {
+        let output = fixture_output("unwrap_unchecked_infallible_result")?;
+        let card = single_card("unwrap_unchecked_infallible_result", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::UnwrapUnchecked);
+        assert_eq!(card.class, ReviewClass::GuardedUnwitnessed);
+        assert!(card.discharge.present);
+        assert!(obligation_discharge_present(card, "valid-value"));
+        Ok(())
+    }
+
+    #[test]
     fn unreachable_unchecked_uses_concrete_operation_family() -> Result<(), String> {
         let output = fixture_output("unreachable_unchecked_path")?;
         let card = single_card("unreachable_unchecked_path", &output)?;

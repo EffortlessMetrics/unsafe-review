@@ -972,6 +972,35 @@ hazards and the obligation that the value is known to be `Some` or `Ok` before
 `unwrap_unchecked`. This change does not infer the `Fallibility::Infallible`
 precondition yet and does not execute a witness.
 
+Follow-up rerun after adding fixture-backed `Fallibility::Infallible` result
+evidence:
+
+```text
+changed_rust_files: 1
+cards: 15
+contract_missing: 3
+guard_missing: 6
+guarded_unwitnessed: 6
+operation families: unsafe_fn_call, unwrap_unchecked, nonnull_unchecked, raw_pointer_read
+unwrap_unchecked cards: 8
+```
+
+The improved cards are still advisory only:
+
+```text
+shrink_to    line 903   unwrap_unchecked  guarded_unwitnessed
+reserve      line 919   unwrap_unchecked  guarded_unwitnessed
+with_capacity line 1667 unwrap_unchecked  guarded_unwitnessed
+clone        line 3312  unwrap_unchecked  guarded_unwitnessed
+clone_from   line 3369  unwrap_unchecked  guarded_unwitnessed
+```
+
+The change is deliberately narrow: a local `result` produced in visible
+`Fallibility::Infallible` mode now discharges the valid-value obligation before
+`result.unwrap_unchecked()`. It does not infer arbitrary option/result state;
+`option.unwrap_unchecked()` sites remain missing valid-value evidence unless a
+separate proof pattern is visible. No witness was executed.
+
 ### `hashbrown#657`
 
 PR: `https://github.com/rust-lang/hashbrown/pull/657`
@@ -1220,6 +1249,7 @@ rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hash
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr501.raw.diff --format json --max-cards 40 --out target/dogfood-work/hashbrown-pr501.after-declaration-range.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr469.raw.diff --format json --max-cards 60 --out target/dogfood-work/hashbrown-pr469.after-unreachable-unchecked.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr469.raw.diff --format json --max-cards 60 --out target/dogfood-work/hashbrown-pr469.after-owner-impl-trait.json
+rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr693.raw.diff --format json --max-cards 30 --out target/dogfood-work/hashbrown-pr693.after-infallible-unwrap-evidence.json
 ```
 
 The dogfood reruns used a temporary `CARGO_TARGET_DIR` to avoid a Windows file
@@ -1313,6 +1343,9 @@ The repo may claim:
 - one fixture-backed operation classification improvement changed
   `hashbrown#693` `unwrap_unchecked` sites from generic `unsafe_fn_call` to
   `unwrap_unchecked` invalid-value cards
+- one fixture-backed `Fallibility::Infallible` result-evidence improvement
+  changed five `hashbrown#693` `result.unwrap_unchecked()` cards to
+  `guarded_unwitnessed` without discharging `option.unwrap_unchecked()` sites
 - one fixture-backed operation classification improvement changed
   `hashbrown#469` `unreachable_unchecked` sites from generic
   `unsafe_fn_call` to `unreachable_unchecked` invalid-value cards and removed
@@ -1391,8 +1424,10 @@ The repo must not claim:
 - `hashbrown#692` now treats private unsafe declarations with explicit
   `# Safety` docs as caller-contract sites, but unsafe-call-specific callee
   contract inference remains future work.
-- `hashbrown#693` now labels `unwrap_unchecked` calls as invalid-value cards, but
-  it does not infer `Fallibility::Infallible` or option/result state proofs.
+- `hashbrown#693` now labels `unwrap_unchecked` calls as invalid-value cards and
+  recognizes local `Fallibility::Infallible` evidence for
+  `result.unwrap_unchecked()`, but broader option/result state proofs remain
+  future work.
 - `hashbrown#469` now labels `unreachable_unchecked` calls as invalid-value
   cards, but it does not infer that a match arm or control-flow path is
   unreachable.
