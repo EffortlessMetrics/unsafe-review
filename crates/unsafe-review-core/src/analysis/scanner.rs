@@ -528,3 +528,109 @@ fn parse_ident(rest: &str) -> Option<String> {
     }
     (!name.is_empty()).then_some(name)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::input::diff::parse_unified_diff;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn scan_file_prefers_operation_card_over_enclosing_unsafe_block() -> Result<(), String> {
+        let root = unique_temp_dir("scanner_operation")?;
+        let src = root.join("src");
+        fs::create_dir_all(&src).map_err(|err| err.to_string())?;
+        fs::write(
+            src.join("lib.rs"),
+            "pub fn read_byte(ptr: *const u8) -> u8 {\n    unsafe { *ptr }\n}\n",
+        )
+        .map_err(|err| err.to_string())?;
+        let rel = PathBuf::from("src/lib.rs");
+        let sites = scan_file(&root, &rel, None, true)?;
+        fs::remove_dir_all(&root).map_err(|err| err.to_string())?;
+
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(sites[0].operation.family, OperationFamily::RawPointerDeref);
+        assert_eq!(sites[0].site.owner, Some("read_byte".to_string()));
+        assert_eq!(sites[0].site.visibility, "private");
+        Ok(())
+    }
+
+    #[test]
+    fn scan_file_filters_to_diff_neighborhood_unless_repo_mode() -> Result<(), String> {
+        let root = unique_temp_dir("scanner_diff")?;
+        let src = root.join("src");
+        fs::create_dir_all(&src).map_err(|err| err.to_string())?;
+        fs::write(
+            src.join("lib.rs"),
+            "pub fn first(ptr: *const u8) -> u8 {\n    unsafe { *ptr }\n}\n\n\n\n\n\n\n\n\npub fn second(ptr: *const u8) -> u8 {\n    unsafe { *ptr }\n}\n",
+        )
+        .map_err(|err| err.to_string())?;
+        let diff = parse_unified_diff(
+            "diff --git a/src/lib.rs b/src/lib.rs\n\
+             --- a/src/lib.rs\n\
+             +++ b/src/lib.rs\n\
+             @@ -1,2 +1,2 @@\n\
+             +pub fn first(ptr: *const u8) -> u8 {\n",
+        );
+        let rel = PathBuf::from("src/lib.rs");
+        let diff_sites = scan_file(&root, &rel, Some(&diff), false)?;
+        let repo_sites = scan_file(&root, &rel, Some(&diff), true)?;
+        fs::remove_dir_all(&root).map_err(|err| err.to_string())?;
+
+        assert_eq!(diff_sites.len(), 1);
+        assert_eq!(diff_sites[0].site.owner, Some("first".to_string()));
+        assert_eq!(repo_sites.len(), 2);
+        assert_eq!(repo_sites[1].site.owner, Some("second".to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn detects_public_unsafe_items_and_impl_owners() {
+        let cases = [
+            (
+                "pub unsafe fn dangerous() {",
+                Some((UnsafeSiteKind::UnsafeFn, OperationFamily::Unknown)),
+            ),
+            (
+                "unsafe impl Send for Handle {}",
+                Some((
+                    UnsafeSiteKind::UnsafeImplSend,
+                    OperationFamily::UnsafeImplSendSync,
+                )),
+            ),
+            (
+                "unsafe extern \"C\" { fn foreign(); }",
+                Some((UnsafeSiteKind::ExternBlock, OperationFamily::Ffi)),
+            ),
+        ];
+
+        for (line, expected) in cases {
+            assert_eq!(detect_site(line), expected);
+        }
+        assert_eq!(
+            parse_impl_owner("unsafe impl Send for Handle {}"),
+            Some("Handle".to_string())
+        );
+        assert!(is_public_api_surface(
+            &UnsafeSiteKind::UnsafeFn,
+            "pub unsafe fn dangerous() {}"
+        ));
+        assert!(!is_public_api_surface(
+            &UnsafeSiteKind::Operation,
+            "pub fn safe_wrapper() {}"
+        ));
+    }
+
+    fn unique_temp_dir(name: &str) -> Result<PathBuf, String> {
+        let mut path = std::env::temp_dir();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|err| err.to_string())?
+            .as_nanos();
+        path.push(format!("unsafe-review-{name}-{nanos}"));
+        fs::create_dir_all(&path).map_err(|err| err.to_string())?;
+        Ok(path)
+    }
+}

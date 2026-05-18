@@ -82,3 +82,45 @@ fn parse_new_start(header: &str) -> Option<usize> {
     let start = new.split(',').next()?;
     start.parse::<usize>().ok()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn parses_added_line_coordinates_across_hunks_and_deletions() {
+        let diff = parse_unified_diff(
+            "diff --git a/src/lib.rs b/src/lib.rs\n\
+             --- a/src/lib.rs\n\
+             +++ b/src/lib.rs\n\
+             @@ -1,4 +10,5 @@\n\
+              context\n\
+             -old line\n\
+             +new line\n\
+              after\n\
+             @@ -20,2 +30,3 @@\n\
+              more context\n\
+             +second add\n",
+        );
+
+        let path = PathBuf::from("src/lib.rs");
+        assert!(diff.contains_file(&path));
+        assert!(diff.contains_near(&path, 11));
+        assert!(diff.contains_near(&path, 31));
+        assert!(!diff.contains_near(&path, 23));
+    }
+
+    #[test]
+    fn ignores_removed_only_files_until_new_file_path_is_seen() {
+        let diff = parse_unified_diff(
+            "diff --git a/src/old.rs b/src/old.rs\n\
+             --- a/src/old.rs\n\
+             @@ -1,2 +0,0 @@\n\
+             -gone\n",
+        );
+
+        assert!(diff.is_empty());
+        assert!(!diff.contains_file(&PathBuf::from("src/old.rs")));
+    }
+}
