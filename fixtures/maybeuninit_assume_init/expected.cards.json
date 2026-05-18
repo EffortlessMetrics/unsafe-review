@@ -1,0 +1,62 @@
+[
+  {
+    "id": "UR-src-lib-rs-9-assume-header-maybe_uninit_assume_init",
+    "class": "guard_missing",
+    "priority": "high",
+    "confidence": "medium",
+    "site": {
+      "file": "src/lib.rs",
+      "line": 9,
+      "column": 5,
+      "kind": "operation",
+      "owner": "assume_header",
+      "snippet": "unsafe { slot.assume_init() }"
+    },
+    "operation_family": "maybe_uninit_assume_init",
+    "hazards": [
+      "initialized_memory",
+      "invalid_value"
+    ],
+    "obligations": [
+      "all fields/elements are initialized and valid before `assume_init`"
+    ],
+    "obligation_evidence": [
+      {
+        "key": "initialized",
+        "description": "all fields/elements are initialized and valid before `assume_init`",
+        "contract": {
+          "present": true,
+          "state": "present",
+          "summary": "Nearby `SAFETY:` comment was detected"
+        },
+        "discharge": {
+          "present": false,
+          "state": "missing",
+          "summary": "No obligation-specific guard code was detected"
+        },
+        "reach": {
+          "present": true,
+          "state": "present",
+          "summary": "1 related test file(s) mention owner `assume_header`"
+        },
+        "witness": {
+          "present": false,
+          "state": "missing",
+          "summary": "No imported witness receipt was found"
+        }
+      }
+    ],
+    "contract": "Nearby `SAFETY:` comment was detected",
+    "discharge": "No visible local guard detected",
+    "reach": "1 related test file(s) mention owner `assume_header`",
+    "witness": "No imported witness receipt was found",
+    "missing": [
+      "Missing visible local guard for inferred safety obligations",
+      "No witness receipt imported for this card"
+    ],
+    "verify_commands": [
+      "cargo +nightly miri test assume_header",
+      "cargo +nightly careful test assume_header"
+    ]
+  }
+]

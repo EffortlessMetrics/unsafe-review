@@ -229,7 +229,7 @@ fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
     if line.contains(".read()") || line.contains("ptr::read") {
         return Some((UnsafeSiteKind::Operation, OperationFamily::RawPointerRead));
     }
-    if line.contains(".write(") || line.contains("ptr::write") {
+    if is_raw_pointer_write(line) {
         return Some((UnsafeSiteKind::Operation, OperationFamily::RawPointerWrite));
     }
     if line.contains(".add(") || line.contains(".offset(") {
@@ -366,6 +366,14 @@ fn is_unknown_unsafe_block(compact: &str) -> bool {
 
 fn is_raw_pointer_deref(compact: &str) -> bool {
     compact.starts_with('*') && !compact.starts_with("**")
+}
+
+fn is_raw_pointer_write(line: &str) -> bool {
+    line.contains("ptr::write")
+        || line.contains("ptr.write(")
+        || line.contains(".as_mut_ptr().write(")
+        || line.contains(".cast_mut().write(")
+        || (line.contains(".cast::<") && line.contains(".write("))
 }
 
 fn unsafe_block_ranges(parsed: &ParsedSource) -> Vec<(usize, usize)> {
