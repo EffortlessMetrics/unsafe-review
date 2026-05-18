@@ -11,3 +11,6 @@ For embedding, use `unsafe-review-core`.
 
 For command examples and artifact guidance, see the repository:
 https://github.com/EffortlessMetrics/unsafe-review
+
+Start with the first-use guide:
+https://github.com/EffortlessMetrics/unsafe-review/blob/main/docs/FIRST_USE.md
