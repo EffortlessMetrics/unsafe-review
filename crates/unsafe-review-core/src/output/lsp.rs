@@ -165,6 +165,31 @@ fn code_actions(card: &ReviewCard) -> Vec<LspCodeAction<'_>> {
             arguments: vec![card.id.0.clone()],
         },
     ];
+    if let Some(test) = card.related_tests.first() {
+        actions.push(LspCodeAction {
+            card_id: &card.id.0,
+            path: test.file.clone(),
+            range: LspRange {
+                start: LspPosition {
+                    line: test.line.saturating_sub(1),
+                    character: 0,
+                },
+                end: LspPosition {
+                    line: test.line.saturating_sub(1),
+                    character: 1,
+                },
+            },
+            title: format!("Open related test {}", test.name),
+            kind: "quickfix",
+            command: "unsafe-review.openRelatedTest",
+            arguments: vec![
+                card.id.0.clone(),
+                test.file.clone(),
+                test.line.to_string(),
+                test.name.clone(),
+            ],
+        });
+    }
     if let Some(command) = card.next_action.verify_commands.first() {
         actions.push(LspCodeAction {
             card_id: &card.id.0,
@@ -315,6 +340,11 @@ mod tests {
             value["code_actions"][0]["command"],
             "unsafe-review.copyAgentPacket"
         );
+        assert!(value["code_actions"].as_array().is_some_and(|actions| {
+            actions
+                .iter()
+                .any(|action| action["command"] == "unsafe-review.openRelatedTest")
+        }));
         assert!(
             !serde_json::to_string(&value["code_actions"])
                 .map_err(|err| format!("render code actions failed: {err}"))?
