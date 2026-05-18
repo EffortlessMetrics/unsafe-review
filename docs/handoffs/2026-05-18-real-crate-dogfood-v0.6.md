@@ -258,6 +258,32 @@ verify: cargo +nightly miri test keep_rest
 The card class did not change. The improvement is that the card now points the
 reviewer and witness route at the real owner instead of prose.
 
+### `rust-smallvec#254`
+
+PR: `https://github.com/servo/rust-smallvec/pull/254`
+
+The PR fixes a potential buffer overflow in `insert_many` by restructuring the
+unsafe insertion path and adding a regression test.
+
+Dogfood output:
+
+```text
+elapsed_seconds: 17.6
+changed_rust_files: 2
+cards: 9
+contract_missing: 9
+guard_missing: 0
+operation families: pointer_arithmetic, vec_set_len, raw_pointer_write
+owner: insert_many
+```
+
+This run did not receive a scanner patch. It is useful because the cards point
+at a dense changed unsafe block where pointer arithmetic, `ptr::copy`,
+`ptr::write`, and `set_len` operations moved without local `SAFETY:` contract
+text. That is a legitimate PR-review prompt: the tool is not claiming the fix
+is wrong, only that the changed unsafe seam needs explicit contract evidence and
+the usual witness route.
+
 ### `arrayvec#308`
 
 PR: `https://github.com/bluss/arrayvec/pull/308`
@@ -429,8 +455,8 @@ The repo may claim:
 
 - the first real-crate dogfood slice was run on `rust-smallvec` and `arrayvec`
 - a capped `memchr` dogfood snapshot now completes
-- real PR-diff dogfood runs on `memchr#215`, `rust-smallvec#407`, and
-  `arrayvec#308`, and `arrayvec#288` produce card output
+- real PR-diff dogfood runs on `memchr#215`, `rust-smallvec#407`,
+  `rust-smallvec#254`, `arrayvec#308`, and `arrayvec#288` produce card output
 - dogfood found and fixed import/declaration and `cfg(target_feature)`
   false positives
 - capped repo scans stop after the requested card cap
@@ -462,7 +488,7 @@ The repo must not claim:
 
 - Only three real crates completed in this slice.
 - The successful dogfood snapshots were capped at 50 cards.
-- Only three real PR diffs were measured.
+- Only five real PR diffs were measured.
 - `memchr` completion depends on capped-scan behavior; uncapped performance is
   still unmeasured.
 - No human audit was performed for every emitted card.
