@@ -171,6 +171,21 @@ fn has_set_len_shrink_evidence(lower: &str) -> bool {
     if compact.contains(".set_len(0)") {
         return true;
     }
+    if compact.contains(".set_len(last_index)")
+        && (compact.contains("last_index=self.len-1")
+            || compact.contains("last_index=self.len()-1")
+            || (compact.contains("last_index=")
+                && (compact.contains(".len-1") || compact.contains(".len()-1"))))
+        && (compact.contains("self.len==0")
+            || compact.contains("self.len()==0")
+            || compact.contains(".len==0")
+            || compact.contains(".len()==0")
+            || compact.contains("self.len>0")
+            || compact.contains("self.len()>0")
+            || compact.contains("!self.is_empty()"))
+    {
+        return true;
+    }
     if !compact.contains(".set_len(new_len)") {
         return false;
     }
@@ -526,6 +541,94 @@ mod tests {
         let evidence = obligation_evidence(&set_len, &obligations, &contract, &reach);
 
         assert!(evidence.iter().all(|item| item.discharge.present));
+    }
+
+    #[test]
+    fn set_len_last_index_shrink_discharges_capacity_and_initialized_obligations() {
+        let obligations = vec![
+            SafetyObligation::new("capacity", "new length is at most capacity"),
+            SafetyObligation::new(
+                "initialized",
+                "elements in the extended range are initialized",
+            ),
+        ];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let set_len = site_with_family(
+            OperationFamily::VecSetLen,
+            vec![
+                "if self.len == 0 {",
+                "    return None;",
+                "}",
+                "let last_index = self.len - 1;",
+            ],
+            "self.set_len(last_index);",
+            vec![],
+        );
+
+        let evidence = obligation_evidence(&set_len, &obligations, &contract, &reach);
+
+        assert!(evidence.iter().all(|item| item.discharge.present));
+    }
+
+    #[test]
+    fn set_len_last_index_shrink_accepts_len_method_receiver() {
+        let obligations = vec![
+            SafetyObligation::new("capacity", "new length is at most capacity"),
+            SafetyObligation::new(
+                "initialized",
+                "elements in the extended range are initialized",
+            ),
+        ];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let set_len = site_with_family(
+            OperationFamily::VecSetLen,
+            vec![
+                "if values.len() == 0 {",
+                "    return None;",
+                "}",
+                "let last_index = values.len() - 1;",
+            ],
+            "values.set_len(last_index);",
+            vec![],
+        );
+
+        let evidence = obligation_evidence(&set_len, &obligations, &contract, &reach);
+
+        assert!(evidence.iter().all(|item| item.discharge.present));
+    }
+
+    #[test]
+    fn set_len_last_index_shrink_requires_non_empty_guard() {
+        let obligations = vec![
+            SafetyObligation::new("capacity", "new length is at most capacity"),
+            SafetyObligation::new(
+                "initialized",
+                "elements in the extended range are initialized",
+            ),
+        ];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let set_len = site_with_family(
+            OperationFamily::VecSetLen,
+            vec!["let last_index = values.len() - 1;"],
+            "values.set_len(last_index);",
+            vec![],
+        );
+
+        let evidence = obligation_evidence(&set_len, &obligations, &contract, &reach);
+
+        assert!(evidence.iter().all(|item| !item.discharge.present));
     }
 
     #[test]

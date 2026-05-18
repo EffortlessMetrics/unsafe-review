@@ -258,6 +258,40 @@ verify: cargo +nightly miri test keep_rest
 The card class did not change. The improvement is that the card now points the
 reviewer and witness route at the real owner instead of prose.
 
+### `rust-smallvec#64`
+
+PR: `https://github.com/servo/rust-smallvec/pull/64`
+
+The PR simplifies `SmallVec::pop` by replacing `ptr::replace(...,
+mem::uninitialized())` with a raw `ptr::read(end_ptr)` and then shrinking the
+length with `set_len(last_index)`.
+
+Before last-index shrink evidence:
+
+```text
+changed_rust_files: 1
+cards: 3
+contract_missing: 3
+operation families: pointer_arithmetic, raw_pointer_read, vec_set_len
+set_len discharge: missing local guard evidence
+```
+
+After last-index shrink evidence:
+
+```text
+changed_rust_files: 1
+cards: 3
+contract_missing: 3
+operation families: pointer_arithmetic, raw_pointer_read, vec_set_len
+set_len discharge: all inferred obligations have visible local guard evidence
+```
+
+The card class did not change because the changed unsafe block still lacks local
+`SAFETY:` contract text. The useful improvement is narrower: the `Vec::set_len`
+card now recognizes the local `self.len == 0` guard plus
+`last_index = self.len - 1` as shrink evidence, so the remaining prompt is
+contract/witness review rather than a missing initialized-range guard.
+
 ### `rust-smallvec#254`
 
 PR: `https://github.com/servo/rust-smallvec/pull/254`
@@ -469,6 +503,7 @@ rtk cargo run --locked -p unsafe-review -- repo --root target/dogfood-work/array
 rtk cargo run --locked -p unsafe-review -- repo --root target/dogfood-work/memchr --format json --max-cards 50 --out target/dogfood-work/memchr.unsafe-review.after-cap-targetfeature.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/memchr --diff target/dogfood-work/memchr-pr215.raw.diff --format json --max-cards 20 --out target/dogfood-work/memchr-pr215.owner-contract.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/smallvec --diff target/dogfood-work/smallvec-pr407.raw.diff --format json --max-cards 20 --out target/dogfood-work/smallvec-pr407.owner-fix.json
+rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/smallvec --diff target/dogfood-work/smallvec-pr64.raw.diff --format json --max-cards 20 --out target/dogfood-work/smallvec-pr64.after-last-index-shrink.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr308.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr308.unsafe-review.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr138.raw.diff --format json --max-cards 30 --out target/dogfood-work/arrayvec-pr138.after-attributed-dedupe.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.unsafe-review.json
@@ -489,7 +524,8 @@ The repo may claim:
 - the first real-crate dogfood slice was run on `rust-smallvec` and `arrayvec`
 - a capped `memchr` dogfood snapshot now completes
 - real PR-diff dogfood runs on `memchr#215`, `rust-smallvec#407`,
-  `rust-smallvec#254`, `arrayvec#308`, and `arrayvec#288` produce card output
+  `rust-smallvec#64`, `rust-smallvec#254`, `arrayvec#308`, `arrayvec#138`,
+  and `arrayvec#288` produce card output
 - dogfood found and fixed import/declaration and `cfg(target_feature)`
   false positives
 - capped repo scans stop after the requested card cap
@@ -502,6 +538,9 @@ The repo may claim:
 - one fixture-backed non-zero shrink-evidence improvement changed two more
   `arrayvec#288` cards from `guard_missing` to `guarded_unwitnessed` and one
   card from `guard_missing` to `unsafe_unreached`
+- one fixture-backed last-index shrink improvement changed the `rust-smallvec#64`
+  `set_len(last_index)` card from missing local guard evidence to fully
+  discharged guard evidence while preserving the contract/witness prompt
 - attributed unsafe function declarations are deduped between syntax-backed
   extraction and fallback line scanning
 - false-positive regression coverage exists in fixtures and calibration
@@ -523,7 +562,7 @@ The repo must not claim:
 
 - Only three real crates completed in this slice.
 - The successful dogfood snapshots were capped at 50 cards.
-- Only six real PR diffs were measured.
+- Only seven real PR diffs were measured.
 - `memchr` completion depends on capped-scan behavior; uncapped performance is
   still unmeasured.
 - No human audit was performed for every emitted card.
@@ -531,6 +570,7 @@ The repo must not claim:
   modeling; visible `MaybeUninit::new` initialization loops and const `CAP`
   capacity evidence now have fixture and dogfood-rerun coverage, and
   non-zero shrink and `set_len(0)` clear evidence have fixture and dogfood-rerun
+  coverage, and last-index shrink evidence has fixture and `rust-smallvec#64`
   coverage, while other `set_len` and broader initialization patterns remain
   limited.
 - `arrayvec#138` shows the raw-pointer UTF-8 write path still needs better
