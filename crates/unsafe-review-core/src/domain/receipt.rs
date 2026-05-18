@@ -38,6 +38,18 @@ pub struct CargoCarefulReceiptInput {
     pub limitations: Vec<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SanitizerReceiptInput {
+    pub card_id: String,
+    pub tool: String,
+    pub output: String,
+    pub author: String,
+    pub recorded_at: String,
+    pub expires_at: String,
+    pub command: String,
+    pub limitations: Vec<String>,
+}
+
 impl WitnessReceipt {
     pub fn validate(&self) -> Result<(), String> {
         validate_required(&self.schema_version, "schema_version")?;
@@ -160,6 +172,36 @@ impl WitnessReceipt {
         receipt.validate()?;
         Ok(receipt)
     }
+
+    pub fn from_sanitizer_output(input: SanitizerReceiptInput) -> Result<Self, String> {
+        validate_sanitizer_tool(&input.tool)?;
+        validate_saved_success_output(&input.output, &input.tool)?;
+        validate_sanitizer_success_output(&input.output, &input.tool)?;
+        validate_required(&input.command, "command")?;
+        validate_sanitizer_command(&input.command)?;
+        let mut limitations = vec![
+            "saved-output adapter; unsafe-review did not run a sanitizer".to_string(),
+            "receipt strength is `ran`; site reach is not claimed".to_string(),
+        ];
+        limitations.extend(input.limitations);
+        let receipt = Self {
+            schema_version: WITNESS_RECEIPT_SCHEMA_VERSION.to_string(),
+            card_id: input.card_id,
+            tool: input.tool.clone(),
+            strength: "ran".to_string(),
+            author: Some(input.author),
+            recorded_at: Some(input.recorded_at),
+            expires_at: Some(input.expires_at),
+            summary: Some(format!(
+                "saved {} output reported `test result: ok`",
+                input.tool
+            )),
+            command: Some(input.command),
+            limitations: Some(limitations),
+        };
+        receipt.validate()?;
+        Ok(receipt)
+    }
 }
 
 fn is_supported_receipt_strength(value: &str) -> bool {
@@ -219,6 +261,31 @@ fn validate_tool(value: &str) -> Result<(), String> {
     }
 }
 
+fn validate_sanitizer_tool(value: &str) -> Result<(), String> {
+    if matches!(value, "asan" | "msan" | "tsan" | "lsan") {
+        Ok(())
+    } else {
+        Err(format!(
+            "sanitizer receipt tool must be one of `asan`, `msan`, `tsan`, or `lsan`, got `{value}`"
+        ))
+    }
+}
+
+fn validate_sanitizer_command(command: &str) -> Result<(), String> {
+    let lower = command.to_ascii_lowercase();
+    if ["sanitizer", "asan", "msan", "tsan", "lsan"]
+        .iter()
+        .any(|needle| lower.contains(needle))
+    {
+        Ok(())
+    } else {
+        Err(
+            "sanitizer receipt command must mention `sanitizer`, `asan`, `msan`, `tsan`, or `lsan`"
+                .to_string(),
+        )
+    }
+}
+
 fn validate_saved_success_output(output: &str, tool: &str) -> Result<(), String> {
     if output.trim().is_empty() {
         return Err(format!("saved {tool} output is empty"));
@@ -241,6 +308,26 @@ fn validate_saved_success_output(output: &str, tool: &str) -> Result<(), String>
         return Err(format!(
             "saved {tool} output must contain `test result: ok`"
         ));
+    }
+    Ok(())
+}
+
+fn validate_sanitizer_success_output(output: &str, tool: &str) -> Result<(), String> {
+    let lower = output.to_ascii_lowercase();
+    for needle in [
+        "addresssanitizer:",
+        "memorysanitizer:",
+        "threadsanitizer:",
+        "leaksanitizer:",
+        "detected memory leaks",
+        "data race",
+        "deadlysignal",
+    ] {
+        if lower.contains(needle) {
+            return Err(format!(
+                "saved {tool} output contains sanitizer failure marker `{needle}`"
+            ));
+        }
     }
     Ok(())
 }
@@ -498,6 +585,104 @@ mod tests {
                 .err()
                 .unwrap_or_default()
                 .contains("must mention `careful`")
+        );
+    }
+
+    #[test]
+    fn sanitizer_receipt_from_saved_output_uses_ran_strength_without_site_reach()
+    -> Result<(), String> {
+        let receipt = WitnessReceipt::from_sanitizer_output(SanitizerReceiptInput {
+            card_id: "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1"
+                .to_string(),
+            tool: "asan".to_string(),
+            output: "running 1 test\ntest read_header ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; finished in 0.01s\n"
+                .to_string(),
+            author: "core/fixtures".to_string(),
+            recorded_at: "2026-05-18T00:00:00Z".to_string(),
+            expires_at: "2026-08-18".to_string(),
+            command: "RUSTFLAGS='-Z sanitizer=address' cargo +nightly test read_header".to_string(),
+            limitations: vec!["fixture only".to_string()],
+        })?;
+
+        assert_eq!(receipt.tool, "asan");
+        assert_eq!(receipt.strength, "ran");
+        assert_eq!(
+            receipt.summary.as_deref(),
+            Some("saved asan output reported `test result: ok`")
+        );
+        let limitations = receipt.limitations.as_ref().ok_or("missing limitations")?;
+        assert!(
+            limitations
+                .iter()
+                .any(|item| item.contains("unsafe-review did not run a sanitizer"))
+        );
+        assert!(
+            limitations
+                .iter()
+                .any(|item| item.contains("site reach is not claimed"))
+        );
+        assert!(limitations.iter().any(|item| item == "fixture only"));
+        Ok(())
+    }
+
+    #[test]
+    fn sanitizer_receipt_from_saved_output_rejects_unsupported_sanitizer_tool() {
+        let result = WitnessReceipt::from_sanitizer_output(SanitizerReceiptInput {
+            card_id: "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1"
+                .to_string(),
+            tool: "ubsan".to_string(),
+            output: "test result: ok. 1 passed; 0 failed; finished in 0.01s\n".to_string(),
+            author: "core/fixtures".to_string(),
+            recorded_at: "2026-05-18T00:00:00Z".to_string(),
+            expires_at: "2026-08-18".to_string(),
+            command: "RUSTFLAGS='-Z sanitizer=address' cargo +nightly test read_header".to_string(),
+            limitations: Vec::new(),
+        });
+
+        assert!(
+            result
+                .err()
+                .unwrap_or_default()
+                .contains("sanitizer receipt tool")
+        );
+    }
+
+    #[test]
+    fn sanitizer_receipt_from_saved_output_rejects_failure_markers() {
+        let result = WitnessReceipt::from_sanitizer_output(SanitizerReceiptInput {
+            card_id: "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1"
+                .to_string(),
+            tool: "asan".to_string(),
+            output: "==123==ERROR: AddressSanitizer: heap-use-after-free\n".to_string(),
+            author: "core/fixtures".to_string(),
+            recorded_at: "2026-05-18T00:00:00Z".to_string(),
+            expires_at: "2026-08-18".to_string(),
+            command: "RUSTFLAGS='-Z sanitizer=address' cargo +nightly test read_header".to_string(),
+            limitations: Vec::new(),
+        });
+
+        assert!(result.err().unwrap_or_default().contains("failure marker"));
+    }
+
+    #[test]
+    fn sanitizer_receipt_from_saved_output_requires_sanitizer_command() {
+        let result = WitnessReceipt::from_sanitizer_output(SanitizerReceiptInput {
+            card_id: "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1"
+                .to_string(),
+            tool: "asan".to_string(),
+            output: "test result: ok. 1 passed; 0 failed; finished in 0.01s\n".to_string(),
+            author: "core/fixtures".to_string(),
+            recorded_at: "2026-05-18T00:00:00Z".to_string(),
+            expires_at: "2026-08-18".to_string(),
+            command: "cargo test read_header".to_string(),
+            limitations: Vec::new(),
+        });
+
+        assert!(
+            result
+                .err()
+                .unwrap_or_default()
+                .contains("sanitizer receipt command")
         );
     }
 

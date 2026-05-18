@@ -61,6 +61,7 @@ pub(crate) struct ReceiptTemplateOptions {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct SavedOutputReceiptOptions {
     pub card_id: String,
+    pub tool: Option<String>,
     pub log: PathBuf,
     pub author: String,
     pub recorded_at: String,
@@ -99,4 +100,5 @@ pub(crate) enum Command {
     },
     ReceiptImportMiri(SavedOutputReceiptOptions),
     ReceiptImportCareful(SavedOutputReceiptOptions),
+    ReceiptImportSanitizer(SavedOutputReceiptOptions),
 }
