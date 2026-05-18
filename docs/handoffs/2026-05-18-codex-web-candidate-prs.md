@@ -2,7 +2,7 @@
 
 Date: 2026-05-18
 Status: current-lane candidate intake drained; later-lane candidates parked
-Base snapshot: `main` at `e746925`
+Base snapshot: `main` at `364672d`
 
 ## Operating model
 
@@ -40,6 +40,8 @@ Already landed in this lane:
 - advisory artifact verifier and projection consistency checks
 - raw pointer write, unaligned read, and partial-parse scanner hardening
 - CLI diff-input hardening for stdin diffs, root-relative diffs, and local `--out`
+- repo-mode dogfood false-positive hardening for deref assignments in product code
+- CLI parser hardening for `--flag=value` artifact commands and missing values
 
 Do not use candidate intake as permission to jump to LSP, agent packets, repo
 badges, receipts, Miri execution, or blocking policy.
@@ -74,7 +76,7 @@ candidate PRs in the theme inventory below.
 | Property testing | #43, #60, #84, #85 | none yet | park | later hardening | Valuable later, but do not put property infrastructure ahead of current PR projection unless it is tiny and directly protects a current parser invariant. |
 | Fuzzing | #42, #59, #82, #83 | none yet | park | later hardening | Keep as candidate inventory. Avoid scheduled or blocking fuzz workflows in the current lane. |
 | Mutation testing | #41, #57, #78, #79 | none yet | park | later hardening | Useful after the card and PR artifact surfaces settle. Keep non-blocking and manual/scheduled later. |
-| CLI ergonomics and diff handling | #31, #45, #46, #47 | merged as #104; #46 parked | mostly closed | current PR/CI projection / later UX | #104 kept current-lane fixes: stdin diffs, root-relative diff files, current-directory `--out`, JSON aliases, duplicate card-id rejection, and no `--fail-on-gaps` policy behavior. #46 remains parked for optional later `--flag=value` UX. |
+| CLI ergonomics and diff handling | #31, #45, #46, #47 | merged as #104 and #112 | closed | current PR/CI projection | #104 kept current-lane fixes: stdin diffs, root-relative diff files, current-directory `--out`, JSON aliases, duplicate card-id rejection, and no `--fail-on-gaps` policy behavior. #112 extracted the useful current-lane slice from stale #46: `--flag=value` parsing, stricter missing-value handling, and help text aligned with advisory artifact outputs. #46 was closed as superseded. |
 | Documentation usage guides | #36, #37, #53, #56, #72, #73, #76, #77 | choose one only after doc-map review | park or rework | later docs | Pick one canonical CLI usage guide. Avoid multiple overlapping docs pages. |
 | Diataxis docs structure | #35, #54, #70, #71 | none yet | park | later docs | Broad docs restructuring is not active-lane work. |
 | Spec expansion | #38, #52, #68, #69 | none yet | park | later source-of-truth | Specs should follow concrete behavior gaps, not outrun implementation. |
@@ -85,8 +87,8 @@ candidate PRs in the theme inventory below.
 
 ## Immediate intake order
 
-1. The current-lane candidate intake is drained through #104.
-2. Leave #46 parked for optional later CLI `--flag=value` UX.
+1. The current-lane candidate intake is drained through #112.
+2. #46 is closed as superseded by the narrower #112 extraction.
 3. Leave property, fuzz, mutation, broad docs, spec expansion, and broad refactor
    candidates parked until their target lanes open.
 4. Next current-lane work should dogfood the advisory artifacts on real PRs
