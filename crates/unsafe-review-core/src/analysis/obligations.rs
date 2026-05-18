@@ -42,6 +42,11 @@ pub(crate) fn hazards_for(family: &OperationFamily) -> Vec<HazardKind> {
             HazardKind::LayoutOrRepr,
             HazardKind::AliasingOrProvenance,
         ],
+        OperationFamily::DropInPlace => vec![
+            HazardKind::PointerValidity,
+            HazardKind::InitializedMemory,
+            HazardKind::DropOrDeallocation,
+        ],
         OperationFamily::BoxFromRaw => vec![
             HazardKind::PointerValidity,
             HazardKind::DropOrDeallocation,
@@ -112,6 +117,14 @@ pub(crate) fn obligations_for(family: &OperationFamily) -> Vec<SafetyObligation>
             "valid-zero",
             "all-zero bit pattern is a valid value for the target type",
         )],
+        OperationFamily::DropInPlace => vec![
+            SafetyObligation::new("pointer-live", "pointer is valid for dropping one value"),
+            SafetyObligation::new("initialized", "pointed-to value is initialized"),
+            SafetyObligation::new(
+                "ownership",
+                "value will not be dropped again or observed after drop",
+            ),
+        ],
         OperationFamily::CopyNonOverlapping => vec![
             SafetyObligation::new("non-overlap", "source and destination do not overlap"),
             SafetyObligation::new("valid-range", "both ranges are valid for count elements"),
@@ -244,6 +257,22 @@ mod tests {
         assert_eq!(
             obligation_keys(&OperationFamily::UnsafeImplSendSync),
             vec!["thread-safety".to_string()]
+        );
+        assert_eq!(
+            hazards_for(&OperationFamily::DropInPlace),
+            vec![
+                HazardKind::PointerValidity,
+                HazardKind::InitializedMemory,
+                HazardKind::DropOrDeallocation,
+            ]
+        );
+        assert_eq!(
+            obligation_keys(&OperationFamily::DropInPlace),
+            vec![
+                "pointer-live".to_string(),
+                "initialized".to_string(),
+                "ownership".to_string(),
+            ]
         );
     }
 }

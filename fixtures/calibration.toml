@@ -11,6 +11,7 @@ required_core_fixtures = [
   "vec_set_len_last_index_shrink",
   "vec_set_len_start_bound_shrink",
   "vec_set_len_zero_clear",
+  "drop_in_place_deallocation",
   "transmute_invalid_value",
   "unsafe_impl_send",
   "ffi_sanitizer_route",
@@ -109,6 +110,16 @@ expected_cards = 1
 expected_class = "guarded_unwitnessed"
 expected_operation_family = "vec_set_len"
 expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "drop_in_place_deallocation"
+kind = "positive"
+claim = "ptr::drop_in_place reports drop/deallocation obligations instead of unknown unsafe syntax"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "drop_in_place"
+expected_hazard = "drop_or_deallocation"
 
 [[cases]]
 fixture = "transmute_invalid_value"

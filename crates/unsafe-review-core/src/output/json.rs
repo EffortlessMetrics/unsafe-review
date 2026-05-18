@@ -242,6 +242,7 @@ mod tests {
         "vec_set_len_last_index_shrink",
         "vec_set_len_start_bound_shrink",
         "vec_set_len_zero_clear",
+        "drop_in_place_deallocation",
         "transmute_invalid_value",
         "unsafe_impl_send",
         "ffi_sanitizer_route",
