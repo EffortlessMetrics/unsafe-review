@@ -36,10 +36,12 @@ pub(crate) fn analyze(input: AnalyzeInput) -> Result<AnalyzeOutput, String> {
                 classify::classify(&hazards, &contract, &discharge, &reach);
             let mut missing = Vec::new();
             if !contract.present {
-                missing.push(MissingEvidence::new(
-                    "contract",
-                    "Missing `# Safety` documentation or `SAFETY:` comment",
-                ));
+                let contract_missing_message = if scanned_site.site.public_api_surface {
+                    "Missing public `# Safety` documentation for unsafe API"
+                } else {
+                    "Missing `# Safety` documentation or `SAFETY:` comment"
+                };
+                missing.push(MissingEvidence::new("contract", contract_missing_message));
             }
             if !discharge.present {
                 missing.push(MissingEvidence::new(
@@ -255,6 +257,54 @@ mod tests {
         assert_eq!(card.site.kind, UnsafeSiteKind::UnsafeBlock);
         assert_eq!(card.operation.family, OperationFamily::Unknown);
         assert_eq!(card.class, ReviewClass::ContractMissing);
+        Ok(())
+    }
+
+    #[test]
+    fn public_unsafe_api_contract_evidence_requires_safety_docs() -> Result<(), String> {
+        for fixture in [
+            "public_unsafe_fn_missing_safety",
+            "public_unsafe_trait_missing_safety",
+            "public_unsafe_fn_safety_comment_not_docs",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
+
+            assert_eq!(card.class, ReviewClass::ContractMissing);
+            assert!(card.site.public_api_surface);
+            assert!(!card.contract.present);
+            assert!(
+                card.contract.summary.contains("# Safety"),
+                "{fixture} should ask for public safety docs"
+            );
+            assert!(
+                card.missing.iter().any(|missing| missing.kind == "contract"
+                    && missing.message.contains("public `# Safety`")),
+                "{fixture} should not accept local SAFETY prose as public API docs"
+            );
+            assert!(
+                card.site.owner.is_some(),
+                "{fixture} should preserve the public API owner in the card"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn private_unsafe_helper_can_use_local_safety_comment() -> Result<(), String> {
+        let output = fixture_output("private_unsafe_helper_safety_comment")?;
+        let card = single_card("private_unsafe_helper_safety_comment", &output)?;
+
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(!card.site.public_api_surface);
+        assert!(card.contract.present);
+        assert_eq!(card.reach.state, "owner_reached");
+        assert!(
+            !card
+                .missing
+                .iter()
+                .any(|missing| missing.kind == "contract")
+        );
         Ok(())
     }
 

@@ -26,7 +26,7 @@
         "contract": {
           "present": false,
           "state": "missing",
-          "summary": "No nearby `# Safety` docs or `SAFETY:` comment detected"
+          "summary": "Public unsafe API is missing nearby `# Safety` documentation"
         },
         "discharge": {
           "present": false,
@@ -45,12 +45,12 @@
         }
       }
     ],
-    "contract": "No nearby `# Safety` docs or `SAFETY:` comment detected",
+    "contract": "Public unsafe API is missing nearby `# Safety` documentation",
     "discharge": "No visible local guard detected",
     "reach": "No static test mention of owner `caller_must_uphold_contract` was found",
     "witness": "No imported witness receipt was found",
     "missing": [
-      "Missing `# Safety` documentation or `SAFETY:` comment",
+      "Missing public `# Safety` documentation for unsafe API",
       "Missing visible local guard for inferred safety obligations",
       "No related test path was found by static search",
       "No witness receipt imported for this card"

@@ -8,13 +8,26 @@ use std::path::{Path, PathBuf};
 
 pub(crate) fn contract_evidence(site: &ScannedSite) -> ContractEvidence {
     let context = site.context_before.join("\n");
-    if context.contains("# Safety") {
+    if has_safety_doc(&context) {
         return ContractEvidence::present("Nearby `# Safety` documentation was detected");
+    }
+    if site.site.public_api_surface {
+        return ContractEvidence::missing_with(
+            "Public unsafe API is missing nearby `# Safety` documentation",
+        );
     }
     if context.contains("SAFETY:") || site.site.snippet.contains("SAFETY:") {
         return ContractEvidence::present("Nearby `SAFETY:` comment was detected");
     }
     ContractEvidence::missing()
+}
+
+fn has_safety_doc(context: &str) -> bool {
+    context.lines().any(|line| {
+        let trimmed = line.trim_start();
+        (trimmed.starts_with("///") || trimmed.starts_with("//!") || trimmed.starts_with("#[doc"))
+            && trimmed.contains("# Safety")
+    })
 }
 
 pub(crate) fn obligation_evidence(
