@@ -743,6 +743,19 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn copy_nonoverlapping_uses_copy_operation_family() -> Result<(), String> {
+        let output = fixture_output("copy_nonoverlapping")?;
+        let card = single_card("copy_nonoverlapping", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::CopyNonOverlapping);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(card.hazards.contains(&HazardKind::AliasingOrProvenance));
+        assert!(card.id.0.contains("copy-nonoverlapping"));
+        Ok(())
+    }
+
+    #[test]
     fn pointer_arithmetic_num_ctrl_bytes_guard_is_discharged() -> Result<(), String> {
         let output = fixture_output("pointer_arithmetic_num_ctrl_bytes_guard")?;
         let card = single_card("pointer_arithmetic_num_ctrl_bytes_guard", &output)?;
