@@ -202,6 +202,37 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
 }
 
 #[test]
+fn doctor_reports_first_install_signals_without_running_witnesses() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_alignment");
+
+    let output = run_success([
+        os("doctor"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+    ])?;
+    let text = stdout_text(&output)?;
+
+    assert!(text.contains("unsafe-review doctor"));
+    assert!(text.contains("workspace root:"));
+    assert!(text.contains("git command:"));
+    assert!(text.contains("git repository:"));
+    assert!(text.contains("base ref origin/main:"));
+    assert!(text.contains("Witness tool signals"));
+    assert!(text.contains("miri:"));
+    assert!(text.contains("cargo-careful:"));
+    assert!(text.contains("sanitizers:"));
+    assert!(text.contains("loom:"));
+    assert!(text.contains("shuttle:"));
+    assert!(text.contains("kani:"));
+    assert!(text.contains("crux:"));
+    assert!(text.contains("policy: advisory by default"));
+    assert!(text.contains("witness execution: not run by doctor or by default"));
+    assert!(text.contains("trust boundary: static review evidence"));
+
+    Ok(())
+}
+
+#[test]
 fn repo_inventory_and_badges_count_open_gaps_without_safety_claim() -> Result<(), Box<dyn Error>> {
     let fixture = fixture_root("raw_pointer_alignment");
     let temp = TempDir::new("unsafe-review-repo-e2e")?;

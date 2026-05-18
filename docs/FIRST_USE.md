@@ -21,6 +21,15 @@ is for development.
 
 ## Get A First Card
 
+Check local environment signals:
+
+```bash
+unsafe-review doctor
+```
+
+Missing witness tools are informational. `doctor` does not run witnesses and
+does not make policy decisions.
+
 Run against the current branch diff:
 
 ```bash

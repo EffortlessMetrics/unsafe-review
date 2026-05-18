@@ -329,8 +329,11 @@ Run a lightweight environment check:
 unsafe-review doctor
 ```
 
-`doctor` reports availability signals. Missing witness tools are reported, not
-treated as a default failure.
+`doctor` reports first-install signals: workspace root, Git availability,
+whether `origin/main` is visible, witness tool availability or configuration
+hints, advisory policy, and the trust boundary. Missing witness tools are
+reported, not treated as a default failure. The command does not run Miri,
+`cargo-careful`, sanitizers, Loom, Shuttle, Kani, Crux, or any witness test.
 
 ## Flag Forms
 
