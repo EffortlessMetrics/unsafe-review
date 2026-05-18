@@ -1,6 +1,6 @@
 use crate::analysis::pipeline;
 use crate::domain::{CardId, ReviewCard};
-use crate::output::{human, json, markdown};
+use crate::output::{human, json, markdown, sarif};
 use std::path::PathBuf;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -123,6 +123,10 @@ pub fn render_markdown(output: &AnalyzeOutput) -> String {
 
 pub fn render_pr_summary(output: &AnalyzeOutput) -> String {
     markdown::render_pr_summary(output)
+}
+
+pub fn render_sarif(output: &AnalyzeOutput) -> String {
+    sarif::render(output)
 }
 
 pub fn explain_card(output: &AnalyzeOutput, id: &CardId) -> Option<String> {

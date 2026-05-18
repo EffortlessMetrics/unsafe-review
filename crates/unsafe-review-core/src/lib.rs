@@ -15,6 +15,7 @@ mod util;
 pub use api::{
     AnalysisMode, AnalyzeInput, AnalyzeOutput, DiffSource, PolicyMode, Scope, analyze,
     collect_context, explain_card, render_human, render_json, render_markdown, render_pr_summary,
+    render_sarif,
 };
 pub use domain::{
     CardId, Confidence, ContractEvidence, DischargeEvidence, HazardKind, MissingEvidence,

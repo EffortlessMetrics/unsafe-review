@@ -17,6 +17,9 @@ The first supported PR projection is a local Markdown summary artifact rendered
 from existing `ReviewCard`s. It includes counts, a top card, a card table, a
 witness plan, and the trust boundary. It does not post comments, run witness
 tools, or change policy mode.
+SARIF output is also a projection from existing `ReviewCard`s. SARIF results
+carry card identity, operation family, hazards, missing evidence, witness route
+recommendations, and the same trust boundary in result properties.
 
 ## Non-goals
 
@@ -38,6 +41,8 @@ tools, or change policy mode.
 - If evidence is not knowable statically, the card names the limitation instead of overclaiming.
 - `unsafe-review check --format pr-summary --out target/unsafe-review/pr-summary.md`
   writes a GitHub-ready Markdown artifact.
+- `unsafe-review check --format sarif --out target/unsafe-review/cards.sarif`
+  writes parseable SARIF 2.1.0.
 - Empty output states no actionable cards and does not imply the repository is
   safe or UB-free.
 

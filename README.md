@@ -38,6 +38,11 @@ unsafe-review check --base origin/main \
   --format pr-summary \
   --out target/unsafe-review/pr-summary.md
 
+# Write SARIF for code scanning upload or CI artifacts
+unsafe-review check --base origin/main \
+  --format sarif \
+  --out target/unsafe-review/cards.sarif
+
 # Try the bundled smoke fixture
 unsafe-review check --root fixtures/raw_pointer_alignment \
   --diff fixtures/raw_pointer_alignment/change.diff \

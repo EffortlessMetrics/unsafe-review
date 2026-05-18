@@ -14,7 +14,7 @@ All tiers describe static review evidence. None means memory-safety proof.
 | Witness routing | experimental | cards | route-table tests plus raw pointer, FFI, unsafe impl Send, Pin, and invalid-value fixture routes | route recommendation only; no witness receipts |
 | Repo inventory | scaffold | repo JSON / badges | compile gate only | badge is not UB-free claim |
 | PR Markdown summary | experimental | PR artifact Markdown | `pr_summary` renderer tests and CLI `--format pr-summary` | local artifact only; no workflow wiring or comments yet |
-| SARIF projection | planned | PR artifact SARIF | SARIF fixture tests | no default blocking |
+| SARIF projection | experimental | PR artifact SARIF | `sarif` renderer tests and CLI `--format sarif` | local artifact only; no workflow upload or default blocking |
 | LSP projection | planned | editor | saved-card fixtures | read-only first |
 | Agent packets | planned | JSON packet | packet schema tests | agents still require review |
 | Receipt import | planned | witness receipts | Miri/careful/sanitizer fixtures | receipt strength must be explicit |
