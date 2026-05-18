@@ -640,6 +640,18 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn multiline_unsafe_call_wrapper_uses_concrete_operation_family() -> Result<(), String> {
+        let output = fixture_output("multiline_unsafe_fn_call_wrapper")?;
+        let card = single_card("multiline_unsafe_fn_call_wrapper", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::UnsafeFnCall);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(card.id.0.contains("encode-utf8"));
+        Ok(())
+    }
+
+    #[test]
     fn slice_from_raw_parts_mut_uses_slice_operation_family() -> Result<(), String> {
         let output = fixture_output("slice_from_raw_parts_mut")?;
         let card = single_card("slice_from_raw_parts_mut", &output)?;

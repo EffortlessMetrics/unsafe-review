@@ -230,6 +230,7 @@ mod tests {
         "attributed_unsafe_fn_no_duplicate",
         "inline_unsafe_raw_pointer_deref_no_duplicate",
         "unsafe_fn_call_wrapper",
+        "multiline_unsafe_fn_call_wrapper",
         "split_unsafe_block",
         "raw_pointer_deref",
         "raw_pointer_read_unaligned",
