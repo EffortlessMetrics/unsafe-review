@@ -1,0 +1,18 @@
+#[derive(Clone, Copy)]
+pub struct Header(pub u32);
+
+pub fn read_header(ptr: *const Header) -> Header {
+    // SAFETY: caller guarantees pointer validity, but guards are not visible here.
+    unsafe { *ptr }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Header, read_header};
+
+    #[test]
+    fn reads_header() {
+        let header = Header(7);
+        let _read = read_header(&header);
+    }
+}

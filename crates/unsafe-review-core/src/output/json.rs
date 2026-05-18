@@ -289,6 +289,8 @@ mod tests {
         "public_unsafe_fn_missing_safety",
         "split_public_unsafe_fn_missing_safety",
         "split_unsafe_block",
+        "raw_pointer_deref",
+        "safe_reference_deref_no_cards",
     ];
 
     #[test]
