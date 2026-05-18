@@ -1,7 +1,8 @@
 use super::{classify, evidence, obligations, scanner, witness};
 use crate::api::{AnalysisMode, AnalyzeInput, AnalyzeOutput, DiffSource, Scope, Summary};
-use crate::domain::{CardId, MissingEvidence, NextAction, ReviewCard};
+use crate::domain::{CardId, MissingEvidence, NextAction, Priority, ReviewCard, ReviewClass};
 use crate::input::{diff, workspace};
+use crate::policy::PolicyState;
 use crate::util::{slug, stable_hash_hex};
 use std::collections::BTreeMap;
 use std::fs;
@@ -11,6 +12,7 @@ pub(crate) fn analyze(input: AnalyzeInput) -> Result<AnalyzeOutput, String> {
     let diff_index = load_diff_index(&input.diff)?;
     let all_rust_files = workspace::discover_rust_files(&input.root)?;
     let package = package_name(&input.root);
+    let policy_state = PolicyState::load(&input.root)?;
     let candidate_files = if repo_mode || diff_index.is_empty() {
         all_rust_files.clone()
     } else {
@@ -35,7 +37,7 @@ pub(crate) fn analyze(input: AnalyzeInput) -> Result<AnalyzeOutput, String> {
                 evidence::obligation_evidence(&scanned_site, &obligations, &contract, &reach);
             let discharge = evidence::summarize_discharge(&obligation_evidence);
             let routes = witness::routes_for(&hazards, scanned_site.site.owner.as_ref());
-            let (class, priority, confidence) =
+            let (mut class, mut priority, confidence) =
                 classify::classify(&hazards, &contract, &discharge, &reach);
             let mut missing = Vec::new();
             if !contract.present {
@@ -67,11 +69,18 @@ pub(crate) fn analyze(input: AnalyzeInput) -> Result<AnalyzeOutput, String> {
                 .iter()
                 .filter_map(|route| route.command.clone())
                 .collect::<Vec<_>>();
+            let id = card_id(&package, &scanned_site, &hazards, &mut identity_counts);
+            if policy_state.is_suppressed(&id) {
+                class = ReviewClass::Suppressed;
+                priority = Priority::Low;
+            } else if policy_state.is_baseline_known(&id) {
+                class = ReviewClass::BaselineKnown;
+                priority = Priority::Low;
+            }
             let next_action = NextAction {
                 summary: next_action_summary(&class, scanned_site.operation.family.as_str()),
                 verify_commands,
             };
-            let id = card_id(&package, &scanned_site, &hazards, &mut identity_counts);
             cards.push(ReviewCard {
                 id,
                 class,
@@ -193,6 +202,8 @@ fn next_action_summary(class: &crate::domain::ReviewClass, operation: &str) -> S
         crate::domain::ReviewClass::RequiresLoom => "Add or update a Loom/Shuttle model for the changed concurrency invariant.".to_string(),
         crate::domain::ReviewClass::MiriUnsupported => "Use sanitizer/cargo-careful or an explicit FFI boundary contract; Miri may not exercise this seam.".to_string(),
         crate::domain::ReviewClass::UnsafeUnreached => "Add or identify a focused test path that reaches the safe wrapper around this unsafe seam.".to_string(),
+        crate::domain::ReviewClass::BaselineKnown => "Known baseline card; keep the ledger owner and review date current.".to_string(),
+        crate::domain::ReviewClass::Suppressed => "Suppressed card; keep the owner, reason, evidence, and review or expiry date current.".to_string(),
         _ => "Attach a focused witness receipt or mark the static limitation explicitly.".to_string(),
     }
 }
@@ -276,7 +287,10 @@ mod tests {
     use super::*;
     use crate::api::{AnalysisMode, DiffSource, PolicyMode};
     use crate::domain::{HazardKind, OperationFamily, ReviewCard, ReviewClass, UnsafeSiteKind};
+    use std::fs;
+    use std::path::Path;
     use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn raw_pointer_v1_operation_cards_are_concrete() -> Result<(), String> {
@@ -481,10 +495,65 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn baseline_policy_marks_exact_card_identity_as_known() -> Result<(), String> {
+        let root = copy_fixture_to_temp("raw_pointer_alignment", "unsafe-review-baseline-match")?;
+        let card_id = single_card("raw_pointer_alignment", &fixture_output_at(&root)?)?
+            .id
+            .0
+            .clone();
+        write_policy_ledger(
+            &root,
+            "unsafe-review-baseline.toml",
+            &card_id,
+            "review_after",
+        )?;
+
+        let output = fixture_output_at(&root)?;
+        let card = single_card("raw_pointer_alignment baseline", &output)?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp fixture failed: {err}"))?;
+        assert_eq!(card.class, ReviewClass::BaselineKnown);
+        assert_eq!(card.priority, Priority::Low);
+        assert_eq!(output.summary.open_actionable_gaps, 0);
+        assert!(card.next_action.summary.contains("Known baseline"));
+        Ok(())
+    }
+
+    #[test]
+    fn suppression_policy_marks_exact_card_identity_as_suppressed() -> Result<(), String> {
+        let root =
+            copy_fixture_to_temp("raw_pointer_alignment", "unsafe-review-suppression-match")?;
+        let card_id = single_card("raw_pointer_alignment", &fixture_output_at(&root)?)?
+            .id
+            .0
+            .clone();
+        write_policy_ledger(
+            &root,
+            "unsafe-review-suppressions.toml",
+            &card_id,
+            "expires",
+        )?;
+
+        let output = fixture_output_at(&root)?;
+        let card = single_card("raw_pointer_alignment suppression", &output)?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp fixture failed: {err}"))?;
+        assert_eq!(card.class, ReviewClass::Suppressed);
+        assert_eq!(card.priority, Priority::Low);
+        assert_eq!(output.summary.open_actionable_gaps, 0);
+        assert!(card.next_action.summary.contains("Suppressed"));
+        Ok(())
+    }
+
     fn fixture_output(name: &str) -> Result<AnalyzeOutput, String> {
         let root = fixture_root(name);
+        fixture_output_at(&root)
+    }
+
+    fn fixture_output_at(root: &Path) -> Result<AnalyzeOutput, String> {
         analyze(AnalyzeInput {
-            root: root.clone(),
+            root: root.to_path_buf(),
             scope: Scope::Diff,
             diff: DiffSource::File(root.join("change.diff")),
             mode: AnalysisMode::Draft,
@@ -530,5 +599,71 @@ mod tests {
     fn identity_without_count(id: &CardId) -> &str {
         id.0.rsplit_once("-c")
             .map_or(id.0.as_str(), |(base, _count)| base)
+    }
+
+    fn copy_fixture_to_temp(name: &str, prefix: &str) -> Result<PathBuf, String> {
+        let source = fixture_root(name);
+        let target = unique_temp_dir(prefix)?;
+        copy_dir_all(&source, &target)?;
+        Ok(target)
+    }
+
+    fn copy_dir_all(source: &Path, target: &Path) -> Result<(), String> {
+        fs::create_dir_all(target)
+            .map_err(|err| format!("create {} failed: {err}", target.display()))?;
+        let entries = fs::read_dir(source)
+            .map_err(|err| format!("read {} failed: {err}", source.display()))?;
+        for entry in entries {
+            let entry = entry.map_err(|err| format!("read_dir entry failed: {err}"))?;
+            let source_path = entry.path();
+            let target_path = target.join(entry.file_name());
+            if source_path.is_dir() {
+                copy_dir_all(&source_path, &target_path)?;
+            } else {
+                fs::copy(&source_path, &target_path).map_err(|err| {
+                    format!(
+                        "copy {} to {} failed: {err}",
+                        source_path.display(),
+                        target_path.display()
+                    )
+                })?;
+            }
+        }
+        Ok(())
+    }
+
+    fn write_policy_ledger(
+        root: &Path,
+        file_name: &str,
+        card_id: &str,
+        date_key: &str,
+    ) -> Result<(), String> {
+        let policy_dir = root.join("policy");
+        fs::create_dir_all(&policy_dir)
+            .map_err(|err| format!("create {} failed: {err}", policy_dir.display()))?;
+        fs::write(
+            policy_dir.join(file_name),
+            format!(
+                r#"schema_version = "0.1"
+status = "active"
+
+[[entries]]
+card_id = "{card_id}"
+owner = "core/policy"
+reason = "fixture policy match"
+evidence = "test fixture"
+{date_key} = "2026-08-01"
+"#
+            ),
+        )
+        .map_err(|err| format!("write policy ledger failed: {err}"))
+    }
+
+    fn unique_temp_dir(prefix: &str) -> Result<PathBuf, String> {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|err| format!("system clock before UNIX_EPOCH: {err}"))?
+            .as_nanos();
+        Ok(std::env::temp_dir().join(format!("{prefix}-{nanos}")))
     }
 }
