@@ -375,6 +375,32 @@ on the signature line. The remaining cards are legitimate advisory prompts for
 missing contract evidence around the raw-pointer UTF-8 write path, including the
 public unsafe `encode_utf8` API.
 
+### `arrayvec#187`
+
+PR: `https://github.com/bluss/arrayvec/pull/187`
+
+The PR adds `ArrayVec::take` and a public unsafe
+`into_inner_unchecked` helper that reads the initialized backing array with
+`ptr::read`.
+
+Dogfood output:
+
+```text
+changed_rust_files: 2
+cards: 3
+contract_missing: 3
+operation families: unknown, raw_pointer_read
+owners: into_inner, into_inner_unchecked
+```
+
+This run did not require a scanner patch. It is useful because it shows a
+legitimate contract-quality prompt: the new public unsafe API uses `Safety:`
+prose rather than a `# Safety` section, so the public unsafe function and the
+raw `ptr::read` remain `contract_missing` prompts. The safe `into_inner` wrapper
+has a related test mention, while `into_inner_unchecked` itself is still
+statically unreached by name. The output remains advisory and does not claim the
+change is wrong.
+
 ### `arrayvec#288`
 
 PR: `https://github.com/bluss/arrayvec/pull/288`
@@ -506,6 +532,7 @@ rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/smal
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/smallvec --diff target/dogfood-work/smallvec-pr64.raw.diff --format json --max-cards 20 --out target/dogfood-work/smallvec-pr64.after-last-index-shrink.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr308.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr308.unsafe-review.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr138.raw.diff --format json --max-cards 30 --out target/dogfood-work/arrayvec-pr138.after-attributed-dedupe.json
+rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr187.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr187.unsafe-review.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.unsafe-review.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-setlen-init.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-setlen-zero.json
@@ -525,7 +552,7 @@ The repo may claim:
 - a capped `memchr` dogfood snapshot now completes
 - real PR-diff dogfood runs on `memchr#215`, `rust-smallvec#407`,
   `rust-smallvec#64`, `rust-smallvec#254`, `arrayvec#308`, `arrayvec#138`,
-  and `arrayvec#288` produce card output
+  `arrayvec#187`, and `arrayvec#288` produce card output
 - dogfood found and fixed import/declaration and `cfg(target_feature)`
   false positives
 - capped repo scans stop after the requested card cap
@@ -552,7 +579,7 @@ The repo must not claim:
 - usable-alpha support-tier promotion
 - full-repository coverage from top-50 capped snapshots
 - uncapped repo-scan performance
-- general PR-diff usefulness from four PRs
+- general PR-diff usefulness from eight PRs
 - memory-safety proof
 - UB-free status
 - witness execution
@@ -562,7 +589,7 @@ The repo must not claim:
 
 - Only three real crates completed in this slice.
 - The successful dogfood snapshots were capped at 50 cards.
-- Only seven real PR diffs were measured.
+- Only eight real PR diffs were measured.
 - `memchr` completion depends on capped-scan behavior; uncapped performance is
   still unmeasured.
 - No human audit was performed for every emitted card.
@@ -576,6 +603,9 @@ The repo must not claim:
 - `arrayvec#138` shows the raw-pointer UTF-8 write path still needs better
   contract evidence, especially around unsafe helper APIs and tests with unsafe
   blocks.
+- `arrayvec#187` shows public unsafe helper APIs with `Safety:` prose remain
+  contract prompts until they expose a recognized `# Safety` section or nearby
+  `SAFETY:` evidence.
 - These runs do not prove absence of missed unsafe seams.
 
 ## Next useful work
