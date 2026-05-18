@@ -531,17 +531,6 @@ fn is_raw_pointer_write(line: &str) -> bool {
         || line.contains(".cast_mut().write_volatile(")
         || (line.contains(".cast::<") && line.contains(".write("))
         || (line.contains(".cast::<") && line.contains(".write_volatile("))
-        || is_raw_pointer_assignment(line)
-}
-
-fn is_raw_pointer_assignment(line: &str) -> bool {
-    let compact = line.trim_start();
-    (compact.starts_with('*') || compact.starts_with("(*")) && contains_assignment_operator(compact)
-}
-
-fn contains_assignment_operator(text: &str) -> bool {
-    let text = text.trim_start();
-    assignment_operator_start(text).is_some()
 }
 
 fn assignment_operator_start(text: &str) -> Option<usize> {
@@ -791,17 +780,39 @@ mod tests {
     }
 
     #[test]
-    fn text_detection_classifies_raw_pointer_assignments_as_writes() {
-        assert_eq!(
-            detect_site("*ptr = value;"),
-            Some((UnsafeSiteKind::Operation, OperationFamily::RawPointerWrite))
-        );
-        assert_eq!(
-            detect_site("*ptr += 1;"),
-            Some((UnsafeSiteKind::Operation, OperationFamily::RawPointerWrite))
-        );
-        assert!(!is_raw_pointer_assignment("*ptr == value;"));
+    fn text_detection_does_not_classify_deref_assignments_as_writes() {
+        assert_eq!(detect_site("*ptr = value;"), None);
+        assert_eq!(detect_site("*ptr += 1;"), None);
+        assert_eq!(detect_site("*next += 1;"), None);
         assert_eq!(detect_site("*ptr == value;"), None);
+    }
+
+    #[test]
+    fn syntax_detection_classifies_unsafe_raw_pointer_assignments_as_writes() -> Result<(), String>
+    {
+        let root = unique_temp_dir()?;
+        fs::create_dir_all(root.join("src"))
+            .map_err(|err| format!("create temp src failed: {err}"))?;
+        fs::write(
+            root.join("src/lib.rs"),
+            "pub fn write_byte(ptr: *mut u8, value: u8) {\n    unsafe {\n        *ptr = value;\n    }\n}\n",
+        )
+        .map_err(|err| format!("write temp source failed: {err}"))?;
+
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        let operations = sites
+            .iter()
+            .filter(|site| site.site.kind == UnsafeSiteKind::Operation)
+            .collect::<Vec<_>>();
+        assert_eq!(operations.len(), 1, "unexpected sites: {sites:#?}");
+        assert_eq!(
+            operations[0].operation.family,
+            OperationFamily::RawPointerWrite
+        );
+        assert_eq!(operations[0].site.snippet, "*ptr = value;");
+        Ok(())
     }
 
     #[test]
