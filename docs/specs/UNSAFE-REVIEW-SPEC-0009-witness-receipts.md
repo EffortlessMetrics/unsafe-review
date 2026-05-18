@@ -58,6 +58,14 @@ read an existing log file, require an explicit concurrency `tool` of `loom` or
 and `strength = "ran"`. It must not execute Loom or Shuttle, infer site reach,
 or claim complete scheduler coverage.
 
+The CLI may import a receipt from saved Kani or Crux proof output. The adapter
+must read an existing log file, require an explicit proof `tool` of `kani` or
+`crux`, reject empty output, reject failure-looking output, require a
+conservative verification-success marker, and emit a normal `WitnessReceipt`
+with that proof tool and `strength = "ran"`. It must not execute Kani or Crux,
+infer site reach, create a card, or claim proof beyond the recorded
+harness/output scope.
+
 The CLI may also validate receipt files without running analysis. Validation must
 use the same importer checks as normal card analysis so users do not get a
 separate receipt truth.
@@ -146,6 +154,9 @@ after the `recorded_at` date.
 - The CLI concurrency saved-output adapter writes a receipt from a
   success-looking Loom/Shuttle log, rejects unsupported concurrency tools, and
   rejects failure-looking output.
+- The CLI proof saved-output adapter writes a receipt from a success-looking
+  Kani/Crux log, rejects unsupported proof tools, and rejects failure-looking
+  output.
 - The CLI receipt-validate command counts importable receipts and rejects the
   same invalid receipt files as normal analysis.
 

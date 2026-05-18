@@ -240,6 +240,27 @@ when the output contains `test result: ok` and no failure marker. It does not
 run Loom or Shuttle, infer site reach, or claim that all scheduler interleavings
 or callers are covered.
 
+Import a receipt from saved Kani or Crux proof output after the proof run
+happened outside `unsafe-review`:
+
+```bash
+unsafe-review receipt import-proof <card-id> \
+  --tool kani \
+  --log target/kani-byte-to-bool.log \
+  --author core/fixtures \
+  --recorded-at 2026-05-18T00:00:00Z \
+  --expires-at 2026-08-18 \
+  --command "cargo kani --harness byte_to_bool_harness" \
+  --limitation "fixture only" \
+  --out .unsafe-review/receipts/kani.json
+```
+
+The proof adapter accepts `kani` or `crux` as the explicit receipt tool. It reads
+saved output and writes a receipt with `strength = "ran"` only when the output
+contains a conservative verification-success marker and no failure marker. It
+does not run Kani or Crux, infer site reach, or claim proof beyond the recorded
+harness/output scope.
+
 Validate imported receipt files without running analysis:
 
 ```bash

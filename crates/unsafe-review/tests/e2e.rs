@@ -616,6 +616,72 @@ fn receipt_import_concurrency_writes_receipt_from_saved_success_log() -> Result<
 }
 
 #[test]
+fn receipt_import_proof_writes_receipt_from_saved_success_log() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("transmute_invalid_value");
+    let temp = TempDir::new("unsafe-review-proof-receipt-e2e")?;
+    let receipt_path = temp.path().join("kani.json");
+    let card_id = "UR-transmute-invalid-value-src-lib-rs-byte-to-bool-operation-transmute-u8-bool-bdefdb7b6120-invalid_value-c1";
+
+    let output = run_success([
+        os("receipt"),
+        os("import-proof"),
+        os(card_id),
+        os("--tool"),
+        os("kani"),
+        os("--log"),
+        fixture.join("kani.success.log").into_os_string(),
+        os("--author"),
+        os("core/fixtures"),
+        os("--recorded-at"),
+        os("2026-05-18T00:00:00Z"),
+        os("--expires-at"),
+        os("2026-08-18"),
+        os("--command"),
+        os("cargo kani --harness byte_to_bool_harness"),
+        os("--limitation"),
+        os("fixture only"),
+        os("--out"),
+        receipt_path.as_os_str().to_os_string(),
+    ])?;
+
+    assert_eq!(stdout_text(&output)?.trim(), "");
+    let receipt = parse_json(&fs::read_to_string(receipt_path)?)?;
+    assert_eq!(receipt["schema_version"], "0.1");
+    assert_eq!(receipt["card_id"], card_id);
+    assert_eq!(receipt["tool"], "kani");
+    assert_eq!(receipt["strength"], "ran");
+    assert_eq!(
+        receipt["summary"],
+        "saved kani proof output reported verification success"
+    );
+    assert_eq!(
+        receipt["command"],
+        "cargo kani --harness byte_to_bool_harness"
+    );
+    let limitations = receipt["limitations"]
+        .as_array()
+        .ok_or("receipt limitations should be an array")?;
+    assert!(limitations.iter().any(|item| {
+        item.as_str()
+            .unwrap_or("")
+            .contains("unsafe-review did not run a proof tool")
+    }));
+    assert!(limitations.iter().any(|item| {
+        item.as_str()
+            .unwrap_or("")
+            .contains("site reach is not claimed")
+    }));
+    assert!(limitations.iter().any(|item| {
+        item.as_str()
+            .unwrap_or("")
+            .contains("recorded harness/output")
+    }));
+    assert!(limitations.iter().any(|item| item == "fixture only"));
+
+    Ok(())
+}
+
+#[test]
 fn no_new_debt_policy_fails_only_for_unbaselined_actionable_gaps() -> Result<(), Box<dyn Error>> {
     let fixture = fixture_root("raw_pointer_alignment");
     let failing = run_failure([

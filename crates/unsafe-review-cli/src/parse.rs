@@ -221,7 +221,7 @@ fn parse_receipt(args: Vec<String>) -> Result<Command, String> {
     let mut rest = args;
     let Some(subcommand) = rest.first() else {
         return Err(
-            "missing receipt subcommand `import-miri`, `import-careful`, `import-sanitizer`, `import-concurrency`, `template`, or `validate`"
+            "missing receipt subcommand `import-miri`, `import-careful`, `import-sanitizer`, `import-concurrency`, `import-proof`, `template`, or `validate`"
                 .to_string(),
         );
     };
@@ -239,6 +239,9 @@ fn parse_receipt(args: Vec<String>) -> Result<Command, String> {
             .map(Command::ReceiptImportSanitizer),
         "import-concurrency" => parse_saved_output_receipt(rest, "import-concurrency", true)
             .map(Command::ReceiptImportConcurrency),
+        "import-proof" => {
+            parse_saved_output_receipt(rest, "import-proof", true).map(Command::ReceiptImportProof)
+        }
         "template" => parse_receipt_template(rest).map(Command::ReceiptTemplate),
         "validate" => parse_receipt_validate(rest),
         other => Err(format!("unknown receipt subcommand `{other}`")),
@@ -1015,6 +1018,49 @@ mod tests {
     }
 
     #[test]
+    fn parses_receipt_import_proof_command() -> Result<(), String> {
+        let command = parse(args([
+            "unsafe-review",
+            "receipt",
+            "import-proof",
+            "UR-transmute-invalid-value-src-lib-rs-byte-to-bool-operation-transmute-u8-bool-bdefdb7b6120-invalid_value-c1",
+            "--tool",
+            "kani",
+            "--log",
+            "fixtures/transmute_invalid_value/kani.success.log",
+            "--author",
+            "core/fixtures",
+            "--recorded-at",
+            "2026-05-18T00:00:00Z",
+            "--expires-at",
+            "2026-08-18",
+            "--command",
+            "cargo kani --harness byte_to_bool_harness",
+            "--limitation",
+            "fixture only",
+            "--out",
+            "target/kani.json",
+        ]))?;
+
+        let Command::ReceiptImportProof(options) = command else {
+            return Err("expected receipt import-proof command".to_string());
+        };
+        assert_eq!(
+            options.card_id,
+            "UR-transmute-invalid-value-src-lib-rs-byte-to-bool-operation-transmute-u8-bool-bdefdb7b6120-invalid_value-c1"
+        );
+        assert_eq!(options.tool.as_deref(), Some("kani"));
+        assert_eq!(
+            options.log,
+            PathBuf::from("fixtures/transmute_invalid_value/kani.success.log")
+        );
+        assert_eq!(options.author, "core/fixtures");
+        assert_eq!(options.command, "cargo kani --harness byte_to_bool_harness");
+        assert_eq!(options.limitations, vec!["fixture only".to_string()]);
+        Ok(())
+    }
+
+    #[test]
     fn receipt_import_miri_requires_command() {
         let command = parse(args([
             "unsafe-review",
@@ -1093,6 +1139,28 @@ mod tests {
             "2026-08-18",
             "--command",
             "cargo test shared_cell_loom -- --nocapture",
+        ]));
+
+        assert_eq!(command, Err("missing value for --tool".to_string()));
+    }
+
+    #[test]
+    fn receipt_import_proof_requires_tool() {
+        let command = parse(args([
+            "unsafe-review",
+            "receipt",
+            "import-proof",
+            "UR-transmute-invalid-value-src-lib-rs-byte-to-bool-operation-transmute-u8-bool-bdefdb7b6120-invalid_value-c1",
+            "--log",
+            "kani.log",
+            "--author",
+            "core/fixtures",
+            "--recorded-at",
+            "2026-05-18T00:00:00Z",
+            "--expires-at",
+            "2026-08-18",
+            "--command",
+            "cargo kani --harness byte_to_bool_harness",
         ]));
 
         assert_eq!(command, Err("missing value for --tool".to_string()));

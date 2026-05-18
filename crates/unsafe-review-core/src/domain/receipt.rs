@@ -62,6 +62,18 @@ pub struct ConcurrencyReceiptInput {
     pub limitations: Vec<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProofReceiptInput {
+    pub card_id: String,
+    pub tool: String,
+    pub output: String,
+    pub author: String,
+    pub recorded_at: String,
+    pub expires_at: String,
+    pub command: String,
+    pub limitations: Vec<String>,
+}
+
 impl WitnessReceipt {
     pub fn validate(&self) -> Result<(), String> {
         validate_required(&self.schema_version, "schema_version")?;
@@ -243,6 +255,36 @@ impl WitnessReceipt {
         receipt.validate()?;
         Ok(receipt)
     }
+
+    pub fn from_proof_output(input: ProofReceiptInput) -> Result<Self, String> {
+        validate_proof_tool(&input.tool)?;
+        validate_saved_proof_success_output(&input.output, &input.tool)?;
+        validate_required(&input.command, "command")?;
+        validate_proof_command(&input.command)?;
+        let mut limitations = vec![
+            "saved-output adapter; unsafe-review did not run a proof tool".to_string(),
+            "receipt strength is `ran`; site reach is not claimed".to_string(),
+            "proof scope is limited to the recorded harness/output".to_string(),
+        ];
+        limitations.extend(input.limitations);
+        let receipt = Self {
+            schema_version: WITNESS_RECEIPT_SCHEMA_VERSION.to_string(),
+            card_id: input.card_id,
+            tool: input.tool.clone(),
+            strength: "ran".to_string(),
+            author: Some(input.author),
+            recorded_at: Some(input.recorded_at),
+            expires_at: Some(input.expires_at),
+            summary: Some(format!(
+                "saved {} proof output reported verification success",
+                input.tool
+            )),
+            command: Some(input.command),
+            limitations: Some(limitations),
+        };
+        receipt.validate()?;
+        Ok(receipt)
+    }
 }
 
 fn is_supported_receipt_strength(value: &str) -> bool {
@@ -322,6 +364,16 @@ fn validate_concurrency_tool(value: &str) -> Result<(), String> {
     }
 }
 
+fn validate_proof_tool(value: &str) -> Result<(), String> {
+    if matches!(value, "kani" | "crux") {
+        Ok(())
+    } else {
+        Err(format!(
+            "proof receipt tool must be one of `kani` or `crux`, got `{value}`"
+        ))
+    }
+}
+
 fn validate_sanitizer_command(command: &str) -> Result<(), String> {
     let lower = command.to_ascii_lowercase();
     if ["sanitizer", "asan", "msan", "tsan", "lsan"]
@@ -349,6 +401,15 @@ fn validate_concurrency_command(command: &str) -> Result<(), String> {
     }
 }
 
+fn validate_proof_command(command: &str) -> Result<(), String> {
+    let lower = command.to_ascii_lowercase();
+    if ["kani", "crux"].iter().any(|needle| lower.contains(needle)) {
+        Ok(())
+    } else {
+        Err("proof receipt command must mention `kani` or `crux`".to_string())
+    }
+}
+
 fn validate_saved_success_output(output: &str, tool: &str) -> Result<(), String> {
     if output.trim().is_empty() {
         return Err(format!("saved {tool} output is empty"));
@@ -373,6 +434,45 @@ fn validate_saved_success_output(output: &str, tool: &str) -> Result<(), String>
         ));
     }
     Ok(())
+}
+
+fn validate_saved_proof_success_output(output: &str, tool: &str) -> Result<(), String> {
+    if output.trim().is_empty() {
+        return Err(format!("saved {tool} proof output is empty"));
+    }
+    let lower = output.to_ascii_lowercase();
+    for needle in [
+        "verification failed",
+        "verification:- failed",
+        "counterexample",
+        "assertion failed",
+        "panicked at",
+        "panic",
+        "error:",
+        "failed",
+    ] {
+        if lower.contains(needle) {
+            return Err(format!(
+                "saved {tool} proof output contains failure marker `{needle}`"
+            ));
+        }
+    }
+    if [
+        "verification:- successful",
+        "verification successful",
+        "verification result: verified",
+        "proof successful",
+        "status: verified",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+    {
+        Ok(())
+    } else {
+        Err(format!(
+            "saved {tool} proof output must contain a verification success marker"
+        ))
+    }
 }
 
 fn validate_sanitizer_success_output(output: &str, tool: &str) -> Result<(), String> {
@@ -845,6 +945,137 @@ mod tests {
                 .err()
                 .unwrap_or_default()
                 .contains("concurrency receipt command")
+        );
+    }
+
+    #[test]
+    fn proof_receipt_from_saved_output_uses_ran_strength_without_site_reach() -> Result<(), String>
+    {
+        let receipt = WitnessReceipt::from_proof_output(ProofReceiptInput {
+            card_id:
+                "UR-transmute-invalid-value-src-lib-rs-byte-to-bool-operation-transmute-u8-bool-bdefdb7b6120-invalid_value-c1"
+                    .to_string(),
+            tool: "kani".to_string(),
+            output:
+                "Kani Rust Verifier\nVERIFICATION:- SUCCESSFUL\nVerification result: verified\n"
+                    .to_string(),
+            author: "core/fixtures".to_string(),
+            recorded_at: "2026-05-18T00:00:00Z".to_string(),
+            expires_at: "2026-08-18".to_string(),
+            command: "cargo kani --harness byte_to_bool_harness".to_string(),
+            limitations: vec!["fixture only".to_string()],
+        })?;
+
+        assert_eq!(receipt.tool, "kani");
+        assert_eq!(receipt.strength, "ran");
+        assert_eq!(
+            receipt.summary.as_deref(),
+            Some("saved kani proof output reported verification success")
+        );
+        let limitations = receipt.limitations.as_ref().ok_or("missing limitations")?;
+        assert!(
+            limitations
+                .iter()
+                .any(|item| item.contains("unsafe-review did not run a proof tool"))
+        );
+        assert!(
+            limitations
+                .iter()
+                .any(|item| item.contains("site reach is not claimed"))
+        );
+        assert!(
+            limitations
+                .iter()
+                .any(|item| item.contains("recorded harness/output"))
+        );
+        assert!(limitations.iter().any(|item| item == "fixture only"));
+        Ok(())
+    }
+
+    #[test]
+    fn proof_receipt_from_saved_output_accepts_crux_success_marker() -> Result<(), String> {
+        let receipt = WitnessReceipt::from_proof_output(ProofReceiptInput {
+            card_id:
+                "UR-transmute-invalid-value-src-lib-rs-byte-to-bool-operation-transmute-u8-bool-bdefdb7b6120-invalid_value-c1"
+                    .to_string(),
+            tool: "crux".to_string(),
+            output: "Crux verification\nStatus: Verified\n".to_string(),
+            author: "core/fixtures".to_string(),
+            recorded_at: "2026-05-18T00:00:00Z".to_string(),
+            expires_at: "2026-08-18".to_string(),
+            command: "crux prove byte_to_bool".to_string(),
+            limitations: Vec::new(),
+        })?;
+
+        assert_eq!(receipt.tool, "crux");
+        assert_eq!(
+            receipt.summary.as_deref(),
+            Some("saved crux proof output reported verification success")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn proof_receipt_from_saved_output_rejects_unsupported_tool() {
+        let result = WitnessReceipt::from_proof_output(ProofReceiptInput {
+            card_id:
+                "UR-transmute-invalid-value-src-lib-rs-byte-to-bool-operation-transmute-u8-bool-bdefdb7b6120-invalid_value-c1"
+                    .to_string(),
+            tool: "prusti".to_string(),
+            output: "VERIFICATION:- SUCCESSFUL\n".to_string(),
+            author: "core/fixtures".to_string(),
+            recorded_at: "2026-05-18T00:00:00Z".to_string(),
+            expires_at: "2026-08-18".to_string(),
+            command: "cargo kani --harness byte_to_bool_harness".to_string(),
+            limitations: Vec::new(),
+        });
+
+        assert!(
+            result
+                .err()
+                .unwrap_or_default()
+                .contains("proof receipt tool")
+        );
+    }
+
+    #[test]
+    fn proof_receipt_from_saved_output_rejects_failure_markers() {
+        let result = WitnessReceipt::from_proof_output(ProofReceiptInput {
+            card_id:
+                "UR-transmute-invalid-value-src-lib-rs-byte-to-bool-operation-transmute-u8-bool-bdefdb7b6120-invalid_value-c1"
+                    .to_string(),
+            tool: "kani".to_string(),
+            output: "VERIFICATION:- FAILED\nCounterexample generated\n".to_string(),
+            author: "core/fixtures".to_string(),
+            recorded_at: "2026-05-18T00:00:00Z".to_string(),
+            expires_at: "2026-08-18".to_string(),
+            command: "cargo kani --harness byte_to_bool_harness".to_string(),
+            limitations: Vec::new(),
+        });
+
+        assert!(result.err().unwrap_or_default().contains("failure marker"));
+    }
+
+    #[test]
+    fn proof_receipt_from_saved_output_requires_proof_command() {
+        let result = WitnessReceipt::from_proof_output(ProofReceiptInput {
+            card_id:
+                "UR-transmute-invalid-value-src-lib-rs-byte-to-bool-operation-transmute-u8-bool-bdefdb7b6120-invalid_value-c1"
+                    .to_string(),
+            tool: "kani".to_string(),
+            output: "VERIFICATION:- SUCCESSFUL\n".to_string(),
+            author: "core/fixtures".to_string(),
+            recorded_at: "2026-05-18T00:00:00Z".to_string(),
+            expires_at: "2026-08-18".to_string(),
+            command: "cargo test byte_to_bool".to_string(),
+            limitations: Vec::new(),
+        });
+
+        assert!(
+            result
+                .err()
+                .unwrap_or_default()
+                .contains("proof receipt command")
         );
     }
 
