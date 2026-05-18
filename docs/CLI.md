@@ -113,6 +113,7 @@ Repo mode scans the workspace and reports static open unsafe-review gaps:
 
 ```bash
 unsafe-review repo --format json
+unsafe-review repo --format markdown --out target/unsafe-review/repo-posture.md
 ```
 
 Badge JSON reports open review gaps, not raw unsafe usage and not safety status:

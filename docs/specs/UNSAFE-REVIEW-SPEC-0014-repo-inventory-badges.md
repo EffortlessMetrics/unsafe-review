@@ -13,8 +13,8 @@ Linked plan: ../../plans/0.1.0/implementation-plan.md
 ## Behavior
 
 Repo mode is a static posture snapshot projected from `ReviewCard`s. It reports
-repo-scope summary counts, card JSON, advisory policy, and the static-review
-trust boundary.
+repo-scope summary counts, card JSON, Markdown posture reports, advisory policy,
+and the static-review trust boundary.
 
 Badge JSON is a small open-gap summary for shields-compatible consumers:
 
@@ -63,6 +63,8 @@ separate policy surfaces and are not part of badge proof.
 
 - Repo JSON for a fixture reports `scope = repo`, advisory policy, open-gap
   counts, cards, and the trust boundary.
+- Repo Markdown for a fixture reports repo posture, summary counts, top card
+  classes, operation families, witness routes, cards, and the trust boundary.
 - Badge JSON for a fixture reports open unsafe-review gaps rather than raw
   unsafe count or safe/unsafe status.
 - Outcome comparison between a no-card snapshot and a one-card snapshot reports
