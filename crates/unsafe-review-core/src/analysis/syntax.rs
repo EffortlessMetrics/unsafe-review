@@ -95,6 +95,7 @@ fn text_size_to_usize(size: ra_ap_syntax::TextSize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     #[test]
     fn parses_complete_rust_source_without_errors() {
@@ -134,5 +135,45 @@ mod tests {
 
         assert!(!parsed.parse_errors.is_empty());
         assert!(parsed.nodes.iter().any(|node| node.kind == "SOURCE_FILE"));
+    }
+
+    proptest! {
+        #[test]
+        fn generated_safe_functions_parse_without_errors(
+            name in "[a-z][a-z0-9_]{0,24}",
+            value in 0u32..10_000,
+        ) {
+            let source = format!("pub fn {name}() -> u32 {{\n    {value}\n}}\n");
+            let parsed = parse_source(source.clone());
+
+            prop_assert!(parsed.parse_errors.is_empty());
+            prop_assert_eq!(parsed.text, source);
+            let found_function = parsed
+                .nodes
+                .iter()
+                .any(|node| node.kind == "FN" && node.snippet.contains(&format!("fn {name}")));
+            prop_assert!(found_function);
+        }
+
+        #[test]
+        fn node_snippets_match_their_byte_ranges(
+            prefix in "[a-z_]{0,16}",
+            value in 0u8..=u8::MAX,
+        ) {
+            let source = format!(
+                "fn generated() {{\n    let {prefix}_value = {value};\n    unsafe {{ core::ptr::read(0 as *const u8); }}\n}}\n"
+            );
+            let parsed = parse_source(source.clone());
+
+            for node in parsed.nodes {
+                prop_assert!(node.start <= node.end);
+                prop_assert!(node.end <= source.len());
+                let Some(expected) = source.get(node.start..node.end) else {
+                    prop_assert!(false, "node range must be on UTF-8 boundaries");
+                    continue;
+                };
+                prop_assert_eq!(node.snippet, expected);
+            }
+        }
     }
 }
