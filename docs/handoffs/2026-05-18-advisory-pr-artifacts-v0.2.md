@@ -23,14 +23,21 @@ The lane now has:
 - raw pointer assignment-write fixture coverage
 - minimal CI hardening for locked checks, docs build, read-only checkout
   credentials, PR-run cancellation, manual dispatch, and job timeout
+- in-workflow advisory artifact contract verification before upload
 
-The workflow uploads:
+The workflow renders and verifies these artifacts before upload:
 
 ```text
 target/unsafe-review/cards.json
 target/unsafe-review/pr-summary.md
 target/unsafe-review/cards.sarif
 target/unsafe-review/comment-plan.json
+```
+
+The verifier command is:
+
+```bash
+cargo run --locked -p xtask -- check-advisory-artifacts target/unsafe-review
 ```
 
 ## Proof
@@ -55,6 +62,7 @@ rtk cargo test -p unsafe-review-core pr_summary
 rtk cargo test -p unsafe-review-core sarif
 rtk cargo test -p unsafe-review-core comment_plan
 rtk cargo test -p unsafe-review --test e2e
+rtk cargo run --locked -p xtask -- check-advisory-artifacts target/unsafe-review
 ```
 
 The CI workflow now also runs a docs build:
