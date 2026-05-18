@@ -1509,6 +1509,9 @@ The repo may claim:
   in function signatures
 - doc-comment `Safety:` prose counts as safety contract evidence for public
   unsafe API declarations
+- local `Safety:` line comments count as contract evidence for nearby unsafe
+  operations, matching common Rust style without treating the comment as guard
+  evidence
 - inline unsafe blocks with concrete same-line raw pointer operations are
   deduped instead of emitting generic unknown wrapper cards
 - `ptr::drop_in_place` is modeled as a fixture-backed drop/deallocation
@@ -1631,10 +1634,12 @@ The repo may claim:
 - one capped `tokio-rs/mio` repo snapshot completed with 50 cards across 80
   Rust files, adding dogfood for unsafe function call contracts, `Vec::set_len`,
   zeroed values, pointer operations, and unsafe Send/Sync route cards
-- one PR-diff dogfood pass on `tokio-rs/mio#1388` completed with 18
-  contract-missing cards across six changed Rust files, adding focused coverage
-  for socket-address layout conversions, `mem::zeroed`, raw pointer writes, raw
-  pointer dereferences, and unsafe function call contract prompts
+- one PR-diff dogfood pass on `tokio-rs/mio#1388` completed with 18 cards
+  across six changed Rust files. A follow-up local `Safety:` comment evidence
+  fix moved eight cards from `contract_missing` to `guard_missing`, adding
+  focused coverage for socket-address layout conversions, `mem::zeroed`, raw
+  pointer writes, raw pointer dereferences, and unsafe function call contract
+  prompts without discharging guard or witness evidence.
 - one PR-diff dogfood pass on `bluss/arrayvec#137` completed with 15
   contract-missing cards across three changed Rust files, adding focused
   coverage for raw pointer accessor soundness fixes, raw pointer reads/writes,
@@ -1685,6 +1690,9 @@ The repo must not claim:
   contract evidence and len/capacity equality assertions can discharge raw-read
   bounds evidence, but the safe wrapper and the other raw pointer read
   obligations still need separate contract/discharge evidence.
+- `mio#1388` shows local `Safety:` line comments can satisfy nearby operation
+  contract evidence, but those comments do not discharge local guard evidence or
+  prove witness execution.
 - Public unsafe API declarations with recognized `# Safety` or doc-comment
   `Safety:` docs no longer ask for local declaration guards, but static reach
   remains a heuristic name search.
