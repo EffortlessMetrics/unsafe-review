@@ -221,7 +221,7 @@ fn parse_receipt(args: Vec<String>) -> Result<Command, String> {
     let mut rest = args;
     let Some(subcommand) = rest.first() else {
         return Err(
-            "missing receipt subcommand `import-miri`, `import-careful`, `import-sanitizer`, `template`, or `validate`"
+            "missing receipt subcommand `import-miri`, `import-careful`, `import-sanitizer`, `import-concurrency`, `template`, or `validate`"
                 .to_string(),
         );
     };
@@ -237,6 +237,8 @@ fn parse_receipt(args: Vec<String>) -> Result<Command, String> {
         }
         "import-sanitizer" => parse_saved_output_receipt(rest, "import-sanitizer", true)
             .map(Command::ReceiptImportSanitizer),
+        "import-concurrency" => parse_saved_output_receipt(rest, "import-concurrency", true)
+            .map(Command::ReceiptImportConcurrency),
         "template" => parse_receipt_template(rest).map(Command::ReceiptTemplate),
         "validate" => parse_receipt_validate(rest),
         other => Err(format!("unknown receipt subcommand `{other}`")),
@@ -967,6 +969,52 @@ mod tests {
     }
 
     #[test]
+    fn parses_receipt_import_concurrency_command() -> Result<(), String> {
+        let command = parse(args([
+            "unsafe-review",
+            "receipt",
+            "import-concurrency",
+            "UR-unsafe-impl-send-src-lib-rs-sharedcell-unsafe_impl_send-unsafe_impl_send_sync-unsafe-impl-send-sync-e915d3491163-send_sync_invariant-c1",
+            "--tool",
+            "loom",
+            "--log",
+            "fixtures/unsafe_impl_send/loom.success.log",
+            "--author",
+            "core/fixtures",
+            "--recorded-at",
+            "2026-05-18T00:00:00Z",
+            "--expires-at",
+            "2026-08-18",
+            "--command",
+            "cargo test shared_cell_loom -- --nocapture",
+            "--limitation",
+            "fixture only",
+            "--out",
+            "target/loom.json",
+        ]))?;
+
+        let Command::ReceiptImportConcurrency(options) = command else {
+            return Err("expected receipt import-concurrency command".to_string());
+        };
+        assert_eq!(
+            options.card_id,
+            "UR-unsafe-impl-send-src-lib-rs-sharedcell-unsafe_impl_send-unsafe_impl_send_sync-unsafe-impl-send-sync-e915d3491163-send_sync_invariant-c1"
+        );
+        assert_eq!(options.tool.as_deref(), Some("loom"));
+        assert_eq!(
+            options.log,
+            PathBuf::from("fixtures/unsafe_impl_send/loom.success.log")
+        );
+        assert_eq!(options.author, "core/fixtures");
+        assert_eq!(
+            options.command,
+            "cargo test shared_cell_loom -- --nocapture"
+        );
+        assert_eq!(options.limitations, vec!["fixture only".to_string()]);
+        Ok(())
+    }
+
+    #[test]
     fn receipt_import_miri_requires_command() {
         let command = parse(args([
             "unsafe-review",
@@ -1023,6 +1071,28 @@ mod tests {
             "2026-08-18",
             "--command",
             "RUSTFLAGS='-Z sanitizer=address' cargo +nightly test read_header",
+        ]));
+
+        assert_eq!(command, Err("missing value for --tool".to_string()));
+    }
+
+    #[test]
+    fn receipt_import_concurrency_requires_tool() {
+        let command = parse(args([
+            "unsafe-review",
+            "receipt",
+            "import-concurrency",
+            "UR-unsafe-impl-send-src-lib-rs-sharedcell-unsafe_impl_send-unsafe_impl_send_sync-unsafe-impl-send-sync-e915d3491163-send_sync_invariant-c1",
+            "--log",
+            "loom.log",
+            "--author",
+            "core/fixtures",
+            "--recorded-at",
+            "2026-05-18T00:00:00Z",
+            "--expires-at",
+            "2026-08-18",
+            "--command",
+            "cargo test shared_cell_loom -- --nocapture",
         ]));
 
         assert_eq!(command, Err("missing value for --tool".to_string()));

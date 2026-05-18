@@ -554,6 +554,68 @@ fn receipt_import_sanitizer_writes_receipt_from_saved_success_log() -> Result<()
 }
 
 #[test]
+fn receipt_import_concurrency_writes_receipt_from_saved_success_log() -> Result<(), Box<dyn Error>>
+{
+    let fixture = fixture_root("unsafe_impl_send");
+    let temp = TempDir::new("unsafe-review-concurrency-receipt-e2e")?;
+    let receipt_path = temp.path().join("loom.json");
+    let card_id = "UR-unsafe-impl-send-src-lib-rs-sharedcell-unsafe_impl_send-unsafe_impl_send_sync-unsafe-impl-send-sync-e915d3491163-send_sync_invariant-c1";
+
+    let output = run_success([
+        os("receipt"),
+        os("import-concurrency"),
+        os(card_id),
+        os("--tool"),
+        os("loom"),
+        os("--log"),
+        fixture.join("loom.success.log").into_os_string(),
+        os("--author"),
+        os("core/fixtures"),
+        os("--recorded-at"),
+        os("2026-05-18T00:00:00Z"),
+        os("--expires-at"),
+        os("2026-08-18"),
+        os("--command"),
+        os("cargo test shared_cell_loom -- --nocapture"),
+        os("--limitation"),
+        os("fixture only"),
+        os("--out"),
+        receipt_path.as_os_str().to_os_string(),
+    ])?;
+
+    assert_eq!(stdout_text(&output)?.trim(), "");
+    let receipt = parse_json(&fs::read_to_string(receipt_path)?)?;
+    assert_eq!(receipt["schema_version"], "0.1");
+    assert_eq!(receipt["card_id"], card_id);
+    assert_eq!(receipt["tool"], "loom");
+    assert_eq!(receipt["strength"], "ran");
+    assert_eq!(
+        receipt["summary"],
+        "saved loom output reported `test result: ok`"
+    );
+    assert_eq!(
+        receipt["command"],
+        "cargo test shared_cell_loom -- --nocapture"
+    );
+    let limitations = receipt["limitations"]
+        .as_array()
+        .ok_or("receipt limitations should be an array")?;
+    assert!(limitations.iter().any(|item| {
+        item.as_str()
+            .unwrap_or("")
+            .contains("unsafe-review did not run a concurrency witness")
+    }));
+    assert!(limitations.iter().any(|item| {
+        item.as_str()
+            .unwrap_or("")
+            .contains("site reach is not claimed")
+    }));
+    assert!(limitations.iter().any(|item| item == "fixture only"));
+
+    Ok(())
+}
+
+#[test]
 fn no_new_debt_policy_fails_only_for_unbaselined_actionable_gaps() -> Result<(), Box<dyn Error>> {
     let fixture = fixture_root("raw_pointer_alignment");
     let failing = run_failure([

@@ -219,6 +219,27 @@ only when the output contains `test result: ok` and no failure marker. It does
 not run a sanitizer, parse sanitizer diagnostics into cards, or claim site
 reach.
 
+Import a receipt from saved Loom or Shuttle output after the concurrency witness
+run happened outside `unsafe-review`:
+
+```bash
+unsafe-review receipt import-concurrency <card-id> \
+  --tool loom \
+  --log target/loom-shared-cell.log \
+  --author core/fixtures \
+  --recorded-at 2026-05-18T00:00:00Z \
+  --expires-at 2026-08-18 \
+  --command "cargo test shared_cell_loom -- --nocapture" \
+  --limitation "fixture only" \
+  --out .unsafe-review/receipts/loom.json
+```
+
+The concurrency adapter accepts `loom` or `shuttle` as the explicit receipt
+tool. It reads saved output and writes a receipt with `strength = "ran"` only
+when the output contains `test result: ok` and no failure marker. It does not
+run Loom or Shuttle, infer site reach, or claim that all scheduler interleavings
+or callers are covered.
+
 Validate imported receipt files without running analysis:
 
 ```bash

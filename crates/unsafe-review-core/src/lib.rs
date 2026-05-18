@@ -19,9 +19,9 @@ pub use api::{
     validate_witness_receipts,
 };
 pub use domain::{
-    CardId, CargoCarefulReceiptInput, Confidence, ContractEvidence, DischargeEvidence, HazardKind,
-    MiriReceiptInput, MissingEvidence, NextAction, Priority, ReachEvidence, RelatedTest,
-    ReviewCard, ReviewClass, SafetyObligation, SanitizerReceiptInput, SourceLocation,
-    UnsafeOperation, UnsafeSite, WITNESS_RECEIPT_SCHEMA_VERSION, WitnessEvidence, WitnessKind,
-    WitnessReceipt, WitnessRoute,
+    CardId, CargoCarefulReceiptInput, ConcurrencyReceiptInput, Confidence, ContractEvidence,
+    DischargeEvidence, HazardKind, MiriReceiptInput, MissingEvidence, NextAction, Priority,
+    ReachEvidence, RelatedTest, ReviewCard, ReviewClass, SafetyObligation, SanitizerReceiptInput,
+    SourceLocation, UnsafeOperation, UnsafeSite, WITNESS_RECEIPT_SCHEMA_VERSION, WitnessEvidence,
+    WitnessKind, WitnessReceipt, WitnessRoute,
 };
