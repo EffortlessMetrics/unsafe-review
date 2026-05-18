@@ -35,6 +35,9 @@ fn parse_doctor(args: Vec<String>) -> Result<Command, String> {
                 idx += 1;
                 root = PathBuf::from(value(&args, idx, "--root")?);
             }
+            arg if arg.starts_with("--root=") => {
+                root = PathBuf::from(inline_value(arg, "--root")?);
+            }
             other => return Err(format!("unknown doctor argument `{other}`")),
         }
         idx += 1;
@@ -51,17 +54,29 @@ fn parse_check(args: Vec<String>) -> Result<CheckOptions, String> {
                 idx += 1;
                 options.root = PathBuf::from(value(&args, idx, "--root")?);
             }
+            arg if arg.starts_with("--root=") => {
+                options.root = PathBuf::from(inline_value(arg, "--root")?);
+            }
             "--base" => {
                 idx += 1;
                 options.base = Some(value(&args, idx, "--base")?.to_string());
+            }
+            arg if arg.starts_with("--base=") => {
+                options.base = Some(inline_value(arg, "--base")?.to_string());
             }
             "--diff" => {
                 idx += 1;
                 options.diff = Some(parse_diff_input(value(&args, idx, "--diff")?));
             }
+            arg if arg.starts_with("--diff=") => {
+                options.diff = Some(parse_diff_input(inline_value(arg, "--diff")?));
+            }
             "--format" => {
                 idx += 1;
                 options.format = parse_format(value(&args, idx, "--format")?)?;
+            }
+            arg if arg.starts_with("--format=") => {
+                options.format = parse_format(inline_value(arg, "--format")?)?;
             }
             "--json" => options.format = Format::Json,
             "--markdown" => options.format = Format::Markdown,
@@ -69,13 +84,15 @@ fn parse_check(args: Vec<String>) -> Result<CheckOptions, String> {
                 idx += 1;
                 options.out = Some(PathBuf::from(value(&args, idx, "--out")?));
             }
+            arg if arg.starts_with("--out=") => {
+                options.out = Some(PathBuf::from(inline_value(arg, "--out")?));
+            }
             "--max-cards" => {
                 idx += 1;
-                let raw = value(&args, idx, "--max-cards")?;
-                options.max_cards = Some(
-                    raw.parse::<usize>()
-                        .map_err(|err| format!("invalid --max-cards `{raw}`: {err}"))?,
-                );
+                options.max_cards = Some(parse_max_cards(value(&args, idx, "--max-cards")?)?);
+            }
+            arg if arg.starts_with("--max-cards=") => {
+                options.max_cards = Some(parse_max_cards(inline_value(arg, "--max-cards")?)?);
             }
             other => return Err(format!("unknown argument `{other}`")),
         }
@@ -95,9 +112,15 @@ fn parse_badges(args: Vec<String>) -> Result<Command, String> {
                 idx += 1;
                 root = PathBuf::from(value(&args, idx, "--root")?);
             }
+            arg if arg.starts_with("--root=") => {
+                root = PathBuf::from(inline_value(arg, "--root")?);
+            }
             "--out" => {
                 idx += 1;
                 out = PathBuf::from(value(&args, idx, "--out")?);
+            }
+            arg if arg.starts_with("--out=") => {
+                out = PathBuf::from(inline_value(arg, "--out")?);
             }
             other => return Err(format!("unknown badges argument `{other}`")),
         }
@@ -117,9 +140,15 @@ fn parse_explain(args: Vec<String>) -> Result<Command, String> {
                 idx += 1;
                 root = PathBuf::from(value(&args, idx, "--root")?);
             }
+            arg if arg.starts_with("--root=") => {
+                root = PathBuf::from(inline_value(arg, "--root")?);
+            }
             "--format" => {
                 idx += 1;
                 format = parse_format(value(&args, idx, "--format")?)?;
+            }
+            arg if arg.starts_with("--format=") => {
+                format = parse_format(inline_value(arg, "--format")?)?;
             }
             "--json" => format = Format::Json,
             "--markdown" => format = Format::Markdown,
@@ -147,11 +176,19 @@ fn parse_context(args: Vec<String>) -> Result<Command, String> {
                 idx += 1;
                 root = PathBuf::from(value(&args, idx, "--root")?);
             }
+            arg if arg.starts_with("--root=") => {
+                root = PathBuf::from(inline_value(arg, "--root")?);
+            }
             "--json" => {}
             "--format" => {
                 idx += 1;
                 let raw = value(&args, idx, "--format")?;
                 if parse_format(raw)? != Format::Json {
+                    return Err("context only supports json output".to_string());
+                }
+            }
+            arg if arg.starts_with("--format=") => {
+                if parse_format(inline_value(arg, "--format")?)? != Format::Json {
                     return Err("context only supports json output".to_string());
                 }
             }
@@ -190,6 +227,11 @@ fn set_card_id(id: &mut Option<String>, value: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn parse_max_cards(raw: &str) -> Result<usize, String> {
+    raw.parse::<usize>()
+        .map_err(|err| format!("invalid --max-cards `{raw}`: {err}"))
+}
+
 fn parse_format(raw: &str) -> Result<Format, String> {
     match raw {
         "human" => Ok(Format::Human),
@@ -203,9 +245,26 @@ fn parse_format(raw: &str) -> Result<Format, String> {
 }
 
 fn value<'a>(args: &'a [String], idx: usize, flag: &str) -> Result<&'a str, String> {
-    args.get(idx)
-        .map(|value| value.as_str())
-        .ok_or_else(|| format!("missing value for {flag}"))
+    let Some(value) = args.get(idx).map(|value| value.as_str()) else {
+        return Err(format!("missing value for {flag}"));
+    };
+    if value != "-" && value.starts_with('-') {
+        return Err(format!("missing value for {flag}"));
+    }
+    Ok(value)
+}
+
+fn inline_value<'a>(arg: &'a str, flag: &str) -> Result<&'a str, String> {
+    let Some(value) = arg
+        .strip_prefix(flag)
+        .and_then(|rest| rest.strip_prefix('='))
+    else {
+        return Err(format!("missing value for {flag}"));
+    };
+    if value.is_empty() {
+        return Err(format!("missing value for {flag}"));
+    }
+    Ok(value)
 }
 
 #[cfg(test)]
@@ -258,6 +317,32 @@ mod tests {
     }
 
     #[test]
+    fn parses_equals_style_artifact_flags_for_check() -> Result<(), String> {
+        let command = parse(args([
+            "unsafe-review",
+            "check",
+            "--root=fixtures/raw_pointer_deref",
+            "--diff=-",
+            "--format=sarif",
+            "--out=target/unsafe-review/cards.sarif",
+            "--max-cards=7",
+        ]))?;
+        let Command::Check(options) = command else {
+            return Err("expected check command".to_string());
+        };
+
+        assert_eq!(options.root, PathBuf::from("fixtures/raw_pointer_deref"));
+        assert_eq!(options.diff, Some(DiffInput::Stdin));
+        assert_eq!(options.format, Format::Sarif);
+        assert_eq!(
+            options.out,
+            Some(PathBuf::from("target/unsafe-review/cards.sarif"))
+        );
+        assert_eq!(options.max_cards, Some(7));
+        Ok(())
+    }
+
+    #[test]
     fn parses_stdin_diff_for_check() -> Result<(), String> {
         let command = parse(args(["unsafe-review", "check", "--diff", "-", "--json"]))?;
         let Command::Check(options) = command else {
@@ -287,6 +372,15 @@ mod tests {
     }
 
     #[test]
+    fn rejects_missing_values_when_next_argument_is_a_flag() {
+        let diff = parse(args(["unsafe-review", "check", "--diff", "--json"]));
+        let format = parse(args(["unsafe-review", "check", "--format", "--out"]));
+
+        assert_eq!(diff, Err("missing value for --diff".to_string()));
+        assert_eq!(format, Err("missing value for --format".to_string()));
+    }
+
+    #[test]
     fn parses_context_json_alias() -> Result<(), String> {
         let command = parse(args(["unsafe-review", "context", "--json", "UR-card"]))?;
 
@@ -295,6 +389,67 @@ mod tests {
             Command::Context {
                 root: PathBuf::from("."),
                 id: "UR-card".to_string()
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn parses_equals_style_explain_and_context_flags() -> Result<(), String> {
+        let explain = parse(args([
+            "unsafe-review",
+            "explain",
+            "--root=fixtures/raw_pointer_deref",
+            "--format=json",
+            "UR-card",
+        ]))?;
+        assert_eq!(
+            explain,
+            Command::Explain {
+                root: PathBuf::from("fixtures/raw_pointer_deref"),
+                id: "UR-card".to_string(),
+                format: Format::Json,
+            }
+        );
+
+        let context = parse(args([
+            "unsafe-review",
+            "context",
+            "--root=fixtures/raw_pointer_deref",
+            "--format=json",
+            "UR-card",
+        ]))?;
+        assert_eq!(
+            context,
+            Command::Context {
+                root: PathBuf::from("fixtures/raw_pointer_deref"),
+                id: "UR-card".to_string(),
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn parses_equals_style_doctor_and_badges_flags() -> Result<(), String> {
+        let doctor = parse(args(["unsafe-review", "doctor", "--root=fixtures"]))?;
+        assert_eq!(
+            doctor,
+            Command::Doctor {
+                root: PathBuf::from("fixtures"),
+            }
+        );
+
+        let badges = parse(args([
+            "unsafe-review",
+            "badges",
+            "--root=fixtures",
+            "--out=target/badges",
+        ]))?;
+        assert_eq!(
+            badges,
+            Command::Badges {
+                root: PathBuf::from("fixtures"),
+                out: PathBuf::from("target/badges"),
             }
         );
         Ok(())
