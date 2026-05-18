@@ -13,3 +13,33 @@ pub(crate) fn slug(value: &str) -> String {
     }
     out.trim_matches('-').to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+    use std::path::PathBuf;
+
+    proptest! {
+        #[test]
+        fn slug_outputs_are_stable_ascii_tokens(input in "\\PC{0,256}") {
+            let slugged = slug(&input);
+
+            prop_assert_eq!(slug(&slugged), slugged.clone());
+            prop_assert!(!slugged.starts_with('-'));
+            prop_assert!(!slugged.ends_with('-'));
+            prop_assert!(!slugged.contains("--"));
+            prop_assert!(slugged
+                .chars()
+                .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-'));
+        }
+
+        #[test]
+        fn path_display_normalizes_backslashes(input in "[[:alnum:]_./\\\\ -]{0,256}") {
+            let path = PathBuf::from(input);
+            let displayed = path_display(&path);
+
+            prop_assert!(!displayed.contains('\\'));
+        }
+    }
+}
