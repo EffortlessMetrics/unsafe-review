@@ -29,6 +29,11 @@ pub(crate) fn scan_file(
     } else {
         Vec::new()
     };
+    let syntax_operation_lines = syntax_sites
+        .iter()
+        .filter(|site| site.kind == UnsafeSiteKind::Operation)
+        .map(|site| site.line)
+        .collect::<BTreeSet<_>>();
     let mut out = Vec::new();
     let mut seen = BTreeSet::new();
     for (idx, raw) in lines.iter().enumerate() {
@@ -40,6 +45,12 @@ pub(crate) fn scan_file(
         let Some((kind, family)) = detect_site(trimmed) else {
             continue;
         };
+        if kind == UnsafeSiteKind::UnsafeBlock
+            && family == OperationFamily::Unknown
+            && syntax_operation_lines.contains(&line_no)
+        {
+            continue;
+        }
         seen.insert(site_key(line_no, &kind, &family));
         let changed = diff.is_none_or(|d| repo_mode || d.contains_near(rel, line_no));
         if !changed && !repo_mode {
@@ -249,8 +260,12 @@ struct DetectedSyntaxSite {
 
 fn detect_syntax_sites(parsed: &ParsedSource) -> Vec<DetectedSyntaxSite> {
     let mut sites = Vec::new();
+    let unsafe_block_ranges = unsafe_block_ranges(parsed);
+    let operation_block_ranges = operation_block_ranges(parsed, &unsafe_block_ranges);
     for fact in &parsed.nodes {
-        let Some((kind, family)) = detect_syntax_site(fact) else {
+        let Some((kind, family)) =
+            detect_syntax_site(fact, &unsafe_block_ranges, &operation_block_ranges)
+        else {
             continue;
         };
         let _span_len = fact.end.saturating_sub(fact.start);
@@ -272,7 +287,11 @@ fn detect_syntax_sites(parsed: &ParsedSource) -> Vec<DetectedSyntaxSite> {
     sites
 }
 
-fn detect_syntax_site(fact: &SyntaxNodeFact) -> Option<(UnsafeSiteKind, OperationFamily)> {
+fn detect_syntax_site(
+    fact: &SyntaxNodeFact,
+    unsafe_block_ranges: &[(usize, usize)],
+    operation_block_ranges: &BTreeSet<(usize, usize)>,
+) -> Option<(UnsafeSiteKind, OperationFamily)> {
     let compact = compact_whitespace(&fact.snippet);
     match fact.kind.as_str() {
         "FN" if compact.contains("unsafe fn") => {
@@ -298,8 +317,16 @@ fn detect_syntax_site(fact: &SyntaxNodeFact) -> Option<(UnsafeSiteKind, Operatio
         "STATIC" if compact.contains("static mut") => {
             Some((UnsafeSiteKind::StaticMut, OperationFamily::StaticMut))
         }
-        "BLOCK_EXPR" if is_unknown_unsafe_block(&compact) => {
+        "BLOCK_EXPR"
+            if is_unknown_unsafe_block(&compact)
+                && !operation_block_ranges.contains(&(fact.start, fact.end)) =>
+        {
             Some((UnsafeSiteKind::UnsafeBlock, OperationFamily::Unknown))
+        }
+        "PREFIX_EXPR"
+            if is_raw_pointer_deref(&compact) && is_inside_range(fact, unsafe_block_ranges) =>
+        {
+            Some((UnsafeSiteKind::Operation, OperationFamily::RawPointerDeref))
         }
         "CALL_EXPR" | "METHOD_CALL_EXPR" | "MACRO_EXPR" => detect_site(&compact),
         _ => None,
@@ -330,6 +357,48 @@ fn is_unknown_unsafe_block(compact: &str) -> bool {
             detect_site(compact),
             Some((UnsafeSiteKind::Operation, _family))
         )
+}
+
+fn is_raw_pointer_deref(compact: &str) -> bool {
+    compact.starts_with('*') && !compact.starts_with("**")
+}
+
+fn unsafe_block_ranges(parsed: &ParsedSource) -> Vec<(usize, usize)> {
+    parsed
+        .nodes
+        .iter()
+        .filter(|fact| {
+            fact.kind == "BLOCK_EXPR" && compact_whitespace(&fact.snippet).starts_with("unsafe {")
+        })
+        .map(|fact| (fact.start, fact.end))
+        .collect()
+}
+
+fn operation_block_ranges(
+    parsed: &ParsedSource,
+    unsafe_block_ranges: &[(usize, usize)],
+) -> BTreeSet<(usize, usize)> {
+    parsed
+        .nodes
+        .iter()
+        .filter(|fact| {
+            fact.kind == "PREFIX_EXPR" && is_raw_pointer_deref(&compact_whitespace(&fact.snippet))
+        })
+        .filter_map(|fact| containing_range(fact, unsafe_block_ranges))
+        .collect()
+}
+
+fn containing_range(fact: &SyntaxNodeFact, ranges: &[(usize, usize)]) -> Option<(usize, usize)> {
+    ranges
+        .iter()
+        .copied()
+        .find(|(start, end)| fact.start >= *start && fact.end <= *end)
+}
+
+fn is_inside_range(fact: &SyntaxNodeFact, ranges: &[(usize, usize)]) -> bool {
+    ranges
+        .iter()
+        .any(|(start, end)| fact.start >= *start && fact.end <= *end)
 }
 
 fn compact_whitespace(text: &str) -> String {
