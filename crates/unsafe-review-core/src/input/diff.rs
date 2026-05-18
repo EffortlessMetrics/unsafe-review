@@ -82,3 +82,66 @@ fn parse_new_start(header: &str) -> Option<usize> {
     let start = new.split(',').next()?;
     start.parse::<usize>().ok()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_unified_diff_tracks_new_file_lines_and_skips_deletions() {
+        let diff = r#"diff --git a/src/lib.rs b/src/lib.rs
+index 1111111..2222222 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -8,7 +8,8 @@ fn demo() {
+ context();
+-old_call();
++new_call();
+ unchanged();
++extra_call();
+ tail();
+"#;
+
+        let index = parse_unified_diff(diff);
+        let path = PathBuf::from("src/lib.rs");
+
+        assert!(index.contains_file(&path));
+        assert!(index.changed_lines[&path].contains(&9));
+        assert!(index.changed_lines[&path].contains(&11));
+        assert!(!index.changed_lines[&path].contains(&10));
+        assert!(index.contains_near(&path, 15));
+        assert!(!index.contains_near(&path, 18));
+    }
+
+    #[test]
+    fn parse_unified_diff_keeps_empty_entries_for_changed_files_without_additions() {
+        let diff = r#"diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,2 +1,1 @@
+ fn keep() {}
+-fn removed() {}
+"#;
+
+        let index = parse_unified_diff(diff);
+        let path = PathBuf::from("src/lib.rs");
+
+        assert!(index.contains_file(&path));
+        assert!(index.changed_lines[&path].is_empty());
+        assert!(!index.contains_near(&path, 1));
+    }
+
+    #[test]
+    fn parse_unified_diff_supports_single_line_hunk_headers() {
+        let diff = r#"diff --git a/src/main.rs b/src/main.rs
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -42 +42 @@ fn main() {
++println!("new");
+"#;
+
+        let index = parse_unified_diff(diff);
+
+        assert!(index.changed_lines[&PathBuf::from("src/main.rs")].contains(&42));
+    }
+}
