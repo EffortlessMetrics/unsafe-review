@@ -4,12 +4,16 @@ All tiers describe static review evidence. None means memory-safety proof.
 
 | Capability | Tier | Surface | Proof | Known limits |
 |---|---|---|---|---|
-| Diff unsafe site inventory | scaffold | CLI JSON/human | compile gate and one fixture smoke | source-based, not MIR |
-| Review cards | scaffold | CLI / PR artifacts | fixture golden tests and JSON contract tests | fixture corpus is still small |
-| Contract evidence mining | scaffold | cards / hovers | `# Safety` and `SAFETY:` smoke fixture | comment quality is heuristic |
-| Guard evidence mining | scaffold | cards | raw-pointer alignment golden fixture | obligation-specific patterns are still sparse |
-| Witness routing | scaffold | cards / packets | route-table code smoke | route may be incomplete |
+| Diff unsafe site inventory | experimental | CLI JSON/human | syntax-backed fixture goldens for unsafe blocks, split unsafe blocks, raw pointer operations, and negative safe-code cases | source-based, not MIR |
+| Review-card JSON schema | experimental | CLI JSON | serde-backed DTOs, `schema_version`, and `fixture_card_goldens_match_rendered_json` | fixture corpus is still small; no dogfood receipts yet |
+| Review-card identity | experimental | card `id` | `card_identity` tests cover line drift and duplicate counted identities | baseline and suppression policy do not consume identities yet |
+| Raw pointer card slice | experimental | cards | `raw_pointer_alignment`, `raw_pointer_deref`, `split_raw_pointer_read_call`, `split_unsafe_block`, and safe-reference negative fixtures | source-level review evidence only |
+| Core operation smoke slice | experimental | cards | `maybeuninit_assume_init`, `vec_set_len`, `transmute_invalid_value`, `get_unchecked_mut_bounds`, and `pin_new_unchecked` fixture goldens | curated fixtures, not broad semantic proof |
+| Contract evidence mining | experimental | cards | public unsafe fn/trait fixtures and private helper `SAFETY:` fixture | comment quality is heuristic |
+| Guard evidence mining | experimental | cards | raw-pointer alignment and comment-not-guard fixtures prove bounds evidence does not discharge alignment | obligation-specific patterns are still sparse |
+| Witness routing | experimental | cards | route-table tests plus raw pointer, FFI, unsafe impl Send, Pin, and invalid-value fixture routes | route recommendation only; no witness receipts |
 | Repo inventory | scaffold | repo JSON / badges | compile gate only | badge is not UB-free claim |
+| PR / SARIF projection | planned | PR artifacts | review-card projection fixtures | summary-only first; no default blocking |
 | LSP projection | planned | editor | saved-card fixtures | read-only first |
 | Agent packets | planned | JSON packet | packet schema tests | agents still require review |
 | Receipt import | planned | witness receipts | Miri/careful/sanitizer fixtures | receipt strength must be explicit |
