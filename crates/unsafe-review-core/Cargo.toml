@@ -14,5 +14,9 @@ categories = ["development-tools", "development-tools::testing"]
 name = "unsafe_review_core"
 path = "src/lib.rs"
 
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
 [lints]
 workspace = true

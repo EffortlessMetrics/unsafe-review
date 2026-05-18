@@ -13,6 +13,9 @@ Linked plan: ../../plans/0.1.0/implementation-plan.md
 ## Behavior
 
 ReviewCard is the canonical unit for CLI, PR, SARIF, LSP, badges, and agent packets.
+Machine-readable review-card and agent-packet JSON output is produced through
+serde-backed DTOs so escaping, arrays, and required fields are parser-checked rather
+than hand-rendered strings.
 
 ## Non-goals
 

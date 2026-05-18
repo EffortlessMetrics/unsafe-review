@@ -5,7 +5,7 @@ All tiers describe static review evidence. None means memory-safety proof.
 | Capability | Tier | Surface | Proof | Known limits |
 |---|---|---|---|---|
 | Diff unsafe site inventory | scaffold | CLI JSON/human | compile gate and one fixture smoke | source-based, not MIR |
-| Review cards | scaffold | CLI / PR artifacts | raw-pointer fixture smoke | schema and golden checks are planned |
+| Review cards | scaffold | CLI / PR artifacts | raw-pointer fixture smoke and JSON contract tests | golden fixtures are planned |
 | Contract evidence mining | scaffold | cards / hovers | `# Safety` and `SAFETY:` smoke fixture | comment quality is heuristic |
 | Guard evidence mining | scaffold | cards | raw-pointer alignment smoke fixture | card-wide evidence; obligation-level evidence is planned |
 | Witness routing | scaffold | cards / packets | route-table code smoke | route may be incomplete |
