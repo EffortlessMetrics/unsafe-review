@@ -4,5 +4,6 @@ pub(crate) mod human;
 pub(crate) mod json;
 pub(crate) mod lsp;
 pub(crate) mod markdown;
+pub(crate) mod outcome;
 pub(crate) mod sarif;
 pub(crate) mod witness_plan;

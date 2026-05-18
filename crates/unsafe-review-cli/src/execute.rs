@@ -1,5 +1,6 @@
 use crate::command::{
-    CheckOptions, Command, DiffInput, Format, ReceiptTemplateOptions, SavedOutputReceiptOptions,
+    CheckOptions, Command, DiffInput, Format, OutcomeOptions, ReceiptTemplateOptions,
+    SavedOutputReceiptOptions,
 };
 use std::fs;
 use std::io::{self, Read};
@@ -8,9 +9,10 @@ use std::process::Command as ProcessCommand;
 use unsafe_review_core::{
     AnalysisMode, AnalyzeInput, CardId, CargoCarefulReceiptInput, ConcurrencyReceiptInput,
     DiffSource, MiriReceiptInput, PolicyMode, ProofReceiptInput, SanitizerReceiptInput, Scope,
-    WITNESS_RECEIPT_SCHEMA_VERSION, WitnessReceipt, analyze, collect_context, explain_card,
-    render_comment_plan, render_human, render_json, render_lsp, render_markdown, render_pr_summary,
-    render_sarif, render_witness_plan, validate_witness_receipts,
+    WITNESS_RECEIPT_SCHEMA_VERSION, WitnessReceipt, analyze, collect_context, compare_outcome_json,
+    explain_card, render_comment_plan, render_human, render_json, render_lsp, render_markdown,
+    render_outcome_json, render_outcome_markdown, render_pr_summary, render_sarif,
+    render_witness_plan, validate_witness_receipts,
 };
 
 pub(crate) fn execute(command: Command) -> Result<(), String> {
@@ -37,6 +39,7 @@ pub(crate) fn execute(command: Command) -> Result<(), String> {
         Command::ReceiptImportSanitizer(options) => receipt_import_sanitizer(options),
         Command::ReceiptImportConcurrency(options) => receipt_import_concurrency(options),
         Command::ReceiptImportProof(options) => receipt_import_proof(options),
+        Command::Outcome(options) => outcome(options),
     }
 }
 
@@ -283,6 +286,27 @@ fn receipt_validate(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn outcome(options: OutcomeOptions) -> Result<(), String> {
+    let before = fs::read_to_string(&options.before)
+        .map_err(|err| format!("read {} failed: {err}", options.before.display()))?;
+    let after = fs::read_to_string(&options.after)
+        .map_err(|err| format!("read {} failed: {err}", options.after.display()))?;
+    let report = compare_outcome_json(&before, &after)?;
+    let rendered = match options.format {
+        Format::Json => render_outcome_json(&report),
+        Format::Markdown => render_outcome_markdown(&report),
+        _ => return Err("outcome only supports json or markdown output".to_string()),
+    };
+    if let Some(path) = options.out {
+        ensure_parent_dir(&path)?;
+        fs::write(&path, rendered)
+            .map_err(|err| format!("write {} failed: {err}", path.display()))?;
+    } else {
+        println!("{rendered}");
+    }
+    Ok(())
+}
+
 fn receipt_import_miri(options: SavedOutputReceiptOptions) -> Result<(), String> {
     let output = fs::read_to_string(&options.log)
         .map_err(|err| format!("read {} failed: {err}", options.log.display()))?;
@@ -421,6 +445,9 @@ fn print_help() {
     println!("  badges  [--root .] [--out badges]");
     println!("  explain [--root .] [--json|--format json] <card-id>");
     println!("  context [--root .] [--json|--format json] <card-id>");
+    println!(
+        "  outcome --before <cards.json> --after <cards.json> [--format json|markdown] [--out file]"
+    );
     println!(
         "  receipt template <card-id> --tool <lane> --strength <level> --author <owner> --recorded-at <utc> --expires-at <date> [--summary text] [--command text] [--limitation text] [--out file]"
     );

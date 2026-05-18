@@ -254,6 +254,83 @@ fn repo_inventory_and_badges_count_open_gaps_without_safety_claim() -> Result<()
 }
 
 #[test]
+fn outcome_compares_existing_json_snapshots_without_safety_claim() -> Result<(), Box<dyn Error>> {
+    let before_fixture = fixture_root("safe_code_no_cards");
+    let after_fixture = fixture_root("raw_pointer_alignment");
+    let temp = TempDir::new("unsafe-review-outcome-e2e")?;
+    let before_path = temp.path().join("before.json");
+    let after_path = temp.path().join("after.json");
+    let outcome_path = temp.path().join("outcome.json");
+
+    run_success([
+        os("check"),
+        os("--root"),
+        before_fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        before_fixture.join("change.diff").into_os_string(),
+        os("--format"),
+        os("json"),
+        os("--out"),
+        before_path.as_os_str().to_os_string(),
+    ])?;
+    run_success([
+        os("check"),
+        os("--root"),
+        after_fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        after_fixture.join("change.diff").into_os_string(),
+        os("--format"),
+        os("json"),
+        os("--out"),
+        after_path.as_os_str().to_os_string(),
+    ])?;
+
+    let output = run_success([
+        os("outcome"),
+        os("--before"),
+        before_path.as_os_str().to_os_string(),
+        os("--after"),
+        after_path.as_os_str().to_os_string(),
+        os("--format"),
+        os("json"),
+        os("--out"),
+        outcome_path.as_os_str().to_os_string(),
+    ])?;
+
+    assert_eq!(stdout_text(&output)?.trim(), "");
+    let outcome = parse_json(&fs::read_to_string(&outcome_path)?)?;
+    assert_eq!(outcome["schema_version"], "0.1");
+    assert_eq!(outcome["mode"], "outcome");
+    assert_eq!(outcome["before"]["cards"], 0);
+    assert_eq!(outcome["after"]["cards"], 1);
+    assert_eq!(outcome["summary"]["new"], 1);
+    assert_eq!(outcome["summary"]["resolved"], 0);
+    assert_eq!(outcome["cards"][0]["status"], "new");
+    assert!(
+        outcome["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("not memory-safety proof")
+    );
+
+    let markdown = run_success([
+        os("outcome"),
+        os("--before"),
+        before_path.as_os_str().to_os_string(),
+        os("--after"),
+        after_path.as_os_str().to_os_string(),
+        os("--format"),
+        os("markdown"),
+    ])?;
+    let markdown = stdout_text(&markdown)?;
+    assert!(markdown.contains("# unsafe-review outcome"));
+    assert!(markdown.contains("## Trust boundary"));
+    assert!(markdown.contains("| 1 | 0 | 0 | 0 | 0 |"));
+
+    Ok(())
+}
+
+#[test]
 fn check_json_imports_witness_receipts_without_hiding_guard_gaps() -> Result<(), Box<dyn Error>> {
     let fixture = fixture_root("raw_pointer_alignment_receipted");
 

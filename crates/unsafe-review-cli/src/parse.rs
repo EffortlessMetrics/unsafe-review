@@ -1,5 +1,6 @@
 use crate::command::{
-    CheckOptions, Command, DiffInput, Format, ReceiptTemplateOptions, SavedOutputReceiptOptions,
+    CheckOptions, Command, DiffInput, Format, OutcomeOptions, ReceiptTemplateOptions,
+    SavedOutputReceiptOptions,
 };
 use std::path::PathBuf;
 use unsafe_review_core::PolicyMode;
@@ -23,6 +24,7 @@ pub(crate) fn parse(args: Vec<String>) -> Result<Command, String> {
         "badges" => parse_badges(rest),
         "explain" => parse_explain(rest),
         "context" => parse_context(rest),
+        "outcome" => parse_outcome(rest).map(Command::Outcome),
         "receipt" => parse_receipt(rest),
         "receipt-template" => parse_receipt_template(rest).map(Command::ReceiptTemplate),
         other => Err(format!(
@@ -214,6 +216,56 @@ fn parse_context(args: Vec<String>) -> Result<Command, String> {
     Ok(Command::Context {
         root,
         id: id.ok_or_else(|| "missing card id".to_string())?,
+    })
+}
+
+fn parse_outcome(args: Vec<String>) -> Result<OutcomeOptions, String> {
+    let mut before: Option<PathBuf> = None;
+    let mut after: Option<PathBuf> = None;
+    let mut format = Format::Json;
+    let mut out: Option<PathBuf> = None;
+    let mut idx = 0usize;
+    while idx < args.len() {
+        match args[idx].as_str() {
+            "--before" => {
+                idx += 1;
+                before = Some(PathBuf::from(value(&args, idx, "--before")?));
+            }
+            arg if arg.starts_with("--before=") => {
+                before = Some(PathBuf::from(inline_value(arg, "--before")?));
+            }
+            "--after" => {
+                idx += 1;
+                after = Some(PathBuf::from(value(&args, idx, "--after")?));
+            }
+            arg if arg.starts_with("--after=") => {
+                after = Some(PathBuf::from(inline_value(arg, "--after")?));
+            }
+            "--format" => {
+                idx += 1;
+                format = parse_outcome_format(value(&args, idx, "--format")?)?;
+            }
+            arg if arg.starts_with("--format=") => {
+                format = parse_outcome_format(inline_value(arg, "--format")?)?;
+            }
+            "--json" => format = Format::Json,
+            "--markdown" => format = Format::Markdown,
+            "--out" => {
+                idx += 1;
+                out = Some(PathBuf::from(value(&args, idx, "--out")?));
+            }
+            arg if arg.starts_with("--out=") => {
+                out = Some(PathBuf::from(inline_value(arg, "--out")?));
+            }
+            other => return Err(format!("unknown outcome argument `{other}`")),
+        }
+        idx += 1;
+    }
+    Ok(OutcomeOptions {
+        before: before.ok_or_else(|| "missing value for --before".to_string())?,
+        after: after.ok_or_else(|| "missing value for --after".to_string())?,
+        format,
+        out,
     })
 }
 
@@ -447,6 +499,17 @@ fn parse_receipt_validate(args: Vec<String>) -> Result<Command, String> {
     Ok(Command::ReceiptValidate { root })
 }
 
+fn parse_outcome_format(raw: &str) -> Result<Format, String> {
+    match parse_format(raw)? {
+        Format::Json => Ok(Format::Json),
+        Format::Markdown => Ok(Format::Markdown),
+        other => Err(format!(
+            "outcome only supports json or markdown output, got `{}`",
+            format_name(&other)
+        )),
+    }
+}
+
 fn parse_diff_input(raw: &str) -> DiffInput {
     if raw == "-" {
         DiffInput::Stdin
@@ -526,6 +589,19 @@ fn inline_value<'a>(arg: &'a str, flag: &str) -> Result<&'a str, String> {
         return Err(format!("missing value for {flag}"));
     }
     Ok(value)
+}
+
+fn format_name(format: &Format) -> &'static str {
+    match format {
+        Format::Human => "human",
+        Format::Json => "json",
+        Format::Markdown => "markdown",
+        Format::PrSummary => "pr-summary",
+        Format::Sarif => "sarif",
+        Format::CommentPlan => "comment-plan",
+        Format::Lsp => "lsp",
+        Format::WitnessPlan => "witness-plan",
+    }
 }
 
 #[cfg(test)]
@@ -693,6 +769,61 @@ mod tests {
             }
         );
         Ok(())
+    }
+
+    #[test]
+    fn parses_outcome_command() -> Result<(), String> {
+        let command = parse(args([
+            "unsafe-review",
+            "outcome",
+            "--before",
+            "target/before.json",
+            "--after=target/after.json",
+            "--format",
+            "markdown",
+            "--out",
+            "target/outcome.md",
+        ]))?;
+
+        let Command::Outcome(options) = command else {
+            return Err("expected outcome command".to_string());
+        };
+        assert_eq!(options.before, PathBuf::from("target/before.json"));
+        assert_eq!(options.after, PathBuf::from("target/after.json"));
+        assert_eq!(options.format, Format::Markdown);
+        assert_eq!(options.out, Some(PathBuf::from("target/outcome.md")));
+        Ok(())
+    }
+
+    #[test]
+    fn outcome_rejects_non_outcome_format() {
+        let command = parse(args([
+            "unsafe-review",
+            "outcome",
+            "--before",
+            "target/before.json",
+            "--after",
+            "target/after.json",
+            "--format",
+            "sarif",
+        ]));
+
+        assert_eq!(
+            command,
+            Err("outcome only supports json or markdown output, got `sarif`".to_string())
+        );
+    }
+
+    #[test]
+    fn outcome_requires_before_and_after() {
+        let command = parse(args([
+            "unsafe-review",
+            "outcome",
+            "--before",
+            "before.json",
+        ]));
+
+        assert_eq!(command, Err("missing value for --after".to_string()));
     }
 
     #[test]

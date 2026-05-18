@@ -1,6 +1,8 @@
 use crate::analysis::{pipeline, receipts};
 use crate::domain::{CardId, ReviewCard};
-use crate::output::{agent, comment_plan, human, json, lsp, markdown, sarif, witness_plan};
+use crate::output::{
+    agent, comment_plan, human, json, lsp, markdown, outcome, sarif, witness_plan,
+};
 use std::path::PathBuf;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -145,6 +147,18 @@ pub fn render_witness_plan(output: &AnalyzeOutput) -> String {
     witness_plan::render(output)
 }
 
+pub fn compare_outcome_json(before_json: &str, after_json: &str) -> Result<OutcomeReport, String> {
+    outcome::compare_json(before_json, after_json)
+}
+
+pub fn render_outcome_json(report: &OutcomeReport) -> String {
+    outcome::render_json(report)
+}
+
+pub fn render_outcome_markdown(report: &OutcomeReport) -> String {
+    outcome::render_markdown(report)
+}
+
 pub fn explain_card(output: &AnalyzeOutput, id: &CardId) -> Option<String> {
     output
         .cards
@@ -160,3 +174,5 @@ pub fn collect_context(output: &AnalyzeOutput, id: &CardId) -> Option<String> {
         .find(|card| &card.id == id)
         .map(agent::render)
 }
+
+pub use outcome::OutcomeReport;

@@ -25,8 +25,21 @@ Badge JSON is a small open-gap summary for shields-compatible consumers:
 Badges count unresolved review evidence. They never claim the repository is
 safe, UB-free, Miri-clean, or policy-compliant.
 
-Baseline-known items, suppressions, and no-new-debt deltas are planned later
-policy surfaces and are not part of the current badge proof.
+Outcome comparison reads two saved `unsafe-review --format json` snapshots and
+reports card identity deltas:
+
+- `new`
+- `resolved`
+- `improved`
+- `regressed`
+- `unchanged`
+
+Outcome comparison must compare existing card identity, class actionability, and
+missing-evidence counts from the supplied snapshots. It must not rerun analysis,
+run witnesses, post policy decisions, or claim repository safety.
+
+Baseline-known items, suppressions, and no-new-debt policy promotion remain
+separate policy surfaces and are not part of badge proof.
 
 ## Non-goals
 
@@ -35,12 +48,14 @@ policy surfaces and are not part of the current badge proof.
 - no duplicate truth outside this spec and linked policy files
 - no safety badge
 - no baseline, suppression, or no-new-debt policy in the badge JSON
+- no outcome comparison without saved snapshot inputs
 
 ## Required evidence
 
 - fixture-backed examples for positive and negative cases
 - JSON output contract coverage
 - CLI e2e coverage for repo JSON and badge JSON
+- CLI e2e coverage for outcome comparison JSON/Markdown
 - policy documentation when behavior is configurable
 
 ## Acceptance examples
@@ -49,6 +64,8 @@ policy surfaces and are not part of the current badge proof.
   counts, cards, and the trust boundary.
 - Badge JSON for a fixture reports open unsafe-review gaps rather than raw
   unsafe count or safe/unsafe status.
+- Outcome comparison between a no-card snapshot and a one-card snapshot reports
+  one `new` card and preserves the static-review trust boundary.
 - If evidence is not knowable statically, repo output and badges count the
   card state instead of overclaiming.
 
@@ -58,6 +75,7 @@ policy surfaces and are not part of the current badge proof.
 cargo xtask check-pr
 cargo test --workspace
 cargo test -p unsafe-review --test e2e repo_inventory_and_badges_count_open_gaps_without_safety_claim
+cargo test -p unsafe-review --test e2e outcome_compares_existing_json_snapshots_without_safety_claim
 ```
 
 ## Promotion rule
