@@ -15,11 +15,13 @@ Linked proposal: ../../docs/proposals/UNSAFE-REVIEW-PROP-0001-product-contract.m
 7. Contract and guard evidence — initial implementation present.
 8. Witness routing — initial implementation present.
 9. Human/JSON/Markdown output — initial implementation present.
-10. Policy/baseline matching — planned.
-11. SARIF/GitHub output — planned.
-12. LSP projection — planned.
-13. Agent packet hardening — planned.
-14. Receipt import — planned.
+10. Policy/baseline matching — planned; behavior expanded in SPEC-0010.
+11. SARIF/GitHub output — planned; behavior expanded in SPEC-0011.
+12. LSP projection — planned; behavior expanded in SPEC-0012.
+13. Agent packet hardening — planned; behavior expanded in SPEC-0013.
+14. Receipt import — planned; behavior expanded in SPEC-0009.
+15. Obligation-level evidence — planned; behavior expanded in SPEC-0006.
+16. Calibration/support-tier gates — planned; behavior expanded in SPEC-0016.
 
 ## Proof commands
 
