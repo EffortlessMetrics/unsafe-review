@@ -564,6 +564,13 @@ fn detect_syntax_site(
             Some((UnsafeSiteKind::StaticMut, OperationFamily::StaticMut))
         }
         "BLOCK_EXPR"
+            if compact.starts_with("unsafe {")
+                && !operation_block_ranges.contains(&(fact.start, fact.end))
+                && unsafe_block_contains_call(&compact) =>
+        {
+            Some((UnsafeSiteKind::Operation, OperationFamily::UnsafeFnCall))
+        }
+        "BLOCK_EXPR"
             if is_unknown_unsafe_block(&compact)
                 && !operation_block_ranges.contains(&(fact.start, fact.end)) =>
         {

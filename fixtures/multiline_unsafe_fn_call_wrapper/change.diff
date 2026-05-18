@@ -1,0 +1,17 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,0 +1,13 @@
++pub fn push_encoded(c: char, ptr: *mut u8, remaining_cap: usize) -> Result<usize, ()> {
++    // SAFETY: `ptr` points to `remaining_cap` bytes of writable storage.
++    match unsafe {
++        encode_utf8(
++            c,
++            ptr,
++            remaining_cap,
++        )
++    } {
++        Ok(n) => Ok(n),
++        Err(_) => Err(()),
++    }
++}
