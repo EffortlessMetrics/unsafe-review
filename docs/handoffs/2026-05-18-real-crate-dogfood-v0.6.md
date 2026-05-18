@@ -67,6 +67,17 @@ evidence-quality gap:
 Regression proof was added with a repo-mode analyzer test for pointer
 arithmetic inside a documented unsafe function.
 
+A real PR-diff dogfood pass on `servo/rust-smallvec#407` exposed and fixed an
+owner-inference gap:
+
+- owner inference now ignores comment lines while scanning backward
+- comment prose such as `` `Drop` impl would drop `` is no longer parsed as an
+  `impl would` owner
+- witness commands now use the real owner when one is available
+
+Regression proof was added with a scanner unit test for comment text during
+owner inference.
+
 ## Dogfood observations
 
 The before/after numbers below are top-50 capped repo inventory snapshots, not
@@ -208,6 +219,45 @@ The pointer arithmetic card now recognizes the enclosing `# Safety` contract and
 local guard evidence, then routes the remaining gap to Miri/cargo-careful as a
 witness need.
 
+### `rust-smallvec#407`
+
+PR: `https://github.com/servo/rust-smallvec/pull/407`
+
+The PR fixes a use-after-free in `DrainFilter::keep_rest` for zero-capacity
+`SmallVec`s by changing the ZST guard and adding a Miri-targeted regression
+test.
+
+Before comment-aware owner inference:
+
+```text
+elapsed_seconds: 33.48
+changed_rust_files: 2
+cards: 1
+contract_missing: 1
+owner: would
+verify: cargo +nightly miri test would
+```
+
+The owner was inferred from comment prose:
+
+```text
+// Normally `Drop` impl would drop [tail] ...
+```
+
+After comment-aware owner inference:
+
+```text
+elapsed_seconds: 34.8
+changed_rust_files: 2
+cards: 1
+contract_missing: 1
+owner: keep_rest
+verify: cargo +nightly miri test keep_rest
+```
+
+The card class did not change. The improvement is that the card now points the
+reviewer and witness route at the real owner instead of prose.
+
 ## Proof
 
 Targeted local validation:
@@ -229,6 +279,7 @@ rtk cargo run --locked -p unsafe-review -- repo --root target/dogfood-work/small
 rtk cargo run --locked -p unsafe-review -- repo --root target/dogfood-work/arrayvec --format json --max-cards 50 --out target/dogfood-work/arrayvec.unsafe-review.after.json
 rtk cargo run --locked -p unsafe-review -- repo --root target/dogfood-work/memchr --format json --max-cards 50 --out target/dogfood-work/memchr.unsafe-review.after-cap-targetfeature.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/memchr --diff target/dogfood-work/memchr-pr215.raw.diff --format json --max-cards 20 --out target/dogfood-work/memchr-pr215.owner-contract.json
+rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/smallvec --diff target/dogfood-work/smallvec-pr407.raw.diff --format json --max-cards 20 --out target/dogfood-work/smallvec-pr407.owner-fix.json
 ```
 
 The dogfood reruns used a temporary `CARGO_TARGET_DIR` to avoid a Windows file
@@ -242,11 +293,13 @@ The repo may claim:
 
 - the first real-crate dogfood slice was run on `rust-smallvec` and `arrayvec`
 - a capped `memchr` dogfood snapshot now completes
-- a real PR-diff dogfood run on `memchr#215` produces card output
+- real PR-diff dogfood runs on `memchr#215` and `rust-smallvec#407` produce card
+  output
 - dogfood found and fixed import/declaration and `cfg(target_feature)`
   false positives
 - capped repo scans stop after the requested card cap
 - operation cards can inherit enclosing unsafe function `# Safety` docs
+- owner inference ignores comments while scanning backward
 - false-positive regression coverage exists in fixtures and calibration
 - dogfood output remains advisory static review evidence
 
@@ -256,7 +309,7 @@ The repo must not claim:
 - usable-alpha support-tier promotion
 - full-repository coverage from top-50 capped snapshots
 - uncapped repo-scan performance
-- general PR-diff usefulness from one PR
+- general PR-diff usefulness from two PRs
 - memory-safety proof
 - UB-free status
 - witness execution
@@ -266,7 +319,7 @@ The repo must not claim:
 
 - Only three real crates completed in this slice.
 - The successful dogfood snapshots were capped at 50 cards.
-- Only one real PR diff was measured.
+- Only two real PR diffs were measured.
 - `memchr` completion depends on capped-scan behavior; uncapped performance is
   still unmeasured.
 - No human audit was performed for every emitted card.

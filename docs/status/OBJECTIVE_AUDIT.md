@@ -35,7 +35,7 @@ witnesses by default.
 | Explicit receipts can be authored and validated safely | `receipt template` and `receipt validate` are covered by CLI e2e tests and support tiers | Experimental | Template output does not verify that the recorded command ran |
 | Public claims map to proof | `SUPPORT_TIERS.md` maps every current surface to proof and limits | In place | Keep updating for every new lane |
 | No soundness, UB-free, Miri-clean, site-execution, or default-blocking claim | Trust-boundary text is enforced across artifacts; support tiers and handoffs repeat limits | In place | Must remain part of all new projections |
-| First real-crate dogfood measurement | Handoff `2026-05-18-real-crate-dogfood-v0.6.md` records top-50 capped `rust-smallvec`, `arrayvec`, and `memchr` runs plus a `memchr#215` PR-diff run; dogfood found and fixed import/declaration false positives, `cfg(target_feature)` false positives, capped repo scan timeout behavior, and missing owner-contract inheritance for operation cards | Experimental | More crates, more real PR diffs, uncapped/sampled runs, and human review are still needed before calibration claims |
+| First real-crate dogfood measurement | Handoff `2026-05-18-real-crate-dogfood-v0.6.md` records top-50 capped `rust-smallvec`, `arrayvec`, and `memchr` runs plus `memchr#215` and `rust-smallvec#407` PR-diff runs; dogfood found and fixed import/declaration false positives, `cfg(target_feature)` false positives, capped repo scan timeout behavior, missing owner-contract inheritance for operation cards, and comment-derived owner false positives | Experimental | More crates, more real PR diffs, uncapped/sampled runs, and human review are still needed before calibration claims |
 
 ## Current Gaps
 
