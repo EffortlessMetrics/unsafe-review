@@ -260,6 +260,7 @@ mod tests {
         "vec_set_len_zero_clear",
         "drop_in_place_deallocation",
         "unwrap_unchecked_result",
+        "unwrap_unchecked_infallible_result",
         "unreachable_unchecked_path",
         "transmute_invalid_value",
         "unsafe_impl_send",

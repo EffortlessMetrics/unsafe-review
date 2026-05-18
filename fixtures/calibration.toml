@@ -17,6 +17,7 @@ required_core_fixtures = [
   "vec_set_len_zero_clear",
   "drop_in_place_deallocation",
   "unwrap_unchecked_result",
+  "unwrap_unchecked_infallible_result",
   "unreachable_unchecked_path",
   "raw_pointer_write_bytes",
   "raw_pointer_write_maybeuninit",
@@ -186,6 +187,16 @@ claim = "unwrap_unchecked reports invalid-value obligations instead of a generic
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_infallible_result"
+kind = "positive"
+claim = "unwrap_unchecked recognizes local Fallibility::Infallible result evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
 expected_operation_family = "unwrap_unchecked"
 expected_hazard = "invalid_value"
 

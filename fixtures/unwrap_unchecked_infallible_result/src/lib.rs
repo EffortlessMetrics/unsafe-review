@@ -1,0 +1,28 @@
+enum Fallibility {
+    Infallible,
+    Fallible,
+}
+
+fn reserve_rehash(fallibility: Fallibility) -> Result<u8, ()> {
+    match fallibility {
+        Fallibility::Infallible => Ok(7),
+        Fallibility::Fallible => Err(()),
+    }
+}
+
+pub fn reserve() -> u8 {
+    let result = reserve_rehash(Fallibility::Infallible);
+
+    // SAFETY: infallible mode converts allocation errors before this point.
+    unsafe { result.unwrap_unchecked() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::reserve;
+
+    #[test]
+    fn reserves_infallibly() {
+        assert_eq!(reserve(), 7);
+    }
+}
