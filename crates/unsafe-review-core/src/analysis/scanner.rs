@@ -37,10 +37,13 @@ pub(crate) fn scan_file(
     let syntax_operation_block_lines = operation_block_start_lines(&parsed);
     let mut out = Vec::new();
     let mut seen = BTreeSet::new();
+    let mut block_comment_depth = 0usize;
     for (idx, raw) in lines.iter().enumerate() {
         let line_no = idx + 1;
-        let trimmed = raw.trim();
-        if trimmed.starts_with("//") {
+        let raw_trimmed = raw.trim();
+        let code = strip_comments_from_line(raw, &mut block_comment_depth);
+        let trimmed = code.trim();
+        if trimmed.is_empty() {
             continue;
         }
         let Some((kind, family)) = detect_site(trimmed) else {
@@ -78,11 +81,11 @@ pub(crate) fn scan_file(
                 visibility,
                 public_api_surface,
                 changed,
-                snippet: trimmed.to_string(),
+                snippet: raw_trimmed.to_string(),
             },
             operation: UnsafeOperation {
                 family,
-                expression: trimmed.to_string(),
+                expression: raw_trimmed.to_string(),
             },
             context_before,
             context_after,
@@ -151,6 +154,45 @@ fn context_slice(lines: &[&str], start: usize, end: usize) -> Vec<String> {
         .iter()
         .map(|line| line.trim().to_string())
         .collect()
+}
+
+fn strip_comments(text: &str) -> String {
+    let mut block_comment_depth = 0usize;
+    text.lines()
+        .map(|line| strip_comments_from_line(line, &mut block_comment_depth))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn strip_comments_from_line(line: &str, block_comment_depth: &mut usize) -> String {
+    let mut code = String::with_capacity(line.len());
+    let mut chars = line.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if *block_comment_depth > 0 {
+            match (ch, chars.peek().copied()) {
+                ('/', Some('*')) => {
+                    *block_comment_depth += 1;
+                    chars.next();
+                }
+                ('*', Some('/')) => {
+                    *block_comment_depth -= 1;
+                    chars.next();
+                }
+                _ => {}
+            }
+            continue;
+        }
+
+        match (ch, chars.peek().copied()) {
+            ('/', Some('/')) => break,
+            ('/', Some('*')) => {
+                *block_comment_depth += 1;
+                chars.next();
+            }
+            _ => code.push(ch),
+        }
+    }
+    code
 }
 
 fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
@@ -294,8 +336,13 @@ fn detect_syntax_site(
     unsafe_block_ranges: &[(usize, usize)],
     operation_block_ranges: &BTreeSet<(usize, usize)>,
 ) -> Option<(UnsafeSiteKind, OperationFamily)> {
-    let compact = compact_whitespace(&fact.snippet);
-    if compact.starts_with("//") {
+    let raw_start = fact.snippet.trim_start();
+    if raw_start.starts_with("//") || raw_start.starts_with("/*") {
+        return None;
+    }
+    let uncommented = strip_comments(&fact.snippet);
+    let compact = compact_whitespace(&uncommented);
+    if compact.is_empty() {
         return None;
     }
     match fact.kind.as_str() {
@@ -384,7 +431,8 @@ fn unsafe_block_ranges(parsed: &ParsedSource) -> Vec<(usize, usize)> {
         .nodes
         .iter()
         .filter(|fact| {
-            fact.kind == "BLOCK_EXPR" && compact_whitespace(&fact.snippet).starts_with("unsafe {")
+            fact.kind == "BLOCK_EXPR"
+                && compact_whitespace(&strip_comments(&fact.snippet)).starts_with("unsafe {")
         })
         .map(|fact| (fact.start, fact.end))
         .collect()
@@ -527,4 +575,71 @@ fn parse_ident(rest: &str) -> Option<String> {
         }
     }
     (!name.is_empty()).then_some(name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn line_fallback_ignores_unsafe_mentions_in_comments() -> Result<(), String> {
+        let root = temp_fixture_dir("comment_mentions")?;
+        let src_dir = root.join("src");
+        fs::create_dir_all(&src_dir).map_err(|err| err.to_string())?;
+        let rel = PathBuf::from("src/lib.rs");
+        fs::write(
+            root.join(&rel),
+            r#"
+/*
+unsafe fn commented_out() {}
+unsafe { core::ptr::read(0 as *const u8); }
+*/
+pub fn safe() {
+    let _value = 1; // unsafe { core::ptr::read(0 as *const u8); }
+    /* nested /* unsafe impl Send for Nope {} */ still comment */
+}
+"#,
+        )
+        .map_err(|err| err.to_string())?;
+
+        let sites = scan_file(&root, &rel, None, true)?;
+
+        assert!(
+            sites.is_empty(),
+            "comment-only unsafe mentions emitted cards: {sites:#?}"
+        );
+        fs::remove_dir_all(root).map_err(|err| err.to_string())?;
+        Ok(())
+    }
+
+    #[test]
+    fn line_comment_stripping_preserves_code_before_comment() {
+        let mut depth = 0;
+
+        let line = strip_comments_from_line(
+            "    unsafe { core::ptr::read(ptr); } // trailing explanation",
+            &mut depth,
+        );
+
+        assert_eq!(line.trim(), "unsafe { core::ptr::read(ptr); }");
+        assert_eq!(depth, 0);
+        assert_eq!(
+            detect_site(line.trim()),
+            Some((UnsafeSiteKind::Operation, OperationFamily::RawPointerRead))
+        );
+    }
+
+    fn temp_fixture_dir(name: &str) -> Result<PathBuf, String> {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|err| err.to_string())?
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "unsafe-review-core-{name}-{}-{nanos}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&path).map_err(|err| err.to_string())?;
+        Ok(path)
+    }
 }
