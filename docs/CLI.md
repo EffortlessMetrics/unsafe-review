@@ -123,6 +123,20 @@ unsafe-review badges --out badges/
 
 The badge output is repo posture evidence only. It is not a safety badge.
 
+Compare two saved `unsafe-review --format json` snapshots:
+
+```bash
+unsafe-review outcome \
+  --before target/unsafe-review/before.json \
+  --after target/unsafe-review/after.json \
+  --format markdown \
+  --out target/unsafe-review/outcome.md
+```
+
+Outcome comparison is read-only. It compares existing `ReviewCard` identities,
+classes, and missing-evidence counts from the supplied snapshots. It does not
+rerun analysis, run witnesses, post policy decisions, or claim repository safety.
+
 ## Witness Receipts
 
 Imported receipts attach external witness evidence to exact `ReviewCard`

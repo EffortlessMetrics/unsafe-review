@@ -72,6 +72,14 @@ pub(crate) struct SavedOutputReceiptOptions {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct OutcomeOptions {
+    pub before: PathBuf,
+    pub after: PathBuf,
+    pub format: Format,
+    pub out: Option<PathBuf>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Command {
     Help,
     Version,
@@ -103,4 +111,5 @@ pub(crate) enum Command {
     ReceiptImportSanitizer(SavedOutputReceiptOptions),
     ReceiptImportConcurrency(SavedOutputReceiptOptions),
     ReceiptImportProof(SavedOutputReceiptOptions),
+    Outcome(OutcomeOptions),
 }

@@ -28,7 +28,7 @@ witnesses by default.
 | Advisory PR artifact loop | Handoff `2026-05-18-advisory-pr-artifacts-v0.2.md` records cards JSON, PR summary, SARIF, and comment-plan artifact proof plus in-workflow artifact verification | Experimental/dogfoodable | No automatic comments or blocking policy by design |
 | Saved IDE projection | Handoff `2026-05-18-lsp-agent-projection-v0.3.md` records `--format lsp` saved diagnostics, hovers, and copy-command data | Experimental | No live LSP server or editor extension |
 | Bounded LLM packet | Handoff `2026-05-18-lsp-agent-projection-v0.3.md` records `context <card-id> --json` bounded packet proof | Experimental | Copy-only; no automated repair or source edits |
-| Repo posture and badges count open review gaps, not raw unsafe or safety status | Handoff `2026-05-18-repo-policy-v0.4.md` and support tiers cover repo JSON and badge JSON | Experimental | No outcome comparison; not release-grade posture |
+| Repo posture and badges count open review gaps, not raw unsafe or safety status | Handoff `2026-05-18-repo-policy-v0.4.md` and support tiers cover repo JSON, badge JSON, and saved-snapshot outcome comparison | Experimental | Not release-grade posture or calibrated governance |
 | Baselines and suppressions use exact counted identity | Repo policy handoff records exact baseline/suppression matching and explicit no-new-debt mode | Experimental | Exact identity only; no broad suppressions; no calibrated blocking |
 | Witness routing recommends cheap next action | Support tiers cover route-table tests and fixture routes for raw pointer, FFI, unsafe impl Send, Pin, and invalid-value cases | Experimental | Recommendation only unless a receipt is attached |
 | Witness receipts attach external evidence without executing tools | Receipt docs and tests cover exact-card JSON import, metadata validation, tool/strength validation, DTO shape, template, validate command, Miri saved-output adapter, cargo-careful saved-output adapter, sanitizer saved-output adapter, Loom/Shuttle saved-output adapter, Kani/Crux proof saved-output adapter, and witness-plan output | Experimental | Saved-output adapters read success logs only; no witness tool is executed by `unsafe-review` |
@@ -49,7 +49,8 @@ These are not failures; they are the next unsupported or weakly verified areas:
 - Calibration on real unsafe-heavy crates is still needed before any support
   tier promotion toward usable alpha.
 - No default no-new-debt or blocking branch-protection policy is justified yet.
-- Outcome comparison for repo posture is still missing.
+- Outcome comparison is saved-snapshot only and still needs dogfood on real
+  repo posture snapshots.
 
 ## Current Gates
 
