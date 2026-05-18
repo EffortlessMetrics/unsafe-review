@@ -1,0 +1,106 @@
+schema_version = "0.1"
+status = "experimental"
+
+required_core_fixtures = [
+  "raw_pointer_alignment",
+  "public_unsafe_fn_missing_safety",
+  "maybeuninit_assume_init",
+  "vec_set_len",
+  "transmute_invalid_value",
+  "unsafe_impl_send",
+  "ffi_sanitizer_route",
+  "safe_code_no_cards",
+  "comment_alignment_not_guard",
+]
+
+[[cases]]
+fixture = "raw_pointer_alignment"
+kind = "positive"
+claim = "raw pointer read with length evidence still reports missing alignment guard evidence"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_read"
+expected_hazard = "alignment"
+
+[[cases]]
+fixture = "public_unsafe_fn_missing_safety"
+kind = "positive"
+claim = "public unsafe function without a # Safety contract reports contract_missing"
+support_tier = "Contract evidence mining"
+expected_cards = 1
+expected_class = "contract_missing"
+
+[[cases]]
+fixture = "maybeuninit_assume_init"
+kind = "positive"
+claim = "MaybeUninit::assume_init reports missing initialization evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len"
+kind = "positive"
+claim = "Vec::set_len reports missing initialized-range and capacity evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "transmute_invalid_value"
+kind = "positive"
+claim = "transmute::<u8, bool> reports invalid-value/layout obligations"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unsafe_impl_send"
+kind = "positive"
+claim = "unsafe impl Send routes to concurrency witness review"
+support_tier = "Witness routing"
+expected_cards = 1
+expected_class = "requires_loom"
+expected_operation_family = "unsafe_impl_send_sync"
+expected_hazard = "send_sync_invariant"
+
+[[cases]]
+fixture = "ffi_sanitizer_route"
+kind = "positive"
+claim = "unsafe extern C boundary routes away from Miri-first review"
+support_tier = "Witness routing"
+expected_cards = 1
+expected_class = "miri_unsupported"
+expected_operation_family = "ffi"
+expected_hazard = "ffi_abi"
+
+[[cases]]
+fixture = "safe_code_no_cards"
+kind = "negative"
+claim = "safe Rust changes emit no review cards"
+support_tier = "Diff unsafe site inventory"
+expected_cards = 0
+
+[[cases]]
+fixture = "safe_reference_deref_no_cards"
+kind = "negative"
+claim = "safe reference dereference emits no unsafe review card"
+support_tier = "Raw pointer card slice"
+expected_cards = 0
+
+[[cases]]
+fixture = "comment_alignment_not_guard"
+kind = "false_positive_control"
+claim = "TODO/comment text mentioning alignment does not count as guard evidence"
+support_tier = "Guard evidence mining"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_read"
+expected_hazard = "alignment"
