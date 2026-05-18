@@ -1,0 +1,22 @@
+[package]
+name = "unsafe-review-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+rust-version = "1.95"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+serde_json = "1"
+tempfile = "3"
+unsafe-review-core = { path = "../crates/unsafe-review-core" }
+
+[[bin]]
+name = "analyze_source"
+path = "fuzz_targets/analyze_source.rs"
+test = false
+doc = false
+bench = false

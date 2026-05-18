@@ -13,6 +13,7 @@ Generated: 2026-05-17
 - policy ledgers for unsafe-review, Clippy, no-panic, non-Rust, generated, executable, workflow, process, and network surfaces
 - GitHub workflow and settings scaffold
 - raw-pointer-alignment fixture
+- coverage-guided fuzz harness for analyzer/rendering API smoke coverage
 
 ## Implemented analyzer capabilities
 
@@ -27,6 +28,7 @@ Generated: 2026-05-17
 - human / JSON / Markdown output
 - badge JSON output
 - context packet output scaffold
+- analyzer fuzz target and seed corpus
 
 ## Known limitations
 

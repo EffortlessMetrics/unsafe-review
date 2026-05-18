@@ -5,6 +5,7 @@ members = [
   "crates/unsafe-review-core",
   "xtask"
 ]
+exclude = ["fuzz"]
 default-members = [
   "crates/unsafe-review",
   "crates/unsafe-review-cli",
