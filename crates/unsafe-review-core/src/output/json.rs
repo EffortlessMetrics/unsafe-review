@@ -291,6 +291,7 @@ mod tests {
         "split_unsafe_block",
         "raw_pointer_deref",
         "safe_reference_deref_no_cards",
+        "split_raw_pointer_read_call",
     ];
 
     #[test]
