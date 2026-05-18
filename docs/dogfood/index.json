@@ -6,12 +6,12 @@
   "trust_boundary": "Dogfood corpus records are static unsafe contract review evidence, not a proof of memory safety, not UB-free status, and not a Miri result unless an exact witness receipt is attached.",
   "summary": {
     "repositories": 7,
-    "targets": 25,
+    "targets": 26,
     "repo_snapshots": 7,
-    "pr_diffs": 18,
+    "pr_diffs": 19,
     "checked_in_scan_outputs": 0,
     "artifact_statuses": {
-      "local_untracked": 25
+      "local_untracked": 26
     }
   },
   "repositories": [
@@ -36,8 +36,8 @@
     {
       "repository": "rust-lang/hashbrown",
       "snapshot_targets": ["hashbrown-capped"],
-      "pr_diff_targets": ["hashbrown-pr469", "hashbrown-pr501", "hashbrown-pr556", "hashbrown-pr657", "hashbrown-pr667", "hashbrown-pr692", "hashbrown-pr693"],
-      "primary_exercise": "Large-file syntax scanning, MaybeUninit, pointer arithmetic, unchecked/infallible operations, dedupe"
+      "pr_diff_targets": ["hashbrown-pr469", "hashbrown-pr501", "hashbrown-pr556", "hashbrown-pr657", "hashbrown-pr667", "hashbrown-pr692", "hashbrown-pr681", "hashbrown-pr693"],
+      "primary_exercise": "Large-file syntax scanning, MaybeUninit, pointer arithmetic, unchecked/infallible operations, unsafe-call contract gaps, dedupe"
     },
     {
       "repository": "tokio-rs/bytes",

@@ -319,6 +319,20 @@ artifact_status = "local_untracked"
 artifacts = ["target/dogfood-work/hashbrown-pr692.after-maybeuninit-raw-write.json"]
 
 [[targets]]
+id = "hashbrown-pr681"
+crate = "hashbrown"
+repository = "rust-lang/hashbrown"
+kind = "pr-diff"
+status = "active"
+pr = 681
+root = "target/dogfood-work/hashbrown-pr681-root"
+diff = "target/dogfood-work/hashbrown-pr681.raw.diff"
+purpose = "PR diff for HashSet replace-key unsafe wrappers, raw pointer dereference, and unsafe function call contract evidence"
+command = "rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown-pr681-root --diff target/dogfood-work/hashbrown-pr681.raw.diff --format json --max-cards 40 --out target/dogfood-work/hashbrown-pr681.replace-key.head.json"
+artifact_status = "local_untracked"
+artifacts = ["target/dogfood-work/hashbrown-pr681.replace-key.head.json"]
+
+[[targets]]
 id = "hashbrown-pr693"
 crate = "hashbrown"
 repository = "rust-lang/hashbrown"

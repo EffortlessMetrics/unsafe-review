@@ -21,3 +21,11 @@ away from that PR's files or line ranges.
 Record a zero-card PR diff only when the zero-card result is the intended
 evidence, such as a false-positive control, and explain that in the target
 `purpose`.
+
+When capturing a raw GitHub PR diff, use `rtk proxy` so the saved file keeps the
+full patch shape:
+
+```bash
+rtk proxy gh pr diff 681 -R rust-lang/hashbrown --patch \
+  > target/dogfood-work/hashbrown-pr681.raw.diff
+```
