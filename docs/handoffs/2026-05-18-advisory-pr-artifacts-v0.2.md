@@ -373,6 +373,65 @@ Rust PR with analyzer test fixtures and unsafe-looking snippets while keeping
 the artifact loop quiet. It does not promote mutation testing, enable a
 mutation workflow, or prove analyzer completeness.
 
+### In-workflow artifact contract verification
+
+The `#125 ci: verify advisory artifacts before upload` PR moved artifact
+contract checking into the advisory workflow itself. The workflow now renders
+the four advisory artifacts, runs:
+
+```bash
+cargo run --locked -p xtask -- check-advisory-artifacts target/unsafe-review
+```
+
+and only then uploads the artifact set. The job remains read-only, advisory, and
+free of Miri, sanitizer, Loom, Kani, comment-posting, or blocking-policy
+behavior.
+
+The advisory workflow for `#125` showed the new verifier step passing before
+upload:
+
+- PR: `#125 ci: verify advisory artifacts before upload`
+- Workflow: `unsafe-review`
+- Run: `26015915336`
+- Branch: `ci/verify-advisory-artifacts`
+- Artifact: `unsafe-review`
+- Artifact id: `7050382836`
+- Artifact digest: `sha256:7dfee8c8709b31d6f2fcae1b93df40b0b1b95799eed3b30a3591ec9d7c2588ad`
+
+Downloaded artifact contents:
+
+```text
+cards.json
+cards.sarif
+comment-plan.json
+pr-summary.md
+```
+
+Verification command:
+
+```bash
+rtk cargo run --locked -p xtask -- check-advisory-artifacts target/advisory-artifact-125
+```
+
+Result:
+
+```text
+check-advisory-artifacts: ok (target/advisory-artifact-125)
+```
+
+The downloaded `cards.json` summary reported:
+
+```text
+changed_rust_files: 0
+cards: 0
+open_actionable_gaps: 0
+```
+
+This receipt proves the advisory workflow can reject malformed artifact sets
+before publishing them as dogfood evidence. It does not make the workflow
+blocking policy, and it does not promote any artifact surface beyond
+experimental advisory status.
+
 ## Current support posture
 
 The PR artifact surfaces are experimental and advisory. They are suitable for
