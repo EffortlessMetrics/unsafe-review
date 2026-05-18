@@ -1,4 +1,4 @@
-use super::{classify, evidence, obligations, scanner, witness};
+use super::{classify, evidence, obligations, receipts, scanner, witness};
 use crate::api::{AnalysisMode, AnalyzeInput, AnalyzeOutput, DiffSource, Scope, Summary};
 use crate::domain::{CardId, MissingEvidence, NextAction, Priority, ReviewCard, ReviewClass};
 use crate::input::{diff, workspace};
@@ -13,6 +13,7 @@ pub(crate) fn analyze(input: AnalyzeInput) -> Result<AnalyzeOutput, String> {
     let all_rust_files = workspace::discover_rust_files(&input.root)?;
     let package = package_name(&input.root);
     let policy_state = PolicyState::load(&input.root)?;
+    let receipt_index = receipts::ReceiptIndex::load(&input.root)?;
     let candidate_files = if repo_mode || diff_index.is_empty() {
         all_rust_files.clone()
     } else {
@@ -33,7 +34,7 @@ pub(crate) fn analyze(input: AnalyzeInput) -> Result<AnalyzeOutput, String> {
             let contract = evidence::contract_evidence(&scanned_site);
             let (reach, related_tests) =
                 evidence::reach_evidence(&input.root, scanned_site.site.owner.as_ref());
-            let obligation_evidence =
+            let mut obligation_evidence =
                 evidence::obligation_evidence(&scanned_site, &obligations, &contract, &reach);
             let discharge = evidence::summarize_discharge(&obligation_evidence);
             let routes = witness::routes_for(&hazards, scanned_site.site.owner.as_ref());
@@ -60,16 +61,24 @@ pub(crate) fn analyze(input: AnalyzeInput) -> Result<AnalyzeOutput, String> {
                     "No related test path was found by static search",
                 ));
             }
-            missing.push(MissingEvidence::new(
-                "witness",
-                "No witness receipt imported for this card",
-            ));
-
             let verify_commands = routes
                 .iter()
                 .filter_map(|route| route.command.clone())
                 .collect::<Vec<_>>();
             let id = card_id(&package, &scanned_site, &hazards, &mut identity_counts);
+            let witness_evidence = receipt_index
+                .evidence_for(&id)
+                .unwrap_or_else(crate::domain::WitnessEvidence::missing);
+            if witness_evidence.present {
+                for evidence in &mut obligation_evidence {
+                    evidence.witness =
+                        crate::domain::EvidenceState::present(&witness_evidence.summary);
+                }
+                if class == ReviewClass::GuardedUnwitnessed {
+                    class = ReviewClass::GuardedAndWitnessed;
+                    priority = Priority::Low;
+                }
+            }
             if policy_state.is_suppressed(&id) {
                 class = ReviewClass::Suppressed;
                 priority = Priority::Low;
@@ -81,6 +90,12 @@ pub(crate) fn analyze(input: AnalyzeInput) -> Result<AnalyzeOutput, String> {
                 summary: next_action_summary(&class, scanned_site.operation.family.as_str()),
                 verify_commands,
             };
+            if !witness_evidence.present {
+                missing.push(MissingEvidence::new(
+                    "witness",
+                    "No witness receipt imported for this card",
+                ));
+            }
             cards.push(ReviewCard {
                 id,
                 class,
@@ -94,7 +109,7 @@ pub(crate) fn analyze(input: AnalyzeInput) -> Result<AnalyzeOutput, String> {
                 contract,
                 discharge,
                 reach,
-                witness: crate::domain::WitnessEvidence::missing(),
+                witness: witness_evidence,
                 missing,
                 routes,
                 next_action,
@@ -546,6 +561,32 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn imported_receipt_marks_witness_evidence_present_by_exact_card_identity() -> Result<(), String>
+    {
+        let root = copy_fixture_to_temp("raw_pointer_alignment", "unsafe-review-receipt-match")?;
+        let card_id = single_card("raw_pointer_alignment", &fixture_output_at(&root)?)?
+            .id
+            .0
+            .clone();
+        write_receipt(&root, &card_id)?;
+
+        let output = fixture_output_at(&root)?;
+        let card = single_card("raw_pointer_alignment receipt", &output)?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp fixture failed: {err}"))?;
+        assert!(card.witness.present);
+        assert!(card.witness.summary.contains("miri"));
+        assert!(card.witness.summary.contains("ran"));
+        assert!(!card.missing.iter().any(|missing| missing.kind == "witness"));
+        assert!(
+            card.obligation_evidence
+                .iter()
+                .all(|evidence| evidence.witness.present)
+        );
+        Ok(())
+    }
+
     fn fixture_output(name: &str) -> Result<AnalyzeOutput, String> {
         let root = fixture_root(name);
         fixture_output_at(&root)
@@ -657,6 +698,27 @@ evidence = "test fixture"
             ),
         )
         .map_err(|err| format!("write policy ledger failed: {err}"))
+    }
+
+    fn write_receipt(root: &Path, card_id: &str) -> Result<(), String> {
+        let receipt_dir = root.join(".unsafe-review").join("receipts");
+        fs::create_dir_all(&receipt_dir)
+            .map_err(|err| format!("create {} failed: {err}", receipt_dir.display()))?;
+        fs::write(
+            receipt_dir.join("miri.json"),
+            format!(
+                r#"{{
+  "schema_version": "0.1",
+  "card_id": "{card_id}",
+  "tool": "miri",
+  "strength": "ran",
+  "summary": "focused fixture witness passed",
+  "command": "cargo +nightly miri test read_header",
+  "limitations": ["fixture only"]
+}}"#
+            ),
+        )
+        .map_err(|err| format!("write receipt failed: {err}"))
     }
 
     fn unique_temp_dir(prefix: &str) -> Result<PathBuf, String> {
