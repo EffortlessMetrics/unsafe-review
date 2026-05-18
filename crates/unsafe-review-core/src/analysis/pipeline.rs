@@ -608,6 +608,26 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn documented_private_unsafe_fn_does_not_require_local_guard() -> Result<(), String> {
+        let output = fixture_output("documented_private_unsafe_fn")?;
+        let card = single_card("documented_private_unsafe_fn", &output)?;
+
+        assert_eq!(card.class, ReviewClass::GuardedUnwitnessed);
+        assert!(!card.site.public_api_surface);
+        assert!(card.contract.present);
+        assert!(card.discharge.present);
+        assert!(
+            !card.missing.iter().any(|missing| missing.kind == "guard"),
+            "documented private unsafe declarations should not ask for local declaration guard evidence"
+        );
+        assert!(
+            card.missing.iter().any(|missing| missing.kind == "witness"),
+            "documented private unsafe declarations should still preserve witness prompts"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn unsafe_call_wrapper_uses_concrete_operation_family() -> Result<(), String> {
         let output = fixture_output("unsafe_fn_call_wrapper")?;
         let card = single_card("unsafe_fn_call_wrapper", &output)?;

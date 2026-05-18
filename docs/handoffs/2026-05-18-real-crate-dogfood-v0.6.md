@@ -88,13 +88,17 @@ core operation classification gap:
   operation family instead of generic `unsafe_fn_call`
 - `index < self.num_ctrl_bytes()` debug assertions now count as visible bounds
   guard evidence for pointer arithmetic cards
+- private unsafe function declarations with explicit `# Safety` docs are treated
+  as caller-contract sites rather than local guard sites
 - `&'static mut ...` lifetime/type text is not classified as a `static mut`
   item
 
 Regression proof was added with a fixture golden for
 `slice_from_raw_parts_mut`, a fixture golden for `raw_pointer_write_bytes`, and
 fixture coverage for `pointer_arithmetic_num_ctrl_bytes_guard`, plus scanner
-tests for `&'static mut` versus real `static mut` items.
+tests for `&'static mut` versus real `static mut` items. A
+`documented_private_unsafe_fn` fixture pins the private `# Safety` declaration
+case without changing the older `SAFETY:`-comment helper behavior.
 
 ## Dogfood observations
 
@@ -770,6 +774,29 @@ It moved from `guard_missing` to `guarded_unwitnessed` because the local context
 contains `debug_assert!(index < self.num_ctrl_bytes())`. No witness was
 executed, and other pointer-arithmetic bound naming patterns remain uncalibrated.
 
+Follow-up rerun after treating documented private unsafe declarations as
+caller-contract sites:
+
+```text
+changed_rust_files: 2
+cards: 4
+contract_missing: 0
+guard_missing: 2
+guarded_unwitnessed: 2
+operation families: raw_pointer_write, unknown, pointer_arithmetic, slice_from_raw_parts
+```
+
+The improved declaration card is still advisory only:
+
+```text
+ctrl  line 2639  unsafe_fn/unknown  guarded_unwitnessed
+```
+
+It moved from `guard_missing` to `guarded_unwitnessed` because the private
+unsafe declaration has explicit `# Safety` documentation and a related static
+test mention. This does not infer the safety contract of unsafe call sites and
+does not execute a witness.
+
 ## Proof
 
 Targeted local validation:
@@ -786,6 +813,8 @@ rtk cargo test -p unsafe-review-core scan_file_classifies_static_mut_items --loc
 rtk cargo test -p unsafe-review-core text_detection_classifies_raw_pointer_write_bytes_as_write --locked
 rtk cargo test -p unsafe-review-core raw_pointer_v1_operation_cards_are_concrete --locked
 rtk cargo test -p unsafe-review-core pointer_arithmetic_num_ctrl_bytes_guard_is_discharged --locked
+rtk cargo test -p unsafe-review-core documented_private_unsafe_fn_does_not_require_local_guard --locked
+rtk cargo test -p unsafe-review-core private_unsafe_helper_can_use_local_safety_comment --locked
 rtk cargo test -p unsafe-review-core fixture_card_goldens_match_rendered_json --locked
 rtk cargo run --locked -p xtask -- check-calibration
 ```
@@ -815,6 +844,7 @@ rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arra
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr692.raw.diff --format json --max-cards 30 --out target/dogfood-work/hashbrown-pr692.after-slice-mut.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr692.raw.diff --format json --max-cards 30 --out target/dogfood-work/hashbrown-pr692.after-write-bytes.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr692.raw.diff --format json --max-cards 30 --out target/dogfood-work/hashbrown-pr692.after-num-ctrl-guard.json
+rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr692.raw.diff --format json --max-cards 30 --out target/dogfood-work/hashbrown-pr692.after-private-contract.json
 ```
 
 The dogfood reruns used a temporary `CARGO_TARGET_DIR` to avoid a Windows file
@@ -877,6 +907,9 @@ The repo may claim:
 - one fixture-backed pointer arithmetic improvement changed the `hashbrown#692`
   `ctrl` pointer arithmetic card from `guard_missing` to `guarded_unwitnessed`
   when `index < self.num_ctrl_bytes()` is visible
+- one fixture-backed contract improvement changed the `hashbrown#692` private
+  documented `unsafe fn ctrl` declaration from `guard_missing` to
+  `guarded_unwitnessed`
 - attributed unsafe function declarations are deduped between syntax-backed
   extraction and fallback line scanning
 - false-positive regression coverage exists in fixtures and calibration
@@ -930,6 +963,9 @@ The repo must not claim:
   advisory.
 - `hashbrown#692` now recognizes `num_ctrl_bytes` bounds evidence for pointer
   arithmetic, but broader pointer-arithmetic guard naming remains uncalibrated.
+- `hashbrown#692` now treats private unsafe declarations with explicit
+  `# Safety` docs as caller-contract sites, but unsafe-call-specific callee
+  contract inference remains future work.
 - These runs do not prove absence of missed unsafe seams.
 
 ## Next useful work
