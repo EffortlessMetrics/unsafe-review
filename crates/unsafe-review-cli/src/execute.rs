@@ -40,16 +40,22 @@ fn run_check(options: CheckOptions, scope: Scope, mode: AnalysisMode) -> Result<
     })?;
     let rendered = render_with_format(&output, &options.format);
     if let Some(path) = options.out {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|err| format!("create {} failed: {err}", parent.display()))?;
-        }
-        fs::write(&path, rendered)
-            .map_err(|err| format!("write {} failed: {err}", path.display()))?;
+        write_rendered(&path, rendered)?;
     } else {
         println!("{rendered}");
     }
     Ok(())
+}
+
+fn write_rendered(path: &Path, rendered: String) -> Result<(), String> {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent)
+            .map_err(|err| format!("create {} failed: {err}", parent.display()))?;
+    }
+    fs::write(path, rendered).map_err(|err| format!("write {} failed: {err}", path.display()))
 }
 
 fn diff_source(options: &CheckOptions) -> Result<DiffSource, String> {
@@ -195,8 +201,8 @@ fn print_help() {
     println!("  repo    [--root .] [--format json]");
     println!("  pilot   [--root .] [--base origin/main] [--max-cards 5]");
     println!("  badges  [--root .] [--out badges]");
-    println!("  explain [--root .] <card-id>");
-    println!("  context [--root .] <card-id>");
+    println!("  explain [--root .] [--format markdown|json] <card-id>");
+    println!("  context [--root .] [--json] <card-id>");
     println!("  doctor  [--root .]");
     println!();
     println!("Trust boundary: static review evidence, not soundness proof.");

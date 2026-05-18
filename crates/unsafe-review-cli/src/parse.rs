@@ -44,6 +44,8 @@ fn parse_doctor(args: Vec<String>) -> Result<Command, String> {
 
 fn parse_check(args: Vec<String>) -> Result<CheckOptions, String> {
     let mut options = CheckOptions::default();
+    let mut saw_base = false;
+    let mut saw_diff = false;
     let mut idx = 0usize;
     while idx < args.len() {
         match args[idx].as_str() {
@@ -52,10 +54,18 @@ fn parse_check(args: Vec<String>) -> Result<CheckOptions, String> {
                 options.root = PathBuf::from(value(&args, idx, "--root")?);
             }
             "--base" => {
+                if saw_diff {
+                    return Err("--base and --diff are mutually exclusive".to_string());
+                }
+                saw_base = true;
                 idx += 1;
                 options.base = Some(value(&args, idx, "--base")?.to_string());
             }
             "--diff" => {
+                if saw_base {
+                    return Err("--base and --diff are mutually exclusive".to_string());
+                }
+                saw_diff = true;
                 idx += 1;
                 options.diff = Some(PathBuf::from(value(&args, idx, "--diff")?));
             }
@@ -120,10 +130,12 @@ fn parse_explain(args: Vec<String>) -> Result<Command, String> {
                 idx += 1;
                 format = parse_format(value(&args, idx, "--format")?)?;
             }
+            "--json" => format = Format::Json,
+            "--markdown" => format = Format::Markdown,
             value if value.starts_with('-') => {
                 return Err(format!("unknown explain argument `{value}`"));
             }
-            value => id = Some(value.to_string()),
+            value => set_id(&mut id, value, "explain")?,
         }
         idx += 1;
     }
@@ -144,10 +156,18 @@ fn parse_context(args: Vec<String>) -> Result<Command, String> {
                 idx += 1;
                 root = PathBuf::from(value(&args, idx, "--root")?);
             }
+            "--json" => {}
+            "--format" => {
+                idx += 1;
+                let format = parse_format(value(&args, idx, "--format")?)?;
+                if format != Format::Json {
+                    return Err("context only supports JSON output".to_string());
+                }
+            }
             value if value.starts_with('-') => {
                 return Err(format!("unknown context argument `{value}`"));
             }
-            value => id = Some(value.to_string()),
+            value => set_id(&mut id, value, "context")?,
         }
         idx += 1;
     }
@@ -166,8 +186,87 @@ fn parse_format(raw: &str) -> Result<Format, String> {
     }
 }
 
+fn set_id(id: &mut Option<String>, value: &str, command: &str) -> Result<(), String> {
+    if id.replace(value.to_string()).is_some() {
+        return Err(format!("multiple {command} card ids supplied"));
+    }
+    Ok(())
+}
+
 fn value<'a>(args: &'a [String], idx: usize, flag: &str) -> Result<&'a str, String> {
     args.get(idx)
         .map(|value| value.as_str())
         .ok_or_else(|| format!("missing value for {flag}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse;
+    use crate::command::{Command, Format};
+    use std::path::PathBuf;
+
+    fn args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| (*value).to_string()).collect()
+    }
+
+    #[test]
+    fn context_accepts_json_alias_after_card_id() -> Result<(), String> {
+        let command = parse(args(&["unsafe-review", "context", "UR-card", "--json"]))?;
+        assert_eq!(
+            command,
+            Command::Context {
+                root: PathBuf::from("."),
+                id: "UR-card".to_string()
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn context_rejects_non_json_format() {
+        let err = parse(args(&[
+            "unsafe-review",
+            "context",
+            "UR-card",
+            "--format",
+            "markdown",
+        ]));
+        assert_eq!(err, Err("context only supports JSON output".to_string()));
+    }
+
+    #[test]
+    fn check_rejects_base_and_diff_together() {
+        let err = parse(args(&[
+            "unsafe-review",
+            "check",
+            "--base",
+            "origin/main",
+            "--diff",
+            "change.diff",
+        ]));
+        assert_eq!(
+            err,
+            Err("--base and --diff are mutually exclusive".to_string())
+        );
+    }
+
+    #[test]
+    fn explain_rejects_multiple_card_ids() {
+        let err = parse(args(&["unsafe-review", "explain", "UR-one", "UR-two"]));
+        assert_eq!(err, Err("multiple explain card ids supplied".to_string()));
+    }
+
+    #[test]
+    fn explain_accepts_json_alias() -> Result<(), String> {
+        let command = parse(args(&["unsafe-review", "explain", "UR-card", "--json"]))?;
+        assert_eq!(
+            command,
+            Command::Explain {
+                root: PathBuf::from("."),
+                id: "UR-card".to_string(),
+                format: Format::Json
+            }
+        );
+        Ok(())
+    }
 }
