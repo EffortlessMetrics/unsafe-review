@@ -1,0 +1,8 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,0 +1,4 @@
++// SAFETY: this fixture documents ABI intent but provides no sanitizer receipt.
++unsafe extern "C" {
++    fn strlen(ptr: *const u8) -> usize;
++}

@@ -296,6 +296,7 @@ mod tests {
         "vec_set_len",
         "transmute_invalid_value",
         "unsafe_impl_send",
+        "ffi_sanitizer_route",
     ];
 
     #[test]

@@ -1,0 +1,86 @@
+[
+  {
+    "id": "UR-src-lib-rs-2-unknown-ffi",
+    "class": "miri_unsupported",
+    "priority": "medium",
+    "confidence": "medium",
+    "site": {
+      "file": "src/lib.rs",
+      "line": 2,
+      "column": 1,
+      "kind": "extern_block",
+      "owner": "",
+      "snippet": "unsafe extern \"C\" {"
+    },
+    "operation_family": "ffi",
+    "hazards": [
+      "ffi_abi",
+      "ffi_ownership"
+    ],
+    "obligations": [
+      "foreign declaration matches ABI and layout on both sides",
+      "ownership, lifetime, and nullability contract is explicit"
+    ],
+    "obligation_evidence": [
+      {
+        "key": "abi",
+        "description": "foreign declaration matches ABI and layout on both sides",
+        "contract": {
+          "present": true,
+          "state": "present",
+          "summary": "Nearby `SAFETY:` comment was detected"
+        },
+        "discharge": {
+          "present": false,
+          "state": "missing",
+          "summary": "No obligation-specific guard code was detected"
+        },
+        "reach": {
+          "present": false,
+          "state": "missing",
+          "summary": "No owner function could be inferred"
+        },
+        "witness": {
+          "present": false,
+          "state": "missing",
+          "summary": "No imported witness receipt was found"
+        }
+      },
+      {
+        "key": "ownership",
+        "description": "ownership, lifetime, and nullability contract is explicit",
+        "contract": {
+          "present": true,
+          "state": "present",
+          "summary": "Nearby `SAFETY:` comment was detected"
+        },
+        "discharge": {
+          "present": false,
+          "state": "missing",
+          "summary": "No obligation-specific guard code was detected"
+        },
+        "reach": {
+          "present": false,
+          "state": "missing",
+          "summary": "No owner function could be inferred"
+        },
+        "witness": {
+          "present": false,
+          "state": "missing",
+          "summary": "No imported witness receipt was found"
+        }
+      }
+    ],
+    "contract": "Nearby `SAFETY:` comment was detected",
+    "discharge": "No visible local guard detected",
+    "reach": "No owner function could be inferred",
+    "witness": "No imported witness receipt was found",
+    "missing": [
+      "Missing visible local guard for inferred safety obligations",
+      "No witness receipt imported for this card"
+    ],
+    "verify_commands": [
+      "RUSTFLAGS='-Z sanitizer=address' cargo +nightly test"
+    ]
+  }
+]
