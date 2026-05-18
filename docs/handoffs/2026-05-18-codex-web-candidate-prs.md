@@ -61,7 +61,7 @@ candidate PRs in the theme inventory below.
 
 | Theme | Candidate PRs | Current canonical | Disposition | Target lane | Reason |
 |---|---:|---|---|---|---|
-| Scanner false-positive hardening | #29, #32 | none | close-duplicate or park | already landed | PR #27 merged this class; only extract anything not covered by current scanner tests. |
+| Scanner false-positive hardening | #29, #32 | reworked declaration-prefix slice from #29/#32 | merge | current hardening | PR #27 merged the broad class; this follow-up extracts the remaining syntax-declaration false-positive guard without reopening broad scanner changes. |
 | Raw pointer write detection | #49, #62 | reworked from #49/#62 on current main | merge | current hardening | The current slice keeps the syntax-target behavior and fixture proof, but rebuilds them narrowly on current main as raw pointer assignment-write detection. |
 | xtask fixture validation | #33, #50, #63, #64 | reworked from #64 on current main | merge | current hardening | Fixture validation protects the support-tier proof mechanism. The reworked slice validates fixture layout, golden JSON shape, diff shape, and package naming without broad xtask policy changes. |
 | CLI e2e coverage | #39, #58, #80, #81 | reworked from #81 on current main | merge | current PR/CI projection | The current slice keeps #81's user-path shape but updates it for landed PR artifacts: JSON, PR summary, SARIF, comment plan, context, and explain. |
