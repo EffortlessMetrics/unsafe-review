@@ -112,6 +112,15 @@ Use real PRs to inspect artifact usefulness before adding more product surface:
 7. Record noisy cards, missing cards, and unclear wording as fixture or renderer
    follow-ups.
 
+For downloaded or locally rendered artifacts, run:
+
+```bash
+rtk cargo xtask check-advisory-artifacts target/unsafe-review
+```
+
+This verifies the four-file artifact contract, advisory policy, plan-only
+comment mode, JSON/SARIF parseability, and trust-boundary text.
+
 ## Next lane
 
 The next durable lane should be dogfood-driven stabilization, not new product

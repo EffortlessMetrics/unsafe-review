@@ -50,7 +50,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
     match args.get(1).map(|arg| arg.as_str()) {
         None | Some("help") | Some("--help") => {
             println!(
-                "xtask commands: check-pr, check-docs, check-policy, check-support-tiers, check-fixtures"
+                "xtask commands: check-pr, check-docs, check-policy, check-support-tiers, check-fixtures, check-advisory-artifacts <dir>"
             );
             Ok(())
         }
@@ -67,6 +67,12 @@ fn run(args: Vec<String>) -> Result<(), String> {
         Some("check-policy") => check_policy(),
         Some("check-support-tiers") => check_support_tiers(),
         Some("check-fixtures") => check_fixtures(),
+        Some("check-advisory-artifacts") => {
+            let Some(dir) = args.get(2) else {
+                return Err("usage: cargo xtask check-advisory-artifacts <dir>".to_string());
+            };
+            check_advisory_artifacts(Path::new(dir))
+        }
         Some(other) => Err(format!("unknown xtask command `{other}`")),
     }
 }
@@ -144,6 +150,57 @@ fn check_fixtures() -> Result<(), String> {
         check_fixture(dir)?;
     }
     println!("check-fixtures: ok ({} fixtures)", dirs.len());
+    Ok(())
+}
+
+fn check_advisory_artifacts(dir: &Path) -> Result<(), String> {
+    if !dir.is_dir() {
+        return Err(format!(
+            "advisory artifact directory missing: {}",
+            dir.display()
+        ));
+    }
+
+    let cards = parse_json_file(&dir.join("cards.json"))?;
+    require_json_str(&cards, "tool", "unsafe-review", "cards.json")?;
+    require_json_str(&cards, "policy", "advisory", "cards.json")?;
+    require_json_array(&cards, "cards", "cards.json")?;
+
+    let pr_summary_path = dir.join("pr-summary.md");
+    let pr_summary = read_to_string(&pr_summary_path)?;
+    require_text_contains(
+        &pr_summary,
+        "static unsafe contract review",
+        &pr_summary_path,
+    )?;
+    require_text_contains(
+        &pr_summary,
+        "not a proof of memory safety",
+        &pr_summary_path,
+    )?;
+    require_text_contains(&pr_summary, "not UB-free status", &pr_summary_path)?;
+    require_text_contains(&pr_summary, "not a Miri result", &pr_summary_path)?;
+
+    let sarif = parse_json_file(&dir.join("cards.sarif"))?;
+    require_json_str(&sarif, "version", "2.1.0", "cards.sarif")?;
+    require_json_array(&sarif, "runs", "cards.sarif")?;
+    let sarif_boundary = sarif
+        .pointer("/runs/0/properties/trustBoundary")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "cards.sarif is missing /runs/0/properties/trustBoundary".to_string())?;
+    require_boundary_text(sarif_boundary, "cards.sarif")?;
+
+    let comment_plan = parse_json_file(&dir.join("comment-plan.json"))?;
+    require_json_str(&comment_plan, "mode", "plan_only", "comment-plan.json")?;
+    require_json_str(&comment_plan, "policy", "advisory", "comment-plan.json")?;
+    require_json_array(&comment_plan, "comments", "comment-plan.json")?;
+    let comment_boundary = comment_plan
+        .get("trust_boundary")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "comment-plan.json is missing trust_boundary".to_string())?;
+    require_boundary_text(comment_boundary, "comment-plan.json")?;
+
+    println!("check-advisory-artifacts: ok ({})", dir.display());
     Ok(())
 }
 
@@ -289,6 +346,56 @@ fn require_toml_string(value: &toml::Value, key: &str, path: &str) -> Result<(),
     }
 }
 
+fn require_json_str(
+    value: &serde_json::Value,
+    key: &str,
+    expected: &str,
+    path: &str,
+) -> Result<(), String> {
+    match value.get(key).and_then(serde_json::Value::as_str) {
+        Some(actual) if actual == expected => Ok(()),
+        Some(actual) => Err(format!(
+            "{path} key `{key}` is `{actual}`, expected `{expected}`"
+        )),
+        None => Err(format!("{path} is missing string key `{key}`")),
+    }
+}
+
+fn require_json_array(value: &serde_json::Value, key: &str, path: &str) -> Result<(), String> {
+    if value.get(key).is_some_and(serde_json::Value::is_array) {
+        Ok(())
+    } else {
+        Err(format!("{path} is missing array key `{key}`"))
+    }
+}
+
+fn require_text_contains(text: &str, needle: &str, path: &Path) -> Result<(), String> {
+    if text_contains_ignore_ascii_case(text, needle) {
+        Ok(())
+    } else {
+        Err(format!("{} is missing `{needle}`", path.display()))
+    }
+}
+
+fn require_boundary_text(text: &str, path: &str) -> Result<(), String> {
+    for needle in [
+        "static unsafe contract review",
+        "not a proof of memory safety",
+        "not UB-free status",
+        "not a Miri result",
+    ] {
+        if !text_contains_ignore_ascii_case(text, needle) {
+            return Err(format!("{path} trust boundary is missing `{needle}`"));
+        }
+    }
+    Ok(())
+}
+
+fn text_contains_ignore_ascii_case(text: &str, needle: &str) -> bool {
+    text.to_ascii_lowercase()
+        .contains(&needle.to_ascii_lowercase())
+}
+
 fn require_file(path: &str) -> Result<(), String> {
     if Path::new(path).is_file() {
         Ok(())
@@ -429,6 +536,7 @@ fn is_forbidden_generated_path(path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn support_tier_parser_reads_tier_column() {
@@ -493,5 +601,69 @@ mod tests {
         assert!(is_forbidden_generated_path("reports/cards.sarif"));
         assert!(!is_forbidden_generated_path("Cargo.lock"));
         assert!(!is_forbidden_generated_path("docs/status/SUPPORT_TIERS.md"));
+    }
+
+    #[test]
+    fn advisory_artifact_checker_accepts_expected_artifact_set() -> Result<(), String> {
+        let dir = unique_temp_dir("unsafe-review-artifacts-ok")?;
+        fs::create_dir_all(&dir).map_err(|err| format!("create temp dir failed: {err}"))?;
+        write_valid_artifacts(&dir)?;
+
+        let result = check_advisory_artifacts(&dir);
+
+        fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        result
+    }
+
+    #[test]
+    fn advisory_artifact_checker_rejects_missing_trust_boundary() -> Result<(), String> {
+        let dir = unique_temp_dir("unsafe-review-artifacts-missing-boundary")?;
+        fs::create_dir_all(&dir).map_err(|err| format!("create temp dir failed: {err}"))?;
+        write_valid_artifacts(&dir)?;
+        fs::write(dir.join("pr-summary.md"), "# unsafe-review PR summary\n")
+            .map_err(|err| format!("write pr summary failed: {err}"))?;
+
+        let result = check_advisory_artifacts(&dir);
+
+        fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        assert!(
+            result
+                .err()
+                .unwrap_or_default()
+                .contains("static unsafe contract review")
+        );
+        Ok(())
+    }
+
+    fn write_valid_artifacts(dir: &Path) -> Result<(), String> {
+        fs::write(
+            dir.join("cards.json"),
+            r#"{"tool":"unsafe-review","policy":"advisory","cards":[]}"#,
+        )
+        .map_err(|err| format!("write cards failed: {err}"))?;
+        fs::write(
+            dir.join("pr-summary.md"),
+            "This artifact is static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result unless a witness receipt is attached.\n",
+        )
+        .map_err(|err| format!("write pr summary failed: {err}"))?;
+        fs::write(
+            dir.join("cards.sarif"),
+            r#"{"version":"2.1.0","runs":[{"properties":{"trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}]}"#,
+        )
+        .map_err(|err| format!("write sarif failed: {err}"))?;
+        fs::write(
+            dir.join("comment-plan.json"),
+            r#"{"mode":"plan_only","policy":"advisory","comments":[],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}"#,
+        )
+        .map_err(|err| format!("write comment plan failed: {err}"))?;
+        Ok(())
+    }
+
+    fn unique_temp_dir(prefix: &str) -> Result<PathBuf, String> {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|err| format!("system clock before UNIX_EPOCH: {err}"))?
+            .as_nanos();
+        Ok(std::env::temp_dir().join(format!("{prefix}-{nanos}")))
     }
 }

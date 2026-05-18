@@ -49,6 +49,17 @@ not posted by the workflow.
 The workflow does not run Miri, sanitizers, Loom, Kani, or other witness tools.
 It does not post comments and does not enable blocking policy.
 
+After downloading or rendering an advisory artifact set, verify the artifact
+contract with:
+
+```text
+cargo xtask check-advisory-artifacts target/unsafe-review
+```
+
+This checks that `cards.json`, `pr-summary.md`, `cards.sarif`, and
+`comment-plan.json` exist, machine-readable artifacts parse, the policy remains
+advisory, the comment plan remains plan-only, and the trust boundary is present.
+
 Witness tools are routed, not run everywhere. Miri, sanitizers, Loom, and Kani
 belong in targeted PR, nightly, or release lanes unless repo policy says
 otherwise.
