@@ -7,6 +7,7 @@ pub(crate) enum Format {
     Markdown,
     PrSummary,
     Sarif,
+    CommentPlan,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

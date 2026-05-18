@@ -14,6 +14,9 @@ unsafe-review check --base origin/main \
 unsafe-review check --base origin/main \
   --format sarif \
   --out target/unsafe-review/cards.sarif
+unsafe-review check --base origin/main \
+  --format comment-plan \
+  --out target/unsafe-review/comment-plan.json
 ```
 
 The PR summary artifact is Markdown for GitHub job summaries or uploaded
@@ -31,10 +34,14 @@ The advisory GitHub workflow writes and uploads:
 target/unsafe-review/cards.json
 target/unsafe-review/pr-summary.md
 target/unsafe-review/cards.sarif
+target/unsafe-review/comment-plan.json
 ```
 
-It does not run Miri, sanitizers, Loom, Kani, or other witness tools. It does
-not post comments and does not enable blocking policy.
+The comment plan is an artifact of candidate high-signal inline comments. It is
+not posted by the workflow.
+
+The workflow does not run Miri, sanitizers, Loom, Kani, or other witness tools.
+It does not post comments and does not enable blocking policy.
 
 Witness tools are routed, not run everywhere. Miri, sanitizers, Loom, and Kani
 belong in targeted PR, nightly, or release lanes unless repo policy says

@@ -23,6 +23,6 @@ actions = [
   "dtolnay/rust-toolchain@1.95.0",
   "actions/upload-artifact@v4",
 ]
-reason = "Advisory unsafe-review PR artifact workflow. It uploads cards.json, pr-summary.md, and cards.sarif without witness execution or write permissions."
+reason = "Advisory unsafe-review PR artifact workflow. It uploads cards.json, pr-summary.md, cards.sarif, and comment-plan.json without witness execution or write permissions."
 created = "2026-05-18"
 review_after = "2026-06-18"
