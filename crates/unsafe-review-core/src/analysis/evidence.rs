@@ -154,14 +154,24 @@ fn has_capacity_guard(family: &OperationFamily, lower: &str) -> bool {
     lower.contains("capacity")
         || lower.contains("cap()")
         || (family == &OperationFamily::VecSetLen && contains_word(lower, "cap"))
+        || (family == &OperationFamily::VecSetLen && has_set_len_zero_length(lower))
 }
 
 fn has_set_len_initialization_evidence(lower: &str) -> bool {
-    lower.contains("maybeuninit::new")
+    has_set_len_zero_length(lower)
+        || lower.contains("maybeuninit::new")
         || lower.contains(".write(")
         || lower.contains("ptr::write")
         || lower.contains("copy_nonoverlapping")
         || lower.contains("copy_to_nonoverlapping")
+}
+
+fn has_set_len_zero_length(lower: &str) -> bool {
+    let compact = lower
+        .chars()
+        .filter(|ch| !ch.is_ascii_whitespace())
+        .collect::<String>();
+    compact.contains(".set_len(0)")
 }
 
 fn has_alignment_guard(lower: &str) -> bool {
@@ -452,6 +462,32 @@ mod tests {
         let evidence = obligation_evidence(&set_len, &obligations, &contract, &reach);
 
         assert!(evidence[0].discharge.present);
+    }
+
+    #[test]
+    fn set_len_zero_discharges_capacity_and_initialized_obligations() {
+        let obligations = vec![
+            SafetyObligation::new("capacity", "new length is at most capacity"),
+            SafetyObligation::new(
+                "initialized",
+                "elements in the extended range are initialized",
+            ),
+        ];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let set_len = site_with_family(
+            OperationFamily::VecSetLen,
+            vec![],
+            "values.set_len(0);",
+            vec![],
+        );
+
+        let evidence = obligation_evidence(&set_len, &obligations, &contract, &reach);
+
+        assert!(evidence.iter().all(|item| item.discharge.present));
     }
 
     #[test]
