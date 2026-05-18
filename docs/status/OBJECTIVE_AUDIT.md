@@ -80,11 +80,11 @@ rtk cargo test -p unsafe-review --test e2e receipt_validate --locked
 
 ## Recommended Next Lane
 
-Stay in witness-receipt hardening before policy promotion:
+Move from fixture-backed proof to dogfood measurement before policy promotion:
 
-1. Dogfood explicit receipts on real unsafe-review PRs.
-2. Add one native receipt adapter only with fixture proof and no witness
-   execution.
-3. Preserve exact-card matching and visible limitations.
+1. Run `unsafe-review` on selected real unsafe-heavy crates and record
+   false-positive and false-negative notes.
+2. Dogfood explicit receipts and outcome comparison on real unsafe-review PRs.
+3. Preserve exact-card matching, visible limitations, and advisory-only policy.
 4. Keep support tiers experimental until dogfood and calibration justify a
    stronger claim.
