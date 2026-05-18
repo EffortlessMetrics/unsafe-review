@@ -10,6 +10,7 @@ required_core_fixtures = [
   "unsafe_impl_send",
   "ffi_sanitizer_route",
   "safe_code_no_cards",
+  "imports_not_unsafe_operations",
   "comment_alignment_not_guard",
 ]
 
@@ -85,6 +86,13 @@ expected_hazard = "ffi_abi"
 fixture = "safe_code_no_cards"
 kind = "negative"
 claim = "safe Rust changes emit no review cards"
+support_tier = "Diff unsafe site inventory"
+expected_cards = 0
+
+[[cases]]
+fixture = "imports_not_unsafe_operations"
+kind = "false_positive_control"
+claim = "extern crate and import-only unsafe operation paths emit no review cards"
 support_tier = "Diff unsafe site inventory"
 expected_cards = 0
 

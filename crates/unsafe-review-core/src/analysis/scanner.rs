@@ -271,55 +271,58 @@ fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
     if line.contains("unsafe impl") {
         return Some((UnsafeSiteKind::UnsafeImpl, OperationFamily::Unknown));
     }
-    if line.contains("extern \"") || line.starts_with("extern ") || line.contains("unsafe extern") {
+    if is_extern_boundary(line) {
         return Some((UnsafeSiteKind::ExternBlock, OperationFamily::Ffi));
     }
     if line.contains("static mut") {
         return Some((UnsafeSiteKind::StaticMut, OperationFamily::StaticMut));
     }
-    if line.contains("copy_nonoverlapping") {
+    if is_import_item(line) {
+        return None;
+    }
+    if contains_call_name(line, "copy_nonoverlapping") {
         return Some((
             UnsafeSiteKind::Operation,
             OperationFamily::CopyNonOverlapping,
         ));
     }
-    if line.contains("from_raw_parts") {
+    if contains_call_name(line, "from_raw_parts") {
         return Some((
             UnsafeSiteKind::Operation,
             OperationFamily::SliceFromRawParts,
         ));
     }
-    if line.contains("from_utf8_unchecked") {
+    if contains_call_name(line, "from_utf8_unchecked") {
         return Some((
             UnsafeSiteKind::Operation,
             OperationFamily::StrFromUtf8Unchecked,
         ));
     }
-    if line.contains("assume_init") {
+    if contains_call_name(line, "assume_init") {
         return Some((
             UnsafeSiteKind::Operation,
             OperationFamily::MaybeUninitAssumeInit,
         ));
     }
-    if line.contains("set_len") {
+    if contains_call_name(line, "set_len") {
         return Some((UnsafeSiteKind::Operation, OperationFamily::VecSetLen));
     }
-    if line.contains("transmute") {
+    if contains_call_name(line, "transmute") {
         return Some((UnsafeSiteKind::Operation, OperationFamily::Transmute));
     }
-    if line.contains("zeroed") {
+    if contains_call_name(line, "zeroed") {
         return Some((UnsafeSiteKind::Operation, OperationFamily::Zeroed));
     }
-    if line.contains("Box::from_raw") || line.contains("from_raw(") {
+    if contains_call_name(line, "from_raw") {
         return Some((UnsafeSiteKind::Operation, OperationFamily::BoxFromRaw));
     }
-    if line.contains("Pin::new_unchecked") {
+    if contains_call_name(line, "new_unchecked") && line.contains("Pin") {
         return Some((UnsafeSiteKind::Operation, OperationFamily::PinUnchecked));
     }
-    if line.contains("get_unchecked") {
+    if contains_call_name(line, "get_unchecked") || contains_call_name(line, "get_unchecked_mut") {
         return Some((UnsafeSiteKind::Operation, OperationFamily::GetUnchecked));
     }
-    if line.contains("new_unchecked") {
+    if contains_call_name(line, "new_unchecked") {
         return Some((UnsafeSiteKind::Operation, OperationFamily::NonNullUnchecked));
     }
     if line.contains(".read_unaligned()") || line.contains("ptr::read_unaligned") {
@@ -350,6 +353,53 @@ fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
         return Some((UnsafeSiteKind::UnsafeBlock, OperationFamily::Unknown));
     }
     None
+}
+
+fn is_extern_boundary(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    if trimmed.starts_with("extern crate") || trimmed.starts_with("pub extern crate") {
+        return false;
+    }
+    trimmed.contains("extern \"")
+        || trimmed.starts_with("unsafe extern {")
+        || trimmed.starts_with("extern {")
+}
+
+fn is_import_item(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with("use ")
+        || trimmed.starts_with("pub use ")
+        || (trimmed.starts_with("pub(") && trimmed.contains(" use "))
+}
+
+fn contains_call_name(line: &str, name: &str) -> bool {
+    let mut cursor = line;
+    while let Some(pos) = cursor.find(name) {
+        let before = cursor[..pos].chars().next_back();
+        let after = &cursor[pos + name.len()..];
+        let starts_on_boundary = before.is_none_or(|ch| !is_ident_continue(ch));
+        if starts_on_boundary && call_suffix(after) {
+            return true;
+        }
+        cursor = &after[after
+            .char_indices()
+            .next()
+            .map_or(after.len(), |(idx, ch)| idx + ch.len_utf8())..];
+    }
+    false
+}
+
+fn call_suffix(after_name: &str) -> bool {
+    let rest = after_name.trim_start();
+    if rest.starts_with('(') {
+        return true;
+    }
+    rest.strip_prefix("::")
+        .is_some_and(|after_colons| after_colons.trim_start().starts_with('<'))
+}
+
+fn is_ident_continue(ch: char) -> bool {
+    ch == '_' || ch.is_ascii_alphanumeric()
 }
 
 #[derive(Clone, Debug)]
@@ -780,6 +830,32 @@ mod tests {
     }
 
     #[test]
+    fn text_detection_does_not_classify_extern_crate_as_ffi() {
+        assert_eq!(detect_site("extern crate std;"), None);
+        assert_eq!(detect_site("pub extern crate alloc;"), None);
+        assert_eq!(
+            detect_site("unsafe extern \"C\" {"),
+            Some((UnsafeSiteKind::ExternBlock, OperationFamily::Ffi))
+        );
+    }
+
+    #[test]
+    fn text_detection_does_not_classify_imported_operation_paths() {
+        assert_eq!(detect_site("use core::ptr::copy_nonoverlapping;"), None);
+        assert_eq!(
+            detect_site("pub use core::mem::transmute as cast_value;"),
+            None
+        );
+        assert_eq!(
+            detect_site("core::ptr::copy_nonoverlapping(src, dst, len);"),
+            Some((
+                UnsafeSiteKind::Operation,
+                OperationFamily::CopyNonOverlapping
+            ))
+        );
+    }
+
+    #[test]
     fn text_detection_does_not_classify_deref_assignments_as_writes() {
         assert_eq!(detect_site("*ptr = value;"), None);
         assert_eq!(detect_site("*ptr += 1;"), None);
@@ -812,6 +888,25 @@ mod tests {
             OperationFamily::RawPointerWrite
         );
         assert_eq!(operations[0].site.snippet, "*ptr = value;");
+        Ok(())
+    }
+
+    #[test]
+    fn scan_file_does_not_emit_cards_for_extern_crate_or_unsafe_import_paths() -> Result<(), String>
+    {
+        let root = unique_temp_dir()?;
+        fs::create_dir_all(root.join("src"))
+            .map_err(|err| format!("create temp src failed: {err}"))?;
+        fs::write(
+            root.join("src/lib.rs"),
+            "extern crate std;\n\nuse core::ptr::copy_nonoverlapping;\npub use core::mem::transmute as cast_value;\n\npub fn len(bytes: &[u8]) -> usize { bytes.len() }\n",
+        )
+        .map_err(|err| format!("write temp source failed: {err}"))?;
+
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        assert!(sites.is_empty(), "unexpected sites: {sites:#?}");
         Ok(())
     }
 
