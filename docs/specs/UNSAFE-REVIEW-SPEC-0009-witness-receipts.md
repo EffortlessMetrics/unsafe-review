@@ -24,6 +24,10 @@ card's top-level witness evidence present and marks obligation-level witness
 evidence present. Receipt import does not discharge contracts, guards, or reach
 evidence.
 
+The receipt shape is represented in the core SDK as the serde-backed
+`WitnessReceipt` DTO. Importers and future native adapters must use that same
+shape instead of inventing parallel receipt schemas.
+
 Receipt JSON fields:
 
 ```json
@@ -94,6 +98,8 @@ after the `recorded_at` date.
 - A receipt missing author, timestamp, or expiry metadata is rejected.
 - A receipt whose expiry predates its recorded date is rejected.
 - If receipt scope is limited, the receipt summary keeps that limitation visible.
+- The core `WitnessReceipt` DTO round-trips through serde JSON and validates the
+  same required fields as the importer.
 
 ## CI proof
 

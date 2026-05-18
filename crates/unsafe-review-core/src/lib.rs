@@ -20,5 +20,6 @@ pub use api::{
 pub use domain::{
     CardId, Confidence, ContractEvidence, DischargeEvidence, HazardKind, MissingEvidence,
     NextAction, Priority, ReachEvidence, RelatedTest, ReviewCard, ReviewClass, SafetyObligation,
-    SourceLocation, UnsafeOperation, UnsafeSite, WitnessEvidence, WitnessKind, WitnessRoute,
+    SourceLocation, UnsafeOperation, UnsafeSite, WITNESS_RECEIPT_SCHEMA_VERSION, WitnessEvidence,
+    WitnessKind, WitnessReceipt, WitnessRoute,
 };
