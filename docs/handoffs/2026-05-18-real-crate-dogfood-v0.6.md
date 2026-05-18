@@ -258,6 +258,31 @@ verify: cargo +nightly miri test keep_rest
 The card class did not change. The improvement is that the card now points the
 reviewer and witness route at the real owner instead of prose.
 
+### `arrayvec#308`
+
+PR: `https://github.com/bluss/arrayvec/pull/308`
+
+The PR fixes a double-free for ZSTs with `Drop` during `.extend()` by changing
+the write path and adding a safe-API regression test.
+
+Dogfood output:
+
+```text
+elapsed_seconds: 9.2
+changed_rust_files: 2
+cards: 1
+contract_missing: 1
+guard_missing: 0
+operation_family: raw_pointer_write
+owner: extend_from_iter
+verify: cargo +nightly miri test extend_from_iter
+```
+
+This run did not require a scanner fix. It is useful because the card points to
+the changed raw pointer write inside `extend_from_iter`, recognizes visible
+guard evidence, and routes the remaining missing contract/witness work to the
+owner-specific Miri/cargo-careful path.
+
 ## Proof
 
 Targeted local validation:
@@ -280,6 +305,7 @@ rtk cargo run --locked -p unsafe-review -- repo --root target/dogfood-work/array
 rtk cargo run --locked -p unsafe-review -- repo --root target/dogfood-work/memchr --format json --max-cards 50 --out target/dogfood-work/memchr.unsafe-review.after-cap-targetfeature.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/memchr --diff target/dogfood-work/memchr-pr215.raw.diff --format json --max-cards 20 --out target/dogfood-work/memchr-pr215.owner-contract.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/smallvec --diff target/dogfood-work/smallvec-pr407.raw.diff --format json --max-cards 20 --out target/dogfood-work/smallvec-pr407.owner-fix.json
+rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr308.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr308.unsafe-review.json
 ```
 
 The dogfood reruns used a temporary `CARGO_TARGET_DIR` to avoid a Windows file
@@ -293,8 +319,8 @@ The repo may claim:
 
 - the first real-crate dogfood slice was run on `rust-smallvec` and `arrayvec`
 - a capped `memchr` dogfood snapshot now completes
-- real PR-diff dogfood runs on `memchr#215` and `rust-smallvec#407` produce card
-  output
+- real PR-diff dogfood runs on `memchr#215`, `rust-smallvec#407`, and
+  `arrayvec#308` produce card output
 - dogfood found and fixed import/declaration and `cfg(target_feature)`
   false positives
 - capped repo scans stop after the requested card cap
@@ -309,7 +335,7 @@ The repo must not claim:
 - usable-alpha support-tier promotion
 - full-repository coverage from top-50 capped snapshots
 - uncapped repo-scan performance
-- general PR-diff usefulness from two PRs
+- general PR-diff usefulness from three PRs
 - memory-safety proof
 - UB-free status
 - witness execution
@@ -319,7 +345,7 @@ The repo must not claim:
 
 - Only three real crates completed in this slice.
 - The successful dogfood snapshots were capped at 50 cards.
-- Only two real PR diffs were measured.
+- Only three real PR diffs were measured.
 - `memchr` completion depends on capped-scan behavior; uncapped performance is
   still unmeasured.
 - No human audit was performed for every emitted card.
