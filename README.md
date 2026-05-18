@@ -43,6 +43,11 @@ unsafe-review check --base origin/main \
   --format sarif \
   --out target/unsafe-review/cards.sarif
 
+# Plan high-signal inline review comments without posting them
+unsafe-review check --base origin/main \
+  --format comment-plan \
+  --out target/unsafe-review/comment-plan.json
+
 # Try the bundled smoke fixture
 unsafe-review check --root fixtures/raw_pointer_alignment \
   --diff fixtures/raw_pointer_alignment/change.diff \
