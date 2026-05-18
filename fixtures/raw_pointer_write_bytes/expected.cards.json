@@ -86,9 +86,9 @@
                                                          "summary":  "Nearby `SAFETY:` comment was detected"
                                                      },
                                         "discharge":  {
-                                                          "present":  false,
-                                                          "state":  "missing",
-                                                          "summary":  "No alignment guard code was detected"
+                                                          "present":  true,
+                                                          "state":  "present",
+                                                          "summary":  "u8 raw write alignment evidence was detected"
                                                       },
                                         "reach":  {
                                                       "present":  true,
@@ -110,9 +110,9 @@
                                                          "summary":  "Nearby `SAFETY:` comment was detected"
                                                      },
                                         "discharge":  {
-                                                          "present":  false,
-                                                          "state":  "missing",
-                                                          "summary":  "No obligation-specific guard code was detected"
+                                                          "present":  true,
+                                                          "state":  "present",
+                                                          "summary":  "u8 write_bytes target evidence was detected"
                                                       },
                                         "reach":  {
                                                       "present":  true,
@@ -151,7 +151,7 @@
                                     }
                                 ],
         "contract":  "Nearby `SAFETY:` comment was detected",
-        "discharge":  "No visible local guard detected",
+        "discharge":  "Some inferred safety obligations are missing local guard evidence",
         "reach":  "1 related test file(s) mention owner `fill_bytes`",
         "witness":  "No imported witness receipt was found",
         "missing":  [

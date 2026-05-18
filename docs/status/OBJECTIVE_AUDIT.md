@@ -78,11 +78,11 @@ These are not failures; they are the next unsupported or weakly verified areas:
   initialized-memory evidence for `slice::from_raw_parts_mut`, but it does not
   discharge pointer validity, alignment, allocation, or witness evidence.
 - Real PR-diff dogfood now recognizes raw pointer `write_bytes` as a
-  `raw_pointer_write` operation family, but byte-pattern validity and
-  destination-type modeling remain source-level and advisory. It can now
-  recognize `MaybeUninit` raw-write destinations as initialized-memory evidence
-  without discharging pointer validity, alignment, allocation, or witness
-  obligations.
+  `raw_pointer_write` operation family. Fixture coverage also recognizes the
+  narrow `*mut u8` case as alignment and byte-pattern evidence and recognizes
+  `MaybeUninit` raw-write destinations as initialized-memory evidence. Other
+  destination-type modeling remains source-level and advisory, and these rules
+  do not discharge pointer validity, bounds, allocation, or witness obligations.
 - Real PR-diff dogfood now recognizes `index < self.num_ctrl_bytes()` as bounds
   evidence for pointer arithmetic, and capped `memchr` repo dogfood recognizes
   the local same-slice `as_ptr()` plus `len()` end-pointer pattern, but broader
