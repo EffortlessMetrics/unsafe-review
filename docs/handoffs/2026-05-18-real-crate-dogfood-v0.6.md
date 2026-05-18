@@ -311,6 +311,31 @@ capacity evidence for `Vec::set_len`; shrink and broader initialization
 patterns remain limited. The cards are still useful as advisory review prompts,
 but this sample should not be used as support-tier promotion evidence.
 
+Follow-up rerun after the fixture-backed `Vec::set_len` initialization evidence
+improvement:
+
+```text
+elapsed_seconds: 9.3
+changed_rust_files: 1
+cards: 9
+contract_missing: 0
+guard_missing: 7
+guarded_unwitnessed: 2
+operation families: vec_set_len, unknown
+```
+
+The two improved cards are still advisory only:
+
+```text
+from_byte_string  line 140  vec_set_len  guarded_unwitnessed
+try_push_str      line 316  vec_set_len  guarded_unwitnessed
+```
+
+They moved out of `guard_missing` because the local context contains visible
+initialization evidence and capacity evidence. The remaining seven cards still
+need better modeling or reviewer inspection, especially shrink-style `set_len`
+uses and the direct unsafe `set_len` API card.
+
 ## Proof
 
 Targeted local validation:
@@ -335,6 +360,7 @@ rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/memc
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/smallvec --diff target/dogfood-work/smallvec-pr407.raw.diff --format json --max-cards 20 --out target/dogfood-work/smallvec-pr407.owner-fix.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr308.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr308.unsafe-review.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.unsafe-review.json
+rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-setlen-init.json
 ```
 
 The dogfood reruns used a temporary `CARGO_TARGET_DIR` to avoid a Windows file
@@ -355,6 +381,8 @@ The repo may claim:
 - capped repo scans stop after the requested card cap
 - operation cards can inherit enclosing unsafe function `# Safety` docs
 - owner inference ignores comments while scanning backward
+- one fixture-backed `Vec::set_len` initialization-evidence improvement changed
+  two `arrayvec#288` cards from `guard_missing` to `guarded_unwitnessed`
 - false-positive regression coverage exists in fixtures and calibration
 - dogfood output remains advisory static review evidence
 
@@ -380,8 +408,8 @@ The repo must not claim:
 - No human audit was performed for every emitted card.
 - `arrayvec#288` shows that `Vec::set_len` guard evidence still needs better
   modeling; visible `MaybeUninit::new` initialization loops and const `CAP`
-  capacity evidence now have fixture coverage, while shrink operations and
-  broader initialization patterns remain limited.
+  capacity evidence now have fixture and dogfood-rerun coverage, while shrink
+  operations and broader initialization patterns remain limited.
 - These runs do not prove absence of missed unsafe seams.
 
 ## Next useful work
