@@ -10,6 +10,8 @@
       "column": 5,
       "kind": "operation",
       "owner": "assume_header",
+      "visibility": "private",
+      "public_api_surface": false,
       "snippet": "unsafe { slot.assume_init() }"
     },
     "operation_family": "maybe_uninit_assume_init",

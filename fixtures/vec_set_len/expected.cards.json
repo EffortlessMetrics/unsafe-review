@@ -10,6 +10,8 @@
       "column": 5,
       "kind": "operation",
       "owner": "extend_len",
+      "visibility": "private",
+      "public_api_surface": false,
       "snippet": "unsafe { values.set_len(new_len) }"
     },
     "operation_family": "vec_set_len",

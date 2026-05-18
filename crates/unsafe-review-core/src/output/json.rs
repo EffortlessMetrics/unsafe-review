@@ -181,6 +181,8 @@ struct JsonSite<'a> {
     column: usize,
     kind: &'static str,
     owner: &'a str,
+    visibility: &'a str,
+    public_api_surface: bool,
     snippet: &'a str,
 }
 
@@ -192,6 +194,8 @@ impl<'a> From<&'a ReviewCard> for JsonSite<'a> {
             column: card.site.location.column,
             kind: card.site.kind.as_str(),
             owner: card.site.owner.as_deref().unwrap_or(""),
+            visibility: &card.site.visibility,
+            public_api_surface: card.site.public_api_surface,
             snippet: &card.site.snippet,
         }
     }
@@ -317,6 +321,8 @@ mod tests {
         assert_eq!(value["summary"]["cards"], 1);
         assert_eq!(value["cards"][0]["class"], "guard_missing");
         assert_eq!(value["cards"][0]["site"]["file"], "src/lib.rs");
+        assert_eq!(value["cards"][0]["site"]["visibility"], "private");
+        assert_eq!(value["cards"][0]["site"]["public_api_surface"], false);
         assert_eq!(value["cards"][0]["operation_family"], "raw_pointer_read");
         assert!(value["cards"][0]["obligation_evidence"].is_array());
         assert!(value["cards"][0]["verify_commands"].is_array());

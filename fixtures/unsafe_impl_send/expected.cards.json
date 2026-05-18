@@ -10,6 +10,8 @@
       "column": 1,
       "kind": "unsafe_impl_send",
       "owner": "SharedCell",
+      "visibility": "private",
+      "public_api_surface": false,
       "snippet": "unsafe impl Send for SharedCell {}"
     },
     "operation_family": "unsafe_impl_send_sync",

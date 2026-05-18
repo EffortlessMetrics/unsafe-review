@@ -75,7 +75,7 @@ candidate PRs in the theme inventory below.
 | Spec expansion | #38, #52, #68, #69 | none yet | park | later source-of-truth | Specs should follow concrete behavior gaps, not outrun implementation. |
 | CI hardening | #34, #51, #65, #66 | reworked from #66 on current main | merge | current hardening | The current slice keeps the narrow workflow reliability pieces: read-only permissions, no persisted checkout credentials, locked Cargo commands, docs build, timeout, manual dispatch, and PR-run cancellation. |
 | Broad module refactors | #40, #55, #74, #75 | none yet | park | later refactor | Avoid broad SRP churn unless it directly unblocks a reviewed implementation slice. |
-| Public JSON/visibility API | #28 | none yet | park or close-duplicate | already partly landed | Public API surface and card identity work landed in review-card v0.1; inspect only for missing useful schema detail. |
+| Public JSON/visibility API | #28 | reworked from #28 on current main | merge | current hardening | `UnsafeSite` already tracked visibility and public API surface; the reworked slice projects those fields into JSON and updates fixture goldens. |
 | Unaligned raw pointer read behavior | #30 | none yet | park or rework | later analyzer | Could be useful, but review after raw pointer write and fixture validation candidates. |
 
 ## Immediate intake order

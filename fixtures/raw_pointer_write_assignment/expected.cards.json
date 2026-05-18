@@ -10,6 +10,8 @@
       "column": 9,
       "kind": "operation",
       "owner": "write_header",
+      "visibility": "private",
+      "public_api_surface": false,
       "snippet": "*ptr = value;"
     },
     "operation_family": "raw_pointer_write",
