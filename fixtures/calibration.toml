@@ -30,6 +30,7 @@ required_core_fixtures = [
   "vec_from_raw_parts",
   "transmute_invalid_value",
   "transmute_copy_invalid_value",
+  "multiline_transmute_copy_invalid_value",
   "unsafe_impl_send",
   "ffi_sanitizer_route",
   "safe_code_no_cards",
@@ -320,6 +321,16 @@ expected_hazard = "invalid_value"
 fixture = "transmute_copy_invalid_value"
 kind = "positive"
 claim = "transmute_copy::<u8, bool> reports invalid-value/layout obligations instead of a generic unsafe function call"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "multiline_transmute_copy_invalid_value"
+kind = "positive"
+claim = "multi-line transmute_copy::<u8, bool> keeps a syntax-backed call snippet and transmute obligations"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"

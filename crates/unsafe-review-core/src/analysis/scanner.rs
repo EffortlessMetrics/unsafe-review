@@ -48,6 +48,13 @@ pub(crate) fn scan_file(
         if syntax_site_covers_fallback(&syntax_sites, line_no, &kind, &family) {
             continue;
         }
+        if kind == UnsafeSiteKind::Operation
+            && family == OperationFamily::Transmute
+            && is_incomplete_multiline_transmute_copy(detection_trimmed)
+            && syntax_operation_covers_fallback(&syntax_sites, line_no, &family)
+        {
+            continue;
+        }
         if kind == UnsafeSiteKind::UnsafeBlock
             && family == OperationFamily::Unknown
             && (syntax_operation_lines.contains(&line_no)
@@ -484,6 +491,11 @@ fn is_vec_from_raw_parts_call(line: &str) -> bool {
     compact.contains("Vec::from_raw_parts") || compact.contains("vec::Vec::from_raw_parts")
 }
 
+fn is_incomplete_multiline_transmute_copy(line: &str) -> bool {
+    let compact = compact_whitespace(line);
+    compact.ends_with("transmute_copy::<")
+}
+
 #[derive(Clone, Debug)]
 struct DetectedSyntaxSite {
     line: usize,
@@ -591,6 +603,19 @@ fn syntax_site_covers_fallback(
     }
     syntax_sites.iter().any(|site| {
         site.kind == *kind && site.family == *family && site.line <= line && line <= site.end_line
+    })
+}
+
+fn syntax_operation_covers_fallback(
+    syntax_sites: &[DetectedSyntaxSite],
+    line: usize,
+    family: &OperationFamily,
+) -> bool {
+    syntax_sites.iter().any(|site| {
+        site.kind == UnsafeSiteKind::Operation
+            && site.family == *family
+            && site.line <= line
+            && line <= site.end_line
     })
 }
 

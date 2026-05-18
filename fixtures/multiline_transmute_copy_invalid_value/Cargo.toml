@@ -1,0 +1,5 @@
+[package]
+name = "multiline-transmute-copy-invalid-value"
+version = "0.1.0"
+edition = "2024"
+
