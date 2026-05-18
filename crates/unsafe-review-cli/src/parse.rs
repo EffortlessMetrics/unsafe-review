@@ -218,13 +218,15 @@ fn parse_context(args: Vec<String>) -> Result<Command, String> {
 fn parse_receipt(args: Vec<String>) -> Result<Command, String> {
     let mut rest = args;
     let Some(subcommand) = rest.first() else {
-        return Err("missing receipt subcommand `template`".to_string());
+        return Err("missing receipt subcommand `template` or `validate`".to_string());
     };
-    if subcommand != "template" {
-        return Err(format!("unknown receipt subcommand `{subcommand}`"));
-    }
+    let subcommand = subcommand.clone();
     rest.remove(0);
-    parse_receipt_template(rest).map(Command::ReceiptTemplate)
+    match subcommand.as_str() {
+        "template" => parse_receipt_template(rest).map(Command::ReceiptTemplate),
+        "validate" => parse_receipt_validate(rest),
+        other => Err(format!("unknown receipt subcommand `{other}`")),
+    }
 }
 
 fn parse_receipt_template(args: Vec<String>) -> Result<ReceiptTemplateOptions, String> {
@@ -314,6 +316,25 @@ fn parse_receipt_template(args: Vec<String>) -> Result<ReceiptTemplateOptions, S
     validate_required_cli_value(&options.recorded_at, "--recorded-at")?;
     validate_required_cli_value(&options.expires_at, "--expires-at")?;
     Ok(options)
+}
+
+fn parse_receipt_validate(args: Vec<String>) -> Result<Command, String> {
+    let mut root = PathBuf::from(".");
+    let mut idx = 0usize;
+    while idx < args.len() {
+        match args[idx].as_str() {
+            "--root" => {
+                idx += 1;
+                root = PathBuf::from(value(&args, idx, "--root")?);
+            }
+            arg if arg.starts_with("--root=") => {
+                root = PathBuf::from(inline_value(arg, "--root")?);
+            }
+            other => return Err(format!("unknown receipt validate argument `{other}`")),
+        }
+        idx += 1;
+    }
+    Ok(Command::ReceiptValidate { root })
 }
 
 fn parse_diff_input(raw: &str) -> DiffInput {
@@ -703,6 +724,24 @@ mod tests {
         ]));
 
         assert_eq!(command, Err("missing value for --strength".to_string()));
+    }
+
+    #[test]
+    fn parses_receipt_validate_command() -> Result<(), String> {
+        let command = parse(args([
+            "unsafe-review",
+            "receipt",
+            "validate",
+            "--root=fixtures/raw_pointer_alignment_receipted",
+        ]))?;
+
+        assert_eq!(
+            command,
+            Command::ReceiptValidate {
+                root: PathBuf::from("fixtures/raw_pointer_alignment_receipted"),
+            }
+        );
+        Ok(())
     }
 
     fn args<const N: usize>(values: [&str; N]) -> Vec<String> {

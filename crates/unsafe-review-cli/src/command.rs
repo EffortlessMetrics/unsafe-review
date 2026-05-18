@@ -82,4 +82,7 @@ pub(crate) enum Command {
         id: String,
     },
     ReceiptTemplate(ReceiptTemplateOptions),
+    ReceiptValidate {
+        root: PathBuf,
+    },
 }

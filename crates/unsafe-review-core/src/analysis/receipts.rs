@@ -41,6 +41,14 @@ impl ReceiptIndex {
     pub(crate) fn evidence_for(&self, id: &CardId) -> Option<WitnessEvidence> {
         self.by_card_id.get(&id.0).cloned()
     }
+
+    pub(crate) fn len(&self) -> usize {
+        self.by_card_id.len()
+    }
+}
+
+pub(crate) fn validate_receipts(root: &Path) -> Result<usize, String> {
+    ReceiptIndex::load(root).map(|index| index.len())
 }
 
 struct ParsedReceipt {

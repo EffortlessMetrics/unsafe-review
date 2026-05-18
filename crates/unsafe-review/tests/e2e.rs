@@ -360,6 +360,21 @@ fn receipt_template_writes_valid_receipt_json_without_running_witnesses()
 }
 
 #[test]
+fn receipt_validate_counts_importable_receipts() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_alignment_receipted");
+
+    let output = run_success([
+        os("receipt"),
+        os("validate"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+    ])?;
+
+    assert_eq!(stdout_text(&output)?.trim(), "witness receipts: 1 valid");
+    Ok(())
+}
+
+#[test]
 fn no_new_debt_policy_fails_only_for_unbaselined_actionable_gaps() -> Result<(), Box<dyn Error>> {
     let fixture = fixture_root("raw_pointer_alignment");
     let failing = run_failure([

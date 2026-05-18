@@ -32,6 +32,10 @@ The CLI may render a receipt template from explicit user-provided metadata. That
 template output is only a JSON authoring aid; it must not run witness commands or
 claim that a witness succeeded.
 
+The CLI may also validate receipt files without running analysis. Validation must
+use the same importer checks as normal card analysis so users do not get a
+separate receipt truth.
+
 Receipt JSON fields:
 
 ```json
@@ -106,6 +110,8 @@ after the `recorded_at` date.
   same required fields as the importer.
 - The CLI receipt-template command writes a valid receipt JSON object but does
   not execute the recorded command.
+- The CLI receipt-validate command counts importable receipts and rejects the
+  same invalid receipt files as normal analysis.
 
 ## CI proof
 
