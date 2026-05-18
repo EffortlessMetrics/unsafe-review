@@ -60,6 +60,10 @@ These are not failures; they are the next unsupported or weakly verified areas:
 - Outcome comparison is saved-snapshot only. It now has first capped `memchr`
   repo snapshot dogfood, but needs more repos and PR snapshot pairs before
   dashboard-like posture claims.
+- An exploratory `crossbeam#1187` pass produced zero cards for a one-line
+  atomic pointer `load` to `swap(ptr::null_mut())` change in a PR described as a
+  double-free fix. That is a known unsupported unsafe-adjacent invariant class,
+  not evidence that the PR is safe.
 - Real PR-diff dogfood shows `Vec::set_len` guard evidence still needs broader
   modeling; visible `MaybeUninit::new` initialization loops and const `CAP`
   capacity facts now have fixture coverage and an `arrayvec#288` rerun receipt;

@@ -22,6 +22,11 @@ Record a zero-card PR diff only when the zero-card result is the intended
 evidence, such as a false-positive control, and explain that in the target
 `purpose`.
 
+When an exploratory real PR exposes an unsupported class that produces zero
+cards, record it as a named limitation in the dogfood handoff or objective audit
+instead of counting it as an active corpus target. A zero-card result is not
+evidence that the PR is safe.
+
 When capturing a raw GitHub PR diff, use `rtk proxy` so the saved file keeps the
 full patch shape:
 

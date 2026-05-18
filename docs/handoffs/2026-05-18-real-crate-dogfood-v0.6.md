@@ -1584,6 +1584,11 @@ The repo may claim:
 - one PR-diff dogfood pass on `crossbeam-rs/crossbeam#1226` completed with six
   contract-missing cards across one changed Rust file, adding focused coverage
   for strict-provenance Miri cfg atomic pointer unsafe blocks
+- an exploratory pass on `crossbeam-rs/crossbeam#1187` produced zero cards for
+  a one-line atomic pointer `load` to `swap(ptr::null_mut())` change in a PR
+  described as a double-free fix; this is recorded as an unsupported
+  unsafe-adjacent invariant class, not as evidence of safety or as an active
+  corpus target
 - one capped `tokio-rs/mio` repo snapshot completed with 50 cards across 80
   Rust files, adding dogfood for unsafe function call contracts, `Vec::set_len`,
   zeroed values, pointer operations, and unsafe Send/Sync route cards
@@ -1693,6 +1698,10 @@ The repo must not claim:
   `transmute` operation family, but it still does not prove layout compatibility
   or destination value validity.
 - These runs do not prove absence of missed unsafe seams.
+- The exploratory `crossbeam#1187` pass shows that safe-looking changes to
+  atomic pointer state that affect drop/deallocation invariants may produce no
+  card when the diff has no changed unsafe syntax. That remains an unsupported
+  semantic blind spot.
 
 ## Next useful work
 
