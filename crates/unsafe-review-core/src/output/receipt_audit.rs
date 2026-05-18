@@ -12,10 +12,10 @@ pub(crate) fn render_markdown(report: &ReceiptAuditReport) -> String {
     out.push_str("# unsafe-review receipt audit\n\n");
     out.push_str("Static audit of saved witness receipt metadata against current ReviewCards.\n\n");
     out.push_str("## Summary\n\n");
-    out.push_str("| Receipts | Matched | Unmatched | Expired | Stale | Wrong identity | Wrong tool | Weak strength | Invalid |\n");
-    out.push_str("|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
+    out.push_str("| Receipts | Matched | Unmatched | Expired | Stale | Wrong identity | Wrong tool | Weak strength | Duplicate | Invalid |\n");
+    out.push_str("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
     out.push_str(&format!(
-        "| {} | {} | {} | {} | {} | {} | {} | {} | {} |\n\n",
+        "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n\n",
         report.summary.receipts,
         report.summary.matched,
         report.summary.unmatched,
@@ -24,6 +24,7 @@ pub(crate) fn render_markdown(report: &ReceiptAuditReport) -> String {
         report.summary.wrong_identity,
         report.summary.wrong_tool,
         report.summary.weaker_than_required,
+        report.summary.duplicate,
         report.summary.invalid
     ));
     out.push_str("## Receipts\n\n");

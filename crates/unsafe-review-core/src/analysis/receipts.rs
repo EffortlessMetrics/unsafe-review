@@ -79,6 +79,7 @@ pub struct ReceiptAuditSummary {
     pub wrong_identity: usize,
     pub wrong_tool: usize,
     pub weaker_than_required: usize,
+    pub duplicate: usize,
     pub invalid: usize,
 }
 
@@ -122,10 +123,11 @@ fn audit_receipts_with_date(
         receipts: records.len(),
         ..ReceiptAuditSummary::default()
     };
+    let duplicate_card_ids = duplicate_receipt_card_ids(&records);
     let mut receipts = Vec::new();
 
     for record in records {
-        let entry = audit_receipt_record(record, &cards, audit_date);
+        let entry = audit_receipt_record(record, &cards, audit_date, &duplicate_card_ids);
         count_statuses(&mut summary, &entry.statuses);
         receipts.push(entry);
     }
@@ -140,6 +142,19 @@ fn audit_receipts_with_date(
         summary,
         receipts,
     })
+}
+
+fn duplicate_receipt_card_ids(records: &[AuditReceiptRecord]) -> BTreeSet<String> {
+    let mut counts = BTreeMap::<String, usize>::new();
+    for record in records {
+        if let Some(receipt) = &record.receipt {
+            *counts.entry(receipt.card_id.clone()).or_insert(0) += 1;
+        }
+    }
+    counts
+        .into_iter()
+        .filter_map(|(card_id, count)| (count > 1).then_some(card_id))
+        .collect()
 }
 
 struct AuditReceiptRecord {
@@ -217,6 +232,7 @@ fn audit_receipt_record(
     record: AuditReceiptRecord,
     cards: &BTreeMap<String, &ReviewCard>,
     audit_date: &str,
+    duplicate_card_ids: &BTreeSet<String>,
 ) -> ReceiptAuditEntry {
     let mut statuses = BTreeSet::new();
     let mut issues = Vec::new();
@@ -253,6 +269,11 @@ fn audit_receipt_record(
             route_tools: Vec::new(),
         };
     };
+
+    if duplicate_card_ids.contains(&receipt.card_id) {
+        statuses.insert("duplicate".to_string());
+        issues.push("more than one receipt file references this card_id".to_string());
+    }
 
     if let Some(err) = record.validation_error {
         statuses.insert("invalid".to_string());
@@ -360,6 +381,7 @@ fn count_statuses(summary: &mut ReceiptAuditSummary, statuses: &[String]) {
             "wrong_identity" => summary.wrong_identity += 1,
             "wrong_tool" => summary.wrong_tool += 1,
             "weaker_than_required" => summary.weaker_than_required += 1,
+            "duplicate" => summary.duplicate += 1,
             "invalid" => summary.invalid += 1,
             _ => {}
         }
@@ -694,20 +716,35 @@ mod tests {
             "ran",
             "2026-08-18",
         )?;
+        write_receipt(
+            &receipt_dir,
+            "duplicate.json",
+            &card_id,
+            "miri",
+            "ran",
+            "2026-08-18",
+        )?;
 
         let report = audit_receipts_with_date(&output, "2026-05-18")?;
 
         fs::remove_dir_all(&root).map_err(|err| format!("remove temp root failed: {err}"))?;
-        assert_eq!(report.summary.receipts, 6);
-        assert_eq!(report.summary.matched, 4);
+        assert_eq!(report.summary.receipts, 7);
+        assert_eq!(report.summary.matched, 5);
         assert_eq!(report.summary.unmatched, 1);
         assert_eq!(report.summary.stale, 1);
         assert_eq!(report.summary.expired, 1);
         assert_eq!(report.summary.wrong_identity, 1);
         assert_eq!(report.summary.wrong_tool, 1);
         assert_eq!(report.summary.weaker_than_required, 1);
+        assert_eq!(report.summary.duplicate, 5);
         assert_eq!(report.summary.invalid, 1);
         assert!(report.trust_boundary.contains("does not execute witnesses"));
+        let duplicate_entries = report
+            .receipts
+            .iter()
+            .filter(|entry| entry.statuses.iter().any(|status| status == "duplicate"))
+            .count();
+        assert_eq!(duplicate_entries, 5);
         Ok(())
     }
 
