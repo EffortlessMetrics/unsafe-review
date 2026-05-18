@@ -82,6 +82,18 @@ The repo must not claim:
 - calibrated blocking policy
 - branch-protection readiness
 
+## Subsequent status
+
+This handoff preserves the state at repo posture and policy lane closeout. A
+later witness lane has since landed exact-card witness receipt import and
+witness-plan output. The "Known limits" below describe what was outside this
+lane at closeout, not the full current repo state.
+
+For current posture, read this handoff together with:
+
+- `docs/handoffs/2026-05-18-witness-receipt-import-v0.5.md`
+- `docs/status/SUPPORT_TIERS.md`
+
 ## Known limits
 
 - Matching is exact `card_id` only.
