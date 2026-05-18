@@ -64,7 +64,7 @@ candidate PRs in the theme inventory below.
 | Scanner false-positive hardening | #29, #32 | none | close-duplicate or park | already landed | PR #27 merged this class; only extract anything not covered by current scanner tests. |
 | Raw pointer write detection | #49, #62 | choose after review | rework or merge | current hardening | Active-lane aligned if fixture-backed and narrow; conflicting branches need rebase before judging. |
 | xtask fixture validation | #33, #50, #63, #64 | reworked from #64 on current main | merge | current hardening | Fixture validation protects the support-tier proof mechanism. The reworked slice validates fixture layout, golden JSON shape, diff shape, and package naming without broad xtask policy changes. |
-| CLI e2e coverage | #39, #58, #80, #81 | choose after diff review | merge or rework | current PR/CI projection | Useful if it covers current `check` formats and `--out` behavior without broad CLI redesign. |
+| CLI e2e coverage | #39, #58, #80, #81 | reworked from #81 on current main | merge | current PR/CI projection | The current slice keeps #81's user-path shape but updates it for landed PR artifacts: JSON, PR summary, SARIF, comment plan, context, and explain. |
 | Focused unit coverage | #44, #61, #86, #87 | #86 | merge | current hardening | #86 is the canonical core-only slice for classifier, evidence, and diff parser invariants. Keep broader CLI parser coverage for the CLI e2e/ergonomics queue. |
 | Property testing | #43, #60, #84, #85 | none yet | park | later hardening | Valuable later, but do not put property infrastructure ahead of current PR projection unless it is tiny and directly protects a current parser invariant. |
 | Fuzzing | #42, #59, #82, #83 | none yet | park | later hardening | Keep as candidate inventory. Avoid scheduled or blocking fuzz workflows in the current lane. |
@@ -83,7 +83,7 @@ candidate PRs in the theme inventory below.
 1. Complete the reworked xtask fixture-validation slice that was extracted from
    #64.
 2. Complete the focused unit-coverage slice from #86.
-3. Review CLI e2e candidates (#80/#81/#58/#39), choosing one canonical branch.
+3. Complete the reworked CLI e2e artifact slice from #81.
 4. Review raw pointer write candidates (#49, #62), choose one canonical, and
    rework only if it stays fixture-backed and narrow.
 5. Park property, fuzz, mutation, broad docs, broad CI, and broad refactor PRs
