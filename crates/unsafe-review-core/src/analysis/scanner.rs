@@ -901,10 +901,10 @@ fn find_owner(lines: &[&str], idx: usize) -> Option<String> {
         if let Some(name) = parse_trait_name(line) {
             return Some(name);
         }
-        if let Some(name) = parse_impl_owner(line) {
+        if let Some(name) = parse_impl_declaration_owner(line) {
             return Some(name);
         }
-        if line.starts_with("impl ") || line.starts_with("pub impl ") {
+        if is_impl_declaration_line(line) {
             return Some("impl".to_string());
         }
     }
@@ -928,7 +928,7 @@ fn find_owner_declaration_index(lines: &[&str], idx: usize) -> Option<usize> {
         }
         if parse_fn_name(line).is_some()
             || parse_trait_name(line).is_some()
-            || parse_impl_owner(line).is_some()
+            || parse_impl_declaration_owner(line).is_some()
         {
             return Some(line_idx);
         }
@@ -969,6 +969,30 @@ fn parse_impl_owner(line: &str) -> Option<String> {
         .map(|pos| pos + " for ".len())
         .or_else(|| line.find("impl ").map(|pos| pos + "impl ".len()))?;
     parse_ident(&line[owner_start..])
+}
+
+fn parse_impl_declaration_owner(line: &str) -> Option<String> {
+    is_impl_declaration_line(line).then(|| parse_impl_owner(line))?
+}
+
+fn is_impl_declaration_line(line: &str) -> bool {
+    strip_impl_declaration_prefixes(line).starts_with("impl ")
+}
+
+fn strip_impl_declaration_prefixes(line: &str) -> &str {
+    let mut rest = line.trim_start();
+    if let Some(after_pub) = rest.strip_prefix("pub ") {
+        rest = after_pub.trim_start();
+    } else if let Some(after_pub) = rest.strip_prefix("pub(") {
+        let after_pub = after_pub.trim_start();
+        if let Some((_visibility, after_visibility)) = after_pub.split_once(')') {
+            rest = after_visibility.trim_start();
+        }
+    }
+    if let Some(after_unsafe) = rest.strip_prefix("unsafe ") {
+        rest = after_unsafe.trim_start();
+    }
+    rest
 }
 
 fn parse_fn_name(line: &str) -> Option<String> {
@@ -1107,6 +1131,21 @@ mod tests {
 
         assert_eq!(find_owner(&lines, 1), Some("with_byte".to_string()));
         assert_eq!(find_owner_declaration_index(&lines, 1), Some(0));
+    }
+
+    #[test]
+    fn owner_inference_ignores_multiline_impl_trait_bounds() {
+        let lines = [
+            "pub fn try_reserve(",
+            "    &mut self,",
+            "    hasher: impl Fn(&u8) -> u64,",
+            ") {",
+            "    unsafe { self.reserve_rehash(hasher) }",
+            "}",
+        ];
+
+        assert_eq!(find_owner(&lines, 4), Some("try_reserve".to_string()));
+        assert_eq!(find_owner_declaration_index(&lines, 4), Some(0));
     }
 
     #[test]

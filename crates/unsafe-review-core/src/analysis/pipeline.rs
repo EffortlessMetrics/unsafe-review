@@ -729,6 +729,21 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn impl_trait_bound_owner_inference_uses_function_owner() -> Result<(), String> {
+        let output = fixture_output("impl_trait_bound_owner_inference")?;
+        let card = single_card("impl_trait_bound_owner_inference", &output)?;
+
+        assert_eq!(card.operation.family, OperationFamily::UnsafeFnCall);
+        assert_eq!(card.site.owner, Some("try_reserve".to_string()));
+        assert!(card.id.0.contains("try-reserve"));
+        assert!(
+            card.reach.summary.contains("try_reserve"),
+            "reach evidence should use the function owner, not the impl Trait bound"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn private_unsafe_helper_can_use_local_safety_comment() -> Result<(), String> {
         let output = fixture_output("private_unsafe_helper_safety_comment")?;
         let card = single_card("private_unsafe_helper_safety_comment", &output)?;

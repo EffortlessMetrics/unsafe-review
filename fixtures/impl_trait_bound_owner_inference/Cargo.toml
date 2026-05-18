@@ -1,0 +1,4 @@
+[package]
+name = "impl-trait-bound-owner-inference-fixture"
+version = "0.0.0"
+edition = "2024"

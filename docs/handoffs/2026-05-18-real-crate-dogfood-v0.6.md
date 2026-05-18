@@ -75,9 +75,11 @@ owner-inference gap:
 - comment prose such as `` `Drop` impl would drop `` is no longer parsed as an
   `impl would` owner
 - witness commands now use the real owner when one is available
+- multi-line `impl Trait` bounds are ignored as owners instead of treating
+  traits such as `Fn` as enclosing owners
 
 Regression proof was added with a scanner unit test for comment text during
-owner inference.
+owner inference and fixture coverage for multi-line `impl Trait` bounds.
 
 A real PR-diff dogfood pass on `rust-lang/hashbrown#692` exposed and fixed a
 core operation classification gap:
@@ -1018,6 +1020,23 @@ hazard and the obligation that control flow cannot reach the path before
 `Fallibility::Infallible` precondition, does not prove the match arm is
 unreachable, and does not execute a witness.
 
+Follow-up rerun after making owner inference ignore multi-line `impl Trait`
+bounds:
+
+```text
+changed_rust_files: 1
+cards: 15
+contract_missing: 0
+guard_missing: 12
+guarded_unwitnessed: 3
+owners named `Fn`: 2 -> 0
+```
+
+The improved behavior is still advisory only. The card identities and reach
+evidence now use the real function owners, including `try_reserve` and
+`find_or_find_insert_slot`, instead of the `Fn` trait bound from the signature.
+This does not infer callee-specific safety contracts.
+
 ## Proof
 
 Targeted local validation:
@@ -1041,6 +1060,8 @@ rtk cargo test -p unsafe-review-core unreachable_unchecked_uses_concrete_operati
 rtk cargo test -p unsafe-review-core multiline_unsafe_call_wrapper_uses_concrete_operation_family --locked
 rtk cargo test -p unsafe-review-core nested_unsafe_operation_does_not_emit_parent_duplicate --locked
 rtk cargo test -p unsafe-review-core adjacent_unchanged_unsafe_fn_is_not_reported_by_neighboring_change --locked
+rtk cargo test -p unsafe-review-core owner_inference_ignores_multiline_impl_trait_bounds --locked
+rtk cargo test -p unsafe-review-core impl_trait_bound_owner_inference_uses_function_owner --locked
 rtk cargo test -p unsafe-review-core fixture_card_goldens_match_rendered_json --locked
 rtk cargo run --locked -p xtask -- check-calibration
 ```
@@ -1076,6 +1097,7 @@ rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hash
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr667.raw.diff --format json --max-cards 40 --out target/dogfood-work/hashbrown-pr667.after-nested-dedupe.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr501.raw.diff --format json --max-cards 40 --out target/dogfood-work/hashbrown-pr501.after-declaration-range.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr469.raw.diff --format json --max-cards 60 --out target/dogfood-work/hashbrown-pr469.after-unreachable-unchecked.json
+rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr469.raw.diff --format json --max-cards 60 --out target/dogfood-work/hashbrown-pr469.after-owner-impl-trait.json
 ```
 
 The dogfood reruns used a temporary `CARGO_TARGET_DIR` to avoid a Windows file
@@ -1105,6 +1127,8 @@ The repo may claim:
 - owner inference ignores comments while scanning backward
 - owner inference prefers real function declarations over `impl Trait`
   parameter text
+- owner inference ignores multi-line `impl Trait` bounds such as `impl Fn(...)`
+  in function signatures
 - inline unsafe blocks with concrete same-line raw pointer operations are
   deduped instead of emitting generic unknown wrapper cards
 - `ptr::drop_in_place` is modeled as a fixture-backed drop/deallocation
@@ -1150,6 +1174,8 @@ The repo may claim:
   `hashbrown#469` `unreachable_unchecked` sites from generic
   `unsafe_fn_call` to `unreachable_unchecked` invalid-value cards and removed
   one duplicate wrapper card
+- one fixture-backed owner-inference improvement changed two `hashbrown#469`
+  card owners from `Fn` to the real enclosing function names
 - one fixture-backed multi-line unsafe-call wrapper improvement changed five
   `hashbrown#657` cards from generic `unknown` unsafe-block cards to
   `unsafe_fn_call`
@@ -1218,6 +1244,8 @@ The repo must not claim:
 - `hashbrown#469` now labels `unreachable_unchecked` calls as invalid-value
   cards, but it does not infer that a match arm or control-flow path is
   unreachable.
+- `hashbrown#469` no longer uses `Fn` as the owner for multi-line `impl Trait`
+  parameters, but callee-specific safety contract inference remains future work.
 - `hashbrown#657` now labels multi-line unsafe call wrappers as
   `unsafe_fn_call`, but callee-specific contract inference and precise call-path
   extraction remain source-level heuristics.
