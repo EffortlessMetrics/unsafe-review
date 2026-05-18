@@ -294,6 +294,7 @@ mod tests {
         "split_raw_pointer_read_call",
         "maybeuninit_assume_init",
         "vec_set_len",
+        "transmute_invalid_value",
     ];
 
     #[test]
