@@ -37,6 +37,8 @@ const FIXTURE_EXPECTED_CARDS_EXCEPTIONS: &[&str] = &[
 const FIXTURE_PACKAGE_PREFIX_EXCEPTIONS: &[(&str, &str)] =
     &[("raw_pointer_alignment_line_drift", "raw-pointer-alignment")];
 
+const CALIBRATION_REQUIRED_KINDS: &[&str] = &["positive", "negative", "false_positive_control"];
+
 const KNOWN_SUPPORT_TIERS: &[&str] = &["scaffold", "experimental", "planned", "deferred"];
 
 fn main() {
@@ -50,7 +52,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
     match args.get(1).map(|arg| arg.as_str()) {
         None | Some("help") | Some("--help") => {
             println!(
-                "xtask commands: check-pr, check-docs, check-policy, check-support-tiers, check-fixtures, check-advisory-artifacts <dir>"
+                "xtask commands: check-pr, check-docs, check-policy, check-support-tiers, check-fixtures, check-calibration, check-advisory-artifacts <dir>"
             );
             Ok(())
         }
@@ -59,6 +61,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
             check_policy()?;
             check_support_tiers()?;
             check_fixtures()?;
+            check_calibration()?;
             check_tracked_generated_artifacts()?;
             println!("check-pr: ok");
             Ok(())
@@ -67,6 +70,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
         Some("check-policy") => check_policy(),
         Some("check-support-tiers") => check_support_tiers(),
         Some("check-fixtures") => check_fixtures(),
+        Some("check-calibration") => check_calibration(),
         Some("check-advisory-artifacts") => {
             let Some(dir) = args.get(2) else {
                 return Err("usage: cargo xtask check-advisory-artifacts <dir>".to_string());
@@ -290,6 +294,78 @@ fn check_fixtures() -> Result<(), String> {
     Ok(())
 }
 
+fn check_calibration() -> Result<(), String> {
+    let path = workspace_path("fixtures/calibration.toml");
+    let value = parse_toml_file(&path)?;
+    require_toml_string(&value, "schema_version", "fixtures/calibration.toml")?;
+    let required = value
+        .get("required_core_fixtures")
+        .and_then(toml::Value::as_array)
+        .ok_or_else(|| "fixtures/calibration.toml is missing required_core_fixtures".to_string())?;
+    let cases = value
+        .get("cases")
+        .and_then(toml::Value::as_array)
+        .ok_or_else(|| "fixtures/calibration.toml is missing cases".to_string())?;
+    if cases.is_empty() {
+        return Err("fixtures/calibration.toml has no calibration cases".to_string());
+    }
+
+    let mut fixtures = BTreeSet::new();
+    let mut kinds = BTreeSet::new();
+    for (idx, case) in cases.iter().enumerate() {
+        let Some(case) = case.as_table() else {
+            return Err(format!(
+                "fixtures/calibration.toml cases[{idx}] must be a TOML table"
+            ));
+        };
+        let fixture = required_case_string(case, "fixture", idx)?;
+        let kind = required_case_string(case, "kind", idx)?;
+        let claim = required_case_string(case, "claim", idx)?;
+        required_case_string(case, "support_tier", idx)?;
+        if !CALIBRATION_REQUIRED_KINDS.contains(&kind) {
+            return Err(format!(
+                "fixtures/calibration.toml cases[{idx}] uses unknown kind `{kind}`"
+            ));
+        }
+        if claim.len() < 16 {
+            return Err(format!(
+                "fixtures/calibration.toml cases[{idx}] claim is too terse"
+            ));
+        }
+        if !fixtures.insert(fixture.to_string()) {
+            return Err(format!(
+                "fixtures/calibration.toml contains duplicate fixture `{fixture}`"
+            ));
+        }
+        kinds.insert(kind.to_string());
+        check_calibration_case(case, fixture, idx)?;
+    }
+
+    for kind in CALIBRATION_REQUIRED_KINDS {
+        if !kinds.contains(*kind) {
+            return Err(format!(
+                "fixtures/calibration.toml is missing a `{kind}` calibration case"
+            ));
+        }
+    }
+
+    for (idx, fixture) in required.iter().enumerate() {
+        let Some(fixture) = fixture.as_str() else {
+            return Err(format!(
+                "fixtures/calibration.toml required_core_fixtures[{idx}] must be a string"
+            ));
+        };
+        if !fixtures.contains(fixture) {
+            return Err(format!(
+                "fixtures/calibration.toml required core fixture `{fixture}` has no case"
+            ));
+        }
+    }
+
+    println!("check-calibration: ok ({} cases)", cases.len());
+    Ok(())
+}
+
 fn check_advisory_artifacts(dir: &Path) -> Result<(), String> {
     if !dir.is_dir() {
         return Err(format!(
@@ -443,6 +519,66 @@ fn check_fixture(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn check_calibration_case(
+    case: &toml::map::Map<String, toml::Value>,
+    fixture: &str,
+    idx: usize,
+) -> Result<(), String> {
+    let fixture_dir = workspace_path("fixtures").join(fixture);
+    if !fixture_dir.is_dir() {
+        return Err(format!(
+            "fixtures/calibration.toml cases[{idx}] references missing fixture `{fixture}`"
+        ));
+    }
+    let expected_cards = required_case_usize(case, "expected_cards", idx)?;
+    let cards = parse_json_file(&fixture_dir.join("expected.cards.json"))?;
+    let Some(cards) = cards.as_array() else {
+        return Err(format!(
+            "{}/expected.cards.json must contain a JSON array",
+            fixture_dir.display()
+        ));
+    };
+    if cards.len() != expected_cards {
+        return Err(format!(
+            "fixtures/calibration.toml cases[{idx}] expected_cards is {expected_cards}, but {fixture}/expected.cards.json has {} card(s)",
+            cards.len()
+        ));
+    }
+    if expected_cards == 0 {
+        return Ok(());
+    }
+    let expected_class = required_case_string(case, "expected_class", idx)?;
+    if !cards
+        .iter()
+        .any(|card| json_str(card, "class") == Some(expected_class))
+    {
+        return Err(format!(
+            "fixtures/calibration.toml cases[{idx}] expected_class `{expected_class}` was not found in {fixture}/expected.cards.json"
+        ));
+    }
+    if let Some(expected_operation_family) = case
+        .get("expected_operation_family")
+        .and_then(toml::Value::as_str)
+        && !cards
+            .iter()
+            .any(|card| json_str(card, "operation_family") == Some(expected_operation_family))
+    {
+        return Err(format!(
+            "fixtures/calibration.toml cases[{idx}] expected_operation_family `{expected_operation_family}` was not found in {fixture}/expected.cards.json"
+        ));
+    }
+    if let Some(expected_hazard) = case.get("expected_hazard").and_then(toml::Value::as_str)
+        && !cards
+            .iter()
+            .any(|card| json_array_contains_str(card, "hazards", expected_hazard))
+    {
+        return Err(format!(
+            "fixtures/calibration.toml cases[{idx}] expected_hazard `{expected_hazard}` was not found in {fixture}/expected.cards.json"
+        ));
+    }
+    Ok(())
+}
+
 fn check_index(dir: &Path, readme: &Path, prefix: &str) -> Result<(), String> {
     let index = read_to_string(readme)?;
     let mut ids = BTreeSet::new();
@@ -563,6 +699,56 @@ fn require_toml_string(value: &toml::Value, key: &str, path: &str) -> Result<(),
     }
 }
 
+fn required_case_string<'a>(
+    case: &'a toml::map::Map<String, toml::Value>,
+    key: &str,
+    idx: usize,
+) -> Result<&'a str, String> {
+    let Some(value) = case.get(key).and_then(toml::Value::as_str) else {
+        return Err(format!(
+            "fixtures/calibration.toml cases[{idx}] is missing string `{key}`"
+        ));
+    };
+    if value.trim().is_empty() {
+        Err(format!(
+            "fixtures/calibration.toml cases[{idx}] string `{key}` is empty"
+        ))
+    } else {
+        Ok(value)
+    }
+}
+
+fn required_case_usize(
+    case: &toml::map::Map<String, toml::Value>,
+    key: &str,
+    idx: usize,
+) -> Result<usize, String> {
+    let Some(value) = case.get(key).and_then(toml::Value::as_integer) else {
+        return Err(format!(
+            "fixtures/calibration.toml cases[{idx}] is missing integer `{key}`"
+        ));
+    };
+    usize::try_from(value).map_err(|err| {
+        format!("fixtures/calibration.toml cases[{idx}] integer `{key}` is invalid: {err}")
+    })
+}
+
+fn json_str<'a>(value: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+    value.get(key).and_then(serde_json::Value::as_str)
+}
+
+fn json_array_contains_str(value: &serde_json::Value, key: &str, needle: &str) -> bool {
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|items| {
+            items
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .any(|item| item == needle)
+        })
+}
+
 fn require_json_str(
     value: &serde_json::Value,
     key: &str,
@@ -632,6 +818,17 @@ fn require_fixture_file(dir: &Path, relative: &str) -> Result<(), String> {
 
 fn read_to_string(path: &Path) -> Result<String, String> {
     fs::read_to_string(path).map_err(|err| format!("read {} failed: {err}", path.display()))
+}
+
+fn workspace_path(relative: &str) -> PathBuf {
+    let current_dir_path = PathBuf::from(relative);
+    if current_dir_path.exists() {
+        current_dir_path
+    } else {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join(relative)
+    }
 }
 
 fn fixture_dirs(dir: &Path) -> Result<Vec<PathBuf>, String> {
@@ -788,6 +985,19 @@ mod tests {
         assert!(FIXTURE_EXPECTED_CARDS_EXCEPTIONS.contains(&"duplicate_raw_pointer_reads"));
         assert!(FIXTURE_EXPECTED_CARDS_EXCEPTIONS.contains(&"raw_pointer_alignment_line_drift"));
         assert!(!FIXTURE_EXPECTED_CARDS_EXCEPTIONS.contains(&"raw_pointer_alignment"));
+    }
+
+    #[test]
+    fn calibration_manifest_validates_current_fixture_contract() -> Result<(), String> {
+        check_calibration()
+    }
+
+    #[test]
+    fn calibration_manifest_requires_known_case_kinds() {
+        assert!(CALIBRATION_REQUIRED_KINDS.contains(&"positive"));
+        assert!(CALIBRATION_REQUIRED_KINDS.contains(&"negative"));
+        assert!(CALIBRATION_REQUIRED_KINDS.contains(&"false_positive_control"));
+        assert!(!CALIBRATION_REQUIRED_KINDS.contains(&"aspirational"));
     }
 
     #[test]
