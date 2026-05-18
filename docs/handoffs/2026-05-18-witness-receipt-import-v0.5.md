@@ -23,6 +23,7 @@ Merged PRs:
 - `#153 receipts: expose sdk receipt dto`
 - `#155 receipts: add receipt template command`
 - `#157 receipts: add receipt validate command`
+- `#160 receipts: add miri saved-output adapter`
 
 The receipt importer:
 
@@ -54,6 +55,11 @@ The receipt importer:
   explicit witness receipts
 - adds `unsafe-review receipt validate` as a receipt-only validation command
   that reuses the importer checks without running analysis or witnesses
+- adds `unsafe-review receipt import-miri` as a saved-output adapter that reads
+  an existing Miri log, requires `test result: ok`, rejects failure-looking
+  output, and writes a normal `tool = "miri"`, `strength = "ran"` receipt
+- records saved-output adapter limitations directly in the generated receipt:
+  `unsafe-review` did not run Miri, and `ran` strength does not claim site reach
 
 Receipt import does not create analyzer truth. It attaches external witness
 evidence to an existing `ReviewCard`.
@@ -98,6 +104,14 @@ rtk cargo test -p unsafe-review-cli receipt_validate --locked
 rtk cargo test -p unsafe-review --test e2e receipt_validate --locked
 ```
 
+The saved-output Miri adapter follow-up also passed:
+
+```bash
+rtk cargo test -p unsafe-review-core miri_receipt --locked
+rtk cargo test -p unsafe-review-cli receipt_import_miri --locked
+rtk cargo test -p unsafe-review --test e2e receipt_import_miri --locked
+```
+
 The recurring workspace gate also passed:
 
 ```bash
@@ -128,6 +142,12 @@ The repo may claim:
   from explicit user metadata
 - `unsafe-review receipt validate` can count importable receipt files through
   the same validation path used by card analysis
+- `unsafe-review receipt import-miri` can convert a saved Miri success log into
+  a normal exact-card receipt with `tool = "miri"` and `strength = "ran"`
+- the saved-output Miri adapter rejects empty, failure-looking, and
+  non-success-looking logs
+- generated Miri receipts keep visible limitations that `unsafe-review` did not
+  run Miri and does not claim site reach
 - the `raw_pointer_alignment_receipted` golden proves a receipt does not hide
   the still-missing alignment guard
 - CLI JSON output preserves the same behavior end to end
@@ -148,7 +168,9 @@ The repo must not claim:
 
 - Receipt matching is exact `card_id` only.
 - Receipt import does not validate that the recorded command actually ran.
-- Receipt import does not parse native Miri, sanitizer, Loom, Kani, or Crux
+- The Miri adapter reads saved success logs only; it does not execute Miri or
+  parse native UB diagnostics into cards.
+- Receipt import does not parse cargo-careful, sanitizer, Loom, Kani, or Crux
   output.
 - Receipt import does not discharge contract, guard, or reach evidence.
 - Duplicate receipts for the same card are rejected instead of merged.
