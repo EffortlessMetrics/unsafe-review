@@ -712,6 +712,9 @@ evidence = "test fixture"
   "card_id": "{card_id}",
   "tool": "miri",
   "strength": "ran",
+  "author": "core/fixtures",
+  "recorded_at": "2026-05-18T00:00:00Z",
+  "expires_at": "2026-08-18",
   "summary": "focused fixture witness passed",
   "command": "cargo +nightly miri test read_header",
   "limitations": ["fixture only"]
