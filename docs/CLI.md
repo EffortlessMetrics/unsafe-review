@@ -179,6 +179,25 @@ The Miri adapter reads saved output and writes a `tool = "miri"` receipt with
 failure marker. It does not run Miri, parse native UB diagnostics into cards, or
 claim site reach.
 
+Import a receipt from saved `cargo-careful` output after `cargo-careful` has
+been run outside `unsafe-review`:
+
+```bash
+unsafe-review receipt import-careful <card-id> \
+  --log target/careful-read-header.log \
+  --author core/fixtures \
+  --recorded-at 2026-05-18T00:00:00Z \
+  --expires-at 2026-08-18 \
+  --command "cargo +nightly careful test read_header" \
+  --limitation "fixture only" \
+  --out .unsafe-review/receipts/careful.json
+```
+
+The `cargo-careful` adapter reads saved output and writes a
+`tool = "cargo-careful"` receipt with `strength = "ran"` only when the output
+contains `test result: ok` and no failure marker. It does not run
+`cargo-careful`, parse diagnostics into cards, or claim site reach.
+
 Validate imported receipt files without running analysis:
 
 ```bash
