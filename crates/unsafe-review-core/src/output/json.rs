@@ -293,6 +293,7 @@ mod tests {
         "safe_reference_deref_no_cards",
         "split_raw_pointer_read_call",
         "maybeuninit_assume_init",
+        "vec_set_len",
     ];
 
     #[test]
