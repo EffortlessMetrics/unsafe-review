@@ -96,6 +96,9 @@ fn text_size_to_usize(size: ra_ap_syntax::TextSize) -> usize {
 mod tests {
     use super::*;
 
+    use proptest::collection::vec;
+    use proptest::prelude::*;
+
     #[test]
     fn parses_complete_rust_source_without_errors() {
         let parsed = parse_source("pub fn answer() -> usize {\n    42\n}\n");
@@ -134,5 +137,36 @@ mod tests {
 
         assert!(!parsed.parse_errors.is_empty());
         assert!(parsed.nodes.iter().any(|node| node.kind == "SOURCE_FILE"));
+    }
+
+    proptest! {
+        #[test]
+        fn line_column_tracks_ascii_newlines(lines in vec("[ -~]{0,24}", 1..30)) {
+            let text = lines.join("\n");
+            let mut line_start = 0usize;
+
+            for (line_index, line) in lines.iter().enumerate() {
+                for column_offset in 0..=line.len() {
+                    let position = line_column(&text, line_start + column_offset);
+                    prop_assert_eq!(position.line, line_index + 1);
+                    prop_assert_eq!(position.column, column_offset + 1);
+                }
+                line_start = line_start.saturating_add(line.len()).saturating_add(1);
+            }
+        }
+
+        #[test]
+        fn parsed_node_spans_stay_inside_original_text(input in vec(any::<char>(), 0..128)) {
+            let text: String = input.into_iter().collect();
+            let parsed = parse_source(text.clone());
+
+            prop_assert_eq!(&parsed.text, &text);
+            prop_assert!(!parsed.nodes.is_empty());
+            for node in &parsed.nodes {
+                prop_assert!(node.start <= node.end);
+                prop_assert!(node.end <= parsed.text.len());
+                prop_assert_eq!(&node.snippet, &snippet(&parsed.text, node.start, node.end));
+            }
+        }
     }
 }
