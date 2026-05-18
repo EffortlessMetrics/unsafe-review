@@ -1,4 +1,6 @@
-use crate::command::{CheckOptions, Command, DiffInput, Format, ReceiptTemplateOptions};
+use crate::command::{
+    CheckOptions, Command, DiffInput, Format, MiriReceiptOptions, ReceiptTemplateOptions,
+};
 use std::path::PathBuf;
 use unsafe_review_core::PolicyMode;
 
@@ -218,15 +220,95 @@ fn parse_context(args: Vec<String>) -> Result<Command, String> {
 fn parse_receipt(args: Vec<String>) -> Result<Command, String> {
     let mut rest = args;
     let Some(subcommand) = rest.first() else {
-        return Err("missing receipt subcommand `template` or `validate`".to_string());
+        return Err(
+            "missing receipt subcommand `import-miri`, `template`, or `validate`".to_string(),
+        );
     };
     let subcommand = subcommand.clone();
     rest.remove(0);
     match subcommand.as_str() {
+        "import-miri" => parse_miri_receipt(rest).map(Command::ReceiptImportMiri),
         "template" => parse_receipt_template(rest).map(Command::ReceiptTemplate),
         "validate" => parse_receipt_validate(rest),
         other => Err(format!("unknown receipt subcommand `{other}`")),
     }
+}
+
+fn parse_miri_receipt(args: Vec<String>) -> Result<MiriReceiptOptions, String> {
+    let mut options = MiriReceiptOptions::default();
+    let mut id: Option<String> = None;
+    let mut idx = 0usize;
+    while idx < args.len() {
+        match args[idx].as_str() {
+            "--log" => {
+                idx += 1;
+                options.log = PathBuf::from(value(&args, idx, "--log")?);
+            }
+            arg if arg.starts_with("--log=") => {
+                options.log = PathBuf::from(inline_value(arg, "--log")?);
+            }
+            "--author" => {
+                idx += 1;
+                options.author = value(&args, idx, "--author")?.to_string();
+            }
+            arg if arg.starts_with("--author=") => {
+                options.author = inline_value(arg, "--author")?.to_string();
+            }
+            "--recorded-at" => {
+                idx += 1;
+                options.recorded_at = value(&args, idx, "--recorded-at")?.to_string();
+            }
+            arg if arg.starts_with("--recorded-at=") => {
+                options.recorded_at = inline_value(arg, "--recorded-at")?.to_string();
+            }
+            "--expires-at" => {
+                idx += 1;
+                options.expires_at = value(&args, idx, "--expires-at")?.to_string();
+            }
+            arg if arg.starts_with("--expires-at=") => {
+                options.expires_at = inline_value(arg, "--expires-at")?.to_string();
+            }
+            "--command" => {
+                idx += 1;
+                options.command = value(&args, idx, "--command")?.to_string();
+            }
+            arg if arg.starts_with("--command=") => {
+                options.command = inline_value(arg, "--command")?.to_string();
+            }
+            "--limitation" => {
+                idx += 1;
+                options
+                    .limitations
+                    .push(value(&args, idx, "--limitation")?.to_string());
+            }
+            arg if arg.starts_with("--limitation=") => {
+                options
+                    .limitations
+                    .push(inline_value(arg, "--limitation")?.to_string());
+            }
+            "--out" => {
+                idx += 1;
+                options.out = Some(PathBuf::from(value(&args, idx, "--out")?));
+            }
+            arg if arg.starts_with("--out=") => {
+                options.out = Some(PathBuf::from(inline_value(arg, "--out")?));
+            }
+            value if value.starts_with('-') => {
+                return Err(format!("unknown receipt import-miri argument `{value}`"));
+            }
+            value => set_card_id(&mut id, value)?,
+        }
+        idx += 1;
+    }
+    options.card_id = id.ok_or_else(|| "missing card id".to_string())?;
+    if options.log.as_os_str().is_empty() {
+        return Err("missing value for --log".to_string());
+    }
+    validate_required_cli_value(&options.author, "--author")?;
+    validate_required_cli_value(&options.recorded_at, "--recorded-at")?;
+    validate_required_cli_value(&options.expires_at, "--expires-at")?;
+    validate_required_cli_value(&options.command, "--command")?;
+    Ok(options)
 }
 
 fn parse_receipt_template(args: Vec<String>) -> Result<ReceiptTemplateOptions, String> {
@@ -711,6 +793,66 @@ mod tests {
         assert_eq!(options.limitations, vec!["fixture only".to_string()]);
         assert_eq!(options.out, Some(PathBuf::from("target/receipt.json")));
         Ok(())
+    }
+
+    #[test]
+    fn parses_receipt_import_miri_command() -> Result<(), String> {
+        let command = parse(args([
+            "unsafe-review",
+            "receipt",
+            "import-miri",
+            "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1",
+            "--log",
+            "fixtures/raw_pointer_alignment_receipted/miri.success.log",
+            "--author",
+            "core/fixtures",
+            "--recorded-at",
+            "2026-05-18T00:00:00Z",
+            "--expires-at",
+            "2026-08-18",
+            "--command",
+            "cargo +nightly miri test read_header",
+            "--limitation",
+            "fixture only",
+            "--out",
+            "target/miri.json",
+        ]))?;
+
+        let Command::ReceiptImportMiri(options) = command else {
+            return Err("expected receipt import-miri command".to_string());
+        };
+        assert_eq!(
+            options.card_id,
+            "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1"
+        );
+        assert_eq!(
+            options.log,
+            PathBuf::from("fixtures/raw_pointer_alignment_receipted/miri.success.log")
+        );
+        assert_eq!(options.author, "core/fixtures");
+        assert_eq!(options.command, "cargo +nightly miri test read_header");
+        assert_eq!(options.limitations, vec!["fixture only".to_string()]);
+        Ok(())
+    }
+
+    #[test]
+    fn receipt_import_miri_requires_command() {
+        let command = parse(args([
+            "unsafe-review",
+            "receipt",
+            "import-miri",
+            "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1",
+            "--log",
+            "miri.log",
+            "--author",
+            "core/fixtures",
+            "--recorded-at",
+            "2026-05-18T00:00:00Z",
+            "--expires-at",
+            "2026-08-18",
+        ]));
+
+        assert_eq!(command, Err("missing value for --command".to_string()));
     }
 
     #[test]

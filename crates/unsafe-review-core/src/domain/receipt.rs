@@ -16,6 +16,17 @@ pub struct WitnessReceipt {
     pub limitations: Option<Vec<String>>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MiriReceiptInput {
+    pub card_id: String,
+    pub output: String,
+    pub author: String,
+    pub recorded_at: String,
+    pub expires_at: String,
+    pub command: String,
+    pub limitations: Vec<String>,
+}
+
 impl WitnessReceipt {
     pub fn validate(&self) -> Result<(), String> {
         validate_required(&self.schema_version, "schema_version")?;
@@ -84,6 +95,33 @@ impl WitnessReceipt {
             })
             .map_err(|err| format!("serialize witness receipt failed: {err}"))
     }
+
+    pub fn from_miri_output(input: MiriReceiptInput) -> Result<Self, String> {
+        validate_miri_success_output(&input.output)?;
+        validate_required(&input.command, "command")?;
+        if !input.command.to_ascii_lowercase().contains("miri") {
+            return Err("Miri receipt command must mention `miri`".to_string());
+        }
+        let mut limitations = vec![
+            "saved-output adapter; unsafe-review did not run Miri".to_string(),
+            "receipt strength is `ran`; site reach is not claimed".to_string(),
+        ];
+        limitations.extend(input.limitations);
+        let receipt = Self {
+            schema_version: WITNESS_RECEIPT_SCHEMA_VERSION.to_string(),
+            card_id: input.card_id,
+            tool: "miri".to_string(),
+            strength: "ran".to_string(),
+            author: Some(input.author),
+            recorded_at: Some(input.recorded_at),
+            expires_at: Some(input.expires_at),
+            summary: Some("saved Miri output reported `test result: ok`".to_string()),
+            command: Some(input.command),
+            limitations: Some(limitations),
+        };
+        receipt.validate()?;
+        Ok(receipt)
+    }
 }
 
 fn is_supported_receipt_strength(value: &str) -> bool {
@@ -141,6 +179,30 @@ fn validate_tool(value: &str) -> Result<(), String> {
     } else {
         Err(format!("uses unknown receipt tool `{value}`"))
     }
+}
+
+fn validate_miri_success_output(output: &str) -> Result<(), String> {
+    if output.trim().is_empty() {
+        return Err("saved Miri output is empty".to_string());
+    }
+    let lower = output.to_ascii_lowercase();
+    for needle in [
+        "undefined behavior",
+        "test result: failed",
+        "failures:",
+        "panicked at",
+        "error:",
+    ] {
+        if lower.contains(needle) {
+            return Err(format!(
+                "saved Miri output contains failure marker `{needle}`"
+            ));
+        }
+    }
+    if !lower.contains("test result: ok") {
+        return Err("saved Miri output must contain `test result: ok`".to_string());
+    }
+    Ok(())
 }
 
 fn validate_utc_timestamp(value: &str, key: &str) -> Result<(), String> {
@@ -251,6 +313,78 @@ mod tests {
                 .err()
                 .unwrap_or_default()
                 .contains("`author` is required")
+        );
+    }
+
+    #[test]
+    fn miri_receipt_from_saved_output_uses_ran_strength_without_site_reach() -> Result<(), String> {
+        let receipt = WitnessReceipt::from_miri_output(MiriReceiptInput {
+            card_id: "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1"
+                .to_string(),
+            output: "running 1 test\ntest read_header ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; finished in 0.01s\n"
+                .to_string(),
+            author: "core/fixtures".to_string(),
+            recorded_at: "2026-05-18T00:00:00Z".to_string(),
+            expires_at: "2026-08-18".to_string(),
+            command: "cargo +nightly miri test read_header".to_string(),
+            limitations: vec!["fixture only".to_string()],
+        })?;
+
+        assert_eq!(receipt.tool, "miri");
+        assert_eq!(receipt.strength, "ran");
+        assert_eq!(
+            receipt.summary.as_deref(),
+            Some("saved Miri output reported `test result: ok`")
+        );
+        let limitations = receipt.limitations.as_ref().ok_or("missing limitations")?;
+        assert!(
+            limitations
+                .iter()
+                .any(|item| item.contains("unsafe-review did not run Miri"))
+        );
+        assert!(
+            limitations
+                .iter()
+                .any(|item| item.contains("site reach is not claimed"))
+        );
+        assert!(limitations.iter().any(|item| item == "fixture only"));
+        Ok(())
+    }
+
+    #[test]
+    fn miri_receipt_from_saved_output_rejects_failure_markers() {
+        let result = WitnessReceipt::from_miri_output(MiriReceiptInput {
+            card_id: "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1"
+                .to_string(),
+            output: "error: Undefined Behavior: pointer must be aligned\n".to_string(),
+            author: "core/fixtures".to_string(),
+            recorded_at: "2026-05-18T00:00:00Z".to_string(),
+            expires_at: "2026-08-18".to_string(),
+            command: "cargo +nightly miri test read_header".to_string(),
+            limitations: Vec::new(),
+        });
+
+        assert!(result.err().unwrap_or_default().contains("failure marker"));
+    }
+
+    #[test]
+    fn miri_receipt_from_saved_output_requires_miri_command() {
+        let result = WitnessReceipt::from_miri_output(MiriReceiptInput {
+            card_id: "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1"
+                .to_string(),
+            output: "test result: ok. 1 passed; 0 failed; finished in 0.01s\n".to_string(),
+            author: "core/fixtures".to_string(),
+            recorded_at: "2026-05-18T00:00:00Z".to_string(),
+            expires_at: "2026-08-18".to_string(),
+            command: "cargo test read_header".to_string(),
+            limitations: Vec::new(),
+        });
+
+        assert!(
+            result
+                .err()
+                .unwrap_or_default()
+                .contains("must mention `miri`")
         );
     }
 

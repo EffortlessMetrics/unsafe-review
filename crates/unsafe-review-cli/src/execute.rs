@@ -1,10 +1,12 @@
-use crate::command::{CheckOptions, Command, DiffInput, Format, ReceiptTemplateOptions};
+use crate::command::{
+    CheckOptions, Command, DiffInput, Format, MiriReceiptOptions, ReceiptTemplateOptions,
+};
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use unsafe_review_core::{
-    AnalysisMode, AnalyzeInput, CardId, DiffSource, PolicyMode, Scope,
+    AnalysisMode, AnalyzeInput, CardId, DiffSource, MiriReceiptInput, PolicyMode, Scope,
     WITNESS_RECEIPT_SCHEMA_VERSION, WitnessReceipt, analyze, collect_context, explain_card,
     render_comment_plan, render_human, render_json, render_lsp, render_markdown, render_pr_summary,
     render_sarif, render_witness_plan, validate_witness_receipts,
@@ -29,6 +31,7 @@ pub(crate) fn execute(command: Command) -> Result<(), String> {
         Command::Context { root, id } => context(&root, &id),
         Command::ReceiptTemplate(options) => receipt_template(options),
         Command::ReceiptValidate { root } => receipt_validate(&root),
+        Command::ReceiptImportMiri(options) => receipt_import_miri(options),
     }
 }
 
@@ -275,6 +278,29 @@ fn receipt_validate(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn receipt_import_miri(options: MiriReceiptOptions) -> Result<(), String> {
+    let output = fs::read_to_string(&options.log)
+        .map_err(|err| format!("read {} failed: {err}", options.log.display()))?;
+    let receipt = WitnessReceipt::from_miri_output(MiriReceiptInput {
+        card_id: options.card_id,
+        output,
+        author: options.author,
+        recorded_at: options.recorded_at,
+        expires_at: options.expires_at,
+        command: options.command,
+        limitations: options.limitations,
+    })?;
+    let rendered = receipt.to_pretty_json()?;
+    if let Some(path) = options.out {
+        ensure_parent_dir(&path)?;
+        fs::write(&path, rendered)
+            .map_err(|err| format!("write {} failed: {err}", path.display()))?;
+    } else {
+        print!("{rendered}");
+    }
+    Ok(())
+}
+
 fn print_help() {
     println!("unsafe-review: cheap unsafe contract review for Rust");
     println!();
@@ -291,6 +317,9 @@ fn print_help() {
     println!("  context [--root .] [--json|--format json] <card-id>");
     println!(
         "  receipt template <card-id> --tool <lane> --strength <level> --author <owner> --recorded-at <utc> --expires-at <date> [--summary text] [--command text] [--limitation text] [--out file]"
+    );
+    println!(
+        "  receipt import-miri <card-id> --log <file> --author <owner> --recorded-at <utc> --expires-at <date> --command <cmd> [--limitation text] [--out file]"
     );
     println!("  receipt validate [--root .]");
     println!("  doctor  [--root .]");

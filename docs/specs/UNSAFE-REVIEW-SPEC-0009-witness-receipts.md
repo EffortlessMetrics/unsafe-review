@@ -32,6 +32,12 @@ The CLI may render a receipt template from explicit user-provided metadata. That
 template output is only a JSON authoring aid; it must not run witness commands or
 claim that a witness succeeded.
 
+The CLI may import a receipt from saved Miri output. The adapter must read an
+existing log file, reject empty output, reject failure-looking output, require
+`test result: ok`, and emit a normal `WitnessReceipt` with `tool = "miri"` and
+`strength = "ran"`. It must not execute Miri, infer site reach, or create a
+card.
+
 The CLI may also validate receipt files without running analysis. Validation must
 use the same importer checks as normal card analysis so users do not get a
 separate receipt truth.
@@ -110,6 +116,8 @@ after the `recorded_at` date.
   same required fields as the importer.
 - The CLI receipt-template command writes a valid receipt JSON object but does
   not execute the recorded command.
+- The CLI Miri saved-output adapter writes a receipt from a success-looking Miri
+  log and rejects failure-looking output.
 - The CLI receipt-validate command counts importable receipts and rejects the
   same invalid receipt files as normal analysis.
 

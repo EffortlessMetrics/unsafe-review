@@ -160,6 +160,25 @@ unsafe-review receipt template <card-id> \
 The template command validates the receipt shape and writes JSON. It still does
 not run the witness command.
 
+Import a receipt from saved Miri output after Miri has been run outside
+`unsafe-review`:
+
+```bash
+unsafe-review receipt import-miri <card-id> \
+  --log target/miri-read-header.log \
+  --author core/fixtures \
+  --recorded-at 2026-05-18T00:00:00Z \
+  --expires-at 2026-08-18 \
+  --command "cargo +nightly miri test read_header" \
+  --limitation "fixture only" \
+  --out .unsafe-review/receipts/miri.json
+```
+
+The Miri adapter reads saved output and writes a `tool = "miri"` receipt with
+`strength = "ran"` only when the output contains `test result: ok` and no
+failure marker. It does not run Miri, parse native UB diagnostics into cards, or
+claim site reach.
+
 Validate imported receipt files without running analysis:
 
 ```bash
