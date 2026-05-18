@@ -171,3 +171,99 @@ fn value<'a>(args: &'a [String], idx: usize, flag: &str) -> Result<&'a str, Stri
         .map(|value| value.as_str())
         .ok_or_else(|| format!("missing value for {flag}"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn argv(args: &[&str]) -> Vec<String> {
+        std::iter::once("unsafe-review")
+            .chain(args.iter().copied())
+            .map(str::to_string)
+            .collect()
+    }
+
+    #[test]
+    fn parses_check_options_with_format_aliases_and_limits() -> Result<(), String> {
+        let parsed = parse(argv(&[
+            "check",
+            "--root",
+            "fixtures/raw_pointer_alignment",
+            "--base",
+            "main",
+            "--diff",
+            "change.diff",
+            "--markdown",
+            "--out",
+            "review.md",
+            "--max-cards",
+            "7",
+        ]))?;
+
+        let Command::Check(options) = parsed else {
+            return Err("expected check command".to_string());
+        };
+        assert_eq!(
+            options.root,
+            PathBuf::from("fixtures/raw_pointer_alignment")
+        );
+        assert_eq!(options.base, Some("main".to_string()));
+        assert_eq!(options.diff, Some(PathBuf::from("change.diff")));
+        assert_eq!(options.format, Format::Markdown);
+        assert_eq!(options.out, Some(PathBuf::from("review.md")));
+        assert_eq!(options.max_cards, Some(7));
+        Ok(())
+    }
+
+    #[test]
+    fn pilot_defaults_to_five_cards_unless_overridden() -> Result<(), String> {
+        let parsed = parse(argv(&["pilot", "--json"]))?;
+        let Command::Pilot(options) = parsed else {
+            return Err("expected pilot command".to_string());
+        };
+        assert_eq!(options.format, Format::Json);
+        assert_eq!(options.max_cards, Some(5));
+
+        let parsed = parse(argv(&["pilot", "--max-cards", "2"]))?;
+        let Command::Pilot(options) = parsed else {
+            return Err("expected pilot command with explicit limit".to_string());
+        };
+        assert_eq!(options.max_cards, Some(2));
+        Ok(())
+    }
+
+    #[test]
+    fn reports_missing_values_and_unknown_arguments() {
+        let missing_root = parse(argv(&["check", "--root"]));
+        assert_eq!(missing_root, Err("missing value for --root".to_string()));
+
+        let unknown = parse(argv(&["explain", "--bogus", "card-1"]));
+        assert_eq!(
+            unknown,
+            Err("unknown explain argument `--bogus`".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_explain_and_context_card_ids() -> Result<(), String> {
+        let explain = parse(argv(&["explain", "--format", "json", "card-1"]))?;
+        assert_eq!(
+            explain,
+            Command::Explain {
+                root: PathBuf::from("."),
+                id: "card-1".to_string(),
+                format: Format::Json,
+            }
+        );
+
+        let context = parse(argv(&["context", "--root", "repo", "card-2"]))?;
+        assert_eq!(
+            context,
+            Command::Context {
+                root: PathBuf::from("repo"),
+                id: "card-2".to_string(),
+            }
+        );
+        Ok(())
+    }
+}

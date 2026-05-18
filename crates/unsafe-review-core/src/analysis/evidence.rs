@@ -255,3 +255,210 @@ fn visit(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> 
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{
+        OperationFamily, SourceLocation, UnsafeOperation, UnsafeSite, UnsafeSiteKind,
+    };
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn scanned_site(
+        context_before: Vec<&str>,
+        snippet: &str,
+        context_after: Vec<&str>,
+    ) -> ScannedSite {
+        ScannedSite {
+            site: UnsafeSite {
+                location: SourceLocation::new("src/lib.rs", 5, 9),
+                kind: UnsafeSiteKind::Operation,
+                owner: Some("read_byte".to_string()),
+                visibility: "private".to_string(),
+                public_api_surface: false,
+                changed: true,
+                snippet: snippet.to_string(),
+            },
+            operation: UnsafeOperation {
+                family: OperationFamily::RawPointerRead,
+                expression: snippet.to_string(),
+            },
+            context_before: context_before.into_iter().map(str::to_string).collect(),
+            context_after: context_after.into_iter().map(str::to_string).collect(),
+        }
+    }
+
+    fn reached() -> ReachEvidence {
+        ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "owner reached".to_string(),
+        }
+    }
+
+    #[test]
+    fn contract_evidence_accepts_safety_docs_and_safety_comments() {
+        let docs = scanned_site(
+            vec!["/// # Safety", "/// caller validates ptr"],
+            "unsafe { ptr.read() }",
+            vec![],
+        );
+        assert!(contract_evidence(&docs).present);
+
+        let comment = scanned_site(
+            vec!["// SAFETY: ptr was checked"],
+            "unsafe { ptr.read() }",
+            vec![],
+        );
+        assert!(contract_evidence(&comment).present);
+
+        let inline = scanned_site(
+            vec![],
+            "unsafe { ptr.read() } // SAFETY: ptr was checked",
+            vec![],
+        );
+        assert!(contract_evidence(&inline).present);
+
+        let missing = scanned_site(
+            vec!["// safe because this is tested"],
+            "unsafe { ptr.read() }",
+            vec![],
+        );
+        assert!(!contract_evidence(&missing).present);
+    }
+
+    #[test]
+    fn obligation_evidence_ignores_comment_only_guards() {
+        let site = scanned_site(
+            vec!["// len >= 1", "// align_of::<u8>()"],
+            "unsafe { ptr.read() }",
+            vec!["// is_null checked elsewhere"],
+        );
+        let obligations = vec![
+            SafetyObligation::new("bounds", "pointer is in bounds"),
+            SafetyObligation::new("alignment", "pointer is aligned"),
+            SafetyObligation::new("non-null", "pointer is non-null"),
+        ];
+
+        let evidence = obligation_evidence(
+            &site,
+            &obligations,
+            &ContractEvidence::present("contract"),
+            &reached(),
+        );
+
+        assert!(evidence.iter().all(|item| !item.discharge.present));
+    }
+
+    #[test]
+    fn obligation_evidence_detects_local_code_guards_by_key() {
+        let site = scanned_site(
+            vec!["if ptr.is_null() { return None; }"],
+            "unsafe { ptr.read() }",
+            vec!["if len >= 1 && ptr.align_offset(core::mem::align_of::<u8>()) == 0 { }"],
+        );
+        let obligations = vec![
+            SafetyObligation::new("bounds", "pointer is in bounds"),
+            SafetyObligation::new("alignment", "pointer is aligned"),
+            SafetyObligation::new("non-null", "pointer is non-null"),
+        ];
+
+        let evidence = obligation_evidence(
+            &site,
+            &obligations,
+            &ContractEvidence::present("contract"),
+            &reached(),
+        );
+
+        assert!(evidence.iter().all(|item| item.discharge.present));
+        assert!(evidence.iter().all(|item| item.contract.present));
+        assert!(evidence.iter().all(|item| item.reach.present));
+        assert!(evidence.iter().all(|item| !item.witness.present));
+    }
+
+    #[test]
+    fn summarize_discharge_distinguishes_empty_partial_and_complete() {
+        assert!(!summarize_discharge(&[]).present);
+
+        let complete_site = scanned_site(vec!["if len >= 1 {"], "unsafe { ptr.read() }", vec!["}"]);
+        let complete = obligation_evidence(
+            &complete_site,
+            &[SafetyObligation::new("bounds", "pointer is in bounds")],
+            &ContractEvidence::present("contract"),
+            &reached(),
+        );
+        assert!(summarize_discharge(&complete).present);
+
+        let partial_site = scanned_site(vec!["if len >= 1 {"], "unsafe { ptr.read() }", vec!["}"]);
+        let partial = obligation_evidence(
+            &partial_site,
+            &[
+                SafetyObligation::new("bounds", "pointer is in bounds"),
+                SafetyObligation::new("alignment", "pointer is aligned"),
+            ],
+            &ContractEvidence::present("contract"),
+            &reached(),
+        );
+        let summary = summarize_discharge(&partial);
+        assert!(!summary.present);
+        assert_eq!(
+            summary.summary,
+            "Some inferred safety obligations are missing local guard evidence"
+        );
+    }
+
+    #[test]
+    fn reach_evidence_finds_inline_and_integration_tests() -> Result<(), String> {
+        let root = unique_temp_dir("reach-evidence")?;
+        fs::create_dir_all(root.join("src")).map_err(|err| err.to_string())?;
+        fs::create_dir_all(root.join("tests")).map_err(|err| err.to_string())?;
+        fs::write(
+            root.join("src/lib.rs"),
+            "#[test]\nfn inline_reaches_owner() { read_byte(); }\n",
+        )
+        .map_err(|err| err.to_string())?;
+        fs::write(
+            root.join("tests/read_byte.rs"),
+            "#[test]\nfn integration_reaches_owner() { unsafe_review_fixture::read_byte(); }\n",
+        )
+        .map_err(|err| err.to_string())?;
+
+        let owner = "read_byte".to_string();
+        let (reach, tests) = reach_evidence(&root, Some(&owner));
+
+        remove_temp_dir(&root)?;
+        assert_eq!(reach.state, "owner_reached");
+        assert_eq!(tests.len(), 2);
+        assert!(tests.iter().any(|test| test.name == "inline_reaches_owner"));
+        assert!(
+            tests
+                .iter()
+                .any(|test| test.name == "integration_reaches_owner")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn reach_evidence_reports_unknown_without_owner() {
+        let (reach, tests) = reach_evidence(Path::new("."), None);
+
+        assert_eq!(reach.state, "unknown");
+        assert!(tests.is_empty());
+    }
+
+    fn unique_temp_dir(prefix: &str) -> Result<PathBuf, String> {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|err| err.to_string())?
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("unsafe-review-{prefix}-{nanos}"));
+        fs::create_dir_all(&path).map_err(|err| err.to_string())?;
+        Ok(path)
+    }
+
+    fn remove_temp_dir(path: &Path) -> Result<(), String> {
+        if path.exists() {
+            fs::remove_dir_all(path).map_err(|err| err.to_string())?;
+        }
+        Ok(())
+    }
+}
