@@ -1,0 +1,14 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,0 +1,12 @@
++
++pub struct Header(u32);
++
++pub fn read_header(bytes: &[u8]) -> Header {
++    assert!(bytes.len() >= core::mem::size_of::<Header>());
++    let ptr = bytes.as_ptr();
++    // SAFETY: length is checked above, but this fixture intentionally omits an
++    // alignment guard so unsafe-review can emit a guard_missing card.
++    unsafe { ptr.cast::<Header>().read() }
++}

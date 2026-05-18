@@ -1,6 +1,6 @@
 [
   {
-    "id": "UR-src-lib-rs-2-private-helper-unknown",
+    "id": "UR-private-unsafe-helper-safety-comment-src-lib-rs-private-helper-unsafe_fn-unknown-private-helper-9fe94cebac2c-unknown-c1",
     "class": "guard_missing",
     "priority": "high",
     "confidence": "medium",

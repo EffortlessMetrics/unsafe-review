@@ -1,6 +1,6 @@
 [
   {
-    "id": "UR-src-lib-rs-1-callermustupholdcontract-unknown",
+    "id": "UR-public-unsafe-trait-missing-safety-src-lib-rs-callermustupholdcontract-unsafe_trait-unknown-callermustupholdcontract-5d304821b1ed-unknown-c1",
     "class": "contract_missing",
     "priority": "high",
     "confidence": "high",

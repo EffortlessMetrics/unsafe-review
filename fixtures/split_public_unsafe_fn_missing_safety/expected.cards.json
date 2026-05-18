@@ -1,6 +1,6 @@
 [
   {
-    "id": "UR-src-lib-rs-1-split-contract-unknown",
+    "id": "UR-split-public-unsafe-fn-missing-safety-src-lib-rs-split-contract-unsafe_fn-unknown-split-contract-5f32ded6ec0d-unknown-c1",
     "class": "contract_missing",
     "priority": "high",
     "confidence": "high",

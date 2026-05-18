@@ -2,13 +2,15 @@ use super::{classify, evidence, obligations, scanner, witness};
 use crate::api::{AnalysisMode, AnalyzeInput, AnalyzeOutput, DiffSource, Scope, Summary};
 use crate::domain::{CardId, MissingEvidence, NextAction, ReviewCard};
 use crate::input::{diff, workspace};
-use crate::util::slug;
+use crate::util::{slug, stable_hash_hex};
+use std::collections::BTreeMap;
 use std::fs;
 
 pub(crate) fn analyze(input: AnalyzeInput) -> Result<AnalyzeOutput, String> {
     let repo_mode = matches!(input.scope, Scope::Repo) || matches!(input.mode, AnalysisMode::Repo);
     let diff_index = load_diff_index(&input.diff)?;
     let all_rust_files = workspace::discover_rust_files(&input.root)?;
+    let package = package_name(&input.root);
     let candidate_files = if repo_mode || diff_index.is_empty() {
         all_rust_files.clone()
     } else {
@@ -20,6 +22,7 @@ pub(crate) fn analyze(input: AnalyzeInput) -> Result<AnalyzeOutput, String> {
     };
 
     let mut cards = Vec::new();
+    let mut identity_counts = BTreeMap::new();
     for rel in &candidate_files {
         let scanned = scanner::scan_file(&input.root, rel, Some(&diff_index), repo_mode)?;
         for scanned_site in scanned {
@@ -68,7 +71,7 @@ pub(crate) fn analyze(input: AnalyzeInput) -> Result<AnalyzeOutput, String> {
                 summary: next_action_summary(&class, scanned_site.operation.family.as_str()),
                 verify_commands,
             };
-            let id = card_id(&scanned_site);
+            let id = card_id(&package, &scanned_site, &hazards, &mut identity_counts);
             cards.push(ReviewCard {
                 id,
                 class,
@@ -111,6 +114,38 @@ pub(crate) fn analyze(input: AnalyzeInput) -> Result<AnalyzeOutput, String> {
         summary,
         cards,
     })
+}
+
+fn package_name(root: &std::path::Path) -> String {
+    let Ok(text) = fs::read_to_string(root.join("Cargo.toml")) else {
+        return root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("workspace")
+            .to_string();
+    };
+    let mut in_package = false;
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            in_package = trimmed == "[package]";
+            continue;
+        }
+        if !in_package || !trimmed.starts_with("name") {
+            continue;
+        }
+        let Some((_key, value)) = trimmed.split_once('=') else {
+            continue;
+        };
+        let name = value.trim().trim_matches('"');
+        if !name.is_empty() {
+            return name.to_string();
+        }
+    }
+    root.file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("workspace")
+        .to_string()
 }
 
 fn load_diff_index(source: &DiffSource) -> Result<diff::DiffIndex, String> {
@@ -162,7 +197,23 @@ fn next_action_summary(class: &crate::domain::ReviewClass, operation: &str) -> S
     }
 }
 
-fn card_id(scanned: &scanner::ScannedSite) -> CardId {
+fn card_id(
+    package: &str,
+    scanned: &scanner::ScannedSite,
+    hazards: &[crate::domain::HazardKind],
+    identity_counts: &mut BTreeMap<String, usize>,
+) -> CardId {
+    let base = card_identity_base(package, scanned, hazards);
+    let next = identity_counts.entry(base.clone()).or_insert(0);
+    *next += 1;
+    CardId(format!("{base}-c{}", *next))
+}
+
+fn card_identity_base(
+    package: &str,
+    scanned: &scanner::ScannedSite,
+    hazards: &[crate::domain::HazardKind],
+) -> String {
     let file = scanned
         .site
         .location
@@ -174,13 +225,50 @@ fn card_id(scanned: &scanner::ScannedSite) -> CardId {
         .owner
         .clone()
         .unwrap_or_else(|| "unknown".to_string());
-    CardId(format!(
-        "UR-{}-{}-{}-{}",
+    let normalized = normalize_snippet(&scanned.operation.expression);
+    let snippet_hash = stable_hash_hex(&normalized);
+    let hazard = hazards.first().map_or("unknown", |hazard| hazard.as_str());
+    format!(
+        "UR-{}-{}-{}-{}-{}-{}-{}-{}",
+        slug(package),
         slug(&file),
-        scanned.site.location.line,
         slug(&owner),
-        scanned.operation.family.as_str()
-    ))
+        scanned.site.kind.as_str(),
+        scanned.operation.family.as_str(),
+        slug(&operation_path(scanned)),
+        &snippet_hash[..12],
+        hazard
+    )
+}
+
+fn normalize_snippet(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn operation_path(scanned: &scanner::ScannedSite) -> String {
+    if scanned.operation.family == crate::domain::OperationFamily::RawPointerDeref {
+        return "deref".to_string();
+    }
+    if scanned.operation.family == crate::domain::OperationFamily::Unknown {
+        return scanned
+            .site
+            .owner
+            .clone()
+            .unwrap_or_else(|| scanned.site.kind.as_str().to_string());
+    }
+    let normalized = normalize_snippet(&scanned.operation.expression);
+    let target = normalized
+        .split('(')
+        .next()
+        .unwrap_or(normalized.as_str())
+        .trim();
+    if let Some((_prefix, method)) = target.rsplit_once('.') {
+        return method.trim_matches(':').to_string();
+    }
+    if let Some((_prefix, function)) = target.rsplit_once("::") {
+        return function.trim_matches(':').to_string();
+    }
+    scanned.operation.family.as_str().to_string()
 }
 
 #[cfg(test)]
@@ -308,6 +396,48 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn card_identity_is_stable_across_line_drift() -> Result<(), String> {
+        let original = fixture_output("raw_pointer_alignment")?;
+        let drifted = fixture_output("raw_pointer_alignment_line_drift")?;
+        let original_card = single_card("raw_pointer_alignment", &original)?;
+        let drifted_card = single_card("raw_pointer_alignment_line_drift", &drifted)?;
+
+        assert_ne!(
+            original_card.site.location.line, drifted_card.site.location.line,
+            "fixture should prove line drift occurred"
+        );
+        assert_eq!(
+            original_card.id, drifted_card.id,
+            "card identity should not include the line number"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn card_identity_counts_duplicate_sites() -> Result<(), String> {
+        let output = fixture_output("duplicate_raw_pointer_reads")?;
+        if output.cards.len() != 2 {
+            return Err(format!(
+                "duplicate_raw_pointer_reads should emit two cards, got {}",
+                output.cards.len()
+            ));
+        }
+        let first = &output.cards[0];
+        let second = &output.cards[1];
+
+        assert_eq!(first.operation.family, OperationFamily::RawPointerRead);
+        assert_eq!(second.operation.family, OperationFamily::RawPointerRead);
+        assert_ne!(first.id, second.id);
+        assert!(first.id.0.ends_with("-c1"));
+        assert!(second.id.0.ends_with("-c2"));
+        assert_eq!(
+            identity_without_count(&first.id),
+            identity_without_count(&second.id)
+        );
+        Ok(())
+    }
+
     fn fixture_output(name: &str) -> Result<AnalyzeOutput, String> {
         let root = fixture_root(name);
         analyze(AnalyzeInput {
@@ -352,5 +482,10 @@ mod tests {
             }),
             "{fixture} should suppress duplicate unknown unsafe-block wrapper cards"
         );
+    }
+
+    fn identity_without_count(id: &CardId) -> &str {
+        id.0.rsplit_once("-c")
+            .map_or(id.0.as_str(), |(base, _count)| base)
     }
 }
