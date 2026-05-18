@@ -37,6 +37,7 @@ pub(crate) fn scan_file(
     let syntax_operation_block_lines = operation_block_start_lines(&parsed);
     let mut out = Vec::new();
     let mut seen = BTreeSet::new();
+    let mut seen_operation_lines = BTreeSet::new();
     for (idx, raw) in lines.iter().enumerate() {
         let line_no = idx + 1;
         let trimmed = raw.trim();
@@ -54,6 +55,9 @@ pub(crate) fn scan_file(
             continue;
         }
         seen.insert(site_key(line_no, &kind, &family));
+        if kind == UnsafeSiteKind::Operation {
+            seen_operation_lines.insert(line_no);
+        }
         let changed = diff.is_none_or(|d| repo_mode || d.contains_near(rel, line_no));
         if !changed && !repo_mode {
             continue;
@@ -90,6 +94,11 @@ pub(crate) fn scan_file(
     }
 
     for detected in syntax_sites {
+        if detected.kind == UnsafeSiteKind::Operation
+            && seen_operation_lines.contains(&detected.line)
+        {
+            continue;
+        }
         if !seen.insert(site_key(detected.line, &detected.kind, &detected.family)) {
             continue;
         }
@@ -226,10 +235,10 @@ fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
     if line.contains("new_unchecked") {
         return Some((UnsafeSiteKind::Operation, OperationFamily::NonNullUnchecked));
     }
-    if line.contains(".read()") || line.contains("ptr::read") {
+    if is_raw_pointer_read(line) {
         return Some((UnsafeSiteKind::Operation, OperationFamily::RawPointerRead));
     }
-    if is_raw_pointer_write(line) {
+    if is_raw_pointer_write(line) || is_raw_pointer_assignment(line) {
         return Some((UnsafeSiteKind::Operation, OperationFamily::RawPointerWrite));
     }
     if line.contains(".add(") || line.contains(".offset(") {
@@ -371,12 +380,41 @@ fn is_raw_pointer_deref(compact: &str) -> bool {
     compact.starts_with('*') && !compact.starts_with("**")
 }
 
+fn is_raw_pointer_read(line: &str) -> bool {
+    line.contains("ptr::read")
+        || line.contains("ptr::read_volatile")
+        || line.contains(".read()")
+        || line.contains(".read_volatile()")
+}
+
 fn is_raw_pointer_write(line: &str) -> bool {
     line.contains("ptr::write")
+        || line.contains("ptr::write_volatile")
         || line.contains("ptr.write(")
+        || line.contains("ptr.write_volatile(")
         || line.contains(".as_mut_ptr().write(")
+        || line.contains(".as_mut_ptr().write_volatile(")
         || line.contains(".cast_mut().write(")
+        || line.contains(".cast_mut().write_volatile(")
         || (line.contains(".cast::<") && line.contains(".write("))
+        || (line.contains(".cast::<") && line.contains(".write_volatile("))
+}
+
+fn is_raw_pointer_assignment(line: &str) -> bool {
+    let compact = line.trim_start();
+    (compact.starts_with('*') || compact.starts_with("(*")) && contains_assignment_operator(compact)
+}
+
+fn contains_assignment_operator(text: &str) -> bool {
+    let chars = text.chars().collect::<Vec<_>>();
+    chars.iter().enumerate().any(|(idx, ch)| {
+        if *ch != '=' {
+            return false;
+        }
+        let previous = idx.checked_sub(1).and_then(|pos| chars.get(pos));
+        let next = chars.get(idx + 1);
+        !matches!(previous, Some('=' | '!' | '<' | '>' | '-')) && !matches!(next, Some('=' | '>'))
+    })
 }
 
 fn unsafe_block_ranges(parsed: &ParsedSource) -> Vec<(usize, usize)> {
