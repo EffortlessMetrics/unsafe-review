@@ -1,8 +1,8 @@
 [
   {
     "id": "UR-nested-unsafe-operation-call-dedupe-fixture-src-lib-rs-expose-bucket-operation-nonnull_unchecked-nonnull-unchecked-0820f20867b6-pointer_validity-c1",
-    "class": "unsafe_unreached",
-    "priority": "medium",
+    "class": "guard_missing",
+    "priority": "high",
     "confidence": "medium",
     "site": {
       "file": "src/lib.rs",
@@ -31,9 +31,9 @@
           "summary": "Nearby `SAFETY:` comment was detected"
         },
         "discharge": {
-          "present": true,
-          "state": "present",
-          "summary": "Nullability guard code was detected"
+          "present": false,
+          "state": "missing",
+          "summary": "No nullability guard code was detected"
         },
         "reach": {
           "present": false,
@@ -48,10 +48,11 @@
       }
     ],
     "contract": "Nearby `SAFETY:` comment was detected",
-    "discharge": "All inferred safety obligations have visible local guard evidence",
+    "discharge": "No visible local guard detected",
     "reach": "No static test mention of owner `expose_bucket` was found",
     "witness": "No imported witness receipt was found",
     "missing": [
+      "Missing visible local guard for inferred safety obligations",
       "No related test path was found by static search",
       "No witness receipt imported for this card"
     ],

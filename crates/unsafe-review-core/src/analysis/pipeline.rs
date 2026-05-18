@@ -685,7 +685,8 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
 
         assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
         assert_eq!(card.operation.family, OperationFamily::NonNullUnchecked);
-        assert_eq!(card.class, ReviewClass::UnsafeUnreached);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(!obligation_discharge_present(card, "non-null"));
         assert!(card.id.0.contains("nonnull-unchecked"));
         Ok(())
     }

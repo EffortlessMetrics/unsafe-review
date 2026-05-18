@@ -409,7 +409,7 @@ kind = "false_positive_control"
 claim = "nested unsafe operations do not also emit parent-call duplicate cards"
 support_tier = "Diff unsafe site inventory"
 expected_cards = 1
-expected_class = "unsafe_unreached"
+expected_class = "guard_missing"
 expected_operation_family = "nonnull_unchecked"
 expected_hazard = "pointer_validity"
 

@@ -175,8 +175,7 @@ fn discharge_state_for(
             }
         }
         "non-null" | "pointer-live" => {
-            if lower.contains("is_null") || lower.contains("non_null") || lower.contains("nonnull")
-            {
+            if has_nullability_guard(lower) {
                 EvidenceState::present("Nullability guard code was detected")
             } else {
                 EvidenceState::missing("No nullability guard code was detected")
@@ -368,6 +367,11 @@ fn has_alignment_guard(lower: &str) -> bool {
         || lower.contains("align_of")
         || lower.contains("addr() %")
         || lower.contains("as usize %")
+}
+
+fn has_nullability_guard(lower: &str) -> bool {
+    let compact = compact_code(lower);
+    lower.contains("is_null") || compact.contains("nonnull::new(")
 }
 
 fn contains_word(text: &str, word: &str) -> bool {
@@ -595,6 +599,42 @@ mod tests {
         );
         assert!(
             obligation_evidence(&local_guard, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+    }
+
+    #[test]
+    fn nonnull_constructor_name_does_not_discharge_nullability() {
+        let obligations = vec![SafetyObligation::new(
+            "non-null",
+            "pointer is non-null before constructing NonNull",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let constructor_only = site_with_family(
+            OperationFamily::NonNullUnchecked,
+            vec![],
+            "NonNull::new_unchecked(ptr)",
+            vec![],
+        );
+        let explicit_guard = site_with_family(
+            OperationFamily::NonNullUnchecked,
+            vec!["if ptr.is_null() { return None; }"],
+            "NonNull::new_unchecked(ptr)",
+            vec![],
+        );
+
+        assert!(
+            !obligation_evidence(&constructor_only, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
+            obligation_evidence(&explicit_guard, &obligations, &contract, &reach)[0]
                 .discharge
                 .present
         );
