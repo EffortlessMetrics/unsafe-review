@@ -187,6 +187,10 @@ fn discharge_state_for(
                 && has_encode_utf8_remaining_capacity_evidence(lower)
             {
                 EvidenceState::present("Unsafe call argument guard code was detected")
+            } else if family == &OperationFamily::UnsafeFnCall
+                && has_unchecked_constructor_availability_evidence(lower)
+            {
+                EvidenceState::present("Unchecked constructor availability guard code was detected")
             } else {
                 EvidenceState::missing("No obligation-specific guard code was detected")
             }
@@ -287,6 +291,11 @@ fn has_encode_utf8_remaining_capacity_evidence(lower: &str) -> bool {
     compact.contains("encode_utf8(c,ptr,remaining_cap)")
         && compact.contains("remaining_cap=self.capacity()-len")
         && compact.contains("ptr")
+}
+
+fn has_unchecked_constructor_availability_evidence(lower: &str) -> bool {
+    let compact = compact_code(lower);
+    compact.contains("new_unchecked(") && compact.contains("is_available()")
 }
 
 fn has_unwrap_unchecked_infallible_result_evidence(lower: &str) -> bool {
@@ -728,6 +737,37 @@ mod tests {
         let evidence = obligation_evidence(&set_len, &obligations, &contract, &reach);
 
         assert!(evidence.iter().all(|item| item.discharge.present));
+    }
+
+    #[test]
+    fn unchecked_constructor_availability_guard_discharges_callee_contract() {
+        let obligations = vec![SafetyObligation::new(
+            "callee-contract",
+            "callee safety preconditions are satisfied",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let guarded = site_with_family(
+            OperationFamily::UnsafeFnCall,
+            vec!["if One::is_available() {"],
+            "unsafe { Some(One::new_unchecked(needle)) }",
+            vec!["}"],
+        );
+        let unguarded = site_with_family(
+            OperationFamily::UnsafeFnCall,
+            vec![],
+            "unsafe { Some(One::new_unchecked(needle)) }",
+            vec![],
+        );
+
+        let guarded_evidence = obligation_evidence(&guarded, &obligations, &contract, &reach);
+        let unguarded_evidence = obligation_evidence(&unguarded, &obligations, &contract, &reach);
+
+        assert!(guarded_evidence[0].discharge.present);
+        assert!(!unguarded_evidence[0].discharge.present);
     }
 
     #[test]

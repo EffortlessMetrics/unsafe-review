@@ -665,6 +665,20 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn unchecked_constructor_availability_guard_is_unsafe_call_evidence() -> Result<(), String> {
+        let output = fixture_output("unchecked_constructor_availability_guard")?;
+        let card = single_card("unchecked_constructor_availability_guard", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::UnsafeFnCall);
+        assert_eq!(card.class, ReviewClass::GuardedUnwitnessed);
+        assert!(card.discharge.present);
+        assert!(obligation_discharge_present(card, "callee-contract"));
+        assert!(card.site.snippet.contains("new_unchecked"));
+        Ok(())
+    }
+
+    #[test]
     fn nested_unsafe_operation_does_not_emit_parent_duplicate() -> Result<(), String> {
         let output = fixture_output("nested_unsafe_operation_call_dedupe")?;
         let card = single_card("nested_unsafe_operation_call_dedupe", &output)?;

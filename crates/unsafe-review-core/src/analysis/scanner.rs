@@ -355,8 +355,11 @@ fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
     if contains_call_name(line, "get_unchecked") || contains_call_name(line, "get_unchecked_mut") {
         return Some((UnsafeSiteKind::Operation, OperationFamily::GetUnchecked));
     }
-    if contains_call_name(line, "new_unchecked") {
+    if contains_call_name(line, "new_unchecked") && is_nonnull_new_unchecked_call(line) {
         return Some((UnsafeSiteKind::Operation, OperationFamily::NonNullUnchecked));
+    }
+    if contains_call_name(line, "new_unchecked") {
+        return Some((UnsafeSiteKind::Operation, OperationFamily::UnsafeFnCall));
     }
     if line.contains(".read_unaligned()") || line.contains("ptr::read_unaligned") {
         return Some((
@@ -467,6 +470,10 @@ fn is_ident_continue(ch: char) -> bool {
 fn is_target_feature_attribute(line: &str) -> bool {
     let trimmed = line.trim_start();
     trimmed.starts_with("#[target_feature") || contains_call_name(trimmed, "target_feature")
+}
+
+fn is_nonnull_new_unchecked_call(line: &str) -> bool {
+    compact_whitespace(line).contains("NonNull::new_unchecked")
 }
 
 #[derive(Clone, Debug)]
@@ -1169,6 +1176,22 @@ mod tests {
                 "{line} should be classified as a raw pointer write"
             );
         }
+    }
+
+    #[test]
+    fn text_detection_only_classifies_nonnull_new_unchecked_as_nonnull() {
+        assert_eq!(
+            detect_site("unsafe { NonNull::new_unchecked(ptr) }"),
+            Some((UnsafeSiteKind::Operation, OperationFamily::NonNullUnchecked))
+        );
+        assert_eq!(
+            detect_site("unsafe { Pin::new_unchecked(value) }"),
+            Some((UnsafeSiteKind::Operation, OperationFamily::PinUnchecked))
+        );
+        assert_eq!(
+            detect_site("unsafe { Some(One::new_unchecked(needle)) }"),
+            Some((UnsafeSiteKind::Operation, OperationFamily::UnsafeFnCall))
+        );
     }
 
     #[test]

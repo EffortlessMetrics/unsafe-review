@@ -1187,6 +1187,26 @@ The change is deliberately narrow: visible `Fallibility::Infallible` context now
 discharges the unreachable-path obligation for `unreachable_unchecked`. It does
 not infer arbitrary control-flow reachability and does not execute a witness.
 
+Follow-up capped `memchr` repo rerun after making non-`NonNull`
+`new_unchecked` constructors unsafe-call cards and recognizing local
+`is_available()` guards:
+
+```text
+cards: 50
+guard_missing: 22
+guarded_unwitnessed: 28
+unsafe_fn_call cards: 15
+nonnull_unchecked cards: 0
+```
+
+The previous capped `memchr` snapshot had four `nonnull_unchecked` cards from
+target-specific constructors such as `One::new_unchecked`. The rerun keeps
+actual `NonNull::new_unchecked` detection narrow, labels the target-specific
+constructors as unsafe-call cards, and treats visible `is_available()` checks as
+callee-contract evidence. This is still source-level advisory evidence; it does
+not prove the target feature is available at every call site and does not run a
+witness.
+
 Follow-up rerun after making owner inference ignore multi-line `impl Trait`
 bounds:
 
@@ -1241,6 +1261,7 @@ Dogfood commands:
 rtk cargo run --locked -p unsafe-review -- repo --root target/dogfood-work/smallvec --format json --max-cards 50 --out target/dogfood-work/smallvec.unsafe-review.after.json
 rtk cargo run --locked -p unsafe-review -- repo --root target/dogfood-work/arrayvec --format json --max-cards 50 --out target/dogfood-work/arrayvec.unsafe-review.after.json
 rtk cargo run --locked -p unsafe-review -- repo --root target/dogfood-work/memchr --format json --max-cards 50 --out target/dogfood-work/memchr.unsafe-review.after-cap-targetfeature.json
+rtk cargo run --locked -p unsafe-review -- repo --root target/dogfood-work/memchr --format json --max-cards 50 --out target/dogfood-work/memchr.unsafe-review.after-unchecked-constructor-evidence.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/memchr --diff target/dogfood-work/memchr-pr215.raw.diff --format json --max-cards 20 --out target/dogfood-work/memchr-pr215.owner-contract.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/smallvec --diff target/dogfood-work/smallvec-pr407.raw.diff --format json --max-cards 20 --out target/dogfood-work/smallvec-pr407.owner-fix.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/smallvec --diff target/dogfood-work/smallvec-pr277.raw.diff --format json --max-cards 30 --out target/dogfood-work/smallvec-pr277.after-start-bound-shrink.json
@@ -1378,6 +1399,11 @@ The repo may claim:
 - one fixture-backed `Fallibility::Infallible` unreachable-path evidence
   improvement changed two `hashbrown#469` `unreachable_unchecked` cards to
   `guarded_unwitnessed` without claiming arbitrary control-flow proof
+- one fixture-backed unchecked-constructor availability improvement changed the
+  capped `memchr` repo snapshot from four broad `nonnull_unchecked` cards for
+  target-specific constructors to zero such cards, while guarded
+  `new_unchecked` wrappers became `unsafe_fn_call` cards with local
+  `is_available()` evidence
 - one fixture-backed owner-inference improvement changed two `hashbrown#469`
   card owners from `Fn` to the real enclosing function names
 - one fixture-backed multi-line unsafe-call wrapper improvement changed five
@@ -1464,6 +1490,10 @@ The repo must not claim:
 - `hashbrown#657` now labels multi-line unsafe call wrappers as
   `unsafe_fn_call`, but callee-specific contract inference and precise call-path
   extraction remain source-level heuristics.
+- The capped `memchr` repo rerun no longer treats arbitrary `new_unchecked`
+  constructors as `nonnull_unchecked`, and visible `is_available()` wrappers can
+  discharge unsafe-call callee-contract evidence, but deeper callee-specific
+  target-feature modeling remains future work.
 - `hashbrown#667` now dedupes parent calls that contain a smaller unsafe
   operation of the same family, but broader nested-operation attribution remains
   source-syntax heuristic work.
