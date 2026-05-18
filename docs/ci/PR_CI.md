@@ -4,10 +4,10 @@ Default PR runs cheap static review:
 
 ```text
 cargo fmt --check
-cargo check --workspace --all-targets
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-unsafe-review check --base origin/main --format json
+cargo check --workspace --all-targets --locked
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --all-targets --locked
+cargo run --locked -p xtask -- check-pr
 ```
 
 Witness tools are routed, not run everywhere. Miri, sanitizers, Loom, and Kani

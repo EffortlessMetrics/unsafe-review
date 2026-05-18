@@ -93,9 +93,59 @@ fn check_policy() -> Result<(), String> {
         let value = parse_toml_file(Path::new(path))?;
         require_toml_string(&value, "schema_version", path)?;
     }
+    check_workflow_policy()?;
     parse_toml_file(Path::new(".unsafe-review/goals/active.toml"))?;
     println!("check-policy: ok");
     Ok(())
+}
+
+fn check_workflow_policy() -> Result<(), String> {
+    let policy_path = "policy/workflow-allowlist.toml";
+    let workflow_path = ".github/workflows/ci.yml";
+    let policy = parse_toml_file(Path::new(policy_path))?;
+    let workflow = read_to_string(Path::new(workflow_path))?;
+
+    let allowed_actions = require_toml_string_array(&policy, "allowed_actions", policy_path)?;
+    for action in workflow_actions(&workflow) {
+        if !allowed_actions.iter().any(|allowed| allowed == action) {
+            return Err(format!(
+                "{workflow_path} uses an action not listed in {policy_path}: `{action}`"
+            ));
+        }
+    }
+    for action in &allowed_actions {
+        if !workflow.contains(&format!("uses: {action}")) {
+            return Err(format!(
+                "{workflow_path} is missing allowed action from {policy_path}: `{action}`"
+            ));
+        }
+    }
+
+    for command in require_toml_string_array(&policy, "required_commands", policy_path)? {
+        if !workflow.contains(&format!("run: {command}")) {
+            return Err(format!(
+                "{workflow_path} is missing required command from {policy_path}: `{command}`"
+            ));
+        }
+    }
+
+    if !workflow.contains("timeout-minutes:") {
+        return Err(format!("{workflow_path} is missing a job timeout"));
+    }
+    if !workflow.contains("cancel-in-progress: true") {
+        return Err(format!(
+            "{workflow_path} is missing concurrency cancellation"
+        ));
+    }
+
+    Ok(())
+}
+
+fn workflow_actions(workflow: &str) -> Vec<&str> {
+    workflow
+        .lines()
+        .filter_map(|line| line.trim().split_once("uses: ").map(|(_, action)| action))
+        .collect()
 }
 
 fn check_support_tiers() -> Result<(), String> {
@@ -203,6 +253,27 @@ fn require_toml_string(value: &toml::Value, key: &str, path: &str) -> Result<(),
     }
 }
 
+fn require_toml_string_array(
+    value: &toml::Value,
+    key: &str,
+    path: &str,
+) -> Result<Vec<String>, String> {
+    let Some(items) = value.get(key).and_then(toml::Value::as_array) else {
+        return Err(format!("{path} is missing array key `{key}`"));
+    };
+    if items.is_empty() {
+        return Err(format!("{path} array key `{key}` must not be empty"));
+    }
+    items
+        .iter()
+        .map(|item| {
+            item.as_str()
+                .map(str::to_string)
+                .ok_or_else(|| format!("{path} array key `{key}` contains a non-string value"))
+        })
+        .collect()
+}
+
 fn require_file(path: &str) -> Result<(), String> {
     if Path::new(path).is_file() {
         Ok(())
@@ -291,6 +362,41 @@ mod tests {
             Some("scaffold")
         );
         assert_eq!(support_tier_from_row("|---|---|"), None);
+    }
+
+    #[test]
+    fn workflow_action_parser_reads_uses_lines() {
+        assert_eq!(
+            workflow_actions("steps:\n  - uses: actions/checkout@v6\n"),
+            vec!["actions/checkout@v6"]
+        );
+    }
+
+    #[test]
+    fn workflow_policy_lists_required_ci_contract() -> Result<(), String> {
+        let policy_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .ok_or_else(|| "xtask manifest path has no parent".to_string())?
+            .join("policy/workflow-allowlist.toml");
+        let policy = parse_toml_file(&policy_path)?;
+        let actions = require_toml_string_array(
+            &policy,
+            "allowed_actions",
+            "policy/workflow-allowlist.toml",
+        )?;
+        let commands = require_toml_string_array(
+            &policy,
+            "required_commands",
+            "policy/workflow-allowlist.toml",
+        )?;
+
+        assert!(
+            actions
+                .iter()
+                .any(|action| action == "Swatinem/rust-cache@v2")
+        );
+        assert!(commands.iter().all(|command| command.starts_with("cargo ")));
+        Ok(())
     }
 
     #[test]
