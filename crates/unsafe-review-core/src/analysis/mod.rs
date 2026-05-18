@@ -1,7 +1,9 @@
+pub(crate) mod cards;
 pub(crate) mod classify;
 pub(crate) mod evidence;
 pub(crate) mod obligations;
 pub(crate) mod pipeline;
 pub(crate) mod scanner;
+pub(crate) mod summary;
 pub(crate) mod syntax;
 pub(crate) mod witness;
