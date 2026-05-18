@@ -90,6 +90,8 @@ core operation classification gap:
   guard evidence for pointer arithmetic cards
 - private unsafe function declarations with explicit `# Safety` docs are treated
   as caller-contract sites rather than local guard sites
+- `unwrap_unchecked` calls now use a concrete invalid-value operation family
+  instead of generic `unsafe_fn_call`
 - `&'static mut ...` lifetime/type text is not classified as a `static mut`
   item
 
@@ -98,7 +100,8 @@ Regression proof was added with a fixture golden for
 fixture coverage for `pointer_arithmetic_num_ctrl_bytes_guard`, plus scanner
 tests for `&'static mut` versus real `static mut` items. A
 `documented_private_unsafe_fn` fixture pins the private `# Safety` declaration
-case without changing the older `SAFETY:`-comment helper behavior.
+case without changing the older `SAFETY:`-comment helper behavior. An
+`unwrap_unchecked_result` fixture pins unchecked unwrap detection.
 
 ## Dogfood observations
 
@@ -797,6 +800,47 @@ unsafe declaration has explicit `# Safety` documentation and a related static
 test mention. This does not infer the safety contract of unsafe call sites and
 does not execute a witness.
 
+### `hashbrown#693`
+
+PR: `https://github.com/rust-lang/hashbrown/pull/693`
+
+The PR replaces unreachable match arms with `unwrap_unchecked` in raw table
+paths.
+
+Initial dogfood output:
+
+```text
+changed_rust_files: 1
+cards: 16
+contract_missing: 4
+guard_missing: 10
+guarded_unwitnessed: 2
+operation families: unsafe_fn_call, nonnull_unchecked, raw_pointer_read, unknown
+unsafe_fn_call cards: 10
+```
+
+This run exposed a classifier gap: `unwrap_unchecked()` calls were labeled as
+generic `unsafe_fn_call`, which hid the more specific invalid-value obligation
+that the option/result must be known present before unchecked unwrap.
+
+Follow-up rerun after adding fixture-backed `unwrap_unchecked` detection:
+
+```text
+changed_rust_files: 1
+cards: 17
+contract_missing: 4
+guard_missing: 11
+guarded_unwitnessed: 2
+operation families: unsafe_fn_call, unwrap_unchecked, nonnull_unchecked, raw_pointer_read, unknown
+unsafe_fn_call cards: 3
+unwrap_unchecked cards: 8
+```
+
+The improved cards are still advisory only. They now carry `invalid_value`
+hazards and the obligation that the value is known to be `Some` or `Ok` before
+`unwrap_unchecked`. This change does not infer the `Fallibility::Infallible`
+precondition yet and does not execute a witness.
+
 ## Proof
 
 Targeted local validation:
@@ -815,6 +859,7 @@ rtk cargo test -p unsafe-review-core raw_pointer_v1_operation_cards_are_concrete
 rtk cargo test -p unsafe-review-core pointer_arithmetic_num_ctrl_bytes_guard_is_discharged --locked
 rtk cargo test -p unsafe-review-core documented_private_unsafe_fn_does_not_require_local_guard --locked
 rtk cargo test -p unsafe-review-core private_unsafe_helper_can_use_local_safety_comment --locked
+rtk cargo test -p unsafe-review-core unwrap_unchecked_uses_concrete_operation_family --locked
 rtk cargo test -p unsafe-review-core fixture_card_goldens_match_rendered_json --locked
 rtk cargo run --locked -p xtask -- check-calibration
 ```
@@ -845,6 +890,7 @@ rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hash
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr692.raw.diff --format json --max-cards 30 --out target/dogfood-work/hashbrown-pr692.after-write-bytes.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr692.raw.diff --format json --max-cards 30 --out target/dogfood-work/hashbrown-pr692.after-num-ctrl-guard.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr692.raw.diff --format json --max-cards 30 --out target/dogfood-work/hashbrown-pr692.after-private-contract.json
+rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr693.raw.diff --format json --max-cards 30 --out target/dogfood-work/hashbrown-pr693.after-unwrap-unchecked.json
 ```
 
 The dogfood reruns used a temporary `CARGO_TARGET_DIR` to avoid a Windows file
@@ -863,7 +909,7 @@ The repo may claim:
 - real PR-diff dogfood runs on `memchr#215`, `rust-smallvec#407`,
   `rust-smallvec#277`, `rust-smallvec#64`, `rust-smallvec#254`,
   `arrayvec#308`, `arrayvec#138`, `arrayvec#187`, `arrayvec#174`, and
-  `arrayvec#288`, and `hashbrown#692` produce card output
+  `arrayvec#288`, `hashbrown#692`, and `hashbrown#693` produce card output
 - dogfood found and fixed import/declaration and `cfg(target_feature)`
   false positives
 - `&'static mut` type/lifetime text is not classified as a `static mut` item
@@ -910,6 +956,9 @@ The repo may claim:
 - one fixture-backed contract improvement changed the `hashbrown#692` private
   documented `unsafe fn ctrl` declaration from `guard_missing` to
   `guarded_unwitnessed`
+- one fixture-backed operation classification improvement changed
+  `hashbrown#693` `unwrap_unchecked` sites from generic `unsafe_fn_call` to
+  `unwrap_unchecked` invalid-value cards
 - attributed unsafe function declarations are deduped between syntax-backed
   extraction and fallback line scanning
 - false-positive regression coverage exists in fixtures and calibration
@@ -921,7 +970,7 @@ The repo must not claim:
 - usable-alpha support-tier promotion
 - full-repository coverage from top-50 capped snapshots
 - uncapped repo-scan performance
-- general PR-diff usefulness from eleven PRs
+- general PR-diff usefulness from twelve PRs
 - memory-safety proof
 - UB-free status
 - witness execution
@@ -932,7 +981,7 @@ The repo must not claim:
 - Only three real crates completed capped repo snapshots in this slice; four
   crates have at least one snapshot or PR-diff receipt.
 - The successful dogfood snapshots were capped at 50 cards.
-- Only eleven real PR diffs were measured.
+- Only twelve real PR diffs were measured.
 - `memchr` completion depends on capped-scan behavior; uncapped performance is
   still unmeasured.
 - No human audit was performed for every emitted card.
@@ -966,6 +1015,8 @@ The repo must not claim:
 - `hashbrown#692` now treats private unsafe declarations with explicit
   `# Safety` docs as caller-contract sites, but unsafe-call-specific callee
   contract inference remains future work.
+- `hashbrown#693` now labels `unwrap_unchecked` calls as invalid-value cards, but
+  it does not infer `Fallibility::Infallible` or option/result state proofs.
 - These runs do not prove absence of missed unsafe seams.
 
 ## Next useful work

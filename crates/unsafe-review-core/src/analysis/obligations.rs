@@ -47,6 +47,7 @@ pub(crate) fn hazards_for(family: &OperationFamily) -> Vec<HazardKind> {
             HazardKind::InitializedMemory,
             HazardKind::DropOrDeallocation,
         ],
+        OperationFamily::UnwrapUnchecked => vec![HazardKind::InvalidValue],
         OperationFamily::UnsafeFnCall => vec![HazardKind::Unknown],
         OperationFamily::BoxFromRaw => vec![
             HazardKind::PointerValidity,
@@ -126,6 +127,10 @@ pub(crate) fn obligations_for(family: &OperationFamily) -> Vec<SafetyObligation>
                 "value will not be dropped again or observed after drop",
             ),
         ],
+        OperationFamily::UnwrapUnchecked => vec![SafetyObligation::new(
+            "valid-value",
+            "value is known to be `Some` or `Ok` before `unwrap_unchecked`",
+        )],
         OperationFamily::UnsafeFnCall => vec![SafetyObligation::new(
             "callee-contract",
             "callee safety preconditions are satisfied",
