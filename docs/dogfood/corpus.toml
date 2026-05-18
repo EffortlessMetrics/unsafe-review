@@ -179,6 +179,20 @@ artifact_status = "local_untracked"
 artifacts = ["target/dogfood-work/arrayvec-pr308.unsafe-review.json"]
 
 [[targets]]
+id = "arrayvec-pr137"
+crate = "arrayvec"
+repository = "bluss/arrayvec"
+kind = "pr-diff"
+status = "active"
+pr = 137
+root = "target/dogfood-work/arrayvec-pr137-root"
+diff = "target/dogfood-work/arrayvec-pr137.raw.patch"
+purpose = "PR diff for replacing get_unchecked_mut-derived references with raw pointer accessors in a soundness fix"
+command = "rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec-pr137-root --diff target/dogfood-work/arrayvec-pr137.raw.patch --format json --max-cards 40 --out target/dogfood-work/arrayvec-pr137.raw.head.json"
+artifact_status = "local_untracked"
+artifacts = ["target/dogfood-work/arrayvec-pr137.raw.head.json"]
+
+[[targets]]
 id = "arrayvec-pr138"
 crate = "arrayvec"
 repository = "bluss/arrayvec"
