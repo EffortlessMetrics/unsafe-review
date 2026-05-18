@@ -14,6 +14,7 @@
 
 - GitHub summary artifact
 - SARIF artifact
+- advisory GitHub workflow
 - inline comment policy
 - baseline and suppression matching
 - no-new-debt mode
