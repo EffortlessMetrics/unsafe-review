@@ -88,11 +88,13 @@ cargo xtask check-pr
 
 ## Documentation map
 
-- [Mission and vision](docs/MISSION.md)
-- [Roadmap](docs/ROADMAP.md)
-- [Architecture](docs/ARCHITECTURE.md)
-- [Specifications](docs/specs/README.md)
-- [ADRs](docs/adr/README.md)
-- [Implementation plan](plans/0.1.0/implementation-plan.md)
-- [Support tiers](docs/status/SUPPORT_TIERS.md)
-- [Policy ledgers](policy/)
+The docs follow Diátaxis so each page has one primary job:
+
+- **Tutorial:** [First review card](docs/tutorials/first-review-card.md)
+- **How-to:** [Run unsafe-review on a pull request](docs/how-to/run-pr-review.md)
+- **Reference:** [CLI reference](docs/reference/cli.md), [specifications](docs/specs/README.md), [support tiers](docs/status/SUPPORT_TIERS.md), [policy ledgers](policy/)
+- **Explanation:** [Review cards and trust boundary](docs/explanation/review-cards-and-trust-boundary.md), [architecture](docs/ARCHITECTURE.md), [ADRs](docs/adr/README.md)
+- **Planning:** [Mission](docs/MISSION.md), [vision](docs/VISION.md), [roadmap](docs/ROADMAP.md), [implementation plan](plans/0.1.0/implementation-plan.md)
+
+See [docs/README.md](docs/README.md) for the full documentation map and placement
+rules.
