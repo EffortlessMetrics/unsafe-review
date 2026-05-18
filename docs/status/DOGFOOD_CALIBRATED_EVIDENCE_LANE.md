@@ -2,7 +2,7 @@
 
 Date: 2026-05-18
 
-Status: active lane
+Status: closed experimental lane; broader calibration continues
 
 ## Lane Goal
 
@@ -47,6 +47,7 @@ The authoritative proof and limits remain in:
 - `docs/status/SUPPORT_SUMMARY.md`
 - `docs/status/SUPPORT_TIERS.md`
 - `docs/status/OBJECTIVE_AUDIT.md`
+- `docs/handoffs/2026-05-18-dogfood-calibrated-evidence-v0.6.md`
 - `docs/handoffs/2026-05-18-real-crate-dogfood-v0.6.md`
 - `docs/handoffs/2026-05-18-repo-policy-v0.4.md`
 - `docs/handoffs/2026-05-18-witness-receipt-import-v0.5.md`
@@ -81,9 +82,9 @@ This lane is done when:
 - no output claims soundness, UB-free status, Miri-clean status, target-feature
   availability, site execution, or policy readiness without exact evidence
 
-## Active Sequence
+## Closed Sequence
 
-Work should proceed PR by PR:
+This lane proceeded PR by PR:
 
 1. Define this lane in docs/source-of-truth.
 2. Close or park stale candidate PRs as option inventory.

@@ -5,6 +5,7 @@ what not to do next. Do not put active specs here.
 
 | Handoff | Date | Scope |
 |---|---|---|
+| [Dogfood-calibrated evidence loop v0.6](2026-05-18-dogfood-calibrated-evidence-v0.6.md) | 2026-05-18 | experimental repeatable evidence loop across dogfood, outcomes, receipts, repo posture, policy reports, and support posture |
 | [Crates.io initial publication readiness](2026-05-18-crates-io-initial-publication-readiness.md) | 2026-05-18 | package metadata, license hygiene, publish order, and pre-publish proof commands |
 | [Real-crate dogfood v0.6](2026-05-18-real-crate-dogfood-v0.6.md) | 2026-05-18 | first real-crate dogfood slice, capped repo scan hardening, and false-positive fixes |
 | [Fixture calibration v0.6](2026-05-18-fixture-calibration-v0.6.md) | 2026-05-18 | experimental fixture calibration proof index |
