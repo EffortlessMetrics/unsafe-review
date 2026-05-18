@@ -58,15 +58,16 @@ unsafe-review check --root fixtures/raw_pointer_alignment \
 unsafe-review repo --format json
 unsafe-review badges --out badges/
 
-# Explain one card and produce an LLM-ready packet
+# Explain one card and produce an experimental context packet
 unsafe-review explain UR-src-lib-rs-42-raw-pointer-read
 unsafe-review context UR-src-lib-rs-42-raw-pointer-read --json
 ```
 
 ## Current implementation status
 
-This initial workspace includes the specification system and an experimental
-stable-only v0.1 analyzer scaffold. The analyzer is intentionally conservative:
+This workspace includes the specification system, fixture-backed experimental
+review cards, and an advisory PR artifact loop. The analyzer is intentionally
+conservative:
 
 - no `rustc_private`
 - no MIR dependency
@@ -77,8 +78,12 @@ stable-only v0.1 analyzer scaffold. The analyzer is intentionally conservative:
 The current static engine detects common unsafe seams and operations from source text,
 maps them to hazard classes and safety obligations, mines nearby `# Safety` / `SAFETY:`
 contract evidence, looks for simple local guards, and routes cards to likely witnesses.
-It is a scaffold, not a calibrated review signal; the support tiers stay conservative
-until schema fixtures and golden tests prove each claim.
+
+The current PR projection renders `cards.json`, `pr-summary.md`, `cards.sarif`, and
+`comment-plan.json` as advisory artifacts. It does not post comments, run witness
+tools, or enable blocking policy. Support tiers stay conservative: fixture-backed
+surfaces are experimental, and repo posture, LSP, agent packets, receipts, baselines,
+and suppressions remain later lanes until they have proof.
 
 ## Crate surface
 
