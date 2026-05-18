@@ -255,3 +255,166 @@ fn visit(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> 
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{
+        OperationFamily, SourceLocation, UnsafeOperation, UnsafeSite, UnsafeSiteKind,
+    };
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn scanned_site(before: &[&str], snippet: &str, after: &[&str]) -> ScannedSite {
+        ScannedSite {
+            site: UnsafeSite {
+                location: SourceLocation::new(PathBuf::from("src/lib.rs"), 1, 1),
+                kind: UnsafeSiteKind::Operation,
+                owner: Some("checked_read".to_string()),
+                visibility: "private".to_string(),
+                public_api_surface: false,
+                changed: true,
+                snippet: snippet.to_string(),
+            },
+            operation: UnsafeOperation {
+                family: OperationFamily::RawPointerRead,
+                expression: snippet.to_string(),
+            },
+            context_before: before.iter().map(|line| (*line).to_string()).collect(),
+            context_after: after.iter().map(|line| (*line).to_string()).collect(),
+        }
+    }
+
+    fn obligation(key: &str) -> SafetyObligation {
+        SafetyObligation::new(key, "test obligation")
+    }
+
+    #[test]
+    fn guard_detection_ignores_comment_only_evidence() {
+        let site = scanned_site(
+            &["// len >= needed", "// ptr.is_null() was checked elsewhere"],
+            "unsafe { ptr.read() }",
+            &["// align_of::<u32>()"],
+        );
+        let reach = ReachEvidence {
+            state: "static-mention".to_string(),
+            summary: "related test mentions owner".to_string(),
+        };
+        let evidence = obligation_evidence(
+            &site,
+            &[
+                obligation("bounds"),
+                obligation("non-null"),
+                obligation("alignment"),
+            ],
+            &ContractEvidence::present("documented"),
+            &reach,
+        );
+
+        assert!(evidence.iter().all(|item| !item.discharge.present));
+        assert!(evidence.iter().all(|item| item.contract.present));
+        assert!(evidence.iter().all(|item| item.reach.present));
+    }
+
+    #[test]
+    fn guard_detection_requires_obligation_specific_code_patterns() -> Result<(), String> {
+        let site = scanned_site(
+            &[
+                "let enough = src.len() >= needed;",
+                "let aligned = ptr.addr() % align == 0;",
+            ],
+            "unsafe { ptr.read() }",
+            &["if ptr.is_null() { return None; }"],
+        );
+        let reach = ReachEvidence {
+            state: "static-mention".to_string(),
+            summary: "related test mentions owner".to_string(),
+        };
+        let evidence = obligation_evidence(
+            &site,
+            &[
+                obligation("bounds"),
+                obligation("alignment"),
+                obligation("non-null"),
+            ],
+            &ContractEvidence::present("documented"),
+            &reach,
+        );
+
+        for key in ["bounds", "alignment", "non-null"] {
+            let Some(item) = evidence.iter().find(|item| item.obligation.key == key) else {
+                return Err(format!("missing evidence for obligation {key}"));
+            };
+            assert!(item.discharge.present, "{key} should have guard evidence");
+        }
+        assert!(summarize_discharge(&evidence).present);
+        Ok(())
+    }
+
+    #[test]
+    fn summarize_discharge_distinguishes_partial_from_empty() {
+        let missing = EvidenceState::missing("missing");
+        let present = EvidenceState::present("present");
+        let base = ObligationEvidence {
+            obligation: obligation("bounds"),
+            contract: present.clone(),
+            discharge: missing.clone(),
+            reach: present.clone(),
+            witness: missing.clone(),
+        };
+        assert!(!summarize_discharge(&[]).present);
+        assert_eq!(
+            summarize_discharge(std::slice::from_ref(&base)),
+            DischargeEvidence::missing()
+        );
+
+        let mut partial = base.clone();
+        partial.discharge = present;
+        let summary = summarize_discharge(&[base, partial]);
+        assert!(!summary.present);
+        assert!(summary.summary.contains("Some inferred"));
+    }
+
+    #[test]
+    fn reach_evidence_uses_named_test_before_owner_mention() -> Result<(), String> {
+        let root = unique_temp_dir("unsafe-review-reach")?;
+        let tests_dir = root.join("tests");
+        fs::create_dir_all(&tests_dir)
+            .map_err(|err| format!("create {} failed: {err}", tests_dir.display()))?;
+        fs::write(
+            tests_dir.join("checked_read.rs"),
+            "#[test]\nfn reaches_checked_read() {\n    checked_read();\n}\n",
+        )
+        .map_err(|err| format!("write test failed: {err}"))?;
+
+        let owner = "checked_read".to_string();
+        let (reach, related) = reach_evidence(&root, Some(&owner));
+        fs::remove_dir_all(&root)
+            .map_err(|err| format!("cleanup {} failed: {err}", root.display()))?;
+
+        assert_eq!(reach.state, "owner_reached");
+        assert_eq!(related.len(), 1);
+        assert_eq!(related[0].name, "reaches_checked_read");
+        assert_eq!(related[0].line, 2);
+        assert_eq!(related[0].file, "tests/checked_read.rs");
+        Ok(())
+    }
+
+    #[test]
+    fn reach_evidence_reports_unknown_without_owner() {
+        let (reach, related) = reach_evidence(Path::new("."), None);
+
+        assert_eq!(reach.state, "unknown");
+        assert!(related.is_empty());
+    }
+
+    fn unique_temp_dir(prefix: &str) -> Result<PathBuf, String> {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|err| format!("clock went backwards: {err}"))?
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("{prefix}-{}-{nanos}", std::process::id()));
+        fs::create_dir_all(&path)
+            .map_err(|err| format!("create {} failed: {err}", path.display()))?;
+        Ok(path)
+    }
+}

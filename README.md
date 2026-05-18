@@ -84,6 +84,10 @@ cargo check --workspace --all-targets
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo xtask check-pr
+
+# Optional deeper local check; uses .cargo/mutants.toml defaults.
+cargo install cargo-mutants
+cargo mutants
 ```
 
 ## Documentation map

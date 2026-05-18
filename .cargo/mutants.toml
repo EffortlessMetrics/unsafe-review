@@ -1,0 +1,13 @@
+# Project defaults for `cargo mutants`.
+# Keep the default invocation broad enough to exercise cross-crate fixtures while
+# excluding entry-point shims that intentionally contain no product logic.
+test_workspace = true
+gitignore = true
+minimum_test_timeout = 60.0
+timeout_multiplier = 2.0
+
+exclude_globs = [
+  "crates/unsafe-review/src/main.rs",
+  "crates/unsafe-review-cli/src/bin/*.rs",
+  "xtask/src/main.rs",
+]

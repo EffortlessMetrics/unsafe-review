@@ -28,6 +28,7 @@ const POLICY_FILES: &[&str] = &[
 ];
 
 const KNOWN_SUPPORT_TIERS: &[&str] = &["scaffold", "experimental", "planned", "deferred"];
+const MUTANTS_CONFIG: &str = ".cargo/mutants.toml";
 
 fn main() {
     if let Err(err) = run(std::env::args().collect()) {
@@ -39,13 +40,16 @@ fn main() {
 fn run(args: Vec<String>) -> Result<(), String> {
     match args.get(1).map(|arg| arg.as_str()) {
         None | Some("help") | Some("--help") => {
-            println!("xtask commands: check-pr, check-docs, check-policy, check-support-tiers");
+            println!(
+                "xtask commands: check-pr, check-docs, check-policy, check-support-tiers, check-mutants"
+            );
             Ok(())
         }
         Some("check-pr") => {
             check_docs()?;
             check_policy()?;
             check_support_tiers()?;
+            check_mutants()?;
             check_tracked_generated_artifacts()?;
             println!("check-pr: ok");
             Ok(())
@@ -53,6 +57,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
         Some("check-docs") => check_docs(),
         Some("check-policy") => check_policy(),
         Some("check-support-tiers") => check_support_tiers(),
+        Some("check-mutants") => check_mutants(),
         Some(other) => Err(format!("unknown xtask command `{other}`")),
     }
 }
@@ -118,6 +123,15 @@ fn check_support_tiers() -> Result<(), String> {
         return Err(format!("{path} has no support-tier rows"));
     }
     println!("check-support-tiers: ok");
+    Ok(())
+}
+
+fn check_mutants() -> Result<(), String> {
+    let value = parse_toml_file(Path::new(MUTANTS_CONFIG))?;
+    require_toml_bool(&value, "test_workspace", MUTANTS_CONFIG)?;
+    require_toml_bool(&value, "gitignore", MUTANTS_CONFIG)?;
+    require_toml_array(&value, "exclude_globs", MUTANTS_CONFIG)?;
+    println!("check-mutants: ok");
     Ok(())
 }
 
@@ -200,6 +214,20 @@ fn require_toml_string(value: &toml::Value, key: &str, path: &str) -> Result<(),
     match value.get(key).and_then(toml::Value::as_str) {
         Some(_) => Ok(()),
         None => Err(format!("{path} is missing string key `{key}`")),
+    }
+}
+
+fn require_toml_bool(value: &toml::Value, key: &str, path: &str) -> Result<(), String> {
+    match value.get(key).and_then(toml::Value::as_bool) {
+        Some(_) => Ok(()),
+        None => Err(format!("{path} is missing boolean key `{key}`")),
+    }
+}
+
+fn require_toml_array(value: &toml::Value, key: &str, path: &str) -> Result<(), String> {
+    match value.get(key).and_then(toml::Value::as_array) {
+        Some(_) => Ok(()),
+        None => Err(format!("{path} is missing array key `{key}`")),
     }
 }
 
