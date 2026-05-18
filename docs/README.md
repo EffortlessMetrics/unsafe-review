@@ -10,6 +10,7 @@
 | ADRs | durable architecture decisions | `docs/adr/` |
 | Implementation plans | PR-sized sequence and proof commands | `plans/` |
 | Support tiers | product claim to proof mapping | `docs/status/SUPPORT_TIERS.md` |
+| Objective audit | current objective evidence and remaining gaps | `docs/status/OBJECTIVE_AUDIT.md` |
 | Policies | ledgers, baselines, suppressions | `policy/` |
 
 Rule: do not make every document do every job. Proposals say why, specs say what,
