@@ -32,6 +32,7 @@ required_core_fixtures = [
   "transmute_copy_invalid_value",
   "multiline_transmute_copy_invalid_value",
   "unsafe_impl_send",
+  "unsafe_impl_send_generic_owner",
   "ffi_sanitizer_route",
   "safe_code_no_cards",
   "imports_not_unsafe_operations",
@@ -341,6 +342,16 @@ expected_hazard = "invalid_value"
 fixture = "unsafe_impl_send"
 kind = "positive"
 claim = "unsafe impl Send routes to concurrency witness review"
+support_tier = "Witness routing"
+expected_cards = 1
+expected_class = "requires_loom"
+expected_operation_family = "unsafe_impl_send_sync"
+expected_hazard = "send_sync_invariant"
+
+[[cases]]
+fixture = "unsafe_impl_send_generic_owner"
+kind = "positive"
+claim = "generic unsafe impl Send uses the implemented type as owner instead of a preceding function"
 support_tier = "Witness routing"
 expected_cards = 1
 expected_class = "requires_loom"

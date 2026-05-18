@@ -1019,14 +1019,15 @@ fn owner_doc_start(lines: &[&str], decl_idx: usize) -> usize {
 }
 
 fn parse_impl_owner(line: &str) -> Option<String> {
-    if !line.contains("impl ") {
+    let rest = strip_impl_declaration_prefixes(line);
+    if !starts_with_impl_keyword(rest) {
         return None;
     }
-    let owner_start = line
+    let owner_start = rest
         .find(" for ")
         .map(|pos| pos + " for ".len())
-        .or_else(|| line.find("impl ").map(|pos| pos + "impl ".len()))?;
-    parse_ident(&line[owner_start..])
+        .or_else(|| impl_self_type_start(rest))?;
+    parse_ident(&rest[owner_start..])
 }
 
 fn parse_impl_declaration_owner(line: &str) -> Option<String> {
@@ -1034,7 +1035,7 @@ fn parse_impl_declaration_owner(line: &str) -> Option<String> {
 }
 
 fn is_impl_declaration_line(line: &str) -> bool {
-    strip_impl_declaration_prefixes(line).starts_with("impl ")
+    starts_with_impl_keyword(strip_impl_declaration_prefixes(line))
 }
 
 fn strip_impl_declaration_prefixes(line: &str) -> &str {
@@ -1051,6 +1052,41 @@ fn strip_impl_declaration_prefixes(line: &str) -> &str {
         rest = after_unsafe.trim_start();
     }
     rest
+}
+
+fn starts_with_impl_keyword(line: &str) -> bool {
+    let Some(rest) = line.strip_prefix("impl") else {
+        return false;
+    };
+    rest.chars()
+        .next()
+        .is_some_and(|ch| ch == '<' || ch.is_whitespace())
+}
+
+fn impl_self_type_start(line: &str) -> Option<usize> {
+    let mut rest = line.strip_prefix("impl")?.trim_start();
+    if rest.starts_with('<') {
+        rest = rest.get(generic_param_list_len(rest)?..)?.trim_start();
+    }
+    let offset = line.len().saturating_sub(rest.len());
+    Some(offset)
+}
+
+fn generic_param_list_len(text: &str) -> Option<usize> {
+    let mut depth = 0usize;
+    for (idx, ch) in text.char_indices() {
+        match ch {
+            '<' => depth += 1,
+            '>' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(idx + ch.len_utf8());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn parse_fn_name(line: &str) -> Option<String> {
@@ -1154,6 +1190,22 @@ mod tests {
         assert_eq!(
             detect_site("core::mem::transmute_copy::<u8, bool>(&value);"),
             Some((UnsafeSiteKind::Operation, OperationFamily::Transmute))
+        );
+    }
+
+    #[test]
+    fn parses_generic_unsafe_impl_owner() {
+        assert_eq!(
+            parse_impl_owner("unsafe impl<T: Send> Send for Sender<T> {}").as_deref(),
+            Some("Sender")
+        );
+        assert_eq!(
+            parse_impl_owner("unsafe impl<'a, T: Sync> Sync for Receiver<'a, T> {}").as_deref(),
+            Some("Receiver")
+        );
+        assert_eq!(
+            parse_impl_owner("impl<T> Buffer<T> {").as_deref(),
+            Some("Buffer")
         );
     }
 
