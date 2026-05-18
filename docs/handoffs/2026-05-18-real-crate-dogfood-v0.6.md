@@ -309,6 +309,38 @@ the changed raw pointer write inside `extend_from_iter`, recognizes visible
 guard evidence, and routes the remaining missing contract/witness work to the
 owner-specific Miri/cargo-careful path.
 
+### `arrayvec#138`
+
+PR: `https://github.com/bluss/arrayvec/pull/138`
+
+The PR changes `ArrayString::try_push` and `encode_utf8` to write UTF-8 bytes
+through raw pointers into possibly uninitialized storage.
+
+Before attributed unsafe-fn dedupe:
+
+```text
+changed_rust_files: 2
+cards: 9
+contract_missing: 9
+operation families: pointer_arithmetic, vec_set_len, raw_pointer_write, unknown
+duplicate: attributed unsafe fn `write` emitted at both attribute and signature lines
+```
+
+After attributed unsafe-fn dedupe:
+
+```text
+changed_rust_files: 2
+cards: 8
+contract_missing: 8
+operation families: pointer_arithmetic, vec_set_len, raw_pointer_write, unknown
+```
+
+This run exposed and fixed a scanner duplicate: syntax-backed attributed
+`unsafe fn` declarations should not be emitted again by fallback line scanning
+on the signature line. The remaining cards are legitimate advisory prompts for
+missing contract evidence around the raw-pointer UTF-8 write path, including the
+public unsafe `encode_utf8` API.
+
 ### `arrayvec#288`
 
 PR: `https://github.com/bluss/arrayvec/pull/288`
@@ -438,6 +470,7 @@ rtk cargo run --locked -p unsafe-review -- repo --root target/dogfood-work/memch
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/memchr --diff target/dogfood-work/memchr-pr215.raw.diff --format json --max-cards 20 --out target/dogfood-work/memchr-pr215.owner-contract.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/smallvec --diff target/dogfood-work/smallvec-pr407.raw.diff --format json --max-cards 20 --out target/dogfood-work/smallvec-pr407.owner-fix.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr308.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr308.unsafe-review.json
+rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr138.raw.diff --format json --max-cards 30 --out target/dogfood-work/arrayvec-pr138.after-attributed-dedupe.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.unsafe-review.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-setlen-init.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-setlen-zero.json
@@ -469,6 +502,8 @@ The repo may claim:
 - one fixture-backed non-zero shrink-evidence improvement changed two more
   `arrayvec#288` cards from `guard_missing` to `guarded_unwitnessed` and one
   card from `guard_missing` to `unsafe_unreached`
+- attributed unsafe function declarations are deduped between syntax-backed
+  extraction and fallback line scanning
 - false-positive regression coverage exists in fixtures and calibration
 - dogfood output remains advisory static review evidence
 
@@ -488,7 +523,7 @@ The repo must not claim:
 
 - Only three real crates completed in this slice.
 - The successful dogfood snapshots were capped at 50 cards.
-- Only five real PR diffs were measured.
+- Only six real PR diffs were measured.
 - `memchr` completion depends on capped-scan behavior; uncapped performance is
   still unmeasured.
 - No human audit was performed for every emitted card.
@@ -498,6 +533,9 @@ The repo must not claim:
   non-zero shrink and `set_len(0)` clear evidence have fixture and dogfood-rerun
   coverage, while other `set_len` and broader initialization patterns remain
   limited.
+- `arrayvec#138` shows the raw-pointer UTF-8 write path still needs better
+  contract evidence, especially around unsafe helper APIs and tests with unsafe
+  blocks.
 - These runs do not prove absence of missed unsafe seams.
 
 ## Next useful work

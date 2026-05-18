@@ -45,6 +45,9 @@ pub(crate) fn scan_file(
         let Some((kind, family)) = detect_site(detection_trimmed) else {
             continue;
         };
+        if syntax_site_covers_fallback(&syntax_sites, line_no, &kind, &family) {
+            continue;
+        }
         if kind == UnsafeSiteKind::UnsafeBlock
             && family == OperationFamily::Unknown
             && (syntax_operation_lines.contains(&line_no)
@@ -90,10 +93,7 @@ pub(crate) fn scan_file(
             continue;
         }
         let idx = detected.line.saturating_sub(1);
-        let owner = parse_fn_name(&detected.source_snippet)
-            .or_else(|| parse_trait_name(&detected.source_snippet))
-            .or_else(|| parse_impl_owner(&detected.source_snippet))
-            .or_else(|| find_owner(&lines, idx));
+        let owner = syntax_owner(&detected, &lines, idx);
         let visibility = visibility_for_snippet(&detected.source_snippet).to_string();
         let public_api_surface = is_public_api_surface(&detected.kind, &detected.source_snippet);
         let context_before = context_before_site(&lines, idx);
@@ -410,6 +410,7 @@ fn is_target_feature_attribute(line: &str) -> bool {
 #[derive(Clone, Debug)]
 struct DetectedSyntaxSite {
     line: usize,
+    end_line: usize,
     column: usize,
     kind: UnsafeSiteKind,
     family: OperationFamily,
@@ -434,6 +435,7 @@ fn detect_syntax_sites(parsed: &ParsedSource) -> Vec<DetectedSyntaxSite> {
         let card_snippet = card_snippet_for(fact, &kind, &family, &parsed.text);
         sites.push(DetectedSyntaxSite {
             line: fact.line,
+            end_line: fact.line + fact.snippet.lines().count().saturating_sub(1),
             column: fact.column,
             kind,
             family,
@@ -447,6 +449,41 @@ fn detect_syntax_sites(parsed: &ParsedSource) -> Vec<DetectedSyntaxSite> {
             .then(left.column.cmp(&right.column))
     });
     sites
+}
+
+fn syntax_owner(site: &DetectedSyntaxSite, lines: &[&str], idx: usize) -> Option<String> {
+    match site.kind {
+        UnsafeSiteKind::UnsafeFn => parse_fn_name(&site.source_snippet),
+        UnsafeSiteKind::UnsafeTrait => parse_trait_name(&site.source_snippet),
+        UnsafeSiteKind::UnsafeImpl
+        | UnsafeSiteKind::UnsafeImplSend
+        | UnsafeSiteKind::UnsafeImplSync => parse_impl_owner(&site.source_snippet),
+        _ => None,
+    }
+    .or_else(|| find_owner(lines, idx))
+}
+
+fn syntax_site_covers_fallback(
+    syntax_sites: &[DetectedSyntaxSite],
+    line: usize,
+    kind: &UnsafeSiteKind,
+    family: &OperationFamily,
+) -> bool {
+    if !matches!(
+        kind,
+        UnsafeSiteKind::UnsafeFn
+            | UnsafeSiteKind::UnsafeTrait
+            | UnsafeSiteKind::UnsafeImpl
+            | UnsafeSiteKind::UnsafeImplSend
+            | UnsafeSiteKind::UnsafeImplSync
+            | UnsafeSiteKind::ExternBlock
+            | UnsafeSiteKind::StaticMut
+    ) {
+        return false;
+    }
+    syntax_sites.iter().any(|site| {
+        site.kind == *kind && site.family == *family && site.line <= line && line <= site.end_line
+    })
 }
 
 fn detect_syntax_site(
