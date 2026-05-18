@@ -29,6 +29,41 @@ const POLICY_FILES: &[&str] = &[
 
 const KNOWN_SUPPORT_TIERS: &[&str] = &["scaffold", "experimental", "planned", "deferred"];
 
+const FIXTURE_REQUIRED_FILES: &[&str] = &[
+    "Cargo.toml",
+    "change.diff",
+    "expected.cards.json",
+    "src/lib.rs",
+];
+
+struct XtaskCommand {
+    name: &'static str,
+    summary: &'static str,
+}
+
+const COMMANDS: &[XtaskCommand] = &[
+    XtaskCommand {
+        name: "check-pr",
+        summary: "run every repository invariant enforced by PR CI",
+    },
+    XtaskCommand {
+        name: "check-docs",
+        summary: "validate required docs, doc indexes, and portable paths",
+    },
+    XtaskCommand {
+        name: "check-policy",
+        summary: "validate checked-in policy TOML files",
+    },
+    XtaskCommand {
+        name: "check-support-tiers",
+        summary: "validate docs/status/SUPPORT_TIERS.md tier names",
+    },
+    XtaskCommand {
+        name: "check-fixtures",
+        summary: "validate fixture layout and golden review-card JSON",
+    },
+];
+
 fn main() {
     if let Err(err) = run(std::env::args().collect()) {
         eprintln!("xtask: {err}");
@@ -37,23 +72,49 @@ fn main() {
 }
 
 fn run(args: Vec<String>) -> Result<(), String> {
-    match args.get(1).map(|arg| arg.as_str()) {
-        None | Some("help") | Some("--help") => {
-            println!("xtask commands: check-pr, check-docs, check-policy, check-support-tiers");
-            Ok(())
-        }
-        Some("check-pr") => {
+    let Some(command) = args.get(1).map(String::as_str) else {
+        print_help();
+        return Ok(());
+    };
+
+    if matches!(command, "help" | "--help" | "-h") {
+        print_help();
+        return Ok(());
+    }
+
+    if args.len() > 2 {
+        return Err(format!(
+            "command `{command}` does not accept extra arguments: {}",
+            args[2..].join(" ")
+        ));
+    }
+
+    match command {
+        "check-pr" => {
             check_docs()?;
             check_policy()?;
             check_support_tiers()?;
+            check_fixtures()?;
             check_tracked_generated_artifacts()?;
             println!("check-pr: ok");
             Ok(())
         }
-        Some("check-docs") => check_docs(),
-        Some("check-policy") => check_policy(),
-        Some("check-support-tiers") => check_support_tiers(),
-        Some(other) => Err(format!("unknown xtask command `{other}`")),
+        "check-docs" => check_docs(),
+        "check-policy" => check_policy(),
+        "check-support-tiers" => check_support_tiers(),
+        "check-fixtures" => check_fixtures(),
+        other => Err(format!(
+            "unknown xtask command `{other}`\nrun `cargo xtask --help` for available commands"
+        )),
+    }
+}
+
+fn print_help() {
+    println!("Repository automation commands:\n");
+    println!("Usage: cargo xtask <command>\n");
+    println!("Commands:");
+    for command in COMMANDS {
+        println!("  {:<20} {}", command.name, command.summary);
     }
 }
 
@@ -118,6 +179,67 @@ fn check_support_tiers() -> Result<(), String> {
         return Err(format!("{path} has no support-tier rows"));
     }
     println!("check-support-tiers: ok");
+    Ok(())
+}
+
+fn check_fixtures() -> Result<(), String> {
+    let root = Path::new("fixtures");
+    let entries =
+        fs::read_dir(root).map_err(|err| format!("read {} failed: {err}", root.display()))?;
+    let mut fixture_count = 0usize;
+
+    for entry in entries {
+        let entry = entry.map_err(|err| format!("read_dir entry failed: {err}"))?;
+        let fixture = entry.path();
+        if !fixture.is_dir() {
+            continue;
+        }
+        fixture_count += 1;
+        check_fixture(&fixture)?;
+    }
+
+    if fixture_count == 0 {
+        return Err(format!("{} has no fixture directories", root.display()));
+    }
+
+    println!("check-fixtures: ok");
+    Ok(())
+}
+
+fn check_fixture(fixture: &Path) -> Result<(), String> {
+    let fixture_name = fixture
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| format!("non-UTF-8 fixture path {}", fixture.display()))?;
+
+    for required in FIXTURE_REQUIRED_FILES {
+        let path = fixture.join(required);
+        if !path.is_file() {
+            return Err(format!(
+                "fixture `{fixture_name}` is missing required file {}",
+                path.display()
+            ));
+        }
+    }
+
+    let manifest = parse_toml_file(&fixture.join("Cargo.toml"))?;
+    require_toml_string(
+        &manifest,
+        "package.name",
+        &fixture.join("Cargo.toml").display().to_string(),
+    )?;
+
+    let expected_cards = fixture.join("expected.cards.json");
+    let text = read_to_string(&expected_cards)?;
+    let value = serde_json::from_str::<serde_json::Value>(&text)
+        .map_err(|err| format!("{} is not valid JSON: {err}", expected_cards.display()))?;
+    if !value.is_array() {
+        return Err(format!(
+            "{} must contain a JSON array of review cards",
+            expected_cards.display()
+        ));
+    }
+
     Ok(())
 }
 
@@ -197,9 +319,18 @@ fn parse_toml_file(path: &Path) -> Result<toml::Value, String> {
 }
 
 fn require_toml_string(value: &toml::Value, key: &str, path: &str) -> Result<(), String> {
-    match value.get(key).and_then(toml::Value::as_str) {
-        Some(_) => Ok(()),
-        None => Err(format!("{path} is missing string key `{key}`")),
+    let mut current = value;
+    for part in key.split('.') {
+        let Some(next) = current.get(part) else {
+            return Err(format!("{path} is missing string key `{key}`"));
+        };
+        current = next;
+    }
+
+    if current.as_str().is_some() {
+        Ok(())
+    } else {
+        Err(format!("{path} is missing string key `{key}`"))
     }
 }
 
@@ -299,5 +430,25 @@ mod tests {
         assert!(is_forbidden_generated_path("reports/cards.sarif"));
         assert!(!is_forbidden_generated_path("Cargo.lock"));
         assert!(!is_forbidden_generated_path("docs/status/SUPPORT_TIERS.md"));
+    }
+
+    #[test]
+    fn require_toml_string_reads_dotted_paths() {
+        let value = toml::Value::Table(toml::Table::from_iter([(
+            "package".to_string(),
+            toml::Value::Table(toml::Table::from_iter([(
+                "name".to_string(),
+                "fixture".into(),
+            )])),
+        )]));
+
+        assert_eq!(
+            require_toml_string(&value, "package.name", "Cargo.toml"),
+            Ok(())
+        );
+        assert_eq!(
+            require_toml_string(&value, "package.version", "Cargo.toml"),
+            Err("Cargo.toml is missing string key `package.version`".to_string())
+        );
     }
 }
