@@ -137,6 +137,37 @@ After `#107`, rerunning the `#102` diff locally produced one card: the intended
 useful as a noise-finding dogfood path, while the support tier should remain
 experimental and advisory.
 
+The `#107` advisory workflow artifact then confirmed the scanner-only fix no
+longer generated unsafe-review noise:
+
+- PR: `#107 fix: ignore syntax string literal detector text`
+- Workflow: `unsafe-review`
+- Run: `26013722196`
+- Branch: `fix/syntax-string-literal-detection`
+- Artifact: `unsafe-review`
+- Artifact id: `7049611451`
+- Artifact digest: `sha256:d4f0730666ea5f3a7a8a243b6d6957c037cefbddd3da802b8e2d2e9fcd4445c5`
+
+Verification command:
+
+```bash
+rtk cargo run --locked -p xtask -- check-advisory-artifacts target/advisory-artifact-107/unsafe-review
+```
+
+Result:
+
+```text
+check-advisory-artifacts: ok (target/advisory-artifact-107/unsafe-review)
+```
+
+The downloaded `cards.json` summary for `#107` reported:
+
+```text
+changed_rust_files: 1
+cards: 0
+open_actionable_gaps: 0
+```
+
 ## Current support posture
 
 The PR artifact surfaces are experimental and advisory. They are suitable for
