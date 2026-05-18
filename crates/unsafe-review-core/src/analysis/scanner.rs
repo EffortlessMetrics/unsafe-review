@@ -277,26 +277,24 @@ where
 }
 
 fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
-    if line.contains("unsafe impl") && line.contains("Send") {
-        return Some((
-            UnsafeSiteKind::UnsafeImplSend,
-            OperationFamily::UnsafeImplSendSync,
-        ));
-    }
-    if line.contains("unsafe impl") && line.contains("Sync") {
-        return Some((
-            UnsafeSiteKind::UnsafeImplSync,
-            OperationFamily::UnsafeImplSendSync,
-        ));
+    if line.contains("unsafe impl") {
+        return Some(match parse_impl_trait_name(line).as_deref() {
+            Some("Send") => (
+                UnsafeSiteKind::UnsafeImplSend,
+                OperationFamily::UnsafeImplSendSync,
+            ),
+            Some("Sync") => (
+                UnsafeSiteKind::UnsafeImplSync,
+                OperationFamily::UnsafeImplSendSync,
+            ),
+            _ => (UnsafeSiteKind::UnsafeImpl, OperationFamily::Unknown),
+        });
     }
     if line.contains("unsafe fn") {
         return Some((UnsafeSiteKind::UnsafeFn, OperationFamily::Unknown));
     }
     if line.contains("unsafe trait") {
         return Some((UnsafeSiteKind::UnsafeTrait, OperationFamily::Unknown));
-    }
-    if line.contains("unsafe impl") {
-        return Some((UnsafeSiteKind::UnsafeImpl, OperationFamily::Unknown));
     }
     if is_extern_boundary(line) {
         return Some((UnsafeSiteKind::ExternBlock, OperationFamily::Ffi));
@@ -653,14 +651,24 @@ fn detect_syntax_site(
         "TRAIT" if declaration.contains("unsafe trait") => {
             Some((UnsafeSiteKind::UnsafeTrait, OperationFamily::Unknown))
         }
-        "IMPL" if declaration.contains("unsafe impl") && declaration.contains(" Send") => Some((
-            UnsafeSiteKind::UnsafeImplSend,
-            OperationFamily::UnsafeImplSendSync,
-        )),
-        "IMPL" if declaration.contains("unsafe impl") && declaration.contains(" Sync") => Some((
-            UnsafeSiteKind::UnsafeImplSync,
-            OperationFamily::UnsafeImplSendSync,
-        )),
+        "IMPL"
+            if declaration.contains("unsafe impl")
+                && parse_impl_trait_name(declaration).as_deref() == Some("Send") =>
+        {
+            Some((
+                UnsafeSiteKind::UnsafeImplSend,
+                OperationFamily::UnsafeImplSendSync,
+            ))
+        }
+        "IMPL"
+            if declaration.contains("unsafe impl")
+                && parse_impl_trait_name(declaration).as_deref() == Some("Sync") =>
+        {
+            Some((
+                UnsafeSiteKind::UnsafeImplSync,
+                OperationFamily::UnsafeImplSendSync,
+            ))
+        }
         "IMPL" if declaration.contains("unsafe impl") => {
             Some((UnsafeSiteKind::UnsafeImpl, OperationFamily::Unknown))
         }
@@ -1034,6 +1042,13 @@ fn parse_impl_declaration_owner(line: &str) -> Option<String> {
     is_impl_declaration_line(line).then(|| parse_impl_owner(line))?
 }
 
+fn parse_impl_trait_name(line: &str) -> Option<String> {
+    let rest = impl_after_keyword(line)?;
+    let (trait_path, _self_type) = rest.split_once(" for ")?;
+    let trait_name = trait_path.trim().rsplit("::").next()?.trim();
+    parse_ident(trait_name)
+}
+
 fn is_impl_declaration_line(line: &str) -> bool {
     starts_with_impl_keyword(strip_impl_declaration_prefixes(line))
 }
@@ -1064,12 +1079,19 @@ fn starts_with_impl_keyword(line: &str) -> bool {
 }
 
 fn impl_self_type_start(line: &str) -> Option<usize> {
-    let mut rest = line.strip_prefix("impl")?.trim_start();
+    let rest = impl_after_keyword(line)?;
+    let offset = line.len().saturating_sub(rest.len());
+    Some(offset)
+}
+
+fn impl_after_keyword(line: &str) -> Option<&str> {
+    let mut rest = strip_impl_declaration_prefixes(line)
+        .strip_prefix("impl")?
+        .trim_start();
     if rest.starts_with('<') {
         rest = rest.get(generic_param_list_len(rest)?..)?.trim_start();
     }
-    let offset = line.len().saturating_sub(rest.len());
-    Some(offset)
+    Some(rest)
 }
 
 fn generic_param_list_len(text: &str) -> Option<usize> {
@@ -1206,6 +1228,38 @@ mod tests {
         assert_eq!(
             parse_impl_owner("impl<T> Buffer<T> {").as_deref(),
             Some("Buffer")
+        );
+    }
+
+    #[test]
+    fn parses_generic_unsafe_impl_trait_name() {
+        assert_eq!(
+            parse_impl_trait_name("unsafe impl<T: Send> Sync for Sender<T> {}").as_deref(),
+            Some("Sync")
+        );
+        assert_eq!(
+            parse_impl_trait_name("unsafe impl<T: Sync> core::marker::Send for Sender<T> {}")
+                .as_deref(),
+            Some("Send")
+        );
+        assert_eq!(parse_impl_trait_name("impl<T> Buffer<T> {"), None);
+    }
+
+    #[test]
+    fn text_detection_uses_implemented_send_sync_trait_not_bounds() {
+        assert_eq!(
+            detect_site("unsafe impl<T: Send> Sync for Sender<T> {}"),
+            Some((
+                UnsafeSiteKind::UnsafeImplSync,
+                OperationFamily::UnsafeImplSendSync
+            ))
+        );
+        assert_eq!(
+            detect_site("unsafe impl<T: Sync> Send for Sender<T> {}"),
+            Some((
+                UnsafeSiteKind::UnsafeImplSend,
+                OperationFamily::UnsafeImplSendSync
+            ))
         );
     }
 

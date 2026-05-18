@@ -272,6 +272,7 @@ mod tests {
         "multiline_transmute_copy_invalid_value",
         "unsafe_impl_send",
         "unsafe_impl_send_generic_owner",
+        "unsafe_impl_sync_generic_bound",
         "ffi_sanitizer_route",
         "get_unchecked_mut_bounds",
         "pin_new_unchecked",

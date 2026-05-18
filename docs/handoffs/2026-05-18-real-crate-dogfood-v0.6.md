@@ -1568,8 +1568,9 @@ The repo may claim:
   without claiming allocator, layout, initialization, or ownership proof
 - one capped `crossbeam-rs/crossbeam` repo snapshot completed with 50 cards
   across 123 Rust files, adding concurrency-heavy dogfood for unsafe Send/Sync
-  generic owner inference, atomic-ordering witness routes, raw pointer
-  dereference, and ownership-transfer card shapes
+  generic owner inference, Send/Sync trait classification with generic bounds,
+  atomic-ordering witness routes, raw pointer dereference, and
+  ownership-transfer card shapes
 - one fixture-backed generic unsafe impl owner improvement changed capped
   `crossbeam` unsafe impl Send/Sync owners from nearby functions such as `tick`
   and `fmt` to implemented types such as `Sender` and `Receiver`, improving
