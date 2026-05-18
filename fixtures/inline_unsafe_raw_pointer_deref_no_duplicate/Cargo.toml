@@ -1,0 +1,5 @@
+[package]
+name = "inline-unsafe-raw-pointer-deref-no-duplicate-fixture"
+version = "0.0.0"
+edition = "2024"
+

@@ -85,6 +85,12 @@ pub(crate) fn scan_file(
     }
 
     for detected in syntax_sites {
+        if detected.kind == UnsafeSiteKind::UnsafeBlock
+            && detected.family == OperationFamily::Unknown
+            && syntax_operation_lines.contains(&detected.line)
+        {
+            continue;
+        }
         if !seen.insert(site_key(detected.line, &detected.kind, &detected.family)) {
             continue;
         }
@@ -777,13 +783,13 @@ fn find_owner(lines: &[&str], idx: usize) -> Option<String> {
         if is_comment_line(line) {
             continue;
         }
-        if let Some(name) = parse_impl_owner(line) {
+        if let Some(name) = parse_fn_name(line) {
             return Some(name);
         }
         if let Some(name) = parse_trait_name(line) {
             return Some(name);
         }
-        if let Some(name) = parse_fn_name(line) {
+        if let Some(name) = parse_impl_owner(line) {
             return Some(name);
         }
         if line.starts_with("impl ") || line.starts_with("pub impl ") {
@@ -808,9 +814,9 @@ fn find_owner_declaration_index(lines: &[&str], idx: usize) -> Option<usize> {
         if is_comment_line(line) {
             continue;
         }
-        if parse_impl_owner(line).is_some()
+        if parse_fn_name(line).is_some()
             || parse_trait_name(line).is_some()
-            || parse_fn_name(line).is_some()
+            || parse_impl_owner(line).is_some()
         {
             return Some(line_idx);
         }
@@ -977,6 +983,18 @@ mod tests {
         ];
 
         assert_eq!(find_owner(&lines, 3), Some("keep_rest".to_string()));
+    }
+
+    #[test]
+    fn owner_inference_prefers_fn_over_impl_trait_parameters() {
+        let lines = [
+            "pub fn with_byte(ptr: *mut u8, f: impl FnOnce(&mut u8)) {",
+            "    f(unsafe { &mut *ptr });",
+            "}",
+        ];
+
+        assert_eq!(find_owner(&lines, 1), Some("with_byte".to_string()));
+        assert_eq!(find_owner_declaration_index(&lines, 1), Some(0));
     }
 
     #[test]
