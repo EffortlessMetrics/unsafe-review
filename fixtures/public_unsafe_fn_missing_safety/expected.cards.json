@@ -1,6 +1,6 @@
 [
   {
-    "id": "UR-src-lib-rs-1-caller-must-uphold-contract-unknown",
+    "id": "UR-public-unsafe-fn-missing-safety-src-lib-rs-caller-must-uphold-contract-unsafe_fn-unknown-caller-must-uphold-contract-6e7a12b59ca0-unknown-c1",
     "class": "contract_missing",
     "priority": "high",
     "confidence": "high",

@@ -1,6 +1,6 @@
 [
   {
-    "id": "UR-src-lib-rs-8-sharedcell-unsafe_impl_send_sync",
+    "id": "UR-unsafe-impl-send-src-lib-rs-sharedcell-unsafe_impl_send-unsafe_impl_send_sync-unsafe-impl-send-sync-e915d3491163-send_sync_invariant-c1",
     "class": "requires_loom",
     "priority": "high",
     "confidence": "medium",
