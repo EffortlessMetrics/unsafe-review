@@ -13,10 +13,10 @@ All tiers describe static review evidence. None means memory-safety proof.
 | Guard evidence mining | experimental | cards | raw-pointer alignment and comment-not-guard fixtures prove bounds evidence does not discharge alignment | obligation-specific patterns are still sparse |
 | Witness routing | experimental | cards | route-table tests plus raw pointer, FFI, unsafe impl Send, Pin, and invalid-value fixture routes | route recommendation only; no witness receipts |
 | Repo inventory | scaffold | repo JSON / badges | compile gate only | badge is not UB-free claim |
-| PR Markdown summary | experimental | PR artifact Markdown | `pr_summary` renderer tests and CLI `--format pr-summary` | local artifact only; no workflow wiring or comments yet |
-| SARIF projection | experimental | PR artifact SARIF | `sarif` renderer tests and CLI `--format sarif` | local artifact only; no workflow upload or default blocking |
+| PR Markdown summary | experimental | PR artifact Markdown | `pr_summary` renderer tests, CLI `--format pr-summary`, CLI e2e, and advisory workflow upload | advisory artifact only; no comments or blocking policy |
+| SARIF projection | experimental | PR artifact SARIF | `sarif` renderer tests, CLI `--format sarif`, CLI e2e, and advisory workflow upload | advisory static review evidence; no default blocking |
 | Advisory PR workflow | experimental | GitHub Actions artifacts | workflow renders and uploads cards JSON, PR summary, SARIF, and comment plan | no comments, witnesses, or blocking policy |
-| Inline comment plan | experimental | PR artifact JSON | `comment_plan` renderer tests and CLI `--format comment-plan` | artifact-only; no posting by default |
+| Inline comment plan | experimental | PR artifact JSON | `comment_plan` renderer tests, CLI `--format comment-plan`, CLI e2e, and advisory workflow upload | artifact-only; no posting by default |
 | LSP projection | planned | editor | saved-card fixtures | read-only first |
 | Agent packets | planned | JSON packet | packet schema tests | agents still require review |
 | Receipt import | planned | witness receipts | Miri/careful/sanitizer fixtures | receipt strength must be explicit |
