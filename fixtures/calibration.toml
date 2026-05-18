@@ -29,6 +29,7 @@ required_core_fixtures = [
   "inline_unsafe_raw_pointer_deref_no_duplicate",
   "unsafe_fn_call_wrapper",
   "multiline_unsafe_fn_call_wrapper",
+  "nested_unsafe_operation_call_dedupe",
   "comment_alignment_not_guard",
 ]
 
@@ -290,6 +291,16 @@ expected_cards = 1
 expected_class = "guard_missing"
 expected_operation_family = "unsafe_fn_call"
 expected_hazard = "unknown"
+
+[[cases]]
+fixture = "nested_unsafe_operation_call_dedupe"
+kind = "false_positive_control"
+claim = "nested unsafe operations do not also emit parent-call duplicate cards"
+support_tier = "Diff unsafe site inventory"
+expected_cards = 1
+expected_class = "unsafe_unreached"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
 
 [[cases]]
 fixture = "safe_reference_deref_no_cards"

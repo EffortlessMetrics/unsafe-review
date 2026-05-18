@@ -652,6 +652,18 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn nested_unsafe_operation_does_not_emit_parent_duplicate() -> Result<(), String> {
+        let output = fixture_output("nested_unsafe_operation_call_dedupe")?;
+        let card = single_card("nested_unsafe_operation_call_dedupe", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::NonNullUnchecked);
+        assert_eq!(card.class, ReviewClass::UnsafeUnreached);
+        assert!(card.id.0.contains("nonnull-unchecked"));
+        Ok(())
+    }
+
+    #[test]
     fn slice_from_raw_parts_mut_uses_slice_operation_family() -> Result<(), String> {
         let output = fixture_output("slice_from_raw_parts_mut")?;
         let card = single_card("slice_from_raw_parts_mut", &output)?;
