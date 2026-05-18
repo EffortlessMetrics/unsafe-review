@@ -138,7 +138,9 @@ fn discharge_state_for(
     }
     match key {
         "alignment" => {
-            if has_alignment_guard(lower) {
+            if family == &OperationFamily::RawPointerWrite && has_u8_write_bytes_context(lower) {
+                EvidenceState::present("u8 raw write alignment evidence was detected")
+            } else if has_alignment_guard(lower) {
                 EvidenceState::present("Alignment guard code was detected")
             } else {
                 EvidenceState::missing("No alignment guard code was detected")
@@ -172,6 +174,10 @@ fn discharge_state_for(
                 && has_maybeuninit_raw_write_context(lower)
             {
                 EvidenceState::present("MaybeUninit raw write target evidence was detected")
+            } else if family == &OperationFamily::RawPointerWrite
+                && has_u8_write_bytes_context(lower)
+            {
+                EvidenceState::present("u8 write_bytes target evidence was detected")
             } else if family == &OperationFamily::VecSetLen {
                 EvidenceState::missing("No initialization evidence was detected")
             } else {
@@ -350,6 +356,11 @@ fn has_maybeuninit_raw_write_context(lower: &str) -> bool {
     let compact = compact_code(lower);
     (compact.contains("write_bytes(") || compact.contains("ptr::write("))
         && compact.contains("maybeuninit")
+}
+
+fn has_u8_write_bytes_context(lower: &str) -> bool {
+    let compact = compact_code(lower);
+    compact.contains("write_bytes(") && compact.contains(":*mutu8")
 }
 
 fn has_set_len_shrink_evidence(lower: &str) -> bool {
@@ -1150,6 +1161,32 @@ mod tests {
 
         assert!(evidence[0].discharge.present);
         assert!(!evidence[1].discharge.present);
+    }
+
+    #[test]
+    fn u8_write_bytes_discharges_alignment_and_initialized_obligations_only() {
+        let obligations = vec![
+            SafetyObligation::new("initialized", "memory is initialized for the accessed type"),
+            SafetyObligation::new("alignment", "pointer is aligned for the accessed type"),
+            SafetyObligation::new("pointer-live", "pointer is live"),
+        ];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let raw_write = site_with_family(
+            OperationFamily::RawPointerWrite,
+            vec!["pub fn fill_bytes(ptr: *mut u8, len: usize, byte: u8) {"],
+            "unsafe { ptr.write_bytes(byte, len) }",
+            vec![],
+        );
+
+        let evidence = obligation_evidence(&raw_write, &obligations, &contract, &reach);
+
+        assert!(evidence[0].discharge.present);
+        assert!(evidence[1].discharge.present);
+        assert!(!evidence[2].discharge.present);
     }
 
     #[test]
