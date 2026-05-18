@@ -66,6 +66,10 @@ separate policy surfaces and are not part of badge proof.
   unsafe count or safe/unsafe status.
 - Outcome comparison between a no-card snapshot and a one-card snapshot reports
   one `new` card and preserves the static-review trust boundary.
+- Outcome JSON includes `schema_version`, deterministic `before_id` and
+  `after_id` snapshot fingerprints, grouped `cards.new`, `cards.resolved`,
+  `cards.improved`, `cards.regressed`, and `cards.unchanged` arrays, explicit
+  limitations, and the trust boundary.
 - If evidence is not knowable statically, repo output and badges count the
   card state instead of overclaiming.
 
