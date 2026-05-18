@@ -82,3 +82,31 @@ fn parse_new_start(header: &str) -> Option<usize> {
     let start = new.split(',').next()?;
     start.parse::<usize>().ok()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_unified_diff_tracks_added_lines_in_new_file_coordinates() {
+        let diff = "diff --git a/src/lib.rs b/src/lib.rs\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -10,4 +10,5 @@\n context\n-old();\n+new_one();\n+new_two();\n context2\n";
+
+        let index = parse_unified_diff(diff);
+        let path = PathBuf::from("src/lib.rs");
+
+        assert!(index.contains_file(&path));
+        assert!(index.contains_near(&path, 11));
+        assert!(index.contains_near(&path, 12));
+        assert!(!index.contains_near(&path, 30));
+    }
+
+    #[test]
+    fn parse_unified_diff_keeps_file_entry_for_context_only_diff() {
+        let diff = "diff --git a/src/lib.rs b/src/lib.rs\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1,2 +1,2 @@\n fn unchanged() {}\n";
+
+        let index = parse_unified_diff(diff);
+
+        assert!(index.contains_file(&PathBuf::from("src/lib.rs")));
+        assert!(index.changed_lines[&PathBuf::from("src/lib.rs")].is_empty());
+    }
+}

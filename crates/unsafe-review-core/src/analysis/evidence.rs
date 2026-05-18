@@ -255,3 +255,102 @@ fn visit(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> 
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{
+        OperationFamily, SourceLocation, UnsafeOperation, UnsafeSite, UnsafeSiteKind,
+    };
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn scanned_site(
+        context_before: Vec<&str>,
+        snippet: &str,
+        context_after: Vec<&str>,
+    ) -> ScannedSite {
+        ScannedSite {
+            site: UnsafeSite {
+                location: SourceLocation::new(PathBuf::from("src/lib.rs"), 10, 5),
+                kind: UnsafeSiteKind::Operation,
+                owner: Some("read_byte".to_string()),
+                visibility: "private".to_string(),
+                public_api_surface: false,
+                changed: true,
+                snippet: snippet.to_string(),
+            },
+            operation: UnsafeOperation {
+                family: OperationFamily::RawPointerRead,
+                expression: snippet.to_string(),
+            },
+            context_before: context_before.into_iter().map(str::to_string).collect(),
+            context_after: context_after.into_iter().map(str::to_string).collect(),
+        }
+    }
+
+    fn unique_temp_root(name: &str) -> Result<PathBuf, String> {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|err| format!("system clock before Unix epoch: {err}"))?
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("unsafe-review-{name}-{suffix}"));
+        fs::create_dir_all(&root)
+            .map_err(|err| format!("create {} failed: {err}", root.display()))?;
+        Ok(root)
+    }
+
+    #[test]
+    fn obligation_evidence_ignores_guard_words_that_only_appear_in_comments() {
+        let site = scanned_site(
+            vec!["// len >= 1", "// ptr is aligned"],
+            "core::ptr::read(ptr)",
+            vec!["// capacity and is_null are mentioned only in comments"],
+        );
+        let obligations = vec![
+            SafetyObligation::new("bounds", "Length guard"),
+            SafetyObligation::new("alignment", "Alignment guard"),
+            SafetyObligation::new("non-null", "Pointer is non-null"),
+        ];
+        let contract = ContractEvidence::present("SAFETY comment exists");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "test reaches owner".to_string(),
+        };
+
+        let evidence = obligation_evidence(&site, &obligations, &contract, &reach);
+
+        assert!(evidence.iter().all(|item| !item.discharge.present));
+    }
+
+    #[test]
+    fn reach_evidence_finds_named_tests_and_skips_ignored_directories() -> Result<(), String> {
+        let root = unique_temp_root("reach")?;
+        let tests = root.join("tests");
+        let target = root.join("target");
+        fs::create_dir_all(&tests)
+            .map_err(|err| format!("create {} failed: {err}", tests.display()))?;
+        fs::create_dir_all(&target)
+            .map_err(|err| format!("create {} failed: {err}", target.display()))?;
+        fs::write(
+            tests.join("reach.rs"),
+            "#[test]\nfn reaches_read_byte() {\n    crate_under_test::read_byte();\n}\n",
+        )
+        .map_err(|err| format!("write reach test failed: {err}"))?;
+        fs::write(
+            target.join("generated_test.rs"),
+            "#[test]\nfn ignored_target_test() { read_byte(); }\n",
+        )
+        .map_err(|err| format!("write ignored test failed: {err}"))?;
+
+        let owner = "read_byte".to_string();
+        let (reach, related_tests) = reach_evidence(&root, Some(&owner));
+
+        assert_eq!(reach.state, "owner_reached");
+        assert_eq!(related_tests.len(), 1);
+        assert_eq!(related_tests[0].name, "reaches_read_byte");
+        assert_eq!(related_tests[0].file, "tests/reach.rs");
+        fs::remove_dir_all(&root)
+            .map_err(|err| format!("remove {} failed: {err}", root.display()))?;
+        Ok(())
+    }
+}

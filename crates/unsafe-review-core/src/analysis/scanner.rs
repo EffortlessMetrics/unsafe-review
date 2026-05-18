@@ -528,3 +528,68 @@ fn parse_ident(rest: &str) -> Option<String> {
     }
     (!name.is_empty()).then_some(name)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_temp_root(name: &str) -> Result<PathBuf, String> {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|err| format!("system clock before Unix epoch: {err}"))?
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("unsafe-review-{name}-{suffix}"));
+        fs::create_dir_all(&root)
+            .map_err(|err| format!("create {} failed: {err}", root.display()))?;
+        Ok(root)
+    }
+
+    #[test]
+    fn scan_file_reports_multiline_operation_without_duplicate_unknown_block() -> Result<(), String>
+    {
+        let root = unique_temp_root("scanner-operation")?;
+        let src = root.join("src");
+        fs::create_dir_all(&src)
+            .map_err(|err| format!("create {} failed: {err}", src.display()))?;
+        fs::write(
+            src.join("lib.rs"),
+            "pub fn read_byte(ptr: *const u8) -> u8 {\n    // SAFETY: caller promises ptr is valid.\n    unsafe {\n        core::ptr::read(ptr)\n    }\n}\n",
+        )
+        .map_err(|err| format!("write fixture failed: {err}"))?;
+
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(sites[0].operation.family, OperationFamily::RawPointerRead);
+        assert_eq!(sites[0].site.location.line, 4);
+        assert_eq!(sites[0].site.owner.as_deref(), Some("read_byte"));
+        fs::remove_dir_all(&root)
+            .map_err(|err| format!("remove {} failed: {err}", root.display()))?;
+        Ok(())
+    }
+
+    #[test]
+    fn syntax_scan_only_treats_pointer_deref_as_operation_inside_unsafe() {
+        let parsed = super::super::syntax::parse_source(
+            "fn safe_ref(value: &u8) -> u8 {\n    *value\n}\n\nfn raw(ptr: *const u8) -> u8 {\n    unsafe { *ptr }\n}\n",
+        );
+
+        let sites = detect_syntax_sites(&parsed);
+
+        assert_eq!(
+            sites
+                .iter()
+                .filter(|site| site.family == OperationFamily::RawPointerDeref)
+                .count(),
+            1
+        );
+        assert!(
+            sites
+                .iter()
+                .any(|site| { site.family == OperationFamily::RawPointerDeref && site.line == 6 })
+        );
+    }
+}
