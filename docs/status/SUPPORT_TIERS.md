@@ -15,7 +15,7 @@ All tiers describe static review evidence. None means memory-safety proof.
 | Repo inventory | scaffold | repo JSON / badges | compile gate only | badge is not UB-free claim |
 | PR Markdown summary | experimental | PR artifact Markdown | `pr_summary` renderer tests, CLI `--format pr-summary`, CLI e2e, and advisory workflow upload | advisory artifact only; no comments or blocking policy |
 | SARIF projection | experimental | PR artifact SARIF | `sarif` renderer tests, CLI `--format sarif`, CLI e2e, and advisory workflow upload | advisory static review evidence; no default blocking |
-| Advisory PR workflow | experimental | GitHub Actions artifacts | workflow renders and uploads cards JSON, PR summary, SARIF, and comment plan; `cargo xtask check-advisory-artifacts <dir>` verifies the downloaded artifact contract | no comments, witnesses, or blocking policy |
+| Advisory PR workflow | experimental | GitHub Actions artifacts | workflow renders and uploads cards JSON, PR summary, SARIF, and comment plan; `cargo xtask check-advisory-artifacts <dir>` verifies the downloaded artifact contract and projection card identity consistency | no comments, witnesses, or blocking policy |
 | Inline comment plan | experimental | PR artifact JSON | `comment_plan` renderer tests, CLI `--format comment-plan`, CLI e2e, and advisory workflow upload | artifact-only; no posting by default |
 | LSP projection | planned | editor | saved-card fixtures | read-only first |
 | Agent packets | planned | JSON packet | packet schema tests | agents still require review |
