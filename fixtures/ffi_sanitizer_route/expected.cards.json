@@ -10,6 +10,8 @@
       "column": 1,
       "kind": "extern_block",
       "owner": "",
+      "visibility": "private",
+      "public_api_surface": false,
       "snippet": "unsafe extern \"C\" {"
     },
     "operation_family": "ffi",

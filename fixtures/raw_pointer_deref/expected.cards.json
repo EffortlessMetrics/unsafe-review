@@ -10,6 +10,8 @@
       "column": 14,
       "kind": "operation",
       "owner": "read_header",
+      "visibility": "private",
+      "public_api_surface": false,
       "snippet": "*ptr"
     },
     "operation_family": "raw_pointer_deref",
