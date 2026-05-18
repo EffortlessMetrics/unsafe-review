@@ -287,6 +287,7 @@ mod tests {
         "raw_pointer_alignment",
         "safe_code_no_cards",
         "public_unsafe_fn_missing_safety",
+        "split_public_unsafe_fn_missing_safety",
     ];
 
     #[test]

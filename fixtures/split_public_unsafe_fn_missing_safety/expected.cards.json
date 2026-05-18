@@ -1,0 +1,60 @@
+[
+  {
+    "id": "UR-src-lib-rs-1-split-contract-unknown",
+    "class": "contract_missing",
+    "priority": "high",
+    "confidence": "high",
+    "site": {
+      "file": "src/lib.rs",
+      "line": 1,
+      "column": 1,
+      "kind": "unsafe_fn",
+      "owner": "split_contract",
+      "snippet": "pub unsafe fn split_contract() {"
+    },
+    "operation_family": "unknown",
+    "hazards": [
+      "unknown"
+    ],
+    "obligations": [
+      "unsafe contract could not be inferred from this syntax shape"
+    ],
+    "obligation_evidence": [
+      {
+        "key": "unknown",
+        "description": "unsafe contract could not be inferred from this syntax shape",
+        "contract": {
+          "present": false,
+          "state": "missing",
+          "summary": "No nearby `# Safety` docs or `SAFETY:` comment detected"
+        },
+        "discharge": {
+          "present": false,
+          "state": "missing",
+          "summary": "No obligation-specific guard code was detected"
+        },
+        "reach": {
+          "present": false,
+          "state": "missing",
+          "summary": "No static test mention of owner `split_contract` was found"
+        },
+        "witness": {
+          "present": false,
+          "state": "missing",
+          "summary": "No imported witness receipt was found"
+        }
+      }
+    ],
+    "contract": "No nearby `# Safety` docs or `SAFETY:` comment detected",
+    "discharge": "No visible local guard detected",
+    "reach": "No static test mention of owner `split_contract` was found",
+    "witness": "No imported witness receipt was found",
+    "missing": [
+      "Missing `# Safety` documentation or `SAFETY:` comment",
+      "Missing visible local guard for inferred safety obligations",
+      "No related test path was found by static search",
+      "No witness receipt imported for this card"
+    ],
+    "verify_commands": []
+  }
+]
