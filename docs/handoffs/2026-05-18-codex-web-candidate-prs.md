@@ -63,7 +63,7 @@ candidate PRs in the theme inventory below.
 |---|---:|---|---|---|---|
 | Scanner false-positive hardening | #29, #32 | none | close-duplicate or park | already landed | PR #27 merged this class; only extract anything not covered by current scanner tests. |
 | Raw pointer write detection | #49, #62 | choose after review | rework or merge | current hardening | Active-lane aligned if fixture-backed and narrow; conflicting branches need rebase before judging. |
-| xtask fixture validation | #33, #50, #63, #64 | choose #50 or #64 after diff review | merge or rework | current hardening | Fixture validation protects the support-tier proof mechanism. Prefer the smallest branch that validates layout without expanding policy authority. |
+| xtask fixture validation | #33, #50, #63, #64 | reworked from #64 on current main | merge | current hardening | Fixture validation protects the support-tier proof mechanism. The reworked slice validates fixture layout, golden JSON shape, diff shape, and package naming without broad xtask policy changes. |
 | CLI e2e coverage | #39, #58, #80, #81 | choose after diff review | merge or rework | current PR/CI projection | Useful if it covers current `check` formats and `--out` behavior without broad CLI redesign. |
 | Focused unit coverage | #44, #61, #86, #87 | choose #86 or #87 after diff review | merge or rework | current hardening | Useful if focused on classifier, evidence, diff, or output projection invariants. Avoid broad snapshot churn. |
 | Property testing | #43, #60, #84, #85 | none yet | park | later hardening | Valuable later, but do not put property infrastructure ahead of current PR projection unless it is tiny and directly protects a current parser invariant. |
@@ -80,13 +80,13 @@ candidate PRs in the theme inventory below.
 
 ## Immediate intake order
 
-1. Review raw pointer write candidates (#49, #62), choose one canonical, and
-   rework only if it stays fixture-backed and narrow.
-2. Review xtask fixture validation candidates (#50, #64, then #33/#63 only if
-   they contain missing ideas).
-3. Review CLI e2e candidates (#80/#81/#58/#39), choosing one canonical branch.
-4. Review focused unit coverage candidates (#86/#87/#61/#44), choosing one
+1. Complete the reworked xtask fixture-validation slice that was extracted from
+   #64.
+2. Review CLI e2e candidates (#80/#81/#58/#39), choosing one canonical branch.
+3. Review focused unit coverage candidates (#86/#87/#61/#44), choosing one
    canonical branch.
+4. Review raw pointer write candidates (#49, #62), choose one canonical, and
+   rework only if it stays fixture-backed and narrow.
 5. Park property, fuzz, mutation, broad docs, broad CI, and broad refactor PRs
    until their target lane opens.
 

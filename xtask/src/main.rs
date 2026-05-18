@@ -27,6 +27,16 @@ const POLICY_FILES: &[&str] = &[
     "policy/network-allowlist.toml",
 ];
 
+const FIXTURE_REQUIRED_FILES: &[&str] = &["Cargo.toml", "change.diff", "src/lib.rs"];
+
+const FIXTURE_EXPECTED_CARDS_EXCEPTIONS: &[&str] = &[
+    "duplicate_raw_pointer_reads",
+    "raw_pointer_alignment_line_drift",
+];
+
+const FIXTURE_PACKAGE_PREFIX_EXCEPTIONS: &[(&str, &str)] =
+    &[("raw_pointer_alignment_line_drift", "raw-pointer-alignment")];
+
 const KNOWN_SUPPORT_TIERS: &[&str] = &["scaffold", "experimental", "planned", "deferred"];
 
 fn main() {
@@ -39,13 +49,16 @@ fn main() {
 fn run(args: Vec<String>) -> Result<(), String> {
     match args.get(1).map(|arg| arg.as_str()) {
         None | Some("help") | Some("--help") => {
-            println!("xtask commands: check-pr, check-docs, check-policy, check-support-tiers");
+            println!(
+                "xtask commands: check-pr, check-docs, check-policy, check-support-tiers, check-fixtures"
+            );
             Ok(())
         }
         Some("check-pr") => {
             check_docs()?;
             check_policy()?;
             check_support_tiers()?;
+            check_fixtures()?;
             check_tracked_generated_artifacts()?;
             println!("check-pr: ok");
             Ok(())
@@ -53,6 +66,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
         Some("check-docs") => check_docs(),
         Some("check-policy") => check_policy(),
         Some("check-support-tiers") => check_support_tiers(),
+        Some("check-fixtures") => check_fixtures(),
         Some(other) => Err(format!("unknown xtask command `{other}`")),
     }
 }
@@ -118,6 +132,72 @@ fn check_support_tiers() -> Result<(), String> {
         return Err(format!("{path} has no support-tier rows"));
     }
     println!("check-support-tiers: ok");
+    Ok(())
+}
+
+fn check_fixtures() -> Result<(), String> {
+    let dirs = fixture_dirs(Path::new("fixtures"))?;
+    if dirs.is_empty() {
+        return Err("fixtures directory has no fixture cases".to_string());
+    }
+    for dir in &dirs {
+        check_fixture(dir)?;
+    }
+    println!("check-fixtures: ok ({} fixtures)", dirs.len());
+    Ok(())
+}
+
+fn check_fixture(dir: &Path) -> Result<(), String> {
+    let name = fixture_dir_name(dir)?;
+    if !is_snake_case_name(name) {
+        return Err(format!(
+            "{} must use a lowercase snake_case fixture name",
+            dir.display()
+        ));
+    }
+
+    for relative in FIXTURE_REQUIRED_FILES {
+        require_fixture_file(dir, relative)?;
+    }
+
+    let cargo = parse_toml_file(&dir.join("Cargo.toml"))?;
+    let package_name = cargo
+        .get("package")
+        .and_then(|package| package.get("name"))
+        .and_then(toml::Value::as_str)
+        .ok_or_else(|| format!("{}/Cargo.toml is missing package.name", dir.display()))?;
+    let expected_prefix = fixture_package_prefix(name);
+    if !package_name.starts_with(&expected_prefix) {
+        return Err(format!(
+            "{}/Cargo.toml package.name `{package_name}` does not start with `{expected_prefix}`",
+            dir.display()
+        ));
+    }
+
+    let expected_cards = dir.join("expected.cards.json");
+    if expected_cards.is_file() {
+        let expected_cards = parse_json_file(&expected_cards)?;
+        if !expected_cards.is_array() {
+            return Err(format!(
+                "{}/expected.cards.json must contain a JSON array of cards",
+                dir.display()
+            ));
+        }
+    } else if !FIXTURE_EXPECTED_CARDS_EXCEPTIONS.contains(&name) {
+        return Err(format!(
+            "fixture {} is missing expected.cards.json",
+            dir.display()
+        ));
+    }
+
+    let diff = read_to_string(&dir.join("change.diff"))?;
+    if !looks_like_git_diff(&diff) {
+        return Err(format!(
+            "{}/change.diff does not look like a unified git diff",
+            dir.display()
+        ));
+    }
+
     Ok(())
 }
 
@@ -196,6 +276,12 @@ fn parse_toml_file(path: &Path) -> Result<toml::Value, String> {
         .map_err(|err| format!("{} is not valid TOML: {err}", path.display()))
 }
 
+fn parse_json_file(path: &Path) -> Result<serde_json::Value, String> {
+    let text = read_to_string(path)?;
+    serde_json::from_str(&text)
+        .map_err(|err| format!("{} is not valid JSON: {err}", path.display()))
+}
+
 fn require_toml_string(value: &toml::Value, key: &str, path: &str) -> Result<(), String> {
     match value.get(key).and_then(toml::Value::as_str) {
         Some(_) => Ok(()),
@@ -211,8 +297,32 @@ fn require_file(path: &str) -> Result<(), String> {
     }
 }
 
+fn require_fixture_file(dir: &Path, relative: &str) -> Result<(), String> {
+    let path = dir.join(relative);
+    if path.is_file() {
+        Ok(())
+    } else {
+        Err(format!("fixture {} is missing {relative}", dir.display()))
+    }
+}
+
 fn read_to_string(path: &Path) -> Result<String, String> {
     fs::read_to_string(path).map_err(|err| format!("read {} failed: {err}", path.display()))
+}
+
+fn fixture_dirs(dir: &Path) -> Result<Vec<PathBuf>, String> {
+    let mut dirs = Vec::new();
+    let entries =
+        fs::read_dir(dir).map_err(|err| format!("read {} failed: {err}", dir.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|err| format!("read_dir entry failed: {err}"))?;
+        let path = entry.path();
+        if path.is_dir() {
+            dirs.push(path);
+        }
+    }
+    dirs.sort();
+    Ok(dirs)
 }
 
 fn markdown_files(dir: &Path) -> Result<Vec<PathBuf>, String> {
@@ -268,6 +378,42 @@ fn support_tier_from_row(line: &str) -> Option<&str> {
     columns.get(1).copied()
 }
 
+fn fixture_dir_name(path: &Path) -> Result<&str, String> {
+    path.file_name()
+        .and_then(std::ffi::OsStr::to_str)
+        .ok_or_else(|| format!("{} has a non-UTF-8 fixture directory name", path.display()))
+}
+
+fn fixture_package_prefix(name: &str) -> String {
+    FIXTURE_PACKAGE_PREFIX_EXCEPTIONS
+        .iter()
+        .find_map(|(fixture, package_prefix)| (*fixture == name).then_some(*package_prefix))
+        .unwrap_or(name)
+        .replace('_', "-")
+}
+
+fn is_snake_case_name(name: &str) -> bool {
+    let mut previous_underscore = false;
+    let mut has_segment_char = false;
+    for ch in name.chars() {
+        match ch {
+            'a'..='z' | '0'..='9' => {
+                previous_underscore = false;
+                has_segment_char = true;
+            }
+            '_' if has_segment_char && !previous_underscore => {
+                previous_underscore = true;
+            }
+            _ => return false,
+        }
+    }
+    has_segment_char && !previous_underscore
+}
+
+fn looks_like_git_diff(text: &str) -> bool {
+    text.contains("diff --git") && text.contains("--- a/") && text.contains("+++ b/")
+}
+
 fn has_windows_path(line: &str) -> bool {
     line.contains(":\\") || line.contains("\\\\")
 }
@@ -291,6 +437,54 @@ mod tests {
             Some("scaffold")
         );
         assert_eq!(support_tier_from_row("|---|---|"), None);
+    }
+
+    #[test]
+    fn fixture_names_must_be_snake_case() {
+        assert!(is_snake_case_name("raw_pointer_deref"));
+        assert!(is_snake_case_name("ffi_sanitizer_route"));
+        assert!(!is_snake_case_name("RawPointerDeref"));
+        assert!(!is_snake_case_name("raw-pointer-deref"));
+        assert!(!is_snake_case_name("raw_pointer_deref_"));
+        assert!(!is_snake_case_name("_raw_pointer_deref"));
+    }
+
+    #[test]
+    fn fixture_dir_name_reads_last_path_component() -> Result<(), String> {
+        assert_eq!(
+            fixture_dir_name(Path::new("fixtures/raw_pointer_deref"))?,
+            "raw_pointer_deref"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn expected_card_exceptions_are_exact_fixture_names() {
+        assert!(FIXTURE_EXPECTED_CARDS_EXCEPTIONS.contains(&"duplicate_raw_pointer_reads"));
+        assert!(FIXTURE_EXPECTED_CARDS_EXCEPTIONS.contains(&"raw_pointer_alignment_line_drift"));
+        assert!(!FIXTURE_EXPECTED_CARDS_EXCEPTIONS.contains(&"raw_pointer_alignment"));
+    }
+
+    #[test]
+    fn fixture_package_prefix_can_preserve_identity_fixture_package() {
+        assert_eq!(
+            fixture_package_prefix("raw_pointer_alignment_line_drift"),
+            "raw-pointer-alignment"
+        );
+        assert_eq!(
+            fixture_package_prefix("duplicate_raw_pointer_reads"),
+            "duplicate-raw-pointer-reads"
+        );
+    }
+
+    #[test]
+    fn git_diff_shape_requires_file_headers() {
+        assert!(looks_like_git_diff(
+            "diff --git a/src/lib.rs b/src/lib.rs\n--- a/src/lib.rs\n+++ b/src/lib.rs\n"
+        ));
+        assert!(!looks_like_git_diff(
+            "diff --git a/src/lib.rs b/src/lib.rs\n"
+        ));
     }
 
     #[test]
