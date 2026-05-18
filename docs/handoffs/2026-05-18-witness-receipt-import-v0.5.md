@@ -27,6 +27,7 @@ Merged PRs:
 - `#162 receipts: add cargo-careful saved-output adapter`
 - `#164 receipts: add sanitizer saved-output adapter`
 - `#166 receipts: add concurrency saved-output adapter`
+- `#168 receipts: add proof saved-output adapter`
 
 The receipt importer:
 
@@ -84,6 +85,13 @@ The receipt importer:
 - records matching concurrency limitations directly in the generated receipt:
   `unsafe-review` did not run a concurrency witness, and `ran` strength does not
   claim site reach or complete scheduler coverage
+- adds `unsafe-review receipt import-proof` as a saved-output adapter that reads
+  an existing Kani/Crux proof log, requires an explicit `kani` or `crux` tool,
+  requires a conservative verification-success marker, rejects failure-looking
+  output, and writes a normal proof `strength = "ran"` receipt
+- records matching proof limitations directly in the generated receipt:
+  `unsafe-review` did not run a proof tool, `ran` strength does not claim site
+  reach, and proof scope is limited to the recorded harness/output
 
 Receipt import does not create analyzer truth. It attaches external witness
 evidence to an existing `ReviewCard`.
@@ -160,6 +168,14 @@ rtk cargo test -p unsafe-review-cli receipt_import_concurrency --locked
 rtk cargo test -p unsafe-review --test e2e receipt_import_concurrency --locked
 ```
 
+The saved-output Kani/Crux proof adapter follow-up also passed:
+
+```bash
+rtk cargo test -p unsafe-review-core proof_receipt --locked
+rtk cargo test -p unsafe-review-cli receipt_import_proof --locked
+rtk cargo test -p unsafe-review --test e2e receipt_import_proof --locked
+```
+
 The recurring workspace gate also passed:
 
 ```bash
@@ -218,6 +234,14 @@ The repo may claim:
 - generated Loom/Shuttle receipts keep visible limitations that `unsafe-review`
   did not run a concurrency witness and does not claim site reach or complete
   scheduler coverage
+- `unsafe-review receipt import-proof` can convert a saved Kani/Crux proof
+  success log into a normal exact-card receipt with explicit `kani` or `crux`
+  tool and `strength = "ran"`
+- the saved-output Kani/Crux adapter rejects unsupported proof tools, empty
+  logs, failure-looking logs, and non-success-looking logs
+- generated Kani/Crux receipts keep visible limitations that `unsafe-review`
+  did not run a proof tool, does not claim site reach, and only records the
+  logged harness/output scope
 - the `raw_pointer_alignment_receipted` golden proves a receipt does not hide
   the still-missing alignment guard
 - CLI JSON output preserves the same behavior end to end
@@ -246,7 +270,8 @@ The repo must not claim:
   sanitizers or parse diagnostics into cards.
 - The Loom/Shuttle adapter reads saved success logs only; it does not execute
   concurrency witnesses or parse interleaving diagnostics into cards.
-- Receipt import does not parse Kani or Crux output.
+- The Kani/Crux proof adapter reads saved success logs only; it does not execute
+  proof tools, infer site reach, or prove beyond the recorded harness/output.
 - Receipt import does not discharge contract, guard, or reach evidence.
 - Duplicate receipts for the same card are rejected instead of merged.
 - Receipt import validates metadata shape, but it does not verify author identity
@@ -261,8 +286,8 @@ The repo must not claim:
 Prefer dogfood and native adapter proof before adding automation:
 
 - import receipts for real unsafe-review dogfood PRs and inspect card wording
-- dogfood the saved-output Miri, `cargo-careful`, sanitizer, and Loom/Shuttle
-  adapters before adding more native receipt parsers
+- dogfood the saved-output Miri, `cargo-careful`, sanitizer, Loom/Shuttle, and
+  Kani/Crux adapters before adding more native receipt parsers
 - keep witness execution separate from receipt import
 
 Defer:
