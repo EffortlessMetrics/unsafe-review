@@ -1,6 +1,12 @@
 use std::path::PathBuf;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum DiffInput {
+    File(PathBuf),
+    Stdin,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Format {
     Human,
     Json,
@@ -14,7 +20,7 @@ pub(crate) enum Format {
 pub(crate) struct CheckOptions {
     pub root: PathBuf,
     pub base: Option<String>,
-    pub diff: Option<PathBuf>,
+    pub diff: Option<DiffInput>,
     pub format: Format,
     pub out: Option<PathBuf>,
     pub max_cards: Option<usize>,

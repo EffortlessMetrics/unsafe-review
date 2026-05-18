@@ -30,8 +30,9 @@ cargo install unsafe-review
 # Review the current diff against origin/main
 unsafe-review check --base origin/main
 
-# Review a supplied unified diff
+# Review a supplied unified diff from a file or stdin
 unsafe-review check --diff change.diff --format json
+git diff origin/main...HEAD | unsafe-review check --diff - --format json
 
 # Write a sparse GitHub-ready PR summary artifact
 unsafe-review check --base origin/main \

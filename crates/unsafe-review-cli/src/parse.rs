@@ -1,4 +1,4 @@
-use crate::command::{CheckOptions, Command, Format};
+use crate::command::{CheckOptions, Command, DiffInput, Format};
 use std::path::PathBuf;
 
 pub(crate) fn parse(args: Vec<String>) -> Result<Command, String> {
@@ -57,7 +57,7 @@ fn parse_check(args: Vec<String>) -> Result<CheckOptions, String> {
             }
             "--diff" => {
                 idx += 1;
-                options.diff = Some(PathBuf::from(value(&args, idx, "--diff")?));
+                options.diff = Some(parse_diff_input(value(&args, idx, "--diff")?));
             }
             "--format" => {
                 idx += 1;
@@ -81,6 +81,7 @@ fn parse_check(args: Vec<String>) -> Result<CheckOptions, String> {
         }
         idx += 1;
     }
+    validate_check_options(&options)?;
     Ok(options)
 }
 
@@ -120,10 +121,12 @@ fn parse_explain(args: Vec<String>) -> Result<Command, String> {
                 idx += 1;
                 format = parse_format(value(&args, idx, "--format")?)?;
             }
+            "--json" => format = Format::Json,
+            "--markdown" => format = Format::Markdown,
             value if value.starts_with('-') => {
                 return Err(format!("unknown explain argument `{value}`"));
             }
-            value => id = Some(value.to_string()),
+            value => set_card_id(&mut id, value)?,
         }
         idx += 1;
     }
@@ -144,10 +147,18 @@ fn parse_context(args: Vec<String>) -> Result<Command, String> {
                 idx += 1;
                 root = PathBuf::from(value(&args, idx, "--root")?);
             }
+            "--json" => {}
+            "--format" => {
+                idx += 1;
+                let raw = value(&args, idx, "--format")?;
+                if parse_format(raw)? != Format::Json {
+                    return Err("context only supports json output".to_string());
+                }
+            }
             value if value.starts_with('-') => {
                 return Err(format!("unknown context argument `{value}`"));
             }
-            value => id = Some(value.to_string()),
+            value => set_card_id(&mut id, value)?,
         }
         idx += 1;
     }
@@ -155,6 +166,28 @@ fn parse_context(args: Vec<String>) -> Result<Command, String> {
         root,
         id: id.ok_or_else(|| "missing card id".to_string())?,
     })
+}
+
+fn parse_diff_input(raw: &str) -> DiffInput {
+    if raw == "-" {
+        DiffInput::Stdin
+    } else {
+        DiffInput::File(PathBuf::from(raw))
+    }
+}
+
+fn validate_check_options(options: &CheckOptions) -> Result<(), String> {
+    if options.base.is_some() && options.diff.is_some() {
+        return Err("choose only one of --base or --diff".to_string());
+    }
+    Ok(())
+}
+
+fn set_card_id(id: &mut Option<String>, value: &str) -> Result<(), String> {
+    if id.replace(value.to_string()).is_some() {
+        return Err("expected exactly one card id".to_string());
+    }
+    Ok(())
 }
 
 fn parse_format(raw: &str) -> Result<Format, String> {
@@ -222,6 +255,74 @@ mod tests {
         };
         assert_eq!(options.format, Format::CommentPlan);
         Ok(())
+    }
+
+    #[test]
+    fn parses_stdin_diff_for_check() -> Result<(), String> {
+        let command = parse(args(["unsafe-review", "check", "--diff", "-", "--json"]))?;
+        let Command::Check(options) = command else {
+            return Err("expected check command".to_string());
+        };
+
+        assert_eq!(options.diff, Some(DiffInput::Stdin));
+        assert_eq!(options.format, Format::Json);
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_conflicting_diff_sources_for_check() {
+        let command = parse(args([
+            "unsafe-review",
+            "check",
+            "--base",
+            "origin/main",
+            "--diff",
+            "change.diff",
+        ]));
+
+        assert_eq!(
+            command,
+            Err("choose only one of --base or --diff".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_context_json_alias() -> Result<(), String> {
+        let command = parse(args(["unsafe-review", "context", "--json", "UR-card"]))?;
+
+        assert_eq!(
+            command,
+            Command::Context {
+                root: PathBuf::from("."),
+                id: "UR-card".to_string()
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_non_json_context_format() {
+        let command = parse(args([
+            "unsafe-review",
+            "context",
+            "--format",
+            "markdown",
+            "UR-card",
+        ]));
+
+        assert_eq!(
+            command,
+            Err("context only supports json output".to_string())
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_card_ids() {
+        let explain = parse(args(["unsafe-review", "explain", "UR-one", "UR-two"]));
+        let context = parse(args(["unsafe-review", "context", "UR-one", "UR-two"]));
+
+        assert_eq!(explain, Err("expected exactly one card id".to_string()));
+        assert_eq!(context, Err("expected exactly one card id".to_string()));
     }
 
     fn args<const N: usize>(values: [&str; N]) -> Vec<String> {
