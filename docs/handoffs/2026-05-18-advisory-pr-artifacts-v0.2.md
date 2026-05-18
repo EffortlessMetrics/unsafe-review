@@ -254,6 +254,29 @@ product_code_cards: 0
 fixture_cards: 23
 ```
 
+The repo-mode self-dogfood check was refreshed after the in-workflow artifact
+verifier landed:
+
+- Base: `origin/main` at `e57785b`
+- Command:
+
+```bash
+rtk cargo run --quiet --locked -p unsafe-review -- repo --format json --out target/dogfood/repo-self-current.json
+```
+
+Result:
+
+```text
+cards: 23
+open_actionable_gaps: 23
+product_code_cards: 0
+fixture_cards: 23
+```
+
+This confirms the current repository snapshot still emits only fixture cards in
+repo mode. It does not make repo inventory a promoted support tier or imply the
+repository is safe or UB-free.
+
 ### Equals-style artifact flags
 
 Candidate PR `#46` contained useful CLI parser hardening but was stale and
