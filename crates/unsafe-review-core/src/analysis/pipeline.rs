@@ -64,7 +64,7 @@ fn analyze_with_receipts(
                 let contract_missing_message = if scanned_site.site.public_api_surface {
                     "Missing public `# Safety` documentation for unsafe API"
                 } else {
-                    "Missing `# Safety` documentation or `SAFETY:` comment"
+                    "Missing `# Safety` documentation or `SAFETY:` / `Safety:` comment"
                 };
                 missing.push(MissingEvidence::new("contract", contract_missing_message));
             }
@@ -231,7 +231,7 @@ fn summarize(rust_files: usize, changed_rust_files: usize, cards: &[ReviewCard])
 
 fn next_action_summary(class: &crate::domain::ReviewClass, operation: &str) -> String {
     match class {
-        crate::domain::ReviewClass::ContractMissing => "Add a precise `# Safety` section or `SAFETY:` comment that names the required conditions.".to_string(),
+        crate::domain::ReviewClass::ContractMissing => "Add a precise `# Safety` section or `SAFETY:` / `Safety:` comment that names the required conditions.".to_string(),
         crate::domain::ReviewClass::GuardMissing => format!("Add or expose the local guard that discharges the `{operation}` safety obligation."),
         crate::domain::ReviewClass::RequiresLoom => "Add or update a Loom/Shuttle model for the changed concurrency invariant.".to_string(),
         crate::domain::ReviewClass::MiriUnsupported => "Use sanitizer/cargo-careful or an explicit FFI boundary contract; Miri may not exercise this seam.".to_string(),

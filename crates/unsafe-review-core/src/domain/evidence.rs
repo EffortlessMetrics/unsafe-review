@@ -10,7 +10,8 @@ impl ContractEvidence {
     pub fn missing() -> Self {
         Self {
             present: false,
-            summary: "No nearby `# Safety` docs or `SAFETY:` comment detected".to_string(),
+            summary: "No nearby `# Safety` docs or `SAFETY:` / `Safety:` comment detected"
+                .to_string(),
         }
     }
 
