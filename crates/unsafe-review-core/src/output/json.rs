@@ -262,6 +262,7 @@ mod tests {
         "unwrap_unchecked_result",
         "unwrap_unchecked_infallible_result",
         "unreachable_unchecked_path",
+        "unreachable_unchecked_infallible_path",
         "transmute_invalid_value",
         "unsafe_impl_send",
         "ffi_sanitizer_route",

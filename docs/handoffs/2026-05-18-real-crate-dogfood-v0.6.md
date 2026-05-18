@@ -1163,6 +1163,30 @@ hazard and the obligation that control flow cannot reach the path before
 `Fallibility::Infallible` precondition, does not prove the match arm is
 unreachable, and does not execute a witness.
 
+Follow-up rerun after adding fixture-backed `Fallibility::Infallible`
+unreachable-path evidence:
+
+```text
+changed_rust_files: 1
+cards: 15
+contract_missing: 0
+guard_missing: 10
+guarded_unwitnessed: 5
+operation families: raw_pointer_deref, unknown, unsafe_fn_call, unwrap_unchecked, unreachable_unchecked
+unreachable_unchecked cards: 2
+```
+
+The improved cards are still advisory only:
+
+```text
+reserve       line 1109  unreachable_unchecked  guarded_unwitnessed
+with_capacity line 1743  unreachable_unchecked  guarded_unwitnessed
+```
+
+The change is deliberately narrow: visible `Fallibility::Infallible` context now
+discharges the unreachable-path obligation for `unreachable_unchecked`. It does
+not infer arbitrary control-flow reachability and does not execute a witness.
+
 Follow-up rerun after making owner inference ignore multi-line `impl Trait`
 bounds:
 
@@ -1250,6 +1274,7 @@ rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hash
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr469.raw.diff --format json --max-cards 60 --out target/dogfood-work/hashbrown-pr469.after-unreachable-unchecked.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr469.raw.diff --format json --max-cards 60 --out target/dogfood-work/hashbrown-pr469.after-owner-impl-trait.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr693.raw.diff --format json --max-cards 30 --out target/dogfood-work/hashbrown-pr693.after-infallible-unwrap-evidence.json
+rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr469.raw.diff --format json --max-cards 60 --out target/dogfood-work/hashbrown-pr469.after-infallible-unreachable-evidence.json
 ```
 
 The dogfood reruns used a temporary `CARGO_TARGET_DIR` to avoid a Windows file
@@ -1350,6 +1375,9 @@ The repo may claim:
   `hashbrown#469` `unreachable_unchecked` sites from generic
   `unsafe_fn_call` to `unreachable_unchecked` invalid-value cards and removed
   one duplicate wrapper card
+- one fixture-backed `Fallibility::Infallible` unreachable-path evidence
+  improvement changed two `hashbrown#469` `unreachable_unchecked` cards to
+  `guarded_unwitnessed` without claiming arbitrary control-flow proof
 - one fixture-backed owner-inference improvement changed two `hashbrown#469`
   card owners from `Fn` to the real enclosing function names
 - one fixture-backed multi-line unsafe-call wrapper improvement changed five
@@ -1429,8 +1457,8 @@ The repo must not claim:
   `result.unwrap_unchecked()`, but broader option/result state proofs remain
   future work.
 - `hashbrown#469` now labels `unreachable_unchecked` calls as invalid-value
-  cards, but it does not infer that a match arm or control-flow path is
-  unreachable.
+  cards and recognizes visible `Fallibility::Infallible` error-path evidence,
+  but broader control-flow reachability proof remains future work.
 - `hashbrown#469` no longer uses `Fn` as the owner for multi-line `impl Trait`
   parameters, but callee-specific safety contract inference remains future work.
 - `hashbrown#657` now labels multi-line unsafe call wrappers as

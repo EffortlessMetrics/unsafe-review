@@ -19,6 +19,7 @@ required_core_fixtures = [
   "unwrap_unchecked_result",
   "unwrap_unchecked_infallible_result",
   "unreachable_unchecked_path",
+  "unreachable_unchecked_infallible_path",
   "raw_pointer_write_bytes",
   "raw_pointer_write_maybeuninit",
   "raw_pointer_read_len_capacity_assert",
@@ -207,6 +208,16 @@ claim = "unreachable_unchecked reports an unreachable-path obligation instead of
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"
+expected_operation_family = "unreachable_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unreachable_unchecked_infallible_path"
+kind = "positive"
+claim = "unreachable_unchecked recognizes local Fallibility::Infallible error-path evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
 expected_operation_family = "unreachable_unchecked"
 expected_hazard = "invalid_value"
 
