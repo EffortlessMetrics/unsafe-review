@@ -1,8 +1,8 @@
 # Codex web candidate PR intake
 
 Date: 2026-05-18
-Status: active candidate inventory
-Base snapshot: `main` at `27b4c46`
+Status: current-lane candidate intake drained; later-lane candidates parked
+Base snapshot: `main` at `e746925`
 
 ## Operating model
 
@@ -36,6 +36,10 @@ Already landed in this lane:
 - advisory GitHub workflow
 - inline comment planning artifact
 - scanner false-positive hardening that protects PR/LSP/agent projections
+- fixture validation, focused unit coverage, and CLI artifact e2e coverage
+- advisory artifact verifier and projection consistency checks
+- raw pointer write, unaligned read, and partial-parse scanner hardening
+- CLI diff-input hardening for stdin diffs, root-relative diffs, and local `--out`
 
 Do not use candidate intake as permission to jump to LSP, agent packets, repo
 badges, receipts, Miri execution, or blocking policy.
@@ -61,34 +65,33 @@ candidate PRs in the theme inventory below.
 
 | Theme | Candidate PRs | Current canonical | Disposition | Target lane | Reason |
 |---|---:|---|---|---|---|
-| Scanner false-positive hardening | #29, #32 | reworked declaration-prefix slice from #29/#32 | merge | current hardening | PR #27 merged the broad class; this follow-up extracts the remaining syntax-declaration false-positive guard without reopening broad scanner changes. |
-| Scanner partial-parse recovery | #48 | reworked from #48 on current main | merge | current hardening | The current slice keeps syntax-backed concrete operation detection available when unrelated parse errors exist, which reduces fake unknown wrapper cards in PR artifacts. |
-| Raw pointer write detection | #49, #62 | reworked from #49/#62 on current main | merge | current hardening | The current slice keeps the syntax-target behavior and fixture proof, but rebuilds them narrowly on current main as raw pointer assignment-write detection. |
-| xtask fixture validation | #33, #50, #63, #64 | reworked from #64 on current main | merge | current hardening | Fixture validation protects the support-tier proof mechanism. The reworked slice validates fixture layout, golden JSON shape, diff shape, and package naming without broad xtask policy changes. |
-| CLI e2e coverage | #39, #58, #80, #81 | reworked from #81 on current main | merge | current PR/CI projection | The current slice keeps #81's user-path shape but updates it for landed PR artifacts: JSON, PR summary, SARIF, comment plan, context, and explain. |
-| Focused unit coverage | #44, #61, #86, #87 | #86 | merge | current hardening | #86 is the canonical core-only slice for classifier, evidence, and diff parser invariants. Keep broader CLI parser coverage for the CLI e2e/ergonomics queue. |
+| Scanner false-positive hardening | #29, #32 | merged as #100 | closed | current hardening | PR #27 merged the broad class; #100 extracted the remaining syntax-declaration false-positive guard without reopening broad scanner changes. |
+| Scanner partial-parse recovery | #48 | merged as #103 | closed | current hardening | #103 keeps syntax-backed concrete operation detection available when unrelated parse errors exist, reducing fake unknown wrapper cards in PR artifacts. |
+| Raw pointer write detection | #49, #62 | merged as #95 | closed | current hardening | #95 kept syntax-target behavior and fixture proof, rebuilt narrowly on current main as raw pointer assignment-write detection. |
+| xtask fixture validation | #33, #50, #63, #64 | merged as #92 | closed | current hardening | Fixture validation protects the support-tier proof mechanism by validating fixture layout, golden JSON shape, diff shape, and package naming without broad xtask policy changes. |
+| CLI e2e coverage | #39, #58, #80, #81 | merged as #94 | closed | current PR/CI projection | #94 kept #81's user-path shape but updated it for landed PR artifacts: JSON, PR summary, SARIF, comment plan, context, and explain. |
+| Focused unit coverage | #44, #61, #86, #87 | merged as #93 | closed | current hardening | #93 is the canonical core-only slice for classifier, evidence, and diff parser invariants. |
 | Property testing | #43, #60, #84, #85 | none yet | park | later hardening | Valuable later, but do not put property infrastructure ahead of current PR projection unless it is tiny and directly protects a current parser invariant. |
 | Fuzzing | #42, #59, #82, #83 | none yet | park | later hardening | Keep as candidate inventory. Avoid scheduled or blocking fuzz workflows in the current lane. |
 | Mutation testing | #41, #57, #78, #79 | none yet | park | later hardening | Useful after the card and PR artifact surfaces settle. Keep non-blocking and manual/scheduled later. |
-| CLI ergonomics and diff handling | #31, #45, #46, #47 | reworked from #31/#45/#47 on current main | merge | current PR/CI projection | The current slice keeps current-lane fixes: stdin diffs, root-relative diff files, current-directory `--out`, JSON aliases, duplicate card-id rejection, and no `--fail-on-gaps` policy behavior. |
+| CLI ergonomics and diff handling | #31, #45, #46, #47 | merged as #104; #46 parked | mostly closed | current PR/CI projection / later UX | #104 kept current-lane fixes: stdin diffs, root-relative diff files, current-directory `--out`, JSON aliases, duplicate card-id rejection, and no `--fail-on-gaps` policy behavior. #46 remains parked for optional later `--flag=value` UX. |
 | Documentation usage guides | #36, #37, #53, #56, #72, #73, #76, #77 | choose one only after doc-map review | park or rework | later docs | Pick one canonical CLI usage guide. Avoid multiple overlapping docs pages. |
 | Diataxis docs structure | #35, #54, #70, #71 | none yet | park | later docs | Broad docs restructuring is not active-lane work. |
 | Spec expansion | #38, #52, #68, #69 | none yet | park | later source-of-truth | Specs should follow concrete behavior gaps, not outrun implementation. |
-| CI hardening | #34, #51, #65, #66 | reworked from #66 on current main | merge | current hardening | The current slice keeps the narrow workflow reliability pieces: read-only permissions, no persisted checkout credentials, locked Cargo commands, docs build, timeout, manual dispatch, and PR-run cancellation. |
+| CI hardening | #34, #51, #65, #66 | merged as #96 | closed | current hardening | #96 kept the narrow workflow reliability pieces: read-only permissions, no persisted checkout credentials, locked Cargo commands, docs build, timeout, manual dispatch, and PR-run cancellation. |
 | Broad module refactors | #40, #55, #74, #75 | none yet | park | later refactor | Avoid broad SRP churn unless it directly unblocks a reviewed implementation slice. |
-| Public JSON/visibility API | #28 | reworked from #28 on current main | merge | current hardening | `UnsafeSite` already tracked visibility and public API surface; the reworked slice projects those fields into JSON and updates fixture goldens. |
-| Unaligned raw pointer read behavior | #30 | reworked from #30 on current main | merge | current hardening | The current slice keeps the useful distinction that `read_unaligned` does not require alignment evidence while preserving other raw pointer read obligations. |
+| Public JSON/visibility API | #28 | merged as #101 | closed | current hardening | `UnsafeSite` already tracked visibility and public API surface; #101 projected those fields into JSON and updated fixture goldens. |
+| Unaligned raw pointer read behavior | #30 | merged as #102 | closed | current hardening | #102 kept the useful distinction that `read_unaligned` does not require alignment evidence while preserving other raw pointer read obligations. |
 
 ## Immediate intake order
 
-1. Complete the reworked xtask fixture-validation slice that was extracted from
-   #64.
-2. Complete the focused unit-coverage slice from #86.
-3. Complete the reworked CLI e2e artifact slice from #81.
-4. Complete the reworked raw pointer write slice from #49/#62.
-5. Complete the minimal CI hardening slice reworked from #66.
-6. Park property, fuzz, mutation, broad docs, and broad refactor PRs until their
-   target lane opens.
+1. The current-lane candidate intake is drained through #104.
+2. Leave #46 parked for optional later CLI `--flag=value` UX.
+3. Leave property, fuzz, mutation, broad docs, spec expansion, and broad refactor
+   candidates parked until their target lanes open.
+4. Next current-lane work should dogfood the advisory artifacts on real PRs
+   before opening LSP, agent packet, receipt, repo badge, baseline, or blocking
+   policy lanes.
 
 ## Review protocol
 
