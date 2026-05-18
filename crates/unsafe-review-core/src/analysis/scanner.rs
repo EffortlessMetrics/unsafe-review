@@ -226,6 +226,12 @@ fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
     if line.contains("new_unchecked") {
         return Some((UnsafeSiteKind::Operation, OperationFamily::NonNullUnchecked));
     }
+    if line.contains(".read_unaligned()") || line.contains("ptr::read_unaligned") {
+        return Some((
+            UnsafeSiteKind::Operation,
+            OperationFamily::RawPointerReadUnaligned,
+        ));
+    }
     if line.contains(".read()") || line.contains("ptr::read") {
         return Some((UnsafeSiteKind::Operation, OperationFamily::RawPointerRead));
     }

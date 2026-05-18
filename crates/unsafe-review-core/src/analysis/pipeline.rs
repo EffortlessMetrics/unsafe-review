@@ -226,6 +226,27 @@ mod tests {
     }
 
     #[test]
+    fn unaligned_raw_pointer_read_does_not_require_alignment_guard() -> Result<(), String> {
+        let output = fixture_output("raw_pointer_read_unaligned")?;
+        let card = single_card("raw_pointer_read_unaligned", &output)?;
+
+        assert_eq!(
+            card.operation.family,
+            OperationFamily::RawPointerReadUnaligned
+        );
+        assert!(!card.hazards.contains(&HazardKind::Alignment));
+        assert!(
+            card.obligations
+                .iter()
+                .all(|obligation| obligation.key != "alignment")
+        );
+        assert!(card.contract.present);
+        assert!(obligation_discharge_present(card, "bounds"));
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        Ok(())
+    }
+
+    #[test]
     fn raw_pointer_v1_evidence_stays_obligation_specific() -> Result<(), String> {
         for fixture in ["raw_pointer_alignment", "comment_alignment_not_guard"] {
             let output = fixture_output(fixture)?;

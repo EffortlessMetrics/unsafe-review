@@ -12,7 +12,7 @@ Generated: 2026-05-17
 - full proposal/spec/ADR/status/plan documentation system
 - policy ledgers for unsafe-review, Clippy, no-panic, non-Rust, generated, executable, workflow, process, and network surfaces
 - GitHub workflow and settings scaffold
-- raw-pointer-alignment fixture
+- fixture calibration corpus, including raw-pointer alignment and unaligned-read cases
 
 ## Implemented analyzer capabilities
 
@@ -31,8 +31,7 @@ Generated: 2026-05-17
 ## Known limitations
 
 - no MIR or `rustc_private` integration
-- no serde-backed JSON schema or golden fixture harness yet
 - baseline/suppression matching is specified but not yet implemented
 - SARIF/LSP/receipt import are specified but not yet implemented
-- guard evidence is still card-wide; obligation-level evidence is planned
+- guard evidence is still heuristic and pattern-based
 - static reachability is heuristic and should not be treated as execution proof
