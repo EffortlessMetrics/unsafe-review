@@ -6,12 +6,12 @@
   "trust_boundary": "Dogfood corpus records are static unsafe contract review evidence, not a proof of memory safety, not UB-free status, and not a Miri result unless an exact witness receipt is attached.",
   "summary": {
     "repositories": 7,
-    "targets": 27,
+    "targets": 28,
     "repo_snapshots": 7,
-    "pr_diffs": 20,
+    "pr_diffs": 21,
     "checked_in_scan_outputs": 0,
     "artifact_statuses": {
-      "local_untracked": 27
+      "local_untracked": 28
     }
   },
   "repositories": [
@@ -48,8 +48,8 @@
     {
       "repository": "crossbeam-rs/crossbeam",
       "snapshot_targets": ["crossbeam-capped"],
-      "pr_diff_targets": ["crossbeam-pr1226"],
-      "primary_exercise": "Unsafe Send/Sync, atomics, raw pointer, ownership-transfer, and strict-provenance Miri cfg cards"
+      "pr_diff_targets": ["crossbeam-pr1226", "crossbeam-pr1187"],
+      "primary_exercise": "Unsafe Send/Sync, atomics, raw pointer, ownership-transfer, strict-provenance Miri cfg cards, and atomic pointer state transitions"
     },
     {
       "repository": "tokio-rs/mio",

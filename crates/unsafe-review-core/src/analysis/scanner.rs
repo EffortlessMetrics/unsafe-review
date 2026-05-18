@@ -345,6 +345,12 @@ fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
     if contains_call_name(line, "drop_in_place") {
         return Some((UnsafeSiteKind::Operation, OperationFamily::DropInPlace));
     }
+    if is_atomic_pointer_state_transition(line) {
+        return Some((
+            UnsafeSiteKind::Operation,
+            OperationFamily::AtomicPointerState,
+        ));
+    }
     if contains_call_name(line, "unreachable_unchecked") {
         return Some((
             UnsafeSiteKind::Operation,
@@ -487,6 +493,12 @@ fn is_nonnull_new_unchecked_call(line: &str) -> bool {
 fn is_vec_from_raw_parts_call(line: &str) -> bool {
     let compact = compact_whitespace(line);
     compact.contains("Vec::from_raw_parts") || compact.contains("vec::Vec::from_raw_parts")
+}
+
+fn is_atomic_pointer_state_transition(line: &str) -> bool {
+    contains_call_name(line, "swap")
+        && line.contains("ptr::null_mut")
+        && line.contains("Ordering::")
 }
 
 fn is_incomplete_multiline_transmute_copy(line: &str) -> bool {
@@ -1341,6 +1353,21 @@ mod tests {
                 "{line} should be classified as a raw pointer write"
             );
         }
+    }
+
+    #[test]
+    fn text_detection_classifies_atomic_pointer_null_swap_as_state_transition() {
+        assert_eq!(
+            detect_site("block = self.head.block.swap(ptr::null_mut(), Ordering::AcqRel);"),
+            Some((
+                UnsafeSiteKind::Operation,
+                OperationFamily::AtomicPointerState
+            ))
+        );
+        assert_eq!(
+            detect_site("block = self.head.block.load(Ordering::Acquire);"),
+            None
+        );
     }
 
     #[test]

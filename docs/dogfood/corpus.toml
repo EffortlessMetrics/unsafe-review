@@ -373,3 +373,17 @@ purpose = "PR diff for strict-provenance Miri cfg atomic pointer unsafe blocks a
 command = "rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/crossbeam-pr1226-root --diff target/dogfood-work/crossbeam-pr1226.raw.diff --format json --max-cards 40 --out target/dogfood-work/crossbeam-pr1226.strict-provenance.head.json"
 artifact_status = "local_untracked"
 artifacts = ["target/dogfood-work/crossbeam-pr1226.strict-provenance.head.json"]
+
+[[targets]]
+id = "crossbeam-pr1187"
+crate = "crossbeam"
+repository = "crossbeam-rs/crossbeam"
+kind = "pr-diff"
+status = "active"
+pr = 1187
+root = "target/dogfood-work/crossbeam-pr1187-root"
+diff = "target/dogfood-work/crossbeam-pr1187.raw.diff"
+purpose = "PR diff for atomic pointer null swap state transitions in drop/deallocation invariants"
+command = "rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/crossbeam-pr1187-root --diff target/dogfood-work/crossbeam-pr1187.raw.diff --format json --max-cards 40 --out target/dogfood-work/crossbeam-pr1187.after-atomic-pointer-state.json"
+artifact_status = "local_untracked"
+artifacts = ["target/dogfood-work/crossbeam-pr1187.after-atomic-pointer-state.json"]

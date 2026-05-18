@@ -55,6 +55,9 @@ pub(crate) fn hazards_for(family: &OperationFamily) -> Vec<HazardKind> {
             HazardKind::InitializedMemory,
             HazardKind::DropOrDeallocation,
         ],
+        OperationFamily::AtomicPointerState => {
+            vec![HazardKind::AtomicOrdering, HazardKind::DropOrDeallocation]
+        }
         OperationFamily::UnwrapUnchecked | OperationFamily::UnreachableUnchecked => {
             vec![HazardKind::InvalidValue]
         }
@@ -148,6 +151,16 @@ pub(crate) fn obligations_for(family: &OperationFamily) -> Vec<SafetyObligation>
             SafetyObligation::new(
                 "ownership",
                 "value will not be dropped again or observed after drop",
+            ),
+        ],
+        OperationFamily::AtomicPointerState => vec![
+            SafetyObligation::new(
+                "state-transition",
+                "atomic pointer state transition preserves ownership invariants",
+            ),
+            SafetyObligation::new(
+                "ordering",
+                "atomic ordering is strong enough for readers and drop paths",
             ),
         ],
         OperationFamily::UnwrapUnchecked => vec![SafetyObligation::new(
@@ -318,6 +331,14 @@ mod tests {
         assert_eq!(
             obligation_keys(&OperationFamily::UnsafeFnCall),
             vec!["callee-contract".to_string()]
+        );
+        assert_eq!(
+            hazards_for(&OperationFamily::AtomicPointerState),
+            vec![HazardKind::AtomicOrdering, HazardKind::DropOrDeallocation]
+        );
+        assert_eq!(
+            obligation_keys(&OperationFamily::AtomicPointerState),
+            vec!["state-transition".to_string(), "ordering".to_string()]
         );
         assert_eq!(
             hazards_for(&OperationFamily::UnreachableUnchecked),
