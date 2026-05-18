@@ -22,11 +22,21 @@ unsafe-review:
 review evidence. It is not a proof of memory safety, not a claim that the repository is
 UB-free, and not a Miri result unless a witness receipt is attached.
 
-## Quick start
+## Install
 
 ```bash
 cargo install unsafe-review
+```
 
+From a workspace checkout, you can also run the CLI without installing it:
+
+```bash
+cargo run -p unsafe-review -- check --base origin/main
+```
+
+## Quick start
+
+```bash
 # Review the current diff against origin/main
 unsafe-review check --base origin/main
 
@@ -44,8 +54,31 @@ unsafe-review badges --out badges/
 
 # Explain one card and produce an LLM-ready packet
 unsafe-review explain UR-src-lib-rs-42-raw-pointer-read
-unsafe-review context UR-src-lib-rs-42-raw-pointer-read --json
+unsafe-review context UR-src-lib-rs-42-raw-pointer-read
 ```
+
+## Using the report
+
+A report has two levels:
+
+1. **Summary counters** for triage, such as the number of unsafe sites, open
+   actionable gaps, missing contracts, missing guards, unwitnessed guarded code,
+   and unsafe code that appears unreached by tests.
+2. **Review cards** for focused action. Each card points at one unsafe-adjacent
+   site, names the hazard class, lists expected obligations, records the evidence
+   found nearby, and suggests a witness route when one is applicable.
+
+The intended reviewer loop is:
+
+```bash
+unsafe-review check --base origin/main --format markdown --out unsafe-review.md
+unsafe-review explain <card-id>
+unsafe-review context <card-id>
+```
+
+Use `explain` for human-readable detail and `context` when handing one card to an
+assistant, issue tracker, or review automation. See the [CLI guide](docs/CLI.md)
+for command behavior, output formats, and CI examples.
 
 ## Current implementation status
 
@@ -91,6 +124,7 @@ cargo xtask check-pr
 - [Mission and vision](docs/MISSION.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Architecture](docs/ARCHITECTURE.md)
+- [CLI guide](docs/CLI.md)
 - [Specifications](docs/specs/README.md)
 - [ADRs](docs/adr/README.md)
 - [Implementation plan](plans/0.1.0/implementation-plan.md)
