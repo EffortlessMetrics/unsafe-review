@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 use std::collections::BTreeSet;
+use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -27,6 +28,13 @@ const POLICY_FILES: &[&str] = &[
     "policy/network-allowlist.toml",
 ];
 
+const FIXTURE_REQUIRED_FILES: &[&str] = &[
+    "Cargo.toml",
+    "change.diff",
+    "expected.cards.json",
+    "src/lib.rs",
+];
+
 const KNOWN_SUPPORT_TIERS: &[&str] = &["scaffold", "experimental", "planned", "deferred"];
 
 fn main() {
@@ -39,13 +47,14 @@ fn main() {
 fn run(args: Vec<String>) -> Result<(), String> {
     match args.get(1).map(|arg| arg.as_str()) {
         None | Some("help") | Some("--help") => {
-            println!("xtask commands: check-pr, check-docs, check-policy, check-support-tiers");
+            print_help();
             Ok(())
         }
         Some("check-pr") => {
             check_docs()?;
             check_policy()?;
             check_support_tiers()?;
+            check_fixtures()?;
             check_tracked_generated_artifacts()?;
             println!("check-pr: ok");
             Ok(())
@@ -53,8 +62,22 @@ fn run(args: Vec<String>) -> Result<(), String> {
         Some("check-docs") => check_docs(),
         Some("check-policy") => check_policy(),
         Some("check-support-tiers") => check_support_tiers(),
-        Some(other) => Err(format!("unknown xtask command `{other}`")),
+        Some("check-fixtures") => check_fixtures(),
+        Some(other) => Err(format!(
+            "unknown xtask command `{other}`; run `cargo xtask help` for commands"
+        )),
     }
+}
+
+fn print_help() {
+    println!(
+        "xtask commands:
+  check-pr             run all repository policy checks
+  check-docs           validate required docs, indexes, and path style
+  check-policy         validate policy TOML files
+  check-support-tiers  validate support-tier table values
+  check-fixtures       validate fixture layout and expected card JSON"
+    );
 }
 
 fn check_docs() -> Result<(), String> {
@@ -117,7 +140,69 @@ fn check_support_tiers() -> Result<(), String> {
     if rows == 0 {
         return Err(format!("{path} has no support-tier rows"));
     }
-    println!("check-support-tiers: ok");
+    println!("check-support-tiers: ok ({rows} rows)");
+    Ok(())
+}
+
+fn check_fixtures() -> Result<(), String> {
+    let fixture_dirs = fixture_dirs(Path::new("fixtures"))?;
+    if fixture_dirs.is_empty() {
+        return Err("fixtures directory has no fixture cases".to_string());
+    }
+    for fixture_dir in &fixture_dirs {
+        check_fixture(fixture_dir)?;
+    }
+    println!("check-fixtures: ok ({} fixtures)", fixture_dirs.len());
+    Ok(())
+}
+
+fn check_fixture(fixture_dir: &Path) -> Result<(), String> {
+    for required_file in FIXTURE_REQUIRED_FILES {
+        let path = fixture_dir.join(required_file);
+        if !path.is_file() {
+            return Err(format!(
+                "{} is missing required fixture file `{required_file}`",
+                fixture_dir.display()
+            ));
+        }
+    }
+
+    let cargo_toml = parse_toml_file(&fixture_dir.join("Cargo.toml"))?;
+    let package_name = cargo_toml
+        .get("package")
+        .and_then(|package| package.get("name"))
+        .and_then(toml::Value::as_str)
+        .ok_or_else(|| {
+            format!(
+                "{}/Cargo.toml is missing package.name",
+                fixture_dir.display()
+            )
+        })?;
+    let expected_name = fixture_dir_name(fixture_dir)?;
+    let expected_package_name = expected_name.replace('_', "-");
+    if !package_name.starts_with(&expected_package_name) {
+        return Err(format!(
+            "{}/Cargo.toml package.name `{package_name}` does not start with fixture directory `{expected_name}` normalized to `{expected_package_name}`",
+            fixture_dir.display()
+        ));
+    }
+
+    let expected_cards = parse_json_file(&fixture_dir.join("expected.cards.json"))?;
+    if !expected_cards.is_array() {
+        return Err(format!(
+            "{}/expected.cards.json must contain a JSON array of cards",
+            fixture_dir.display()
+        ));
+    }
+
+    let diff = read_to_string(&fixture_dir.join("change.diff"))?;
+    if !diff.contains("diff --git") {
+        return Err(format!(
+            "{}/change.diff does not look like a unified git diff",
+            fixture_dir.display()
+        ));
+    }
+
     Ok(())
 }
 
@@ -196,6 +281,12 @@ fn parse_toml_file(path: &Path) -> Result<toml::Value, String> {
         .map_err(|err| format!("{} is not valid TOML: {err}", path.display()))
 }
 
+fn parse_json_file(path: &Path) -> Result<serde_json::Value, String> {
+    let text = read_to_string(path)?;
+    serde_json::from_str(&text)
+        .map_err(|err| format!("{} is not valid JSON: {err}", path.display()))
+}
+
 fn require_toml_string(value: &toml::Value, key: &str, path: &str) -> Result<(), String> {
     match value.get(key).and_then(toml::Value::as_str) {
         Some(_) => Ok(()),
@@ -225,6 +316,21 @@ fn markdown_files(dir: &Path) -> Result<Vec<PathBuf>, String> {
     })?;
     files.sort();
     Ok(files)
+}
+
+fn fixture_dirs(dir: &Path) -> Result<Vec<PathBuf>, String> {
+    let entries =
+        fs::read_dir(dir).map_err(|err| format!("read {} failed: {err}", dir.display()))?;
+    let mut dirs = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|err| format!("read_dir entry failed: {err}"))?;
+        let path = entry.path();
+        if path.is_dir() {
+            dirs.push(path);
+        }
+    }
+    dirs.sort();
+    Ok(dirs)
 }
 
 fn visit_text(
@@ -272,6 +378,12 @@ fn has_windows_path(line: &str) -> bool {
     line.contains(":\\") || line.contains("\\\\")
 }
 
+fn fixture_dir_name(path: &Path) -> Result<&str, String> {
+    path.file_name()
+        .and_then(OsStr::to_str)
+        .ok_or_else(|| format!("{} has a non-UTF-8 fixture directory name", path.display()))
+}
+
 fn is_forbidden_generated_path(path: &str) -> bool {
     path.starts_with("target/")
         || path.starts_with("badges/")
@@ -291,6 +403,15 @@ mod tests {
             Some("scaffold")
         );
         assert_eq!(support_tier_from_row("|---|---|"), None);
+    }
+
+    #[test]
+    fn fixture_dir_name_reads_last_path_component() -> Result<(), String> {
+        assert_eq!(
+            fixture_dir_name(Path::new("fixtures/raw_pointer_deref"))?,
+            "raw_pointer_deref"
+        );
+        Ok(())
     }
 
     #[test]
