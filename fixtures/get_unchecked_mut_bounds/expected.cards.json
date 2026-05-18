@@ -53,6 +53,9 @@
       "Missing visible local guard for inferred safety obligations",
       "No witness receipt imported for this card"
     ],
-    "verify_commands": []
+    "verify_commands": [
+      "cargo +nightly miri test pick_unchecked_mut",
+      "cargo +nightly careful test pick_unchecked_mut"
+    ]
   }
 ]

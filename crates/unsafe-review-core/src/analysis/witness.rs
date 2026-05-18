@@ -37,6 +37,7 @@ pub(crate) fn routes_for(hazards: &[HazardKind], owner: Option<&String>) -> Vec<
                 | HazardKind::InitializedMemory
                 | HazardKind::Alignment
                 | HazardKind::PointerValidity
+                | HazardKind::Bounds
                 | HazardKind::AliasingOrProvenance
         )
     }) {
