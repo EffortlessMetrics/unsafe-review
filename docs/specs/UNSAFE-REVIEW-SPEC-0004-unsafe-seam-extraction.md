@@ -13,6 +13,10 @@ Linked plan: ../../plans/0.1.0/implementation-plan.md
 ## Behavior
 
 Detect unsafe blocks, unsafe functions, unsafe impls, FFI, static mut, raw pointer operations, MaybeUninit, transmute, set_len, Pin, Send/Sync, and related seams.
+Extraction should use a stable syntax substrate that records syntax node kind,
+byte range, line/column, and snippet text before card-specific classifiers consume
+those facts. Line-based scanning may remain as a compatibility path while syntax
+facts are adopted behind fixture-backed card output.
 
 ## Non-goals
 
