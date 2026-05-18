@@ -288,6 +288,7 @@ mod tests {
         "safe_code_no_cards",
         "public_unsafe_fn_missing_safety",
         "split_public_unsafe_fn_missing_safety",
+        "split_unsafe_block",
     ];
 
     #[test]

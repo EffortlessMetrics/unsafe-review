@@ -298,6 +298,9 @@ fn detect_syntax_site(fact: &SyntaxNodeFact) -> Option<(UnsafeSiteKind, Operatio
         "STATIC" if compact.contains("static mut") => {
             Some((UnsafeSiteKind::StaticMut, OperationFamily::StaticMut))
         }
+        "BLOCK_EXPR" if is_unknown_unsafe_block(&compact) => {
+            Some((UnsafeSiteKind::UnsafeBlock, OperationFamily::Unknown))
+        }
         "CALL_EXPR" | "METHOD_CALL_EXPR" | "MACRO_EXPR" => detect_site(&compact),
         _ => None,
     }
@@ -306,6 +309,7 @@ fn detect_syntax_site(fact: &SyntaxNodeFact) -> Option<(UnsafeSiteKind, Operatio
 fn card_snippet_for(fact: &SyntaxNodeFact, kind: &UnsafeSiteKind) -> String {
     let compact = compact_whitespace(&fact.snippet);
     match kind {
+        UnsafeSiteKind::UnsafeBlock => "unsafe {".to_string(),
         UnsafeSiteKind::UnsafeFn
         | UnsafeSiteKind::UnsafeTrait
         | UnsafeSiteKind::UnsafeImpl
@@ -318,6 +322,14 @@ fn card_snippet_for(fact: &SyntaxNodeFact, kind: &UnsafeSiteKind) -> String {
             }),
         _ => compact,
     }
+}
+
+fn is_unknown_unsafe_block(compact: &str) -> bool {
+    compact.starts_with("unsafe {")
+        && !matches!(
+            detect_site(compact),
+            Some((UnsafeSiteKind::Operation, _family))
+        )
 }
 
 fn compact_whitespace(text: &str) -> String {
