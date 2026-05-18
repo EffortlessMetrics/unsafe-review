@@ -605,6 +605,9 @@ fn detect_syntax_site(
     unsafe_block_ranges: &[(usize, usize)],
     operation_block_ranges: &BTreeSet<(usize, usize)>,
 ) -> Option<(UnsafeSiteKind, OperationFamily)> {
+    if !syntax_kind_can_be_unsafe_site(&fact.kind) {
+        return None;
+    }
     let compact = compact_whitespace(&fact.snippet);
     if compact.starts_with("//") {
         return None;
@@ -662,6 +665,21 @@ fn detect_syntax_site(
         }
         _ => None,
     }
+}
+
+fn syntax_kind_can_be_unsafe_site(kind: &str) -> bool {
+    matches!(
+        kind,
+        "FN" | "TRAIT"
+            | "IMPL"
+            | "EXTERN_BLOCK"
+            | "STATIC"
+            | "BLOCK_EXPR"
+            | "PREFIX_EXPR"
+            | "CALL_EXPR"
+            | "METHOD_CALL_EXPR"
+            | "MACRO_EXPR"
+    )
 }
 
 fn declaration_prefix(compact: &str) -> &str {

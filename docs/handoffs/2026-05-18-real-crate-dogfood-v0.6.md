@@ -16,7 +16,7 @@ Dogfood repositories:
 | `servo/rust-smallvec` | `bc8a854926a8d940164f6c4ad4fc6efe51962e93` | completed with `--max-cards 50` |
 | `bluss/arrayvec` | `1bc606d8c83a34b8fae9dd117bfeab10f90d2ca7` | completed with `--max-cards 50` |
 | `BurntSushi/memchr` | `db1a77d4b556a1321e136ca0514e43e74ea5fcc3` | completed with `--max-cards 50` after capped-scan hardening |
-| `rust-lang/hashbrown` | `7b3bba6eb4b2f03636155c918552b5f30c1a05b3` | PR-diff dogfood completed for `hashbrown#469`, `hashbrown#501`, `hashbrown#657`, `hashbrown#667`, `hashbrown#692`, and `hashbrown#693` |
+| `rust-lang/hashbrown` | `7b3bba6eb4b2f03636155c918552b5f30c1a05b3` | completed with `--max-cards 50` after syntax-scan performance hardening; PR-diff dogfood completed for `hashbrown#469`, `hashbrown#501`, `hashbrown#556`, `hashbrown#657`, `hashbrown#667`, `hashbrown#692`, and `hashbrown#693` |
 
 The first two completed runs exposed two noisy false positives:
 
@@ -1122,6 +1122,45 @@ The improved behavior is still advisory only. Operation cards continue to use
 diff-neighborhood matching, while unsafe declarations use exact syntax-range
 matching so neighboring declaration cards do not create review noise.
 
+### `hashbrown#556` and capped `hashbrown` scan
+
+PR: `https://github.com/rust-lang/hashbrown/pull/556`
+
+The PR marks `insert_unique_unchecked` unsafe and updates call sites to use
+explicit unsafe blocks.
+
+While dogfooding this PR and a capped full-repo `hashbrown` inventory, the
+current scanner exceeded the local 120-second timeout before producing output.
+The bottleneck was syntax-site extraction on large changed files: line/column
+lookup rescanned the source for each syntax node, and syntax detection
+normalized snippets before checking whether a node kind could ever produce an
+unsafe-review site.
+
+Follow-up rerun after precomputing line starts and skipping impossible syntax
+node kinds before snippet normalization:
+
+```text
+hashbrown#556 changed_rust_files: 3
+hashbrown#556 cards: 1
+hashbrown#556 contract_missing: 1
+hashbrown#556 operation families: unsafe_fn_call
+
+capped hashbrown repo cards: 50
+capped hashbrown repo contract_missing: 44
+capped hashbrown repo guarded_unwitnessed: 2
+capped hashbrown repo requires_loom: 4
+```
+
+The single `hashbrown#556` card is still advisory only:
+
+```text
+insert_unique_unchecked  line 1819  unsafe_fn_call  contract_missing
+```
+
+The performance fix does not change analyzer truth, policy behavior, or witness
+execution. It makes large changed files practical enough for PR-time review, and
+the resulting cards remain source-level unsafe contract review evidence.
+
 ### `hashbrown#469`
 
 PR: `https://github.com/rust-lang/hashbrown/pull/469`
@@ -1346,6 +1385,8 @@ rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hash
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr657.raw.diff --format json --max-cards 40 --out target/dogfood-work/hashbrown-pr657.after-multiline-unsafe-call.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr667.raw.diff --format json --max-cards 40 --out target/dogfood-work/hashbrown-pr667.after-nested-dedupe.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr501.raw.diff --format json --max-cards 40 --out target/dogfood-work/hashbrown-pr501.after-declaration-range.json
+rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr556.raw.diff --format json --max-cards 30 --out target/dogfood-work/hashbrown-pr556.after-syntax-scan-performance.json
+rtk cargo run --locked -p unsafe-review -- repo --root target/dogfood-work/hashbrown --format json --max-cards 50 --out target/dogfood-work/hashbrown.unsafe-review.after-syntax-scan-performance.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr469.raw.diff --format json --max-cards 60 --out target/dogfood-work/hashbrown-pr469.after-unreachable-unchecked.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr469.raw.diff --format json --max-cards 60 --out target/dogfood-work/hashbrown-pr469.after-owner-impl-trait.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/hashbrown --diff target/dogfood-work/hashbrown-pr693.raw.diff --format json --max-cards 30 --out target/dogfood-work/hashbrown-pr693.after-infallible-unwrap-evidence.json
@@ -1362,19 +1403,20 @@ Real-crate dogfood is experimental.
 The repo may claim:
 
 - the first real-crate dogfood slice includes capped repo snapshots on
-  `rust-smallvec`, `arrayvec`, and `memchr`, plus PR-diff dogfood on
-  `hashbrown`
+  `rust-smallvec`, `arrayvec`, `memchr`, and `hashbrown`
 - a capped `memchr` dogfood snapshot now completes
 - real PR-diff dogfood runs on `memchr#215`, `rust-smallvec#407`,
   `rust-smallvec#277`, `rust-smallvec#64`, `rust-smallvec#254`,
   `arrayvec#308`, `arrayvec#138`, `arrayvec#187`, `arrayvec#174`, and
   `arrayvec#288`, `hashbrown#469`, `hashbrown#501`, `hashbrown#657`,
-  `hashbrown#667`,
-  `hashbrown#692`, and `hashbrown#693` produce card output
+  `hashbrown#556`, `hashbrown#667`, `hashbrown#692`, and `hashbrown#693`
+  produce card output
 - dogfood found and fixed import/declaration and `cfg(target_feature)`
   false positives
 - `&'static mut` type/lifetime text is not classified as a `static mut` item
 - capped repo scans stop after the requested card cap
+- syntax scanning on large changed files now precomputes line starts and skips
+  impossible syntax node kinds before snippet normalization
 - operation cards can inherit enclosing unsafe function `# Safety` docs
 - owner inference ignores comments while scanning backward
 - owner inference prefers real function declarations over `impl Trait`
@@ -1474,6 +1516,9 @@ The repo may claim:
   `hashbrown#667` `nonnull_unchecked` parent-call card
 - one fixture-backed diff-precision improvement changed `hashbrown#501` from one
   adjacent unchanged unsafe declaration card to zero cards
+- one syntax-scan performance improvement changed capped full-repo `hashbrown`
+  and `hashbrown#556` dogfood from local timeout to completed output without
+  changing analyzer truth
 - attributed unsafe function declarations are deduped between syntax-backed
   extraction and fallback line scanning
 - false-positive regression coverage exists in fixtures and calibration
@@ -1485,7 +1530,7 @@ The repo must not claim:
 - usable-alpha support-tier promotion
 - full-repository coverage from top-50 capped snapshots
 - uncapped repo-scan performance
-- general PR-diff usefulness from sixteen PRs
+- general PR-diff usefulness from seventeen PRs
 - memory-safety proof
 - UB-free status
 - witness execution
@@ -1493,10 +1538,9 @@ The repo must not claim:
 
 ## Known limits
 
-- Only three real crates completed capped repo snapshots in this slice; four
-  crates have at least one snapshot or PR-diff receipt.
+- Four real crates completed capped repo snapshots in this slice.
 - The successful dogfood snapshots were capped at 50 cards.
-- Only sixteen real PR diffs were measured.
+- Only seventeen real PR diffs were measured.
 - `memchr` completion depends on capped-scan behavior; uncapped performance is
   still unmeasured.
 - No human audit was performed for every emitted card.
@@ -1567,6 +1611,9 @@ The repo must not claim:
 - `hashbrown#501` now avoids adjacent unchanged unsafe declaration cards when a
   neighboring safe function changes, but fallback declaration range handling is
   intentionally stricter than operation neighborhood matching.
+- Capped full-repo `hashbrown` and `hashbrown#556` now complete after syntax
+  scanning performance hardening, but the capped repo output still contains many
+  contract prompts that require human review before calibration claims.
 - These runs do not prove absence of missed unsafe seams.
 
 ## Next useful work
