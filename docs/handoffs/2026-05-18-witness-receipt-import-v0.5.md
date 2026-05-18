@@ -19,6 +19,7 @@ Merged PRs:
 - `#141 test(fixtures): add receipted review card golden`
 - `#146 test(cli): cover receipted fixture output`
 - `#148 output: add witness plan format`
+- `#150 receipts: validate witness tool lanes`
 
 The receipt importer:
 
@@ -26,6 +27,7 @@ The receipt importer:
 - requires exact counted `ReviewCard` identity in `card_id`
 - accepts explicit receipt strengths: `configured`, `ran`, `test_targeted`, and
   `site_reached`
+- rejects unknown witness tool lanes
 - rejects unknown receipt strengths
 - rejects uncounted card identities
 - requires non-empty `author`
@@ -88,6 +90,7 @@ The repo may claim:
 - receipt strength remains explicit in imported evidence summaries
 - receipt author, recorded timestamp, expiry, command, and limitations remain
   visible in imported evidence summaries
+- receipt `tool` values must match known witness lanes
 - the `raw_pointer_alignment_receipted` golden proves a receipt does not hide
   the still-missing alignment guard
 - CLI JSON output preserves the same behavior end to end
