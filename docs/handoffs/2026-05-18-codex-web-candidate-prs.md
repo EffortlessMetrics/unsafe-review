@@ -73,7 +73,7 @@ candidate PRs in the theme inventory below.
 | Documentation usage guides | #36, #37, #53, #56, #72, #73, #76, #77 | choose one only after doc-map review | park or rework | later docs | Pick one canonical CLI usage guide. Avoid multiple overlapping docs pages. |
 | Diataxis docs structure | #35, #54, #70, #71 | none yet | park | later docs | Broad docs restructuring is not active-lane work. |
 | Spec expansion | #38, #52, #68, #69 | none yet | park | later source-of-truth | Specs should follow concrete behavior gaps, not outrun implementation. |
-| CI hardening | #34, #51, #65, #66 | none yet | park or rework | later CI | Avoid broad CI authority changes while advisory workflow is still experimental. Extract narrow safety improvements only. |
+| CI hardening | #34, #51, #65, #66 | reworked from #66 on current main | merge | current hardening | The current slice keeps the narrow workflow reliability pieces: read-only permissions, no persisted checkout credentials, locked Cargo commands, docs build, timeout, manual dispatch, and PR-run cancellation. |
 | Broad module refactors | #40, #55, #74, #75 | none yet | park | later refactor | Avoid broad SRP churn unless it directly unblocks a reviewed implementation slice. |
 | Public JSON/visibility API | #28 | none yet | park or close-duplicate | already partly landed | Public API surface and card identity work landed in review-card v0.1; inspect only for missing useful schema detail. |
 | Unaligned raw pointer read behavior | #30 | none yet | park or rework | later analyzer | Could be useful, but review after raw pointer write and fixture validation candidates. |
@@ -85,8 +85,9 @@ candidate PRs in the theme inventory below.
 2. Complete the focused unit-coverage slice from #86.
 3. Complete the reworked CLI e2e artifact slice from #81.
 4. Complete the reworked raw pointer write slice from #49/#62.
-5. Park property, fuzz, mutation, broad docs, broad CI, and broad refactor PRs
-   until their target lane opens.
+5. Complete the minimal CI hardening slice reworked from #66.
+6. Park property, fuzz, mutation, broad docs, and broad refactor PRs until their
+   target lane opens.
 
 ## Review protocol
 
