@@ -169,7 +169,8 @@ fn is_public_unsafe_contract_obligation(site: &ScannedSite, key: &str) -> bool {
 }
 
 fn has_length_or_bounds_guard(lower: &str) -> bool {
-    lower.contains("len") && (lower.contains(">=") || lower.contains('<'))
+    let has_comparison = lower.contains(">=") || lower.contains('<');
+    has_comparison && (lower.contains("len") || lower.contains("num_ctrl_bytes"))
 }
 
 fn has_capacity_guard(family: &OperationFamily, lower: &str) -> bool {

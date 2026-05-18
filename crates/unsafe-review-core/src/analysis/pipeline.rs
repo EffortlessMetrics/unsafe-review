@@ -632,6 +632,19 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn pointer_arithmetic_num_ctrl_bytes_guard_is_discharged() -> Result<(), String> {
+        let output = fixture_output("pointer_arithmetic_num_ctrl_bytes_guard")?;
+        let card = single_card("pointer_arithmetic_num_ctrl_bytes_guard", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::PointerArithmetic);
+        assert_eq!(card.class, ReviewClass::GuardedUnwitnessed);
+        assert!(card.discharge.present);
+        assert!(card.id.0.contains("add"));
+        Ok(())
+    }
+
+    #[test]
     fn private_unsafe_helper_can_use_local_safety_comment() -> Result<(), String> {
         let output = fixture_output("private_unsafe_helper_safety_comment")?;
         let card = single_card("private_unsafe_helper_safety_comment", &output)?;
