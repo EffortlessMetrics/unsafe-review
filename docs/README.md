@@ -4,6 +4,7 @@
 |---|---|---|
 | Mission / vision | product purpose and end state | `docs/MISSION.md`, `docs/VISION.md` |
 | Roadmap | release direction | `docs/ROADMAP.md` |
+| Usage guide | local, CI, and follow-up CLI workflows | `docs/USAGE.md` |
 | Proposals | why a workstream exists | `docs/proposals/` |
 | Specs | behavior contracts | `docs/specs/` |
 | ADRs | durable architecture decisions | `docs/adr/` |
@@ -12,4 +13,4 @@
 | Policies | ledgers, baselines, suppressions | `policy/` |
 
 Rule: do not make every document do every job. Proposals say why, specs say what,
-ADRs say why this architecture, plans say how, and policies hold exceptions.
+ADRs say why this architecture, usage says how to run the tool day to day, plans say how to land work, and policies hold exceptions.
