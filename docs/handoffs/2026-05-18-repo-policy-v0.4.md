@@ -105,14 +105,42 @@ For current posture, read this handoff together with:
 - `docs/handoffs/2026-05-18-witness-receipt-import-v0.5.md`
 - `docs/status/SUPPORT_TIERS.md`
 
+## Subsequent dogfood
+
+Outcome comparison was dogfooded on capped `memchr` repo snapshots from the
+real-crate dogfood lane:
+
+```bash
+rtk cargo run --locked -p unsafe-review -- outcome --before target/dogfood-work/memchr.unsafe-review.after-slice-end-pointer-evidence.json --after target/dogfood-work/memchr.unsafe-review.after-target-feature-contract-evidence.json --format json --out target/dogfood-work/memchr.outcome.after-target-feature-contract-evidence.json
+rtk cargo run --locked -p unsafe-review -- outcome --before target/dogfood-work/memchr.unsafe-review.after-slice-end-pointer-evidence.json --after target/dogfood-work/memchr.unsafe-review.after-target-feature-contract-evidence.json --format markdown --out target/dogfood-work/memchr.outcome.after-target-feature-contract-evidence.md
+```
+
+The saved-snapshot comparison reported:
+
+```text
+new: 0
+resolved: 0
+improved: 10
+regressed: 0
+unchanged: 40
+```
+
+Those 10 improved cards were the documented target-feature declaration cards
+that moved from `guard_missing` to `guarded_unwitnessed`. The comparison did
+not rerun analysis, execute witnesses, or make a policy decision. It preserved
+the outcome trust boundary: static unsafe contract review outcome only, not
+memory-safety proof, not UB-free status, and not witness execution.
+
 ## Known limits
 
 - Matching is exact `card_id` only.
 - Line-stable identity exists, but broader drift behavior still needs dogfood.
 - Suppression and baseline ledgers do not support glob, owner, path, class, or
   operation-family patterns.
-- Outcome comparison reads saved snapshots only; it does not rerun analysis,
-  execute witnesses, or make policy decisions.
+- Outcome comparison reads saved snapshots only; the first capped `memchr`
+  snapshot dogfood is recorded, but more repos and PRs are needed before making
+  it more dashboard-like. It does not rerun analysis, execute witnesses, or make
+  policy decisions.
 - No calibrated blocking policy exists yet.
 
 ## Next useful work
@@ -121,8 +149,8 @@ Prefer dogfood before expanding policy authority:
 
 - run `--policy no-new-debt` against real unsafe-review PRs and inspect noise
 - record cases where exact identity is too brittle or too permissive
-- dogfood outcome comparison on real repo snapshots before making repo posture
-  more dashboard-like
+- dogfood outcome comparison on more real repo snapshots and PR snapshots before
+  making repo posture more dashboard-like
 - keep witness receipt import separate from policy promotion
 
 Defer:
