@@ -8,11 +8,14 @@ pub struct OutcomeReport {
     pub schema_version: String,
     pub tool: String,
     pub mode: String,
+    pub before_id: String,
+    pub after_id: String,
     pub trust_boundary: String,
+    pub limitations: Vec<String>,
     pub before: OutcomeSnapshotSummary,
     pub after: OutcomeSnapshotSummary,
     pub summary: OutcomeSummary,
-    pub cards: Vec<OutcomeCard>,
+    pub cards: OutcomeCards,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -31,10 +34,18 @@ pub struct OutcomeSummary {
     pub unchanged: usize,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct OutcomeCards {
+    pub new: Vec<OutcomeCard>,
+    pub resolved: Vec<OutcomeCard>,
+    pub improved: Vec<OutcomeCard>,
+    pub regressed: Vec<OutcomeCard>,
+    pub unchanged: Vec<OutcomeCard>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct OutcomeCard {
     pub card_id: String,
-    pub status: String,
     pub before: Option<OutcomeCardState>,
     pub after: Option<OutcomeCardState>,
 }
@@ -105,17 +116,25 @@ pub fn render_markdown(report: &OutcomeReport) -> String {
     } else {
         out.push_str("| Status | Card | Before | After |\n");
         out.push_str("|---|---|---|---|\n");
-        for card in &report.cards {
-            out.push_str(&format!(
-                "| `{}` | `{}` | {} | {} |\n",
-                card.status,
-                card.card_id,
-                markdown_state(card.before.as_ref()),
-                markdown_state(card.after.as_ref())
-            ));
+        for (status, cards) in report.cards.groups() {
+            for card in cards {
+                out.push_str(&format!(
+                    "| `{status}` | `{}` | {} | {} |\n",
+                    card.card_id,
+                    markdown_state(card.before.as_ref()),
+                    markdown_state(card.after.as_ref())
+                ));
+            }
         }
         out.push('\n');
     }
+    out.push_str("## Limitations\n\n");
+    for limitation in &report.limitations {
+        out.push_str("- ");
+        out.push_str(limitation);
+        out.push('\n');
+    }
+    out.push('\n');
     out.push_str("## Trust boundary\n\n");
     out.push_str(&report.trust_boundary);
     out.push('\n');
@@ -139,6 +158,8 @@ fn parse_snapshot(text: &str, label: &str) -> Result<Snapshot, String> {
 }
 
 fn compare_snapshots(before: Snapshot, after: Snapshot) -> Result<OutcomeReport, String> {
+    let before_id = snapshot_id(&before);
+    let after_id = snapshot_id(&after);
     let before_summary = OutcomeSnapshotSummary::from(&before);
     let after_summary = OutcomeSnapshotSummary::from(&after);
     let before_cards = cards_by_id(before.cards, "before")?;
@@ -149,30 +170,51 @@ fn compare_snapshots(before: Snapshot, after: Snapshot) -> Result<OutcomeReport,
         .cloned()
         .collect::<BTreeSet<_>>();
     let mut summary = OutcomeSummary::default();
-    let mut cards = Vec::new();
+    let mut cards = OutcomeCards::default();
     for id in ids {
         let before = before_cards.get(&id);
         let after = after_cards.get(&id);
         let status = outcome_status(before, after);
-        match status {
-            "new" => summary.new += 1,
-            "resolved" => summary.resolved += 1,
-            "improved" => summary.improved += 1,
-            "regressed" => summary.regressed += 1,
-            _ => summary.unchanged += 1,
-        }
-        cards.push(OutcomeCard {
+        let card = OutcomeCard {
             card_id: id,
-            status: status.to_string(),
             before: before.map(OutcomeCardState::from),
             after: after.map(OutcomeCardState::from),
-        });
+        };
+        match status {
+            "new" => {
+                summary.new += 1;
+                cards.new.push(card);
+            }
+            "resolved" => {
+                summary.resolved += 1;
+                cards.resolved.push(card);
+            }
+            "improved" => {
+                summary.improved += 1;
+                cards.improved.push(card);
+            }
+            "regressed" => {
+                summary.regressed += 1;
+                cards.regressed.push(card);
+            }
+            _ => {
+                summary.unchanged += 1;
+                cards.unchanged.push(card);
+            }
+        }
     }
     Ok(OutcomeReport {
         schema_version: "0.1".to_string(),
         tool: "unsafe-review".to_string(),
         mode: "outcome".to_string(),
+        before_id,
+        after_id,
         trust_boundary: TRUST_BOUNDARY.to_string(),
+        limitations: vec![
+            "compares existing saved ReviewCard JSON snapshots only".to_string(),
+            "does not rerun analysis or execute witness tools".to_string(),
+            "does not make policy or blocking decisions".to_string(),
+        ],
         before: before_summary,
         after: after_summary,
         summary,
@@ -239,6 +281,54 @@ fn is_actionable_class(value: &str) -> bool {
     )
 }
 
+fn snapshot_id(snapshot: &Snapshot) -> String {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    feed_hash(&mut hash, &snapshot.schema_version);
+    feed_hash(&mut hash, &snapshot.summary.cards.to_string());
+    feed_hash(
+        &mut hash,
+        &snapshot.summary.open_actionable_gaps.to_string(),
+    );
+    let mut cards = snapshot.cards.iter().collect::<Vec<_>>();
+    cards.sort_by(|left, right| left.id.cmp(&right.id));
+    for card in cards {
+        feed_hash(&mut hash, &card.id);
+        feed_hash(&mut hash, &card.class_name);
+        feed_hash(&mut hash, &card.priority);
+        for missing in &card.missing {
+            feed_hash(&mut hash, missing);
+        }
+    }
+    format!("snapshot-{hash:016x}")
+}
+
+fn feed_hash(hash: &mut u64, text: &str) {
+    for byte in text.bytes().chain([0]) {
+        *hash ^= u64::from(byte);
+        *hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+}
+
+impl OutcomeCards {
+    fn is_empty(&self) -> bool {
+        self.new.is_empty()
+            && self.resolved.is_empty()
+            && self.improved.is_empty()
+            && self.regressed.is_empty()
+            && self.unchanged.is_empty()
+    }
+
+    fn groups(&self) -> [(&'static str, &[OutcomeCard]); 5] {
+        [
+            ("new", &self.new),
+            ("resolved", &self.resolved),
+            ("improved", &self.improved),
+            ("regressed", &self.regressed),
+            ("unchanged", &self.unchanged),
+        ]
+    }
+}
+
 fn markdown_state(state: Option<&OutcomeCardState>) -> String {
     match state {
         Some(state) => format!(
@@ -298,6 +388,13 @@ mod tests {
         assert_eq!(report.summary.improved, 1);
         assert_eq!(report.summary.regressed, 1);
         assert_eq!(report.summary.unchanged, 1);
+        assert!(report.before_id.starts_with("snapshot-"));
+        assert!(report.after_id.starts_with("snapshot-"));
+        assert_eq!(report.cards.new.len(), 1);
+        assert_eq!(report.cards.resolved.len(), 1);
+        assert_eq!(report.cards.improved.len(), 1);
+        assert_eq!(report.cards.regressed.len(), 1);
+        assert_eq!(report.cards.unchanged.len(), 1);
         assert!(
             report
                 .trust_boundary
@@ -316,6 +413,20 @@ mod tests {
             serde_json::from_str(&json).map_err(|err| format!("parse JSON failed: {err}"))?;
         assert_eq!(value["mode"], "outcome");
         assert_eq!(value["summary"]["new"], 1);
+        assert_eq!(value["cards"]["new"][0]["card_id"], "UR-new-c1");
+        assert!(
+            value["before_id"]
+                .as_str()
+                .unwrap_or("")
+                .starts_with("snapshot-")
+        );
+        assert!(
+            value["after_id"]
+                .as_str()
+                .unwrap_or("")
+                .starts_with("snapshot-")
+        );
+        assert!(value["limitations"].is_array());
         assert!(
             value["trust_boundary"]
                 .as_str()
@@ -325,6 +436,7 @@ mod tests {
 
         let markdown = render_markdown(&report);
         assert!(markdown.contains("# unsafe-review outcome"));
+        assert!(markdown.contains("## Limitations"));
         assert!(markdown.contains("## Trust boundary"));
         assert!(markdown.contains("UR-new-c1"));
         Ok(())
