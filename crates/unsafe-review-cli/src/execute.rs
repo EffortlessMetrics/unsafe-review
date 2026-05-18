@@ -9,9 +9,10 @@ use std::process::Command as ProcessCommand;
 use unsafe_review_core::{
     AnalysisMode, AnalyzeInput, CardId, CargoCarefulReceiptInput, ConcurrencyReceiptInput,
     DiffSource, MiriReceiptInput, PolicyMode, ProofReceiptInput, SanitizerReceiptInput, Scope,
-    WITNESS_RECEIPT_SCHEMA_VERSION, WitnessReceipt, analyze, collect_context, compare_outcome_json,
-    explain_card, render_comment_plan, render_human, render_json, render_lsp, render_markdown,
-    render_outcome_json, render_outcome_markdown, render_pr_summary, render_sarif,
+    WITNESS_RECEIPT_SCHEMA_VERSION, WitnessReceipt, analyze, audit_witness_receipts,
+    collect_context, compare_outcome_json, explain_card, render_comment_plan, render_human,
+    render_json, render_lsp, render_markdown, render_outcome_json, render_outcome_markdown,
+    render_pr_summary, render_receipt_audit_json, render_receipt_audit_markdown, render_sarif,
     render_witness_plan, validate_witness_receipts,
 };
 
@@ -34,6 +35,7 @@ pub(crate) fn execute(command: Command) -> Result<(), String> {
         Command::Context { root, id } => context(&root, &id),
         Command::ReceiptTemplate(options) => receipt_template(options),
         Command::ReceiptValidate { root } => receipt_validate(&root),
+        Command::ReceiptAudit(options) => receipt_audit(options),
         Command::ReceiptImportMiri(options) => receipt_import_miri(options),
         Command::ReceiptImportCareful(options) => receipt_import_careful(options),
         Command::ReceiptImportSanitizer(options) => receipt_import_sanitizer(options),
@@ -286,6 +288,41 @@ fn receipt_validate(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn receipt_audit(options: CheckOptions) -> Result<(), String> {
+    let scope = if options.base.is_some() || options.diff.is_some() {
+        Scope::Diff
+    } else {
+        Scope::Repo
+    };
+    let mode = match &scope {
+        Scope::Diff => AnalysisMode::Draft,
+        Scope::Repo => AnalysisMode::Repo,
+    };
+    let diff = diff_source(&options)?;
+    let report = audit_witness_receipts(AnalyzeInput {
+        root: options.root,
+        scope,
+        diff,
+        mode,
+        policy: PolicyMode::Advisory,
+        include_unchanged_tests: true,
+        max_cards: options.max_cards,
+    })?;
+    let rendered = match options.format {
+        Format::Json => render_receipt_audit_json(&report),
+        Format::Markdown => render_receipt_audit_markdown(&report),
+        _ => return Err("receipt audit only supports json or markdown output".to_string()),
+    };
+    if let Some(path) = options.out {
+        ensure_parent_dir(&path)?;
+        fs::write(&path, rendered)
+            .map_err(|err| format!("write {} failed: {err}", path.display()))?;
+    } else {
+        println!("{rendered}");
+    }
+    Ok(())
+}
+
 fn outcome(options: OutcomeOptions) -> Result<(), String> {
     let before = fs::read_to_string(&options.before)
         .map_err(|err| format!("read {} failed: {err}", options.before.display()))?;
@@ -467,6 +504,9 @@ fn print_help() {
         "  receipt import-proof <card-id> --tool kani|crux --log <file> --author <owner> --recorded-at <utc> --expires-at <date> --command <cmd> [--limitation text] [--out file]"
     );
     println!("  receipt validate [--root .]");
+    println!(
+        "  receipt audit [--root .] [--base origin/main|--diff file] [--format json|markdown] [--out file] [--max-cards N]"
+    );
     println!("  doctor  [--root .]");
     println!();
     println!("Flags may be passed as `--flag value` or `--flag=value`.");

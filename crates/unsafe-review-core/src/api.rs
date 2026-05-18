@@ -1,7 +1,7 @@
 use crate::analysis::{pipeline, receipts};
 use crate::domain::{CardId, ReviewCard};
 use crate::output::{
-    agent, comment_plan, human, json, lsp, markdown, outcome, sarif, witness_plan,
+    agent, comment_plan, human, json, lsp, markdown, outcome, receipt_audit, sarif, witness_plan,
 };
 use std::path::PathBuf;
 
@@ -115,6 +115,11 @@ pub fn validate_witness_receipts(root: PathBuf) -> Result<usize, String> {
     receipts::validate_receipts(&root)
 }
 
+pub fn audit_witness_receipts(input: AnalyzeInput) -> Result<ReceiptAuditReport, String> {
+    let output = pipeline::analyze_without_receipts(input)?;
+    receipts::audit_receipts(&output)
+}
+
 pub fn render_json(output: &AnalyzeOutput) -> String {
     json::render(output)
 }
@@ -159,6 +164,14 @@ pub fn render_outcome_markdown(report: &OutcomeReport) -> String {
     outcome::render_markdown(report)
 }
 
+pub fn render_receipt_audit_json(report: &ReceiptAuditReport) -> String {
+    receipt_audit::render_json(report)
+}
+
+pub fn render_receipt_audit_markdown(report: &ReceiptAuditReport) -> String {
+    receipt_audit::render_markdown(report)
+}
+
 pub fn explain_card(output: &AnalyzeOutput, id: &CardId) -> Option<String> {
     output
         .cards
@@ -176,3 +189,4 @@ pub fn collect_context(output: &AnalyzeOutput, id: &CardId) -> Option<String> {
 }
 
 pub use outcome::OutcomeReport;
+pub use receipts::ReceiptAuditReport;

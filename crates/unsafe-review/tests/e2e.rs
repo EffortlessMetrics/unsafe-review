@@ -473,6 +473,69 @@ fn receipt_validate_counts_importable_receipts() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
+fn receipt_audit_reports_matching_saved_receipts_without_running_witnesses()
+-> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_alignment_receipted");
+    let temp = TempDir::new("unsafe-review-receipt-audit-e2e")?;
+    let audit_path = temp.path().join("receipt-audit.md");
+
+    let json = run_success([
+        os("receipt"),
+        os("audit"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        fixture.join("change.diff").into_os_string(),
+        os("--format"),
+        os("json"),
+    ])?;
+    let value = parse_json(&stdout_text(&json)?)?;
+
+    assert_eq!(value["schema_version"], "0.1");
+    assert_eq!(value["mode"], "receipt-audit");
+    assert_eq!(value["policy"], "advisory");
+    assert_eq!(value["summary"]["receipts"], 1);
+    assert_eq!(value["summary"]["matched"], 1);
+    assert_eq!(value["summary"]["unmatched"], 0);
+    assert!(
+        value["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("does not execute witnesses")
+    );
+    let receipt = &value["receipts"][0];
+    assert_eq!(receipt["receipt_tool"], "miri");
+    assert!(
+        receipt["statuses"]
+            .as_array()
+            .ok_or("statuses should be an array")?
+            .iter()
+            .any(|status| status == "matched")
+    );
+    assert_eq!(receipt["matched_card"]["class"], "guard_missing");
+
+    let markdown = run_success([
+        os("receipt"),
+        os("audit"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        fixture.join("change.diff").into_os_string(),
+        os("--format"),
+        os("markdown"),
+        os("--out"),
+        audit_path.as_os_str().to_os_string(),
+    ])?;
+
+    assert_eq!(stdout_text(&markdown)?.trim(), "");
+    let markdown = fs::read_to_string(audit_path)?;
+    assert!(markdown.contains("# unsafe-review receipt audit"));
+    assert!(markdown.contains("does not execute witnesses"));
+    assert!(markdown.contains("| 1 | 1 | 0 | 0 | 0 |"));
+    Ok(())
+}
+
+#[test]
 fn receipt_import_miri_writes_receipt_from_saved_success_log() -> Result<(), Box<dyn Error>> {
     let fixture = fixture_root("raw_pointer_alignment_receipted");
     let temp = TempDir::new("unsafe-review-miri-receipt-e2e")?;

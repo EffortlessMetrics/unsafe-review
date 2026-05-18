@@ -70,6 +70,12 @@ The CLI may also validate receipt files without running analysis. Validation mus
 use the same importer checks as normal card analysis so users do not get a
 separate receipt truth.
 
+The CLI may audit receipt files against the current `ReviewCard` set. Receipt
+audit must report matched, unmatched, stale, expired, wrong-identity, wrong-tool,
+weaker-than-required, and invalid receipt metadata without running witnesses,
+inferring site reach, making policy decisions, or claiming safety. The audit is
+an advisory metadata report over saved receipts and current cards.
+
 Receipt JSON fields:
 
 ```json
@@ -159,6 +165,9 @@ after the `recorded_at` date.
   output.
 - The CLI receipt-validate command counts importable receipts and rejects the
   same invalid receipt files as normal analysis.
+- The CLI receipt-audit command reports matched, stale, expired,
+  wrong-identity, wrong-tool, weaker-than-required, and invalid receipts without
+  executing witnesses or making policy decisions.
 
 ## CI proof
 

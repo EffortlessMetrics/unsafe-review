@@ -273,7 +273,7 @@ fn parse_receipt(args: Vec<String>) -> Result<Command, String> {
     let mut rest = args;
     let Some(subcommand) = rest.first() else {
         return Err(
-            "missing receipt subcommand `import-miri`, `import-careful`, `import-sanitizer`, `import-concurrency`, `import-proof`, `template`, or `validate`"
+            "missing receipt subcommand `import-miri`, `import-careful`, `import-sanitizer`, `import-concurrency`, `import-proof`, `template`, `validate`, or `audit`"
                 .to_string(),
         );
     };
@@ -296,8 +296,22 @@ fn parse_receipt(args: Vec<String>) -> Result<Command, String> {
         }
         "template" => parse_receipt_template(rest).map(Command::ReceiptTemplate),
         "validate" => parse_receipt_validate(rest),
+        "audit" => parse_receipt_audit(rest).map(Command::ReceiptAudit),
         other => Err(format!("unknown receipt subcommand `{other}`")),
     }
+}
+
+fn parse_receipt_audit(args: Vec<String>) -> Result<CheckOptions, String> {
+    let mut options = parse_check(args)?;
+    if !matches!(options.format, Format::Human) {
+        options.format = parse_receipt_audit_format(format_name(&options.format))?;
+    } else {
+        options.format = Format::Json;
+    }
+    if options.policy != PolicyMode::Advisory {
+        return Err("receipt audit is advisory-only".to_string());
+    }
+    Ok(options)
 }
 
 fn parse_saved_output_receipt(
@@ -505,6 +519,17 @@ fn parse_outcome_format(raw: &str) -> Result<Format, String> {
         Format::Markdown => Ok(Format::Markdown),
         other => Err(format!(
             "outcome only supports json or markdown output, got `{}`",
+            format_name(&other)
+        )),
+    }
+}
+
+fn parse_receipt_audit_format(raw: &str) -> Result<Format, String> {
+    match parse_format(raw)? {
+        Format::Json => Ok(Format::Json),
+        Format::Markdown => Ok(Format::Markdown),
+        other => Err(format!(
+            "receipt audit only supports json or markdown output, got `{}`",
             format_name(&other)
         )),
     }
@@ -1326,6 +1351,51 @@ mod tests {
             }
         );
         Ok(())
+    }
+
+    #[test]
+    fn parses_receipt_audit_command() -> Result<(), String> {
+        let command = parse(args([
+            "unsafe-review",
+            "receipt",
+            "audit",
+            "--root=fixtures/raw_pointer_alignment_receipted",
+            "--diff=change.diff",
+            "--format=markdown",
+            "--out=target/receipt-audit.md",
+            "--max-cards=5",
+        ]))?;
+
+        let Command::ReceiptAudit(options) = command else {
+            return Err("expected receipt audit command".to_string());
+        };
+        assert_eq!(
+            options.root,
+            PathBuf::from("fixtures/raw_pointer_alignment_receipted")
+        );
+        assert_eq!(
+            options.diff,
+            Some(DiffInput::File(PathBuf::from("change.diff")))
+        );
+        assert_eq!(options.format, Format::Markdown);
+        assert_eq!(options.out, Some(PathBuf::from("target/receipt-audit.md")));
+        assert_eq!(options.max_cards, Some(5));
+        Ok(())
+    }
+
+    #[test]
+    fn receipt_audit_rejects_non_audit_format() {
+        let command = parse(args([
+            "unsafe-review",
+            "receipt",
+            "audit",
+            "--format=sarif",
+        ]));
+
+        assert_eq!(
+            command,
+            Err("receipt audit only supports json or markdown output, got `sarif`".to_string())
+        );
     }
 
     fn args<const N: usize>(values: [&str; N]) -> Vec<String> {

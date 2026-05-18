@@ -106,6 +106,7 @@ pub(crate) enum Command {
     ReceiptValidate {
         root: PathBuf,
     },
+    ReceiptAudit(CheckOptions),
     ReceiptImportMiri(SavedOutputReceiptOptions),
     ReceiptImportCareful(SavedOutputReceiptOptions),
     ReceiptImportSanitizer(SavedOutputReceiptOptions),
