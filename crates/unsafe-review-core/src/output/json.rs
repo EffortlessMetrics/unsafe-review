@@ -244,6 +244,7 @@ mod tests {
         "raw_pointer_write_bytes",
         "pointer_arithmetic_num_ctrl_bytes_guard",
         "slice_from_raw_parts_mut",
+        "slice_from_raw_parts_mut_maybeuninit",
         "safe_reference_deref_no_cards",
         "imports_not_unsafe_operations",
         "cfg_target_feature_not_operation",

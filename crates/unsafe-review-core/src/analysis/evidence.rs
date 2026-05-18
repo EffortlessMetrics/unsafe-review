@@ -160,6 +160,10 @@ fn discharge_state_for(
         "initialized" => {
             if family == &OperationFamily::VecSetLen && has_set_len_initialization_evidence(lower) {
                 EvidenceState::present("Initialization evidence was detected")
+            } else if family == &OperationFamily::SliceFromRawParts
+                && has_maybeuninit_slice_context(lower)
+            {
+                EvidenceState::present("MaybeUninit slice element evidence was detected")
             } else if family == &OperationFamily::VecSetLen {
                 EvidenceState::missing("No initialization evidence was detected")
             } else {
@@ -257,6 +261,11 @@ fn has_encode_utf8_remaining_capacity_evidence(lower: &str) -> bool {
     compact.contains("encode_utf8(c,ptr,remaining_cap)")
         && compact.contains("remaining_cap=self.capacity()-len")
         && compact.contains("ptr")
+}
+
+fn has_maybeuninit_slice_context(lower: &str) -> bool {
+    let compact = compact_code(lower);
+    compact.contains("from_raw_parts_mut(") && compact.contains("maybeuninit")
 }
 
 fn has_set_len_shrink_evidence(lower: &str) -> bool {
@@ -871,6 +880,30 @@ mod tests {
         let evidence = obligation_evidence(&unsafe_call, &obligations, &contract, &reach);
 
         assert!(evidence[0].discharge.present);
+    }
+
+    #[test]
+    fn maybeuninit_slice_discharges_initialized_obligation_only() {
+        let obligations = vec![
+            SafetyObligation::new("initialized", "memory range is initialized"),
+            SafetyObligation::new("alignment", "pointer is aligned for the element type"),
+        ];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let slice = site_with_family(
+            OperationFamily::SliceFromRawParts,
+            vec!["fn ctrl_slice(&mut self) -> &mut [core::mem::MaybeUninit<Tag>] {"],
+            "unsafe { core::slice::from_raw_parts_mut(self.ctrl.as_ptr().cast(), self.len) }",
+            vec![],
+        );
+
+        let evidence = obligation_evidence(&slice, &obligations, &contract, &reach);
+
+        assert!(evidence[0].discharge.present);
+        assert!(!evidence[1].discharge.present);
     }
 
     #[test]

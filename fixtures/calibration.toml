@@ -22,6 +22,7 @@ required_core_fixtures = [
   "raw_pointer_read_len_capacity_assert",
   "pointer_arithmetic_num_ctrl_bytes_guard",
   "slice_from_raw_parts_mut",
+  "slice_from_raw_parts_mut_maybeuninit",
   "transmute_invalid_value",
   "unsafe_impl_send",
   "ffi_sanitizer_route",
@@ -236,6 +237,16 @@ expected_cards = 1
 expected_class = "guard_missing"
 expected_operation_family = "slice_from_raw_parts"
 expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "slice_from_raw_parts_mut_maybeuninit"
+kind = "positive"
+claim = "slice::from_raw_parts_mut recognizes MaybeUninit element slices as initialized-memory evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "slice_from_raw_parts"
+expected_hazard = "initialized_memory"
 
 [[cases]]
 fixture = "transmute_invalid_value"
