@@ -59,6 +59,10 @@ pub(crate) fn render_card_detail(card: &ReviewCard) -> String {
     for obligation in &card.obligations {
         out.push_str(&format!("- {}\n", obligation.description));
     }
+    out.push_str("\n## Hazards\n\n");
+    for hazard in &card.hazards {
+        out.push_str(&format!("- `{}`\n", hazard.as_str()));
+    }
     out.push_str("\n## Evidence\n\n");
     out.push_str(&format!("- Contract: {}\n", card.contract.summary));
     out.push_str(&format!("- Discharge: {}\n", card.discharge.summary));
@@ -77,8 +81,67 @@ pub(crate) fn render_card_detail(card: &ReviewCard) -> String {
             ));
         }
     }
+    if !card.missing.is_empty() {
+        out.push_str("\n## Missing evidence\n\n");
+        for missing in &card.missing {
+            out.push_str(&format!("- {}\n", missing.message));
+        }
+    }
+    if !card.routes.is_empty() {
+        out.push_str("\n## Recommended witness routes\n\n");
+        for route in &card.routes {
+            out.push_str(&format!("- `{}`: {}\n", route.kind.as_str(), route.reason));
+            if let Some(command) = &route.command {
+                out.push_str("\n```bash\n");
+                out.push_str(command);
+                out.push_str("\n```\n");
+            }
+        }
+    }
     out.push_str("\n## Next action\n\n");
     out.push_str(&card.next_action.summary);
-    out.push('\n');
+    out.push_str("\n\n## Trust boundary\n\n");
+    out.push_str("This is static unsafe contract review. It is not a proof of memory safety and not a Miri result unless a witness receipt is attached.\n");
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::{AnalysisMode, AnalyzeInput, DiffSource, PolicyMode, Scope, analyze};
+    use std::path::PathBuf;
+
+    #[test]
+    fn card_detail_explains_conditions_missing_evidence_and_routes() -> Result<(), String> {
+        let output = fixture_output("raw_pointer_alignment")?;
+        let card = output
+            .cards
+            .first()
+            .ok_or_else(|| "raw pointer fixture should emit a card".to_string())?;
+        let rendered = render_card_detail(card);
+
+        assert!(rendered.contains("## Required safety conditions"));
+        assert!(rendered.contains("pointer is aligned for the accessed type"));
+        assert!(rendered.contains("## Missing evidence"));
+        assert!(rendered.contains("Missing visible local guard"));
+        assert!(rendered.contains("## Recommended witness routes"));
+        assert!(rendered.contains("Pure-Rust UB-adjacent hazard"));
+        assert!(rendered.contains("## Trust boundary"));
+        Ok(())
+    }
+
+    fn fixture_output(name: &str) -> Result<AnalyzeOutput, String> {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures")
+            .join(name);
+        analyze(AnalyzeInput {
+            root: root.clone(),
+            scope: Scope::Diff,
+            diff: DiffSource::File(root.join("change.diff")),
+            mode: AnalysisMode::Draft,
+            policy: PolicyMode::Advisory,
+            include_unchanged_tests: true,
+            max_cards: None,
+        })
+    }
 }
