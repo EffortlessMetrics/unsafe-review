@@ -1,7 +1,7 @@
 use crate::analysis::scanner::ScannedSite;
 use crate::domain::{
-    ContractEvidence, DischargeEvidence, EvidenceState, ObligationEvidence, ReachEvidence,
-    RelatedTest, SafetyObligation,
+    ContractEvidence, DischargeEvidence, EvidenceState, ObligationEvidence, OperationFamily,
+    ReachEvidence, RelatedTest, SafetyObligation,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -43,7 +43,7 @@ pub(crate) fn obligation_evidence(
         .map(|obligation| ObligationEvidence {
             obligation: obligation.clone(),
             contract: contract_state(contract),
-            discharge: discharge_state_for(&obligation.key, &lower),
+            discharge: discharge_state_for(&site.operation.family, &obligation.key, &lower),
             reach: reach_state(reach),
             witness: EvidenceState::missing("No imported witness receipt was found"),
         })
@@ -102,7 +102,7 @@ fn reach_state(reach: &ReachEvidence) -> EvidenceState {
     }
 }
 
-fn discharge_state_for(key: &str, lower: &str) -> EvidenceState {
+fn discharge_state_for(family: &OperationFamily, key: &str, lower: &str) -> EvidenceState {
     match key {
         "alignment" => {
             if has_alignment_guard(lower) {
@@ -119,10 +119,19 @@ fn discharge_state_for(key: &str, lower: &str) -> EvidenceState {
             }
         }
         "capacity" => {
-            if lower.contains("capacity") || lower.contains("cap()") {
+            if has_capacity_guard(family, lower) {
                 EvidenceState::present("Capacity guard code was detected")
             } else {
                 EvidenceState::missing("No capacity guard code was detected")
+            }
+        }
+        "initialized" => {
+            if family == &OperationFamily::VecSetLen && has_set_len_initialization_evidence(lower) {
+                EvidenceState::present("Initialization evidence was detected")
+            } else if family == &OperationFamily::VecSetLen {
+                EvidenceState::missing("No initialization evidence was detected")
+            } else {
+                EvidenceState::missing("No obligation-specific guard code was detected")
             }
         }
         "non-null" | "pointer-live" => {
@@ -141,12 +150,31 @@ fn has_length_or_bounds_guard(lower: &str) -> bool {
     lower.contains("len") && (lower.contains(">=") || lower.contains('<'))
 }
 
+fn has_capacity_guard(family: &OperationFamily, lower: &str) -> bool {
+    lower.contains("capacity")
+        || lower.contains("cap()")
+        || (family == &OperationFamily::VecSetLen && contains_word(lower, "cap"))
+}
+
+fn has_set_len_initialization_evidence(lower: &str) -> bool {
+    lower.contains("maybeuninit::new")
+        || lower.contains(".write(")
+        || lower.contains("ptr::write")
+        || lower.contains("copy_nonoverlapping")
+        || lower.contains("copy_to_nonoverlapping")
+}
+
 fn has_alignment_guard(lower: &str) -> bool {
     lower.contains("is_aligned")
         || lower.contains("align_offset")
         || lower.contains("align_of")
         || lower.contains("addr() %")
         || lower.contains("as usize %")
+}
+
+fn contains_word(text: &str, word: &str) -> bool {
+    text.split(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))
+        .any(|token| token == word)
 }
 
 pub(crate) fn reach_evidence(
@@ -282,6 +310,20 @@ mod tests {
         snippet: &str,
         context_after: Vec<&str>,
     ) -> ScannedSite {
+        site_with_family(
+            OperationFamily::RawPointerRead,
+            context_before,
+            snippet,
+            context_after,
+        )
+    }
+
+    fn site_with_family(
+        family: OperationFamily,
+        context_before: Vec<&str>,
+        snippet: &str,
+        context_after: Vec<&str>,
+    ) -> ScannedSite {
         ScannedSite {
             site: UnsafeSite {
                 location: SourceLocation::new(PathBuf::from("src/lib.rs"), 1, 1),
@@ -293,7 +335,7 @@ mod tests {
                 snippet: snippet.to_string(),
             },
             operation: UnsafeOperation {
-                family: OperationFamily::RawPointerRead,
+                family,
                 expression: snippet.to_string(),
             },
             context_before: context_before.into_iter().map(str::to_string).collect(),
@@ -352,6 +394,64 @@ mod tests {
                 .discharge
                 .present
         );
+    }
+
+    #[test]
+    fn set_len_initialization_evidence_is_operation_specific() {
+        let obligations = vec![SafetyObligation::new(
+            "initialized",
+            "elements in the extended range are initialized",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let context = vec!["*dst = MaybeUninit::new(*src);"];
+        let set_len = site_with_family(
+            OperationFamily::VecSetLen,
+            context.clone(),
+            "out.set_len(CAP);",
+            vec![],
+        );
+        let raw_read = site_with_family(
+            OperationFamily::RawPointerRead,
+            context,
+            "ptr.read()",
+            vec![],
+        );
+
+        let set_len_evidence = obligation_evidence(&set_len, &obligations, &contract, &reach);
+        let raw_read_evidence = obligation_evidence(&raw_read, &obligations, &contract, &reach);
+
+        assert!(set_len_evidence[0].discharge.present);
+        assert_eq!(
+            raw_read_evidence[0].discharge.summary,
+            "No obligation-specific guard code was detected"
+        );
+    }
+
+    #[test]
+    fn set_len_capacity_evidence_accepts_const_cap_token() {
+        let obligations = vec![SafetyObligation::new(
+            "capacity",
+            "new length is at most capacity",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let set_len = site_with_family(
+            OperationFamily::VecSetLen,
+            vec!["pub struct Buffer<const CAP: usize> {"],
+            "out.set_len(CAP);",
+            vec![],
+        );
+
+        let evidence = obligation_evidence(&set_len, &obligations, &contract, &reach);
+
+        assert!(evidence[0].discharge.present);
     }
 
     #[test]

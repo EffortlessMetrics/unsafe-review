@@ -21,7 +21,7 @@ witnesses by default.
 | Requirement | Current evidence | Status | Gap |
 |---|---|---|---|
 | Canonical product unit is `ReviewCard`; projections must not create parallel truth | JSON, PR summary, SARIF, comment-plan, saved LSP, agent packet, repo, badge, policy, and receipt surfaces are all listed in `SUPPORT_TIERS.md` as card projections; handoffs record lane boundaries | Experimental | Continue watching new surfaces for reclassification logic |
-| Card correctness before breadth | Fixture goldens cover raw pointer alignment/deref/read/write, split syntax, public unsafe contracts, `MaybeUninit`, `Vec::set_len`, `transmute`, `get_unchecked_mut`, `Pin::new_unchecked`, FFI, unsafe impl Send, and negative safe/comment cases; `fixtures/calibration.toml` indexes the core positive, negative, and false-positive-control claims | Experimental | Fixture corpus is curated; no broad semantic proof |
+| Card correctness before breadth | Fixture goldens cover raw pointer alignment/deref/read/write, split syntax, public unsafe contracts, `MaybeUninit`, `Vec::set_len`, `Vec::set_len` initialized-loop evidence, `transmute`, `get_unchecked_mut`, `Pin::new_unchecked`, FFI, unsafe impl Send, and negative safe/comment cases; `fixtures/calibration.toml` indexes the core positive, negative, and false-positive-control claims | Experimental | Fixture corpus is curated; no broad semantic proof |
 | Obligation-level evidence | `ReviewCard` output and fixture goldens distinguish contract, discharge, reach, and witness evidence per obligation | Experimental | Guard patterns remain sparse |
 | Length guard does not discharge alignment; comments do not count as guards | Raw-pointer alignment and comment-not-guard fixtures are listed as proof in support tiers | Experimental | More real-world guard idioms need calibration |
 | Stable-first implementation; no mandatory MIR or `rustc_private` | Workspace uses stable source parsing and `ra_ap_syntax`; support tiers mark MIR/nightly facts as deferred | Met for current lanes | Optional adapters still need ADR before promotion |
@@ -35,7 +35,7 @@ witnesses by default.
 | Explicit receipts can be authored and validated safely | `receipt template` and `receipt validate` are covered by CLI e2e tests and support tiers | Experimental | Template output does not verify that the recorded command ran |
 | Public claims map to proof | `SUPPORT_TIERS.md` maps every current surface to proof and limits | In place | Keep updating for every new lane |
 | No soundness, UB-free, Miri-clean, site-execution, or default-blocking claim | Trust-boundary text is enforced across artifacts; support tiers and handoffs repeat limits | In place | Must remain part of all new projections |
-| First real-crate dogfood measurement | Handoff `2026-05-18-real-crate-dogfood-v0.6.md` records top-50 capped `rust-smallvec`, `arrayvec`, and `memchr` runs plus `memchr#215`, `rust-smallvec#407`, `arrayvec#308`, and `arrayvec#288` PR-diff runs; dogfood found and fixed import/declaration false positives, `cfg(target_feature)` false positives, capped repo scan timeout behavior, missing owner-contract inheritance for operation cards, and comment-derived owner false positives | Experimental | More crates, more real PR diffs, uncapped/sampled runs, stronger `Vec::set_len` evidence modeling, and human review are still needed before calibration claims |
+| First real-crate dogfood measurement | Handoff `2026-05-18-real-crate-dogfood-v0.6.md` records top-50 capped `rust-smallvec`, `arrayvec`, and `memchr` runs plus `memchr#215`, `rust-smallvec#407`, `arrayvec#308`, and `arrayvec#288` PR-diff runs; dogfood found and fixed import/declaration false positives, `cfg(target_feature)` false positives, capped repo scan timeout behavior, missing owner-contract inheritance for operation cards, comment-derived owner false positives, and one fixture-backed `Vec::set_len` initialization-evidence improvement | Experimental | More crates, more real PR diffs, uncapped/sampled runs, broader `Vec::set_len` evidence modeling, and human review are still needed before calibration claims |
 
 ## Current Gaps
 
@@ -54,8 +54,9 @@ These are not failures; they are the next unsupported or weakly verified areas:
 - No default no-new-debt or blocking branch-protection policy is justified yet.
 - Outcome comparison is saved-snapshot only and still needs dogfood on real
   repo posture snapshots.
-- Real PR-diff dogfood shows `Vec::set_len` guard evidence is still weak for
-  initialization loops, const capacity facts, and shrink operations.
+- Real PR-diff dogfood shows `Vec::set_len` guard evidence still needs broader
+  modeling; visible `MaybeUninit::new` initialization loops and const `CAP`
+  capacity facts now have fixture coverage, while shrink operations remain weak.
 
 ## Current Gates
 

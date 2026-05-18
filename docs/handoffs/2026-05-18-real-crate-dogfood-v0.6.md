@@ -302,12 +302,14 @@ operation families: vec_set_len, unknown
 ```
 
 This run did not receive a scanner patch. It captured a real limitation in the
-current guard model: `Vec::set_len` evidence remains sparse for initialization
+current guard model: `Vec::set_len` evidence was sparse for initialization
 patterns such as `MaybeUninit::new` loops, const-generic `CAP` capacity facts,
 and shrink operations like `truncate`, `clear`, and `pop` where the initialized
-range obligation is not the right shape. The cards are still useful as advisory
-review prompts, but this sample should not be used as support-tier promotion
-evidence.
+range obligation is not the right shape. A later fixture-backed follow-up now
+recognizes visible `MaybeUninit::new` initialization loops and const `CAP`
+capacity evidence for `Vec::set_len`; shrink and broader initialization
+patterns remain limited. The cards are still useful as advisory review prompts,
+but this sample should not be used as support-tier promotion evidence.
 
 ## Proof
 
@@ -376,9 +378,10 @@ The repo must not claim:
 - `memchr` completion depends on capped-scan behavior; uncapped performance is
   still unmeasured.
 - No human audit was performed for every emitted card.
-- `arrayvec#288` shows that `Vec::set_len` guard evidence needs better
-  modeling for initialization loops, const capacity facts, and shrink
-  operations.
+- `arrayvec#288` shows that `Vec::set_len` guard evidence still needs better
+  modeling; visible `MaybeUninit::new` initialization loops and const `CAP`
+  capacity evidence now have fixture coverage, while shrink operations and
+  broader initialization patterns remain limited.
 - These runs do not prove absence of missed unsafe seams.
 
 ## Next useful work
@@ -388,8 +391,8 @@ Continue dogfood before promotion:
 - run uncapped or sampled repo inventories on additional unsafe-heavy crates
 - measure card usefulness on real PR diffs, not only whole-repo snapshots
 - record repeated false-positive categories as fixture regressions
-- improve `Vec::set_len` obligation/evidence modeling before support-tier
-  promotion
+- continue improving `Vec::set_len` obligation/evidence modeling before
+  support-tier promotion
 - keep support tiers experimental until dogfood evidence justifies promotion
 
 Defer:

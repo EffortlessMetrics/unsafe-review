@@ -235,6 +235,7 @@ mod tests {
         "split_raw_pointer_read_call",
         "maybeuninit_assume_init",
         "vec_set_len",
+        "vec_set_len_initialized_loop",
         "transmute_invalid_value",
         "unsafe_impl_send",
         "ffi_sanitizer_route",
