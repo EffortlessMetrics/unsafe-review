@@ -109,5 +109,7 @@ readiness.
 For `pr-diff` targets, make sure the target checkout under `root` matches the
 saved diff's expected source tree. A zero-card result from checkout drift is not
 dogfood evidence; record zero-card PR diffs only as explicit false-positive
-controls. When saving a raw diff from GitHub, use `rtk proxy gh pr diff ...`
-so RTK does not compact away `diff --git` headers.
+controls. Exploratory zero-card results for unsupported unsafe-adjacent classes
+belong in the handoff or objective-audit limitations instead of the active
+corpus table. When saving a raw diff from GitHub, use
+`rtk proxy gh pr diff ...` so RTK does not compact away `diff --git` headers.
