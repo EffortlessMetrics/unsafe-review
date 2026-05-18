@@ -33,6 +33,11 @@ unsafe-review check --base origin/main
 # Review a supplied unified diff
 unsafe-review check --diff change.diff --format json
 
+# Write a sparse GitHub-ready PR summary artifact
+unsafe-review check --base origin/main \
+  --format pr-summary \
+  --out target/unsafe-review/pr-summary.md
+
 # Try the bundled smoke fixture
 unsafe-review check --root fixtures/raw_pointer_alignment \
   --diff fixtures/raw_pointer_alignment/change.diff \

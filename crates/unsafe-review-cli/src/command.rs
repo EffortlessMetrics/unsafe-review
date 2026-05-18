@@ -5,6 +5,7 @@ pub(crate) enum Format {
     Human,
     Json,
     Markdown,
+    PrSummary,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
