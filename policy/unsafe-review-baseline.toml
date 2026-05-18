@@ -3,4 +3,13 @@ policy = "unsafe-review-baseline"
 owner = "core/policy"
 status = "empty"
 
-# Baseline entries use exact counted identity once no-new-debt mode is enabled.
+# Non-empty ledgers use:
+#
+# [[entries]]
+# card_id = "UR-...-c1"
+# owner = "team-or-person"
+# reason = "why this current card is accepted"
+# evidence = "review link, issue, or receipt"
+# review_after = "2026-08-01"
+#
+# check-policy validates the shape only. Analysis does not consume baselines yet.

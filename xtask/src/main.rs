@@ -113,9 +113,146 @@ fn check_policy() -> Result<(), String> {
         let value = parse_toml_file(Path::new(path))?;
         require_toml_string(&value, "schema_version", path)?;
     }
+    check_unsafe_review_ledger(
+        Path::new("policy/unsafe-review-baseline.toml"),
+        LedgerKind::Baseline,
+    )?;
+    check_unsafe_review_ledger(
+        Path::new("policy/unsafe-review-suppressions.toml"),
+        LedgerKind::Suppression,
+    )?;
     parse_toml_file(Path::new(".unsafe-review/goals/active.toml"))?;
     println!("check-policy: ok");
     Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum LedgerKind {
+    Baseline,
+    Suppression,
+}
+
+impl LedgerKind {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Baseline => "baseline",
+            Self::Suppression => "suppression",
+        }
+    }
+}
+
+fn check_unsafe_review_ledger(path: &Path, kind: LedgerKind) -> Result<(), String> {
+    let value = parse_toml_file(path)?;
+    let path_display = path.display().to_string();
+    let status = value
+        .get("status")
+        .and_then(toml::Value::as_str)
+        .unwrap_or("active");
+    let entries = value
+        .get("entries")
+        .and_then(toml::Value::as_array)
+        .map_or(&[][..], Vec::as_slice);
+
+    if status == "empty" {
+        if entries.is_empty() {
+            return Ok(());
+        }
+        return Err(format!(
+            "{path_display} status is empty but contains entries"
+        ));
+    }
+
+    for (idx, entry) in entries.iter().enumerate() {
+        let Some(entry) = entry.as_table() else {
+            return Err(format!(
+                "{path_display} entries[{idx}] must be a TOML table"
+            ));
+        };
+        for key in ["card_id", "owner", "reason", "evidence"] {
+            require_ledger_entry_string(entry, key, &path_display, idx)?;
+        }
+        let has_review_after = ledger_entry_date(entry, "review_after", &path_display, idx)?;
+        let has_expires = ledger_entry_date(entry, "expires", &path_display, idx)?;
+        match kind {
+            LedgerKind::Baseline if !has_review_after => {
+                return Err(format!(
+                    "{path_display} entries[{idx}] baseline entry is missing review_after"
+                ));
+            }
+            LedgerKind::Suppression if !has_review_after && !has_expires => {
+                return Err(format!(
+                    "{path_display} entries[{idx}] suppression entry must set review_after or expires"
+                ));
+            }
+            _ => {}
+        }
+        let card_id = entry
+            .get("card_id")
+            .and_then(toml::Value::as_str)
+            .unwrap_or_default();
+        if !looks_like_counted_card_id(card_id) {
+            return Err(format!(
+                "{path_display} entries[{idx}] {} card_id must be an exact counted UR-* identity ending in -cN",
+                kind.name()
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn require_ledger_entry_string(
+    entry: &toml::map::Map<String, toml::Value>,
+    key: &str,
+    path: &str,
+    idx: usize,
+) -> Result<(), String> {
+    let Some(value) = entry.get(key).and_then(toml::Value::as_str) else {
+        return Err(format!("{path} entries[{idx}] is missing string `{key}`"));
+    };
+    if value.trim().is_empty() {
+        Err(format!("{path} entries[{idx}] string `{key}` is empty"))
+    } else {
+        Ok(())
+    }
+}
+
+fn ledger_entry_date(
+    entry: &toml::map::Map<String, toml::Value>,
+    key: &str,
+    path: &str,
+    idx: usize,
+) -> Result<bool, String> {
+    let Some(value) = entry.get(key) else {
+        return Ok(false);
+    };
+    let Some(value) = value.as_str() else {
+        return Err(format!("{path} entries[{idx}] `{key}` must be a string"));
+    };
+    if !looks_like_iso_date(value) {
+        return Err(format!("{path} entries[{idx}] `{key}` must use YYYY-MM-DD"));
+    }
+    Ok(true)
+}
+
+fn looks_like_iso_date(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 10
+        && bytes[0..4].iter().all(u8::is_ascii_digit)
+        && bytes[4] == b'-'
+        && bytes[5..7].iter().all(u8::is_ascii_digit)
+        && bytes[7] == b'-'
+        && bytes[8..10].iter().all(u8::is_ascii_digit)
+}
+
+fn looks_like_counted_card_id(value: &str) -> bool {
+    let Some((prefix, count)) = value.rsplit_once("-c") else {
+        return false;
+    };
+    value.starts_with("UR-")
+        && !prefix.is_empty()
+        && !count.is_empty()
+        && count.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 fn check_support_tiers() -> Result<(), String> {
@@ -753,6 +890,105 @@ mod tests {
 
         fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
         assert!(result.err().unwrap_or_default().contains("unknown card id"));
+        Ok(())
+    }
+
+    #[test]
+    fn policy_ledger_accepts_empty_status_without_entries() -> Result<(), String> {
+        let path = unique_temp_dir("unsafe-review-empty-ledger")?.with_extension("toml");
+        fs::write(
+            &path,
+            r#"schema_version = "0.1"
+policy = "unsafe-review-baseline"
+status = "empty"
+"#,
+        )
+        .map_err(|err| format!("write ledger failed: {err}"))?;
+
+        let result = check_unsafe_review_ledger(&path, LedgerKind::Baseline);
+
+        fs::remove_file(&path).map_err(|err| format!("remove ledger failed: {err}"))?;
+        result
+    }
+
+    #[test]
+    fn policy_ledger_requires_exact_counted_identity_metadata() -> Result<(), String> {
+        let path = unique_temp_dir("unsafe-review-baseline-ledger")?.with_extension("toml");
+        fs::write(
+            &path,
+            r#"schema_version = "0.1"
+policy = "unsafe-review-baseline"
+status = "active"
+
+[[entries]]
+card_id = "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1"
+owner = "core/policy"
+reason = "accepted current fixture debt"
+evidence = "review-card fixture"
+review_after = "2026-08-01"
+"#,
+        )
+        .map_err(|err| format!("write ledger failed: {err}"))?;
+
+        let result = check_unsafe_review_ledger(&path, LedgerKind::Baseline);
+
+        fs::remove_file(&path).map_err(|err| format!("remove ledger failed: {err}"))?;
+        result
+    }
+
+    #[test]
+    fn suppression_ledger_requires_review_or_expiry_date() -> Result<(), String> {
+        let path = unique_temp_dir("unsafe-review-suppression-ledger")?.with_extension("toml");
+        fs::write(
+            &path,
+            r#"schema_version = "0.1"
+policy = "unsafe-review-suppressions"
+status = "active"
+
+[[entries]]
+card_id = "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1"
+owner = "core/policy"
+reason = "false positive under review"
+evidence = "manual review"
+"#,
+        )
+        .map_err(|err| format!("write ledger failed: {err}"))?;
+
+        let result = check_unsafe_review_ledger(&path, LedgerKind::Suppression);
+
+        fs::remove_file(&path).map_err(|err| format!("remove ledger failed: {err}"))?;
+        assert!(
+            result
+                .err()
+                .unwrap_or_default()
+                .contains("review_after or expires")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn policy_ledger_rejects_uncounted_card_identity() -> Result<(), String> {
+        let path = unique_temp_dir("unsafe-review-bad-identity-ledger")?.with_extension("toml");
+        fs::write(
+            &path,
+            r#"schema_version = "0.1"
+policy = "unsafe-review-baseline"
+status = "active"
+
+[[entries]]
+card_id = "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment"
+owner = "core/policy"
+reason = "accepted current fixture debt"
+evidence = "review-card fixture"
+review_after = "2026-08-01"
+"#,
+        )
+        .map_err(|err| format!("write ledger failed: {err}"))?;
+
+        let result = check_unsafe_review_ledger(&path, LedgerKind::Baseline);
+
+        fs::remove_file(&path).map_err(|err| format!("remove ledger failed: {err}"))?;
+        assert!(result.err().unwrap_or_default().contains("exact counted"));
         Ok(())
     }
 

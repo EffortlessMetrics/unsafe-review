@@ -3,4 +3,14 @@ policy = "unsafe-review-suppressions"
 owner = "core/policy"
 status = "empty"
 
-# Suppressions require owner, reason, evidence, and expiry.
+# Non-empty ledgers use:
+#
+# [[entries]]
+# card_id = "UR-...-c1"
+# owner = "team-or-person"
+# reason = "why this card is suppressed"
+# evidence = "review link, issue, or receipt"
+# expires = "2026-08-01"
+#
+# `review_after` may be used instead of `expires` for non-expiring reviews.
+# check-policy validates the shape only. Analysis does not consume suppressions yet.
