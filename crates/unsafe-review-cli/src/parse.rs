@@ -240,6 +240,7 @@ fn parse_format(raw: &str) -> Result<Format, String> {
         "pr-summary" | "github-summary" | "github-markdown" => Ok(Format::PrSummary),
         "sarif" => Ok(Format::Sarif),
         "comment-plan" | "comments" => Ok(Format::CommentPlan),
+        "lsp" | "lsp-json" | "editor-json" => Ok(Format::Lsp),
         other => Err(format!("unknown format `{other}`")),
     }
 }
@@ -313,6 +314,16 @@ mod tests {
             return Err("expected check command".to_string());
         };
         assert_eq!(options.format, Format::CommentPlan);
+        Ok(())
+    }
+
+    #[test]
+    fn parses_lsp_format_for_check() -> Result<(), String> {
+        let command = parse(args(["unsafe-review", "check", "--format", "lsp"]))?;
+        let Command::Check(options) = command else {
+            return Err("expected check command".to_string());
+        };
+        assert_eq!(options.format, Format::Lsp);
         Ok(())
     }
 

@@ -49,6 +49,11 @@ unsafe-review check --base origin/main \
   --format comment-plan \
   --out target/unsafe-review/comment-plan.json
 
+# Write a read-only saved editor/LSP projection
+unsafe-review check --base origin/main \
+  --format lsp \
+  --out target/unsafe-review/lsp.json
+
 # Try the bundled smoke fixture
 unsafe-review check --root fixtures/raw_pointer_alignment \
   --diff fixtures/raw_pointer_alignment/change.diff \
@@ -82,8 +87,9 @@ contract evidence, looks for simple local guards, and routes cards to likely wit
 The current PR projection renders `cards.json`, `pr-summary.md`, `cards.sarif`, and
 `comment-plan.json` as advisory artifacts. It does not post comments, run witness
 tools, or enable blocking policy. Support tiers stay conservative: fixture-backed
-surfaces are experimental, and repo posture, LSP, agent packets, receipts, baselines,
-and suppressions remain later lanes until they have proof.
+surfaces are experimental, the saved editor/LSP projection is read-only and
+experimental, and repo posture, agent packets, receipts, baselines, and suppressions
+remain later lanes until they have proof.
 
 ## Crate surface
 

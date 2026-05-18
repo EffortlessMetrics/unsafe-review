@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use unsafe_review_core::{
     AnalysisMode, AnalyzeInput, CardId, DiffSource, PolicyMode, Scope, analyze, collect_context,
-    explain_card, render_comment_plan, render_human, render_json, render_markdown,
+    explain_card, render_comment_plan, render_human, render_json, render_lsp, render_markdown,
     render_pr_summary, render_sarif,
 };
 
@@ -112,6 +112,7 @@ fn render_with_format(output: &unsafe_review_core::AnalyzeOutput, format: &Forma
         Format::PrSummary => render_pr_summary(output),
         Format::Sarif => render_sarif(output),
         Format::CommentPlan => render_comment_plan(output),
+        Format::Lsp => render_lsp(output),
     }
 }
 
@@ -221,10 +222,10 @@ fn print_help() {
     println!();
     println!("Commands:");
     println!(
-        "  check   [--root .] [--base origin/main | --diff file|-] [--format human|json|markdown|pr-summary|sarif|comment-plan] [--out file]"
+        "  check   [--root .] [--base origin/main | --diff file|-] [--format human|json|markdown|pr-summary|sarif|comment-plan|lsp] [--out file]"
     );
     println!(
-        "  repo    [--root .] [--format human|json|markdown|pr-summary|sarif|comment-plan] [--out file]"
+        "  repo    [--root .] [--format human|json|markdown|pr-summary|sarif|comment-plan|lsp] [--out file]"
     );
     println!("  pilot   [--root .] [--base origin/main] [--max-cards 5]");
     println!("  badges  [--root .] [--out badges]");
