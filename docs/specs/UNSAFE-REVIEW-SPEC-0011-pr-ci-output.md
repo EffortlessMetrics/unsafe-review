@@ -20,9 +20,9 @@ tools, or change policy mode.
 SARIF output is also a projection from existing `ReviewCard`s. SARIF results
 carry card identity, operation family, hazards, missing evidence, witness route
 recommendations, and the same trust boundary in result properties.
-The advisory GitHub workflow uploads the JSON, Markdown summary, and SARIF
-artifacts. It does not run witness tools, post inline comments, or enable
-blocking policy.
+The advisory GitHub workflow uploads the JSON, Markdown summary, SARIF, and
+comment-plan artifacts. It does not run witness tools, post inline comments, or
+enable blocking policy.
 Inline comment planning is artifact-only. The plan contains candidate comments
 for actionable high-priority or high-confidence cards, but no workflow posts
 those comments by default.
@@ -49,10 +49,11 @@ those comments by default.
   writes a GitHub-ready Markdown artifact.
 - `unsafe-review check --format sarif --out target/unsafe-review/cards.sarif`
   writes parseable SARIF 2.1.0.
-- The advisory workflow uploads `cards.json`, `pr-summary.md`, and `cards.sarif`
-  as artifacts without running Miri or posting comments.
 - `unsafe-review check --format comment-plan --out target/unsafe-review/comment-plan.json`
   writes candidate inline comments without posting them.
+- The advisory workflow uploads `cards.json`, `pr-summary.md`, `cards.sarif`,
+  and `comment-plan.json` as artifacts without running Miri, posting comments,
+  or enabling blocking policy.
 - Empty output states no actionable cards and does not imply the repository is
   safe or UB-free.
 
@@ -61,6 +62,7 @@ those comments by default.
 ```bash
 cargo xtask check-pr
 cargo test --workspace
+cargo xtask check-advisory-artifacts target/unsafe-review
 ```
 
 ## Promotion rule
