@@ -64,6 +64,19 @@ pub(crate) fn render_card_detail(card: &ReviewCard) -> String {
     out.push_str(&format!("- Discharge: {}\n", card.discharge.summary));
     out.push_str(&format!("- Reach: {}\n", card.reach.summary));
     out.push_str(&format!("- Witness: {}\n", card.witness.summary));
+    if !card.obligation_evidence.is_empty() {
+        out.push_str("\n## Obligation evidence\n\n");
+        for evidence in &card.obligation_evidence {
+            out.push_str(&format!(
+                "- `{}`: contract `{}`, guard `{}`, reach `{}`, witness `{}`\n",
+                evidence.obligation.key,
+                evidence.contract.state,
+                evidence.discharge.state,
+                evidence.reach.state,
+                evidence.witness.state
+            ));
+        }
+    }
     out.push_str("\n## Next action\n\n");
     out.push_str(&card.next_action.summary);
     out.push('\n');

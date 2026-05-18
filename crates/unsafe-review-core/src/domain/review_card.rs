@@ -1,7 +1,7 @@
 use super::{
-    CardId, Confidence, ContractEvidence, DischargeEvidence, HazardKind, MissingEvidence, Priority,
-    ReachEvidence, RelatedTest, ReviewClass, SafetyObligation, UnsafeOperation, UnsafeSite,
-    WitnessEvidence, WitnessRoute,
+    CardId, Confidence, ContractEvidence, DischargeEvidence, HazardKind, MissingEvidence,
+    ObligationEvidence, Priority, ReachEvidence, RelatedTest, ReviewClass, SafetyObligation,
+    UnsafeOperation, UnsafeSite, WitnessEvidence, WitnessRoute,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -20,6 +20,7 @@ pub struct ReviewCard {
     pub operation: UnsafeOperation,
     pub hazards: Vec<HazardKind>,
     pub obligations: Vec<SafetyObligation>,
+    pub obligation_evidence: Vec<ObligationEvidence>,
     pub contract: ContractEvidence,
     pub discharge: DischargeEvidence,
     pub reach: ReachEvidence,

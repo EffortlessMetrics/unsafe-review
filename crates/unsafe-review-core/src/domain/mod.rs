@@ -10,7 +10,8 @@ mod witness;
 
 pub use classification::{Confidence, Priority, ReviewClass};
 pub use evidence::{
-    ContractEvidence, DischargeEvidence, MissingEvidence, ReachEvidence, RelatedTest,
+    ContractEvidence, DischargeEvidence, EvidenceState, MissingEvidence, ObligationEvidence,
+    ReachEvidence, RelatedTest,
 };
 pub use hazard::HazardKind;
 pub use ids::CardId;
