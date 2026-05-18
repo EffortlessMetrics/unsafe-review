@@ -157,3 +157,77 @@ pub(crate) fn obligations_for(family: &OperationFamily) -> Vec<SafetyObligation>
         )],
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn obligation_keys(family: &OperationFamily) -> Vec<String> {
+        obligations_for(family)
+            .into_iter()
+            .map(|obligation| obligation.key)
+            .collect()
+    }
+
+    #[test]
+    fn raw_pointer_operations_share_full_pointer_safety_model() {
+        for family in [
+            OperationFamily::RawPointerDeref,
+            OperationFamily::RawPointerRead,
+            OperationFamily::RawPointerWrite,
+        ] {
+            assert_eq!(
+                hazards_for(&family),
+                vec![
+                    HazardKind::PointerValidity,
+                    HazardKind::Alignment,
+                    HazardKind::InitializedMemory,
+                    HazardKind::SameAllocation,
+                ]
+            );
+            assert_eq!(
+                obligation_keys(&family),
+                vec![
+                    "pointer-live".to_string(),
+                    "bounds".to_string(),
+                    "alignment".to_string(),
+                    "initialized".to_string(),
+                    "allocation".to_string(),
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn concurrency_and_ffi_families_route_to_specialized_hazards() {
+        assert_eq!(
+            hazards_for(&OperationFamily::UnsafeImplSendSync),
+            vec![HazardKind::SendSyncInvariant, HazardKind::AtomicOrdering]
+        );
+        assert_eq!(
+            obligation_keys(&OperationFamily::UnsafeImplSendSync),
+            vec!["thread-safety".to_string()]
+        );
+
+        assert_eq!(
+            hazards_for(&OperationFamily::Ffi),
+            vec![HazardKind::FfiAbi, HazardKind::FfiOwnership]
+        );
+        assert_eq!(
+            obligation_keys(&OperationFamily::Ffi),
+            vec!["abi".to_string(), "ownership".to_string()]
+        );
+    }
+
+    #[test]
+    fn unknown_family_keeps_explicit_unknown_hazard_and_obligation() {
+        assert_eq!(
+            hazards_for(&OperationFamily::Unknown),
+            vec![HazardKind::Unknown]
+        );
+        assert_eq!(
+            obligation_keys(&OperationFamily::Unknown),
+            vec!["unknown".to_string()]
+        );
+    }
+}

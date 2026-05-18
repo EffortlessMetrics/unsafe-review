@@ -528,3 +528,121 @@ fn parse_ident(rest: &str) -> Option<String> {
     }
     (!name.is_empty()).then_some(name)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn fixture_root(test_name: &str) -> Result<PathBuf, String> {
+        let root = std::env::temp_dir().join(format!(
+            "unsafe-review-scanner-{test_name}-{}",
+            std::process::id()
+        ));
+        match fs::remove_dir_all(&root) {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(format!("cleanup {} failed: {err}", root.display())),
+        }
+        fs::create_dir_all(root.join("src"))
+            .map_err(|err| format!("create fixture directory failed: {err}"))?;
+        Ok(root)
+    }
+
+    fn cleanup_root(root: &Path) -> Result<(), String> {
+        match fs::remove_dir_all(root) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(format!("cleanup {} failed: {err}", root.display())),
+        }
+    }
+
+    #[test]
+    fn scan_file_prefers_specific_operations_over_containing_unsafe_blocks() -> Result<(), String> {
+        let root = fixture_root("specific-operations")?;
+        let rel = PathBuf::from("src/lib.rs");
+        fs::write(
+            root.join(&rel),
+            r#"pub unsafe fn expose(ptr: *const u8) -> u8 {
+    // transmute in a comment must not be reported.
+    unsafe {
+        *ptr
+    }
+}
+
+pub fn read_byte(ptr: *const u8) -> u8 {
+    unsafe { core::ptr::read(ptr) }
+}
+"#,
+        )
+        .map_err(|err| format!("write fixture source failed: {err}"))?;
+
+        let sites = scan_file(&root, &rel, None, false)?;
+        cleanup_root(&root)?;
+
+        let families = sites
+            .iter()
+            .map(|site| site.operation.family.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            families,
+            vec![
+                OperationFamily::Unknown,
+                OperationFamily::RawPointerDeref,
+                OperationFamily::RawPointerRead,
+            ]
+        );
+        assert!(
+            sites
+                .iter()
+                .all(|site| site.site.kind != UnsafeSiteKind::UnsafeBlock)
+        );
+        assert!(
+            sites
+                .iter()
+                .all(|site| !site.operation.expression.contains("comment"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn scan_file_marks_public_surface_only_for_public_unsafe_api_items() -> Result<(), String> {
+        let root = fixture_root("public-surface")?;
+        let rel = PathBuf::from("src/lib.rs");
+        fs::write(
+            root.join(&rel),
+            r#"pub unsafe trait PublicTrait {
+    unsafe fn do_it(&self);
+}
+
+unsafe impl Send for LocalType {}
+
+struct LocalType;
+"#,
+        )
+        .map_err(|err| format!("write fixture source failed: {err}"))?;
+
+        let sites = scan_file(&root, &rel, None, false)?;
+        cleanup_root(&root)?;
+
+        let public_trait = sites
+            .iter()
+            .find(|site| site.site.kind == UnsafeSiteKind::UnsafeTrait)
+            .ok_or_else(|| "expected public unsafe trait site".to_string())?;
+        assert_eq!(public_trait.site.visibility, "public");
+        assert!(public_trait.site.public_api_surface);
+
+        let send_impl = sites
+            .iter()
+            .find(|site| site.site.kind == UnsafeSiteKind::UnsafeImplSend)
+            .ok_or_else(|| "expected unsafe impl Send site".to_string())?;
+        assert_eq!(send_impl.site.visibility, "private");
+        assert!(!send_impl.site.public_api_surface);
+        assert_eq!(
+            send_impl.operation.family,
+            OperationFamily::UnsafeImplSendSync
+        );
+        Ok(())
+    }
+}
