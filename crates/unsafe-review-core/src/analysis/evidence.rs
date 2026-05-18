@@ -7,6 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 const PUBLIC_UNSAFE_API_CONTRACT_DISCHARGE: &str = "Public unsafe API declaration is a caller-contract site; local guard evidence is not expected at the declaration";
+const DOCUMENTED_PRIVATE_UNSAFE_CONTRACT_DISCHARGE: &str = "Documented private unsafe declaration is a caller-contract site; local guard evidence is not expected at the declaration";
 
 pub(crate) fn contract_evidence(site: &ScannedSite) -> ContractEvidence {
     let context = site.context_before.join("\n");
@@ -45,7 +46,7 @@ pub(crate) fn obligation_evidence(
         .map(|obligation| ObligationEvidence {
             obligation: obligation.clone(),
             contract: contract_state(contract),
-            discharge: discharge_state_for(site, &obligation.key, &lower),
+            discharge: discharge_state_for(site, &obligation.key, &lower, contract),
             reach: reach_state(reach),
             witness: EvidenceState::missing("No imported witness receipt was found"),
         })
@@ -60,11 +61,11 @@ pub(crate) fn summarize_discharge(evidence: &[ObligationEvidence]) -> DischargeE
         .iter()
         .all(|obligation| obligation.discharge.present)
     {
-        if evidence
-            .iter()
-            .all(|obligation| obligation.discharge.summary == PUBLIC_UNSAFE_API_CONTRACT_DISCHARGE)
-        {
-            return DischargeEvidence::present(PUBLIC_UNSAFE_API_CONTRACT_DISCHARGE);
+        if evidence.iter().all(|obligation| {
+            obligation.discharge.summary == PUBLIC_UNSAFE_API_CONTRACT_DISCHARGE
+                || obligation.discharge.summary == DOCUMENTED_PRIVATE_UNSAFE_CONTRACT_DISCHARGE
+        }) {
+            return DischargeEvidence::present(&evidence[0].discharge.summary);
         }
         return DischargeEvidence::present(
             "All inferred safety obligations have visible local guard evidence",
@@ -110,10 +111,18 @@ fn reach_state(reach: &ReachEvidence) -> EvidenceState {
     }
 }
 
-fn discharge_state_for(site: &ScannedSite, key: &str, lower: &str) -> EvidenceState {
+fn discharge_state_for(
+    site: &ScannedSite,
+    key: &str,
+    lower: &str,
+    contract: &ContractEvidence,
+) -> EvidenceState {
     let family = &site.operation.family;
     if is_public_unsafe_contract_obligation(site, key) {
         return EvidenceState::present(PUBLIC_UNSAFE_API_CONTRACT_DISCHARGE);
+    }
+    if is_documented_private_unsafe_contract_obligation(site, key, contract) {
+        return EvidenceState::present(DOCUMENTED_PRIVATE_UNSAFE_CONTRACT_DISCHARGE);
     }
     match key {
         "alignment" => {
@@ -161,6 +170,22 @@ fn discharge_state_for(site: &ScannedSite, key: &str, lower: &str) -> EvidenceSt
 fn is_public_unsafe_contract_obligation(site: &ScannedSite, key: &str) -> bool {
     key == "unknown"
         && site.site.public_api_surface
+        && site.operation.family == OperationFamily::Unknown
+        && matches!(
+            site.site.kind,
+            UnsafeSiteKind::UnsafeFn | UnsafeSiteKind::UnsafeTrait
+        )
+}
+
+fn is_documented_private_unsafe_contract_obligation(
+    site: &ScannedSite,
+    key: &str,
+    contract: &ContractEvidence,
+) -> bool {
+    key == "unknown"
+        && !site.site.public_api_surface
+        && contract.present
+        && contract.summary.contains("# Safety")
         && site.operation.family == OperationFamily::Unknown
         && matches!(
             site.site.kind,

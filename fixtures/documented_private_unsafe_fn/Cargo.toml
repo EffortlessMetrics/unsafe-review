@@ -1,0 +1,4 @@
+[package]
+name = "documented-private-unsafe-fn-fixture"
+version = "0.0.0"
+edition = "2024"
