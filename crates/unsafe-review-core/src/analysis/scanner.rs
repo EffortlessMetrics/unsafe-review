@@ -446,7 +446,7 @@ fn detect_syntax_site(
             Some((UnsafeSiteKind::Operation, family))
         }
         "CALL_EXPR" | "METHOD_CALL_EXPR" | "MACRO_EXPR" => {
-            detect_site(&normalize_call_spacing(&compact))
+            detect_site(&syntax_detection_text(&compact))
         }
         _ => None,
     }
@@ -617,7 +617,7 @@ fn syntax_operation_in_unsafe_block(
         "PREFIX_EXPR" => is_raw_pointer_deref(&compact),
         "CALL_EXPR" | "METHOD_CALL_EXPR" | "MACRO_EXPR" => {
             matches!(
-                detect_site(&normalize_call_spacing(&compact)),
+                detect_site(&syntax_detection_text(&compact)),
                 Some((UnsafeSiteKind::Operation, _family))
             )
         }
@@ -644,6 +644,11 @@ fn compact_whitespace(text: &str) -> String {
 
 fn normalize_call_spacing(text: &str) -> String {
     text.replace(" (", "(")
+}
+
+fn syntax_detection_text(compact: &str) -> String {
+    let mut state = LineCommentState::default();
+    normalize_call_spacing(line_for_text_detection(compact, &mut state).trim())
 }
 
 fn site_key(
@@ -808,6 +813,24 @@ mod tests {
         fs::write(
             root.join("src/lib.rs"),
             "pub fn safe_text() -> &'static str {\n    /* unsafe { core::ptr::read(ptr) } */\n    \"unsafe { core::ptr::read(ptr) }\"\n}\n",
+        )
+        .map_err(|err| format!("write temp source failed: {err}"))?;
+
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        assert!(sites.is_empty(), "unexpected sites: {sites:#?}");
+        Ok(())
+    }
+
+    #[test]
+    fn syntax_detection_ignores_unsafe_words_inside_call_string_literals() -> Result<(), String> {
+        let root = unique_temp_dir()?;
+        fs::create_dir_all(root.join("src"))
+            .map_err(|err| format!("create temp src failed: {err}"))?;
+        fs::write(
+            root.join("src/lib.rs"),
+            "pub fn detector_text(line: &str) -> bool {\n    line.contains(\"get_unchecked\") || line.contains(\"ptr::read_unaligned\")\n}\n",
         )
         .map_err(|err| format!("write temp source failed: {err}"))?;
 
