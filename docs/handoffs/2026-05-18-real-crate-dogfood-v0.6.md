@@ -18,6 +18,7 @@ Dogfood repositories:
 | `BurntSushi/memchr` | `db1a77d4b556a1321e136ca0514e43e74ea5fcc3` | completed with `--max-cards 50` after capped-scan hardening |
 | `rust-lang/hashbrown` | `7b3bba6eb4b2f03636155c918552b5f30c1a05b3` | completed with `--max-cards 50` after syntax-scan performance hardening; PR-diff dogfood completed for `hashbrown#469`, `hashbrown#501`, `hashbrown#556`, `hashbrown#657`, `hashbrown#667`, `hashbrown#692`, and `hashbrown#693` |
 | `tokio-rs/bytes` | `245adff079eb0cb1a706d35bab5f68b2d51919f6` | completed with `--max-cards 50`; PR-diff dogfood completed for `bytes#826` |
+| `crossbeam-rs/crossbeam` | `03919fedb43cdbd0866aee0c77e0d6df8976b12f` | completed with `--max-cards 50`; capped output recorded 45 `contract_missing`, 4 `requires_loom`, and 1 `guard_missing` cards |
 
 The first two completed runs exposed two noisy false positives:
 
@@ -1565,6 +1566,10 @@ The repo may claim:
 - one fixture-backed `Vec::from_raw_parts` classification improvement changed
   one `bytes#826` card from `slice_from_raw_parts` to `vec_from_raw_parts`
   without claiming allocator, layout, initialization, or ownership proof
+- one capped `crossbeam-rs/crossbeam` repo snapshot completed with 50 cards
+  across 123 Rust files, adding concurrency-heavy dogfood for unsafe Send/Sync,
+  atomic-ordering witness routes, raw pointer dereference, and ownership-transfer
+  card shapes
 - attributed unsafe function declarations are deduped between syntax-backed
   extraction and fallback line scanning
 - false-positive regression coverage exists in fixtures and calibration
@@ -1584,7 +1589,7 @@ The repo must not claim:
 
 ## Known limits
 
-- Five real crates completed capped repo snapshots in this slice.
+- Six real crates completed capped repo snapshots in this slice.
 - The successful dogfood snapshots were capped at 50 cards.
 - Only eighteen real PR diffs were measured.
 - `memchr` completion depends on capped-scan behavior; uncapped performance is
