@@ -665,6 +665,19 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn unwrap_unchecked_uses_concrete_operation_family() -> Result<(), String> {
+        let output = fixture_output("unwrap_unchecked_result")?;
+        let card = single_card("unwrap_unchecked_result", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::UnwrapUnchecked);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(card.hazards.contains(&HazardKind::InvalidValue));
+        assert!(card.id.0.contains("unwrap-unchecked"));
+        Ok(())
+    }
+
+    #[test]
     fn private_unsafe_helper_can_use_local_safety_comment() -> Result<(), String> {
         let output = fixture_output("private_unsafe_helper_safety_comment")?;
         let card = single_card("private_unsafe_helper_safety_comment", &output)?;
