@@ -57,6 +57,7 @@ pub struct OutcomeCardState {
     pub class_name: String,
     pub priority: String,
     pub missing_count: usize,
+    pub witness: String,
     pub missing: Vec<String>,
 }
 
@@ -79,6 +80,8 @@ struct SnapshotCard {
     #[serde(rename = "class")]
     class_name: String,
     priority: String,
+    #[serde(default)]
+    witness: String,
     #[serde(default)]
     missing: Vec<String>,
 }
@@ -286,6 +289,14 @@ fn changed_reason(status: &str, before: &SnapshotCard, after: &SnapshotCard) -> 
             "missing evidence count changed from {before_missing} to {after_missing}"
         ));
     }
+    let before_witness = witness_state(before);
+    let after_witness = witness_state(after);
+    if before_witness.label != after_witness.label {
+        reasons.push(format!(
+            "witness receipt strength changed from `{}` to `{}`",
+            before_witness.label, after_witness.label
+        ));
+    }
     if reasons.is_empty() {
         reasons.push("class and missing evidence count are unchanged".to_string());
     }
@@ -306,6 +317,10 @@ fn changed_status(before: &SnapshotCard, after: &SnapshotCard) -> &'static str {
     if after_missing < before_missing {
         "improved"
     } else if after_missing > before_missing {
+        "regressed"
+    } else if witness_state(after).rank > witness_state(before).rank {
+        "improved"
+    } else if witness_state(after).rank < witness_state(before).rank {
         "regressed"
     } else {
         "unchanged"
@@ -343,6 +358,7 @@ fn snapshot_id(snapshot: &Snapshot) -> String {
         feed_hash(&mut hash, &card.id);
         feed_hash(&mut hash, &card.class_name);
         feed_hash(&mut hash, &card.priority);
+        feed_hash(&mut hash, &card.witness);
         for missing in &card.missing {
             feed_hash(&mut hash, missing);
         }
@@ -380,8 +396,8 @@ impl OutcomeCards {
 fn markdown_state(state: Option<&OutcomeCardState>) -> String {
     match state {
         Some(state) => format!(
-            "`{}` / `{}` / {} missing",
-            state.class_name, state.priority, state.missing_count
+            "`{}` / `{}` / {} missing / witness `{}`",
+            state.class_name, state.priority, state.missing_count, state.witness
         ),
         None => "-".to_string(),
     }
@@ -403,8 +419,57 @@ impl From<&SnapshotCard> for OutcomeCardState {
             class_name: card.class_name.clone(),
             priority: card.priority.clone(),
             missing_count: card.missing.len(),
+            witness: witness_state(card).label,
             missing: card.missing.clone(),
         }
+    }
+}
+
+struct WitnessState {
+    label: String,
+    rank: u8,
+}
+
+fn witness_state(card: &SnapshotCard) -> WitnessState {
+    if let Some(strength) = imported_receipt_strength(&card.witness) {
+        return WitnessState {
+            rank: witness_rank(&strength),
+            label: strength,
+        };
+    }
+    if card
+        .missing
+        .iter()
+        .any(|item| item.to_ascii_lowercase().contains("witness"))
+        || card.witness.contains("No imported witness receipt")
+        || card.witness.trim().is_empty()
+    {
+        return WitnessState {
+            label: "missing".to_string(),
+            rank: 0,
+        };
+    }
+    WitnessState {
+        label: "present".to_string(),
+        rank: witness_rank("ran"),
+    }
+}
+
+fn imported_receipt_strength(summary: &str) -> Option<String> {
+    let marker = " receipt with `";
+    let start = summary.find(marker)? + marker.len();
+    let end = summary[start..].find("` strength")? + start;
+    Some(summary[start..end].to_string())
+}
+
+fn witness_rank(value: &str) -> u8 {
+    match value {
+        "missing" => 0,
+        "configured" => 1,
+        "ran" => 2,
+        "test_targeted" => 3,
+        "site_reached" => 4,
+        _ => 2,
     }
 }
 
@@ -508,6 +573,77 @@ mod tests {
     }
 
     #[test]
+    fn outcome_reports_witness_receipt_improvement_reason() -> Result<(), String> {
+        let before = snapshot_json(&[card_with_witness(
+            "UR-witness-c1",
+            "guard_missing",
+            "high",
+            &["guard", "witness"],
+            "No imported witness receipt was found",
+        )]);
+        let after = snapshot_json(&[card_with_witness(
+            "UR-witness-c1",
+            "guard_missing",
+            "high",
+            &["guard"],
+            "Imported miri receipt with `ran` strength: focused fixture witness passed",
+        )]);
+
+        let report = compare_json(&before, &after)?;
+
+        assert_eq!(report.summary.improved, 1);
+        assert!(
+            report.cards.improved[0]
+                .reason
+                .contains("witness receipt strength changed from `missing` to `ran`")
+        );
+        let after_state = report.cards.improved[0]
+            .after
+            .as_ref()
+            .ok_or("improved card should include after state")?;
+        assert_eq!(after_state.witness, "ran");
+        Ok(())
+    }
+
+    #[test]
+    fn outcome_reports_witness_receipt_strength_regression() -> Result<(), String> {
+        let before = snapshot_json(&[card_with_witness(
+            "UR-witness-c1",
+            "guarded_and_witnessed",
+            "low",
+            &[],
+            "Imported miri receipt with `test_targeted` strength: focused fixture witness passed",
+        )]);
+        let after = snapshot_json(&[card_with_witness(
+            "UR-witness-c1",
+            "guarded_and_witnessed",
+            "low",
+            &[],
+            "Imported miri receipt with `configured` strength: configured only",
+        )]);
+
+        let report = compare_json(&before, &after)?;
+
+        assert_eq!(report.summary.regressed, 1);
+        assert!(
+            report.cards.regressed[0]
+                .reason
+                .contains("witness receipt strength changed from `test_targeted` to `configured`")
+        );
+        let before_state = report.cards.regressed[0]
+            .before
+            .as_ref()
+            .ok_or("regressed card should include before state")?;
+        let after_state = report.cards.regressed[0]
+            .after
+            .as_ref()
+            .ok_or("regressed card should include after state")?;
+        assert_eq!(before_state.witness, "test_targeted");
+        assert_eq!(after_state.witness, "configured");
+        Ok(())
+    }
+
+    #[test]
     fn outcome_rejects_duplicate_card_identity() {
         let before = snapshot_json(&[
             card("UR-dup-c1", "guard_missing", "high", &["guard"]),
@@ -562,6 +698,16 @@ mod tests {
     }
 
     fn card(id: &str, class_name: &str, priority: &str, missing: &[&str]) -> String {
+        card_with_witness(id, class_name, priority, missing, "")
+    }
+
+    fn card_with_witness(
+        id: &str,
+        class_name: &str,
+        priority: &str,
+        missing: &[&str],
+        witness: &str,
+    ) -> String {
         let missing = missing
             .iter()
             .map(|item| format!(r#""{item}""#))
@@ -572,6 +718,7 @@ mod tests {
       "id": "{id}",
       "class": "{class_name}",
       "priority": "{priority}",
+      "witness": "{witness}",
       "missing": [{missing}]
     }}"#
         )
