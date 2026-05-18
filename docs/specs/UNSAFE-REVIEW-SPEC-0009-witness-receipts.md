@@ -51,6 +51,13 @@ an existing log file, require an explicit sanitizer `tool` of `asan`, `msan`,
 and `strength = "ran"`. It must not execute a sanitizer, infer site reach, or
 create a card.
 
+The CLI may import a receipt from saved Loom or Shuttle output. The adapter must
+read an existing log file, require an explicit concurrency `tool` of `loom` or
+`shuttle`, reject empty output, reject failure-looking output, require
+`test result: ok`, and emit a normal `WitnessReceipt` with that concurrency tool
+and `strength = "ran"`. It must not execute Loom or Shuttle, infer site reach,
+or claim complete scheduler coverage.
+
 The CLI may also validate receipt files without running analysis. Validation must
 use the same importer checks as normal card analysis so users do not get a
 separate receipt truth.
@@ -136,6 +143,9 @@ after the `recorded_at` date.
 - The CLI sanitizer saved-output adapter writes a receipt from a success-looking
   sanitizer log, rejects unsupported sanitizer tools, and rejects
   failure-looking output.
+- The CLI concurrency saved-output adapter writes a receipt from a
+  success-looking Loom/Shuttle log, rejects unsupported concurrency tools, and
+  rejects failure-looking output.
 - The CLI receipt-validate command counts importable receipts and rejects the
   same invalid receipt files as normal analysis.
 

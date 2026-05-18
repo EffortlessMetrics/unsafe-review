@@ -6,11 +6,11 @@ use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use unsafe_review_core::{
-    AnalysisMode, AnalyzeInput, CardId, CargoCarefulReceiptInput, DiffSource, MiriReceiptInput,
-    PolicyMode, SanitizerReceiptInput, Scope, WITNESS_RECEIPT_SCHEMA_VERSION, WitnessReceipt,
-    analyze, collect_context, explain_card, render_comment_plan, render_human, render_json,
-    render_lsp, render_markdown, render_pr_summary, render_sarif, render_witness_plan,
-    validate_witness_receipts,
+    AnalysisMode, AnalyzeInput, CardId, CargoCarefulReceiptInput, ConcurrencyReceiptInput,
+    DiffSource, MiriReceiptInput, PolicyMode, SanitizerReceiptInput, Scope,
+    WITNESS_RECEIPT_SCHEMA_VERSION, WitnessReceipt, analyze, collect_context, explain_card,
+    render_comment_plan, render_human, render_json, render_lsp, render_markdown, render_pr_summary,
+    render_sarif, render_witness_plan, validate_witness_receipts,
 };
 
 pub(crate) fn execute(command: Command) -> Result<(), String> {
@@ -35,6 +35,7 @@ pub(crate) fn execute(command: Command) -> Result<(), String> {
         Command::ReceiptImportMiri(options) => receipt_import_miri(options),
         Command::ReceiptImportCareful(options) => receipt_import_careful(options),
         Command::ReceiptImportSanitizer(options) => receipt_import_sanitizer(options),
+        Command::ReceiptImportConcurrency(options) => receipt_import_concurrency(options),
     }
 }
 
@@ -353,6 +354,32 @@ fn receipt_import_sanitizer(options: SavedOutputReceiptOptions) -> Result<(), St
     Ok(())
 }
 
+fn receipt_import_concurrency(options: SavedOutputReceiptOptions) -> Result<(), String> {
+    let output = fs::read_to_string(&options.log)
+        .map_err(|err| format!("read {} failed: {err}", options.log.display()))?;
+    let receipt = WitnessReceipt::from_concurrency_output(ConcurrencyReceiptInput {
+        card_id: options.card_id,
+        tool: options
+            .tool
+            .ok_or_else(|| "missing value for --tool".to_string())?,
+        output,
+        author: options.author,
+        recorded_at: options.recorded_at,
+        expires_at: options.expires_at,
+        command: options.command,
+        limitations: options.limitations,
+    })?;
+    let rendered = receipt.to_pretty_json()?;
+    if let Some(path) = options.out {
+        ensure_parent_dir(&path)?;
+        fs::write(&path, rendered)
+            .map_err(|err| format!("write {} failed: {err}", path.display()))?;
+    } else {
+        print!("{rendered}");
+    }
+    Ok(())
+}
+
 fn print_help() {
     println!("unsafe-review: cheap unsafe contract review for Rust");
     println!();
@@ -378,6 +405,9 @@ fn print_help() {
     );
     println!(
         "  receipt import-sanitizer <card-id> --tool asan|msan|tsan|lsan --log <file> --author <owner> --recorded-at <utc> --expires-at <date> --command <cmd> [--limitation text] [--out file]"
+    );
+    println!(
+        "  receipt import-concurrency <card-id> --tool loom|shuttle --log <file> --author <owner> --recorded-at <utc> --expires-at <date> --command <cmd> [--limitation text] [--out file]"
     );
     println!("  receipt validate [--root .]");
     println!("  doctor  [--root .]");

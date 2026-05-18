@@ -50,6 +50,18 @@ pub struct SanitizerReceiptInput {
     pub limitations: Vec<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConcurrencyReceiptInput {
+    pub card_id: String,
+    pub tool: String,
+    pub output: String,
+    pub author: String,
+    pub recorded_at: String,
+    pub expires_at: String,
+    pub command: String,
+    pub limitations: Vec<String>,
+}
+
 impl WitnessReceipt {
     pub fn validate(&self) -> Result<(), String> {
         validate_required(&self.schema_version, "schema_version")?;
@@ -202,6 +214,35 @@ impl WitnessReceipt {
         receipt.validate()?;
         Ok(receipt)
     }
+
+    pub fn from_concurrency_output(input: ConcurrencyReceiptInput) -> Result<Self, String> {
+        validate_concurrency_tool(&input.tool)?;
+        validate_saved_success_output(&input.output, &input.tool)?;
+        validate_required(&input.command, "command")?;
+        validate_concurrency_command(&input.command)?;
+        let mut limitations = vec![
+            "saved-output adapter; unsafe-review did not run a concurrency witness".to_string(),
+            "receipt strength is `ran`; site reach is not claimed".to_string(),
+        ];
+        limitations.extend(input.limitations);
+        let receipt = Self {
+            schema_version: WITNESS_RECEIPT_SCHEMA_VERSION.to_string(),
+            card_id: input.card_id,
+            tool: input.tool.clone(),
+            strength: "ran".to_string(),
+            author: Some(input.author),
+            recorded_at: Some(input.recorded_at),
+            expires_at: Some(input.expires_at),
+            summary: Some(format!(
+                "saved {} output reported `test result: ok`",
+                input.tool
+            )),
+            command: Some(input.command),
+            limitations: Some(limitations),
+        };
+        receipt.validate()?;
+        Ok(receipt)
+    }
 }
 
 fn is_supported_receipt_strength(value: &str) -> bool {
@@ -271,6 +312,16 @@ fn validate_sanitizer_tool(value: &str) -> Result<(), String> {
     }
 }
 
+fn validate_concurrency_tool(value: &str) -> Result<(), String> {
+    if matches!(value, "loom" | "shuttle") {
+        Ok(())
+    } else {
+        Err(format!(
+            "concurrency receipt tool must be one of `loom` or `shuttle`, got `{value}`"
+        ))
+    }
+}
+
 fn validate_sanitizer_command(command: &str) -> Result<(), String> {
     let lower = command.to_ascii_lowercase();
     if ["sanitizer", "asan", "msan", "tsan", "lsan"]
@@ -283,6 +334,18 @@ fn validate_sanitizer_command(command: &str) -> Result<(), String> {
             "sanitizer receipt command must mention `sanitizer`, `asan`, `msan`, `tsan`, or `lsan`"
                 .to_string(),
         )
+    }
+}
+
+fn validate_concurrency_command(command: &str) -> Result<(), String> {
+    let lower = command.to_ascii_lowercase();
+    if ["loom", "shuttle"]
+        .iter()
+        .any(|needle| lower.contains(needle))
+    {
+        Ok(())
+    } else {
+        Err("concurrency receipt command must mention `loom` or `shuttle`".to_string())
     }
 }
 
@@ -683,6 +746,105 @@ mod tests {
                 .err()
                 .unwrap_or_default()
                 .contains("sanitizer receipt command")
+        );
+    }
+
+    #[test]
+    fn concurrency_receipt_from_saved_output_uses_ran_strength_without_site_reach()
+    -> Result<(), String> {
+        let receipt = WitnessReceipt::from_concurrency_output(ConcurrencyReceiptInput {
+            card_id: "UR-unsafe-impl-send-src-lib-rs-sharedcell-unsafe_impl_send-unsafe_impl_send_sync-unsafe-impl-send-sync-e915d3491163-send_sync_invariant-c1"
+                .to_string(),
+            tool: "loom".to_string(),
+            output: "running 1 test\ntest shared_cell_loom ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; finished in 0.01s\n"
+                .to_string(),
+            author: "core/fixtures".to_string(),
+            recorded_at: "2026-05-18T00:00:00Z".to_string(),
+            expires_at: "2026-08-18".to_string(),
+            command: "cargo test shared_cell_loom -- --nocapture".to_string(),
+            limitations: vec!["fixture only".to_string()],
+        })?;
+
+        assert_eq!(receipt.tool, "loom");
+        assert_eq!(receipt.strength, "ran");
+        assert_eq!(
+            receipt.summary.as_deref(),
+            Some("saved loom output reported `test result: ok`")
+        );
+        let limitations = receipt.limitations.as_ref().ok_or("missing limitations")?;
+        assert!(
+            limitations
+                .iter()
+                .any(|item| item.contains("unsafe-review did not run a concurrency witness"))
+        );
+        assert!(
+            limitations
+                .iter()
+                .any(|item| item.contains("site reach is not claimed"))
+        );
+        assert!(limitations.iter().any(|item| item == "fixture only"));
+        Ok(())
+    }
+
+    #[test]
+    fn concurrency_receipt_from_saved_output_rejects_unsupported_tool() {
+        let result = WitnessReceipt::from_concurrency_output(ConcurrencyReceiptInput {
+            card_id: "UR-unsafe-impl-send-src-lib-rs-sharedcell-unsafe_impl_send-unsafe_impl_send_sync-unsafe-impl-send-sync-e915d3491163-send_sync_invariant-c1"
+                .to_string(),
+            tool: "kani".to_string(),
+            output: "test result: ok. 1 passed; 0 failed; finished in 0.01s\n".to_string(),
+            author: "core/fixtures".to_string(),
+            recorded_at: "2026-05-18T00:00:00Z".to_string(),
+            expires_at: "2026-08-18".to_string(),
+            command: "cargo test shared_cell_loom -- --nocapture".to_string(),
+            limitations: Vec::new(),
+        });
+
+        assert!(
+            result
+                .err()
+                .unwrap_or_default()
+                .contains("concurrency receipt tool")
+        );
+    }
+
+    #[test]
+    fn concurrency_receipt_from_saved_output_rejects_failure_markers() {
+        let result = WitnessReceipt::from_concurrency_output(ConcurrencyReceiptInput {
+            card_id: "UR-unsafe-impl-send-src-lib-rs-sharedcell-unsafe_impl_send-unsafe_impl_send_sync-unsafe-impl-send-sync-e915d3491163-send_sync_invariant-c1"
+                .to_string(),
+            tool: "loom".to_string(),
+            output: "test result: FAILED. 0 passed; 1 failed\nfailures:\nshared_cell_loom\n"
+                .to_string(),
+            author: "core/fixtures".to_string(),
+            recorded_at: "2026-05-18T00:00:00Z".to_string(),
+            expires_at: "2026-08-18".to_string(),
+            command: "cargo test shared_cell_loom -- --nocapture".to_string(),
+            limitations: Vec::new(),
+        });
+
+        assert!(result.err().unwrap_or_default().contains("failure marker"));
+    }
+
+    #[test]
+    fn concurrency_receipt_from_saved_output_requires_concurrency_command() {
+        let result = WitnessReceipt::from_concurrency_output(ConcurrencyReceiptInput {
+            card_id: "UR-unsafe-impl-send-src-lib-rs-sharedcell-unsafe_impl_send-unsafe_impl_send_sync-unsafe-impl-send-sync-e915d3491163-send_sync_invariant-c1"
+                .to_string(),
+            tool: "loom".to_string(),
+            output: "test result: ok. 1 passed; 0 failed; finished in 0.01s\n".to_string(),
+            author: "core/fixtures".to_string(),
+            recorded_at: "2026-05-18T00:00:00Z".to_string(),
+            expires_at: "2026-08-18".to_string(),
+            command: "cargo test shared_cell -- --nocapture".to_string(),
+            limitations: Vec::new(),
+        });
+
+        assert!(
+            result
+                .err()
+                .unwrap_or_default()
+                .contains("concurrency receipt command")
         );
     }
 
