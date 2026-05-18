@@ -236,6 +236,64 @@ fn repo_inventory_and_badges_count_open_gaps_without_safety_claim() -> Result<()
 }
 
 #[test]
+fn check_json_imports_witness_receipts_without_hiding_guard_gaps() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_alignment_receipted");
+
+    let json = run_success([
+        os("check"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        fixture.join("change.diff").into_os_string(),
+        os("--format"),
+        os("json"),
+    ])?;
+    let value = parse_json(&stdout_text(&json)?)?;
+    let card = &value["cards"][0];
+
+    assert_eq!(value["summary"]["cards"], 1);
+    assert_eq!(card["class"], "guard_missing");
+    assert!(
+        card["witness"]
+            .as_str()
+            .unwrap_or("")
+            .contains("Imported miri receipt")
+    );
+    assert!(
+        card["witness"]
+            .as_str()
+            .unwrap_or("")
+            .contains("expires_at: 2026-08-18")
+    );
+    let missing = card["missing"]
+        .as_array()
+        .ok_or("card missing field should be an array")?;
+    assert!(missing.iter().any(|item| {
+        item.as_str()
+            .unwrap_or("")
+            .contains("Missing visible local guard")
+    }));
+    assert!(!missing.iter().any(|item| {
+        item.as_str()
+            .unwrap_or("")
+            .contains("No witness receipt imported")
+    }));
+    let obligations = card["obligation_evidence"]
+        .as_array()
+        .ok_or("obligation_evidence should be an array")?;
+    assert!(
+        obligations
+            .iter()
+            .all(|evidence| evidence["witness"]["present"] == true)
+    );
+    assert!(obligations.iter().any(|evidence| {
+        evidence["key"] == "alignment" && evidence["discharge"]["present"] == false
+    }));
+
+    Ok(())
+}
+
+#[test]
 fn no_new_debt_policy_fails_only_for_unbaselined_actionable_gaps() -> Result<(), Box<dyn Error>> {
     let fixture = fixture_root("raw_pointer_alignment");
     let failing = run_failure([
