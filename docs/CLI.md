@@ -137,6 +137,10 @@ A receipt must include exact counted `card_id`, `tool`, `strength`, `author`,
 receipts mark witness evidence present, but they do not discharge missing
 contracts, guards, or reach evidence.
 
+The receipt JSON shape is backed by `unsafe_review_core::WitnessReceipt`, so SDK
+consumers and future native adapters should produce that same schema rather than
+a parallel receipt format.
+
 `unsafe-review` imports receipts. It does not run Miri, `cargo-careful`,
 sanitizers, Loom, Shuttle, Kani, or Crux by default.
 
