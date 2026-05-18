@@ -434,6 +434,39 @@ has a related test mention, while `into_inner_unchecked` itself is still
 statically unreached by name. The output remains advisory and does not claim the
 change is wrong.
 
+### `arrayvec#174`
+
+PR: `https://github.com/bluss/arrayvec/pull/174`
+
+The PR rewrites `ArrayVec::retain` to mirror `Vec::retain`, with temporary
+length clearing, pointer moves, drop-on-panic cleanup, inline unsafe references,
+and `copy_nonoverlapping` backshifts.
+
+Before inline unsafe-operation dedupe:
+
+```text
+changed_rust_files: 1
+cards: 11
+contract_missing: 11
+operation families: vec_set_len, pointer_arithmetic, unknown, raw_pointer_deref, copy_nonoverlapping
+duplicate: inline `unsafe { &mut *cur }` emitted both unknown unsafe-block and raw_pointer_deref cards
+```
+
+After inline unsafe-operation dedupe:
+
+```text
+changed_rust_files: 1
+cards: 10
+contract_missing: 10
+operation families: vec_set_len, pointer_arithmetic, unknown, raw_pointer_deref, copy_nonoverlapping
+```
+
+This run exposed and fixed a scanner duplicate: an inline unsafe block that
+contains a concrete raw pointer dereference should not also emit a generic
+unknown unsafe-block wrapper card on the same line. The remaining `unknown` card
+is `unsafe { ptr::drop_in_place(cur) }`, which is still a real unsupported
+operation-family gap for future drop/deallocation modeling.
+
 ### `arrayvec#288`
 
 PR: `https://github.com/bluss/arrayvec/pull/288`
@@ -567,6 +600,7 @@ rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/smal
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr308.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr308.unsafe-review.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr138.raw.diff --format json --max-cards 30 --out target/dogfood-work/arrayvec-pr138.after-attributed-dedupe.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr187.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr187.unsafe-review.json
+rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr174.raw.diff --format json --max-cards 30 --out target/dogfood-work/arrayvec-pr174.after-inline-dedupe.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.unsafe-review.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-setlen-init.json
 rtk cargo run --locked -p unsafe-review -- check --root target/dogfood-work/arrayvec --diff target/dogfood-work/arrayvec-pr288.raw.diff --format json --max-cards 20 --out target/dogfood-work/arrayvec-pr288.after-setlen-zero.json
@@ -586,13 +620,17 @@ The repo may claim:
 - a capped `memchr` dogfood snapshot now completes
 - real PR-diff dogfood runs on `memchr#215`, `rust-smallvec#407`,
   `rust-smallvec#277`, `rust-smallvec#64`, `rust-smallvec#254`,
-  `arrayvec#308`, `arrayvec#138`, `arrayvec#187`, and `arrayvec#288` produce
-  card output
+  `arrayvec#308`, `arrayvec#138`, `arrayvec#187`, `arrayvec#174`, and
+  `arrayvec#288` produce card output
 - dogfood found and fixed import/declaration and `cfg(target_feature)`
   false positives
 - capped repo scans stop after the requested card cap
 - operation cards can inherit enclosing unsafe function `# Safety` docs
 - owner inference ignores comments while scanning backward
+- owner inference prefers real function declarations over `impl Trait`
+  parameter text
+- inline unsafe blocks with concrete same-line raw pointer operations are
+  deduped instead of emitting generic unknown wrapper cards
 - one fixture-backed `Vec::set_len` initialization-evidence improvement changed
   two `arrayvec#288` cards from `guard_missing` to `guarded_unwitnessed`
 - one fixture-backed `set_len(0)` clear-evidence improvement changed another
@@ -618,7 +656,7 @@ The repo must not claim:
 - usable-alpha support-tier promotion
 - full-repository coverage from top-50 capped snapshots
 - uncapped repo-scan performance
-- general PR-diff usefulness from nine PRs
+- general PR-diff usefulness from ten PRs
 - memory-safety proof
 - UB-free status
 - witness execution
@@ -628,7 +666,7 @@ The repo must not claim:
 
 - Only three real crates completed in this slice.
 - The successful dogfood snapshots were capped at 50 cards.
-- Only nine real PR diffs were measured.
+- Only ten real PR diffs were measured.
 - `memchr` completion depends on capped-scan behavior; uncapped performance is
   still unmeasured.
 - No human audit was performed for every emitted card.
@@ -646,6 +684,8 @@ The repo must not claim:
 - `arrayvec#187` shows public unsafe helper APIs with `Safety:` prose remain
   contract prompts until they expose a recognized `# Safety` section or nearby
   `SAFETY:` evidence.
+- `arrayvec#174` shows `ptr::drop_in_place` still routes as an unknown unsafe
+  operation family until drop/deallocation modeling is added.
 - These runs do not prove absence of missed unsafe seams.
 
 ## Next useful work

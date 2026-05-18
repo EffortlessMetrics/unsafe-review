@@ -226,6 +226,7 @@ mod tests {
         "private_unsafe_helper_safety_comment",
         "split_public_unsafe_fn_missing_safety",
         "attributed_unsafe_fn_no_duplicate",
+        "inline_unsafe_raw_pointer_deref_no_duplicate",
         "split_unsafe_block",
         "raw_pointer_deref",
         "raw_pointer_read_unaligned",

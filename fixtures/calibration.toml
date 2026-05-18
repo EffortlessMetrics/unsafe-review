@@ -18,6 +18,7 @@ required_core_fixtures = [
   "imports_not_unsafe_operations",
   "cfg_target_feature_not_operation",
   "attributed_unsafe_fn_no_duplicate",
+  "inline_unsafe_raw_pointer_deref_no_duplicate",
   "comment_alignment_not_guard",
 ]
 
@@ -169,6 +170,16 @@ expected_cards = 2
 expected_class = "contract_missing"
 expected_operation_family = "unknown"
 expected_hazard = "unknown"
+
+[[cases]]
+fixture = "inline_unsafe_raw_pointer_deref_no_duplicate"
+kind = "false_positive_control"
+claim = "inline unsafe blocks containing concrete raw pointer derefs do not emit duplicate unknown wrapper cards"
+support_tier = "Diff unsafe site inventory"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_deref"
+expected_hazard = "pointer_validity"
 
 [[cases]]
 fixture = "safe_reference_deref_no_cards"
