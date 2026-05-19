@@ -51,6 +51,17 @@ const CALIBRATION_CASE_FIELDS: &[&str] = &[
 const OPERATION_FAMILY_REGISTRY: &str =
     "docs/specs/appendices/UNSAFE-REVIEW-SPEC-0005-appendix-operation-family-registry.md";
 const OPERATION_FAMILY_REGISTRY_COLUMNS: usize = 9;
+const OPERATION_FAMILY_REGISTRY_HEADER: &[&str] = &[
+    "operation_family",
+    "detected syntax shapes",
+    "hazards",
+    "not hazards",
+    "obligation / evidence keys",
+    "witness route",
+    "fixture proof",
+    "known false-positive controls",
+    "known limits",
+];
 const OPERATION_FAMILY_SOURCE: &str = "crates/unsafe-review-core/src/domain/operation.rs";
 const HAZARD_KIND_SOURCE: &str = "crates/unsafe-review-core/src/domain/hazard.rs";
 const WITNESS_KIND_SOURCE: &str = "crates/unsafe-review-core/src/domain/witness.rs";
@@ -979,6 +990,7 @@ fn check_operation_family_registry_coverage(
     calibration_families: &BTreeSet<String>,
     calibration_fixtures_by_family: &BTreeMap<String, BTreeSet<String>>,
 ) -> Result<(), String> {
+    check_operation_family_registry_header()?;
     let registry_families = operation_family_registry_rows()?;
     let known_operation_families = operation_family_labels()?;
     let known_hazards = hazard_kind_labels()?;
@@ -1000,6 +1012,33 @@ fn check_operation_family_registry_coverage(
         &known_witness_routes,
         &registry,
     )
+}
+
+fn check_operation_family_registry_header() -> Result<(), String> {
+    let text = read_to_string(&workspace_path(OPERATION_FAMILY_REGISTRY))?;
+    check_operation_family_registry_header_from_text(&text)
+}
+
+fn check_operation_family_registry_header_from_text(text: &str) -> Result<(), String> {
+    for line in text.lines() {
+        let columns = registry_columns(line);
+        let Some(first) = columns.first() else {
+            continue;
+        };
+        if *first != "operation_family" {
+            continue;
+        }
+        if columns != OPERATION_FAMILY_REGISTRY_HEADER {
+            return Err(format!(
+                "{OPERATION_FAMILY_REGISTRY} registry header must be: {}",
+                OPERATION_FAMILY_REGISTRY_HEADER.join(" | ")
+            ));
+        }
+        return Ok(());
+    }
+    Err(format!(
+        "{OPERATION_FAMILY_REGISTRY} is missing operation_family registry header"
+    ))
 }
 
 struct OperationFamilyRegistryView<'a> {
@@ -1119,11 +1158,7 @@ fn operation_family_registry_rows() -> Result<BTreeSet<String>, String> {
 fn operation_family_registry_rows_from_text(text: &str) -> Result<BTreeSet<String>, String> {
     let mut rows = BTreeSet::new();
     for line in text.lines() {
-        let columns = line
-            .split('|')
-            .map(str::trim)
-            .filter(|column| !column.is_empty())
-            .collect::<Vec<_>>();
+        let columns = registry_columns(line);
         let Some(first) = columns.first() else {
             continue;
         };
@@ -1215,11 +1250,7 @@ fn operation_family_registry_hazards_from_text(
 ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
     let mut hazards_by_family = BTreeMap::new();
     for line in text.lines() {
-        let columns = line
-            .split('|')
-            .map(str::trim)
-            .filter(|column| !column.is_empty())
-            .collect::<Vec<_>>();
+        let columns = registry_columns(line);
         let Some(first) = columns.first() else {
             continue;
         };
@@ -1268,11 +1299,7 @@ fn operation_family_registry_fixture_proofs_from_text(
 ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
     let mut proofs = BTreeMap::new();
     for line in text.lines() {
-        let columns = line
-            .split('|')
-            .map(str::trim)
-            .filter(|column| !column.is_empty())
-            .collect::<Vec<_>>();
+        let columns = registry_columns(line);
         let Some(first) = columns.first() else {
             continue;
         };
@@ -1318,11 +1345,7 @@ fn operation_family_registry_witness_routes_from_text(
 ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
     let mut routes_by_family = BTreeMap::new();
     for line in text.lines() {
-        let columns = line
-            .split('|')
-            .map(str::trim)
-            .filter(|column| !column.is_empty())
-            .collect::<Vec<_>>();
+        let columns = registry_columns(line);
         let Some(first) = columns.first() else {
             continue;
         };
@@ -1373,6 +1396,13 @@ fn witness_route_tokens(text: &str) -> BTreeSet<String> {
         .map(str::trim)
         .filter(|token| token.chars().any(|ch| ch.is_ascii_alphanumeric()))
         .map(ToString::to_string)
+        .collect()
+}
+
+fn registry_columns(line: &str) -> Vec<&str> {
+    line.split('|')
+        .map(str::trim)
+        .filter(|column| !column.is_empty())
         .collect()
 }
 
@@ -2262,6 +2292,26 @@ mod tests {
 
         assert!(err.contains("must have 9 columns"));
         assert!(err.contains("raw_pointer_read"));
+        Ok(())
+    }
+
+    #[test]
+    fn operation_registry_header_accepts_expected_columns() -> Result<(), String> {
+        let text = "| operation_family | detected syntax shapes | hazards | not hazards | obligation / evidence keys | witness route | fixture proof | known false-positive controls | known limits |\n";
+
+        check_operation_family_registry_header_from_text(text)
+    }
+
+    #[test]
+    fn operation_registry_header_rejects_renamed_columns() -> Result<(), String> {
+        let text = "| operation_family | syntax | hazards | not hazards | obligation / evidence keys | witness route | fixture proof | known false-positive controls | known limits |\n";
+
+        let Err(err) = check_operation_family_registry_header_from_text(text) else {
+            return Err("renamed registry header should fail".to_string());
+        };
+
+        assert!(err.contains("registry header must be"));
+        assert!(err.contains("detected syntax shapes"));
         Ok(())
     }
 
