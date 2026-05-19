@@ -387,6 +387,12 @@ fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
             OperationFamily::RawPointerReadUnaligned,
         ));
     }
+    if is_raw_pointer_write_unaligned(line) {
+        return Some((
+            UnsafeSiteKind::Operation,
+            OperationFamily::RawPointerWriteUnaligned,
+        ));
+    }
     if line.contains(".read()") || line.contains(".read_volatile(") || line.contains("ptr::read") {
         return Some((UnsafeSiteKind::Operation, OperationFamily::RawPointerRead));
     }
@@ -849,6 +855,10 @@ fn is_raw_pointer_write(line: &str) -> bool {
         || (line.contains(".cast::<") && line.contains(".write("))
         || (line.contains(".cast::<") && line.contains(".write_volatile("))
         || (line.contains(".cast::<") && line.contains(".write_bytes"))
+}
+
+fn is_raw_pointer_write_unaligned(line: &str) -> bool {
+    line.contains("ptr::write_unaligned") || line.contains(".write_unaligned(")
 }
 
 fn assignment_operator_start(text: &str) -> Option<usize> {
@@ -1415,6 +1425,23 @@ mod tests {
             );
         }
         assert_eq!(detect_site("writer.write_all(bytes)"), None);
+    }
+
+    #[test]
+    fn text_detection_classifies_unaligned_pointer_write_separately() {
+        for line in [
+            "unsafe { ptr.write_unaligned(value) }",
+            "unsafe { core::ptr::write_unaligned(ptr, value) }",
+        ] {
+            assert_eq!(
+                detect_site(line),
+                Some((
+                    UnsafeSiteKind::Operation,
+                    OperationFamily::RawPointerWriteUnaligned
+                )),
+                "{line} should be classified as an unaligned raw pointer write"
+            );
+        }
     }
 
     #[test]

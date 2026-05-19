@@ -10,11 +10,13 @@ pub(crate) fn hazards_for(family: &OperationFamily) -> Vec<HazardKind> {
             HazardKind::InitializedMemory,
             HazardKind::SameAllocation,
         ],
-        OperationFamily::RawPointerReadUnaligned => vec![
-            HazardKind::PointerValidity,
-            HazardKind::InitializedMemory,
-            HazardKind::SameAllocation,
-        ],
+        OperationFamily::RawPointerReadUnaligned | OperationFamily::RawPointerWriteUnaligned => {
+            vec![
+                HazardKind::PointerValidity,
+                HazardKind::InitializedMemory,
+                HazardKind::SameAllocation,
+            ]
+        }
         OperationFamily::PointerArithmetic => vec![
             HazardKind::SameAllocation,
             HazardKind::Bounds,
@@ -106,15 +108,17 @@ pub(crate) fn obligations_for(family: &OperationFamily) -> Vec<SafetyObligation>
             SafetyObligation::new("initialized", "memory is initialized for the accessed type"),
             SafetyObligation::new("allocation", "access remains inside one live allocation"),
         ],
-        OperationFamily::RawPointerReadUnaligned => vec![
-            SafetyObligation::new(
-                "pointer-live",
-                "pointer is live and dereferenceable for the accessed type",
-            ),
-            SafetyObligation::new("bounds", "buffer has enough bytes for the accessed type"),
-            SafetyObligation::new("initialized", "memory is initialized for the accessed type"),
-            SafetyObligation::new("allocation", "access remains inside one live allocation"),
-        ],
+        OperationFamily::RawPointerReadUnaligned | OperationFamily::RawPointerWriteUnaligned => {
+            vec![
+                SafetyObligation::new(
+                    "pointer-live",
+                    "pointer is live and dereferenceable for the accessed type",
+                ),
+                SafetyObligation::new("bounds", "buffer has enough bytes for the accessed type"),
+                SafetyObligation::new("initialized", "memory is initialized for the accessed type"),
+                SafetyObligation::new("allocation", "access remains inside one live allocation"),
+            ]
+        }
         OperationFamily::SliceFromRawParts => vec![
             SafetyObligation::new("pointer-live", "pointer is valid for `len` elements"),
             SafetyObligation::new("alignment", "pointer is aligned for the element type"),

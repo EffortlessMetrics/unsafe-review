@@ -244,6 +244,7 @@ mod tests {
         "raw_pointer_read_volatile",
         "raw_pointer_read_len_capacity_assert",
         "raw_pointer_write_assignment",
+        "raw_pointer_write_unaligned",
         "raw_pointer_write_bytes",
         "raw_pointer_write_maybeuninit",
         "raw_pointer_write_volatile",
