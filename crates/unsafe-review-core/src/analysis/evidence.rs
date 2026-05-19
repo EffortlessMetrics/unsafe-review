@@ -362,10 +362,38 @@ fn has_slice_end_pointer_arithmetic_evidence(lower: &str) -> bool {
 }
 
 fn has_capacity_guard(family: &OperationFamily, lower: &str) -> bool {
-    lower.contains("capacity")
-        || lower.contains("cap()")
-        || (family == &OperationFamily::VecSetLen && contains_word(lower, "cap"))
-        || (family == &OperationFamily::VecSetLen && has_set_len_shrink_evidence(lower))
+    if family == &OperationFamily::VecSetLen {
+        return has_set_len_capacity_evidence(lower);
+    }
+    lower.contains("capacity") || lower.contains("cap()")
+}
+
+fn has_set_len_capacity_evidence(lower: &str) -> bool {
+    has_set_len_shrink_evidence(lower)
+        || has_set_len_call_result_initialization_evidence(lower)
+        || has_set_len_const_cap_evidence(lower)
+        || has_capacity_bound_guard(lower)
+}
+
+fn has_capacity_bound_guard(lower: &str) -> bool {
+    let compact = compact_code(lower);
+    let mentions_capacity = compact.contains("capacity()")
+        || compact.contains(".cap()")
+        || contains_word(lower, "cap")
+        || contains_word(lower, "capacity");
+    let has_guard_context = compact.contains("assert!(")
+        || compact.contains("debug_assert!(")
+        || compact.contains("if");
+    let has_comparison = compact.contains("<=")
+        || compact.contains(">=")
+        || compact.contains('<')
+        || compact.contains('>');
+    mentions_capacity && has_guard_context && has_comparison
+}
+
+fn has_set_len_const_cap_evidence(lower: &str) -> bool {
+    let compact = compact_code(lower);
+    compact.contains(".set_len(cap)")
 }
 
 fn has_set_len_initialization_evidence(lower: &str) -> bool {
@@ -1301,6 +1329,42 @@ mod tests {
         let evidence = obligation_evidence(&set_len, &obligations, &contract, &reach);
 
         assert!(evidence[0].discharge.present);
+    }
+
+    #[test]
+    fn set_len_capacity_mention_without_bound_is_not_guard_evidence() {
+        let obligations = vec![SafetyObligation::new(
+            "capacity",
+            "new length is at most capacity",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let observation_only = site_with_family(
+            OperationFamily::VecSetLen,
+            vec!["let capacity = values.capacity();", "record(capacity);"],
+            "values.set_len(new_len);",
+            vec![],
+        );
+        let bounded = site_with_family(
+            OperationFamily::VecSetLen,
+            vec!["assert!(new_len <= values.capacity());"],
+            "values.set_len(new_len);",
+            vec![],
+        );
+
+        assert!(
+            !obligation_evidence(&observation_only, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
+            obligation_evidence(&bounded, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
     }
 
     #[test]
