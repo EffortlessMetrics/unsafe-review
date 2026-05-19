@@ -1246,6 +1246,30 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn box_origin_evidence_rejects_reassigned_pointers() -> Result<(), String> {
+        for (fixture, family) in [
+            (
+                "box_from_raw_reassigned_origin_not_guard",
+                OperationFamily::BoxFromRaw,
+            ),
+            (
+                "drop_in_place_reassigned_origin_not_guard",
+                OperationFamily::DropInPlace,
+            ),
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
+
+            assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+            assert_eq!(card.operation.family, family);
+            assert_eq!(card.class, ReviewClass::GuardMissing);
+            assert!(card.hazards.contains(&HazardKind::DropOrDeallocation));
+            assert!(!obligation_discharge_present(card, "ownership"));
+        }
+        Ok(())
+    }
+
+    #[test]
     fn static_mut_global_state_routes_to_concurrency_review() -> Result<(), String> {
         let output = fixture_output("static_mut_global_state")?;
         let card = single_card("static_mut_global_state", &output)?;

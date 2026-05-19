@@ -20,6 +20,8 @@ and stale-pointer controls.
 for assertions, early returns, bare observations, closed branches, and stale
 checked cap arguments. `Vec::set_len` capacity evidence rejects unrelated local
 arguments merely named `cap` unless a const-capacity context is visible.
+`Box::from_raw` and `ptr::drop_in_place` ownership evidence reject stale
+`Box::into_raw` origins when the raw pointer is reassigned before use.
 Unchecked-constructor availability evidence now has fixture-backed controls for
 same-receiver assertions, enclosing positive branches, unavailable-path early
 returns, other receivers, bare observations, and closed branches.
@@ -94,8 +96,9 @@ These are not failures; they are the next unsupported or weakly verified areas:
   `set_len` patterns remain weak.
 - Real PR-diff dogfood now recognizes `ptr::drop_in_place` as a
   drop/deallocation operation family, and fixture coverage recognizes the
-  narrow same-pointer `Box::into_raw` origin shape as drop evidence, but broader
-  drop/deallocation evidence modeling remains narrow.
+  narrow same-pointer `Box::into_raw` origin shape as drop evidence while
+  rejecting reassigned raw pointers, but broader drop/deallocation evidence
+  modeling remains narrow.
 - `arrayvec#137` adds a raw pointer accessor soundness-fix measurement. It
   produced 15 contract-missing cards when run with a PR-head checkout and raw
   `diff --git` patch, which is useful dogfood but not calibration proof.
@@ -177,8 +180,8 @@ These are not failures; they are the next unsupported or weakly verified areas:
   compatibility, layout, and ownership evidence remain source-level and
   advisory.
 - `Box::from_raw` now has fixture coverage for the narrow same-pointer
-  `Box::into_raw` origin shape, but broader allocator and unique-ownership
-  evidence remains source-level and advisory.
+  `Box::into_raw` origin shape and rejects reassigned raw pointers, but broader
+  allocator and unique-ownership evidence remains source-level and advisory.
 
 ## Current Gates
 

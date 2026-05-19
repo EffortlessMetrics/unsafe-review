@@ -1,0 +1,11 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,0 +1,7 @@
++pub fn rebuild_reassigned(value: Box<u8>, foreign_ptr: *mut u8) -> Box<u8> {
++    let mut ptr = Box::into_raw(value);
++    ptr = foreign_ptr;
++    // SAFETY: this fixture intentionally reassigns ptr after Box::into_raw.
++    unsafe { Box::from_raw(ptr) }
++}
++
