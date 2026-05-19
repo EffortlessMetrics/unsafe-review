@@ -3247,12 +3247,21 @@ mod tests {
             "unsafe { option.unwrap_unchecked() }",
             vec!["}"],
         );
+        let other_result_if_let = site_with_family(
+            OperationFamily::UnwrapUnchecked,
+            vec!["if let Ok(_) = other.as_ref() {"],
+            "unsafe { result.unwrap_unchecked() }",
+            vec!["}"],
+        );
 
         let evidence = obligation_evidence(&unchecked, &obligations, &contract, &reach);
         let if_let_evidence = obligation_evidence(&other_if_let, &obligations, &contract, &reach);
+        let result_if_let_evidence =
+            obligation_evidence(&other_result_if_let, &obligations, &contract, &reach);
 
         assert!(!evidence[0].discharge.present);
         assert!(!if_let_evidence[0].discharge.present);
+        assert!(!result_if_let_evidence[0].discharge.present);
     }
 
     #[test]
