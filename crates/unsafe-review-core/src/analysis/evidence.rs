@@ -530,7 +530,10 @@ fn has_transmute_u8_bool_valid_value_evidence(lower: &str) -> bool {
     else {
         return false;
     };
-    if source_type != "u8" || destination_type != "bool" || !is_simple_identifier(argument) {
+    let Some(argument) = source_value_identifier(argument) else {
+        return false;
+    };
+    if source_type != "u8" || destination_type != "bool" {
         return false;
     }
     has_u8_bool_value_guard(before_call, argument)
@@ -638,6 +641,14 @@ fn is_simple_identifier(text: &str) -> bool {
     };
     (first == '_' || first.is_ascii_alphabetic())
         && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+fn source_value_identifier(argument: &str) -> Option<&str> {
+    if is_simple_identifier(argument) {
+        return Some(argument);
+    }
+    let referenced = argument.strip_prefix('&')?;
+    is_simple_identifier(referenced).then_some(referenced)
 }
 
 fn zeroed_target_type(compact: &str) -> Option<&str> {
@@ -1941,6 +1952,29 @@ mod tests {
 
         assert!(!evidence[0].discharge.present);
         assert!(evidence[1].discharge.present);
+    }
+
+    #[test]
+    fn transmute_copy_u8_bool_guard_discharges_valid_value_obligation() {
+        let obligations = vec![SafetyObligation::new(
+            "valid-value",
+            "destination value satisfies Rust validity rules",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let transmute = site_with_family(
+            OperationFamily::Transmute,
+            vec!["assert!(value <= 1);"],
+            "unsafe { core::mem::transmute_copy::<u8, bool>(&value) }",
+            vec![],
+        );
+
+        let evidence = obligation_evidence(&transmute, &obligations, &contract, &reach);
+
+        assert!(evidence[0].discharge.present);
     }
 
     #[test]
