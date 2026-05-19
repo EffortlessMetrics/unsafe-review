@@ -1,0 +1,12 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,0 +1,8 @@
++// SAFETY: fixture documents a process-global mutable state contract but omits synchronization proof.
++pub static mut GLOBAL_COUNT: usize = 0;
++
++#[cfg(test)]
++mod tests {
++    #[test]
++    fn mentions_global_count() {}
++}
