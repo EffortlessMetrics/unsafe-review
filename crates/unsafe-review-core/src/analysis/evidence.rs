@@ -129,6 +129,18 @@ fn code_context(site: &ScannedSite) -> String {
         .join("\n")
 }
 
+fn code_context_through_site(site: &ScannedSite) -> String {
+    site.context_before
+        .iter()
+        .chain(std::iter::once(&site.site.snippet))
+        .map(|line| {
+            line.split_once("//")
+                .map_or(line.as_str(), |(code, _comment)| code)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn contract_state(contract: &ContractEvidence) -> EvidenceState {
     if contract.present {
         EvidenceState::present(&contract.summary)
@@ -179,6 +191,9 @@ fn discharge_state_for(
             }
         }
         "capacity" => {
+            let capacity_scope = (family == &OperationFamily::VecSetLen)
+                .then(|| code_context_through_site(site).to_ascii_lowercase());
+            let capacity_lower = capacity_scope.as_deref().unwrap_or(lower);
             if family == &OperationFamily::VecFromRawParts
                 && has_vec_from_raw_parts_capacity_evidence(&site.operation.expression, lower)
             {
@@ -191,14 +206,23 @@ fn discharge_state_for(
                 EvidenceState::present(
                     "Vec::from_raw_parts same-origin len/capacity evidence was detected",
                 )
-            } else if has_capacity_guard(family, lower) {
+            } else if has_capacity_guard(family, capacity_lower) {
                 EvidenceState::present("Capacity guard code was detected")
             } else {
                 EvidenceState::missing("No capacity guard code was detected")
             }
         }
         "initialized" => {
-            if family == &OperationFamily::VecSetLen && has_set_len_initialization_evidence(lower) {
+            let local_lower;
+            let init_scope = if family == &OperationFamily::VecSetLen {
+                local_lower = code_context_through_site(site).to_ascii_lowercase();
+                local_lower.as_str()
+            } else {
+                lower
+            };
+            if family == &OperationFamily::VecSetLen
+                && has_set_len_initialization_evidence(init_scope)
+            {
                 EvidenceState::present("Initialization evidence was detected")
             } else if family == &OperationFamily::SliceFromRawParts
                 && has_maybeuninit_slice_context(lower)
