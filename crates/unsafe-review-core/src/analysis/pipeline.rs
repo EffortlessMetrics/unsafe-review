@@ -1311,18 +1311,23 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
 
     #[test]
     fn vec_set_len_capacity_observation_is_not_capacity_guard() -> Result<(), String> {
-        let output = fixture_output("vec_set_len_capacity_observed_not_guard")?;
-        let card = single_card("vec_set_len_capacity_observed_not_guard", &output)?;
+        for fixture in [
+            "vec_set_len_capacity_observed_not_guard",
+            "vec_set_len_unrelated_capacity_comparison_not_guard",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
 
-        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
-        assert_eq!(card.operation.family, OperationFamily::VecSetLen);
-        assert_eq!(card.class, ReviewClass::GuardMissing);
-        assert!(!obligation_discharge_present(card, "capacity"));
-        assert!(!obligation_discharge_present(card, "initialized"));
-        assert!(
-            card.missing.iter().any(|missing| missing.kind == "guard"),
-            "observing capacity without bounding new_len must keep the guard prompt"
-        );
+            assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+            assert_eq!(card.operation.family, OperationFamily::VecSetLen);
+            assert_eq!(card.class, ReviewClass::GuardMissing);
+            assert!(!obligation_discharge_present(card, "capacity"));
+            assert!(!obligation_discharge_present(card, "initialized"));
+            assert!(
+                card.missing.iter().any(|missing| missing.kind == "guard"),
+                "observing capacity without bounding new_len must keep the guard prompt"
+            );
+        }
         Ok(())
     }
 
