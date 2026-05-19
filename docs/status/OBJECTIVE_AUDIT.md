@@ -8,6 +8,10 @@ This audit maps the current product objective to concrete repo evidence. It is a
 status artifact, not a support-tier promotion. `docs/status/SUPPORT_TIERS.md`
 remains the authority for public claim wording.
 
+Latest evidence-hardening notes include `get_unchecked` bounds false-positive
+controls for bare predicate observations, closed positive branches, and checked
+indexes reassigned before the unchecked access.
+
 The latest closed execution lane is recorded in
 `docs/status/DOGFOOD_CALIBRATED_EVIDENCE_LANE.md` and
 `docs/handoffs/2026-05-18-dogfood-calibrated-evidence-v0.6.md`.

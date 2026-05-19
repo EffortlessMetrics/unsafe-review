@@ -1,0 +1,24 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,0 +1,20 @@
++pub fn pick_after_observed_bounds(values: &mut [u8], index: usize) -> Option<&mut u8> {
++    if index < values.len() {
++        observe(index);
++    }
++    // SAFETY: this fixture intentionally observes bounds before the unchecked access,
++    // but the positive branch no longer encloses the access.
++    Some(unsafe { values.get_unchecked_mut(index) })
++}
++
++fn observe(_index: usize) {}
++
++#[cfg(test)]
++mod tests {
++    use super::pick_after_observed_bounds;
++
++    #[test]
++    fn mentions_pick_after_observed_bounds() {
++        let _ = stringify!(pick_after_observed_bounds);
++    }
++}

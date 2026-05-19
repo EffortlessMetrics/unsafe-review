@@ -319,6 +319,10 @@ mod tests {
         "get_unchecked_mut_bounds",
         "get_unchecked_mut_len_guard",
         "get_unchecked_mut_other_len_not_guard",
+        "get_unchecked_mut_post_check_not_guard",
+        "get_unchecked_mut_bounds_observed_not_guard",
+        "get_unchecked_mut_closed_bounds_not_guard",
+        "get_unchecked_mut_reassigned_index_not_guard",
         "pin_new_unchecked",
     ];
 

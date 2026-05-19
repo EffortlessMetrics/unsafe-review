@@ -5,6 +5,13 @@ All tiers describe static review evidence. None means memory-safety proof.
 For a concise front panel, see [`SUPPORT_SUMMARY.md`](SUPPORT_SUMMARY.md). This
 file remains the detailed claim-to-proof ledger.
 
+Recent core smoke proof additions include
+`get_unchecked_mut_bounds_observed_not_guard`,
+`get_unchecked_mut_closed_bounds_not_guard`, and
+`get_unchecked_mut_reassigned_index_not_guard`, which pin that positive bounds
+branches must still dominate `get_unchecked`, bare predicate observations are
+not guards, and reassigned checked indexes do not discharge bounds evidence.
+
 | Capability | Tier | Surface | Proof | Known limits |
 |---|---|---|---|---|
 | Diff unsafe site inventory | experimental | CLI JSON/human | syntax-backed fixture goldens for unsafe blocks, split unsafe blocks, inline unsafe operation dedupe, attributed unsafe functions, raw pointer operations, import/declaration, adjacent unchanged unsafe declaration, multi-line `impl Trait` owner inference, and `cfg(target_feature)` false-positive controls, and negative safe-code cases | source-based, not MIR |
