@@ -748,9 +748,20 @@ fn has_nullability_guard(site: &ScannedSite, lower: &str) -> bool {
     if let Some(arg) = nonnull_new_unchecked_argument(&site.operation.expression) {
         let arg = compact_code(&arg.to_ascii_lowercase());
         return compact.contains(&format!("nonnull::new({arg})"))
-            || compact.contains(&format!("{arg}.is_null()"));
+            || has_null_early_return_guard(&compact, &arg);
     }
     lower.contains("is_null") || compact.contains("nonnull::new(")
+}
+
+fn has_null_early_return_guard(compact: &str, arg: &str) -> bool {
+    let guard = format!("if{arg}.is_null(){{");
+    let Some((_prefix, after_guard)) = compact.split_once(&guard) else {
+        return false;
+    };
+    after_guard
+        .split_once('}')
+        .map_or(after_guard, |(guard_body, _after)| guard_body)
+        .contains("return")
 }
 
 fn nonnull_new_unchecked_argument(expression: &str) -> Option<String> {
@@ -1127,6 +1138,42 @@ mod tests {
         );
         assert!(
             obligation_evidence(&method_guard, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+    }
+
+    #[test]
+    fn nonnull_is_null_guard_must_exit_before_unchecked_constructor() {
+        let obligations = vec![SafetyObligation::new(
+            "non-null",
+            "pointer is non-null before constructing NonNull",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let non_returning_guard = site_with_family(
+            OperationFamily::NonNullUnchecked,
+            vec!["if ptr.is_null() { log_null(); }"],
+            "NonNull::new_unchecked(ptr)",
+            vec![],
+        );
+        let returning_guard = site_with_family(
+            OperationFamily::NonNullUnchecked,
+            vec!["if ptr.is_null() { return None; }"],
+            "NonNull::new_unchecked(ptr)",
+            vec![],
+        );
+
+        assert!(
+            !obligation_evidence(&non_returning_guard, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
+            obligation_evidence(&returning_guard, &obligations, &contract, &reach)[0]
                 .discharge
                 .present
         );
