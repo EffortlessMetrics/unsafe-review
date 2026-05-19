@@ -72,6 +72,8 @@ required_core_fixtures = [
   "slice_from_raw_parts_mut_maybeuninit",
   "slice_from_raw_parts_mut_other_maybeuninit_not_guard",
   "vec_from_raw_parts",
+  "vec_from_raw_parts_capacity_guard",
+  "vec_from_raw_parts_capacity_observed_not_guard",
   "box_from_raw",
   "static_mut_global_state",
   "transmute_invalid_value",
@@ -805,6 +807,26 @@ expected_cards = 1
 expected_class = "guard_missing"
 expected_operation_family = "vec_from_raw_parts"
 expected_hazard = "drop_or_deallocation"
+
+[[cases]]
+fixture = "vec_from_raw_parts_capacity_guard"
+kind = "positive"
+claim = "Vec::from_raw_parts recognizes a same-call len/capacity guard while leaving allocator and ownership evidence missing"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_from_raw_parts"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "vec_from_raw_parts_capacity_observed_not_guard"
+kind = "false_positive_control"
+claim = "Vec::from_raw_parts does not accept capacity mentions unless they bound the cap argument passed to the call"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_from_raw_parts"
+expected_hazard = "bounds"
 
 [[cases]]
 fixture = "box_from_raw"

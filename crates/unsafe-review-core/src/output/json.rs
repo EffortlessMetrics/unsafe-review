@@ -268,6 +268,8 @@ mod tests {
         "slice_from_raw_parts_mut_maybeuninit",
         "slice_from_raw_parts_mut_other_maybeuninit_not_guard",
         "vec_from_raw_parts",
+        "vec_from_raw_parts_capacity_guard",
+        "vec_from_raw_parts_capacity_observed_not_guard",
         "box_from_raw",
         "static_mut_global_state",
         "safe_reference_deref_no_cards",
