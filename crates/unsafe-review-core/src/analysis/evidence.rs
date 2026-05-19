@@ -2042,6 +2042,29 @@ mod tests {
     }
 
     #[test]
+    fn transmute_copy_u8_bool_early_return_guard_discharges_valid_value_obligation() {
+        let obligations = vec![SafetyObligation::new(
+            "valid-value",
+            "destination value satisfies Rust validity rules",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let transmute = site_with_family(
+            OperationFamily::Transmute,
+            vec!["if value > 1 {", "    return false;", "}"],
+            "unsafe { core::mem::transmute_copy::<u8, bool>(&value) }",
+            vec![],
+        );
+
+        let evidence = obligation_evidence(&transmute, &obligations, &contract, &reach);
+
+        assert!(evidence[0].discharge.present);
+    }
+
+    #[test]
     fn transmute_u8_bool_early_return_guard_requires_returning_branch() {
         let obligations = vec![SafetyObligation::new(
             "valid-value",
