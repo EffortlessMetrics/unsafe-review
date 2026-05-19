@@ -1027,8 +1027,8 @@ fn has_unwrap_unchecked_receiver_state_evidence(lower: &str) -> bool {
         return false;
     };
 
-    before_call.contains(&format!("{receiver}.is_some()"))
-        || before_call.contains(&format!("{receiver}.is_ok()"))
+    has_receiver_positive_branch_guard(before_call, receiver, "is_some")
+        || has_receiver_positive_branch_guard(before_call, receiver, "is_ok")
         || has_receiver_if_let_as_ref_guard(before_call, receiver, "some")
         || has_receiver_if_let_as_ref_guard(before_call, receiver, "ok")
         || has_receiver_early_return_guard(before_call, receiver, "is_none")
@@ -1052,15 +1052,51 @@ fn has_receiver_early_return_guard(before_call: &str, receiver: &str, predicate:
     let Some((_prefix, after_guard)) = before_call.split_once(&guard) else {
         return false;
     };
-    after_guard
+    let guard_returned = after_guard
         .split_once('}')
         .map_or(after_guard, |(guard_body, _after)| guard_body)
-        .contains("return")
+        .contains("return");
+    guard_returned && !has_receiver_assignment_after_branch(after_guard, receiver)
+}
+
+fn has_receiver_positive_branch_guard(before_call: &str, receiver: &str, predicate: &str) -> bool {
+    let guard = format!("if{receiver}.{predicate}(){{");
+    has_open_receiver_branch_guard(before_call, receiver, &guard)
 }
 
 fn has_receiver_if_let_as_ref_guard(before_call: &str, receiver: &str, constructor: &str) -> bool {
     let guard = format!("iflet{constructor}(_)={receiver}.as_ref(){{");
-    before_call.contains(&guard)
+    has_open_receiver_branch_guard(before_call, receiver, &guard)
+}
+
+fn has_open_receiver_branch_guard(before_call: &str, receiver: &str, guard: &str) -> bool {
+    let mut search_from = 0;
+    while let Some(offset) = before_call[search_from..].find(guard) {
+        let guard_start = search_from + offset;
+        let after_guard = &before_call[guard_start + guard.len()..];
+        let mut depth = 1usize;
+        for ch in after_guard.chars() {
+            match ch {
+                '{' => depth += 1,
+                '}' => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if depth > 0 && !has_receiver_assignment_after_branch(after_guard, receiver) {
+            return true;
+        }
+        search_from = guard_start + guard.len();
+    }
+    false
+}
+
+fn has_receiver_assignment_after_branch(after_guard: &str, receiver: &str) -> bool {
+    is_simple_identifier(receiver) && has_assignment_to_identifier(after_guard, receiver)
 }
 
 fn has_unreachable_unchecked_infallible_path_evidence(lower: &str) -> bool {

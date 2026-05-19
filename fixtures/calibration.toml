@@ -45,11 +45,14 @@ required_core_fixtures = [
   "unwrap_unchecked_other_infallible_not_guard",
   "unwrap_unchecked_is_some_guard",
   "unwrap_unchecked_is_ok_guard",
+  "unwrap_unchecked_is_some_observed_not_guard",
+  "unwrap_unchecked_is_ok_observed_not_guard",
   "unwrap_unchecked_if_let_some_guard",
   "unwrap_unchecked_if_let_ok_guard",
   "unwrap_unchecked_other_if_let_not_guard",
   "unwrap_unchecked_other_if_let_ok_not_guard",
   "unwrap_unchecked_post_check_not_guard",
+  "unwrap_unchecked_guard_then_reassigned_not_guard",
   "unwrap_unchecked_is_none_return_guard",
   "unwrap_unchecked_is_err_return_guard",
   "unreachable_unchecked_path",
@@ -566,6 +569,26 @@ expected_operation_family = "unwrap_unchecked"
 expected_hazard = "invalid_value"
 
 [[cases]]
+fixture = "unwrap_unchecked_is_some_observed_not_guard"
+kind = "false_positive_control"
+claim = "unwrap_unchecked does not accept a bare is_some observation as guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_is_ok_observed_not_guard"
+kind = "false_positive_control"
+claim = "unwrap_unchecked does not accept a bare is_ok observation as guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
 fixture = "unwrap_unchecked_if_let_some_guard"
 kind = "positive"
 claim = "unwrap_unchecked recognizes same-receiver if-let Some as_ref guard evidence"
@@ -609,6 +632,16 @@ expected_hazard = "invalid_value"
 fixture = "unwrap_unchecked_post_check_not_guard"
 kind = "false_positive_control"
 claim = "unwrap_unchecked does not accept post-call is_some checks as guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_guard_then_reassigned_not_guard"
+kind = "false_positive_control"
+claim = "unwrap_unchecked does not accept stale receiver-state guards after receiver reassignment"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"

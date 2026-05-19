@@ -122,9 +122,11 @@ These are not failures; they are the next unsupported or weakly verified areas:
   is contract evidence only and does not prove target-feature availability.
 - The `hashbrown#693` `unwrap_unchecked` sites are labeled as invalid-value
   operation cards, and local `Fallibility::Infallible`, same-receiver
-  `is_some` / `is_ok`, early-return, and narrow `if let ... as_ref()` state
-  evidence is recognized for `unwrap_unchecked()`, but broader option/result
-  state proof inference remains future work.
+  enclosing `is_some` / `is_ok` branches, early-return, and narrow
+  `if let ... as_ref()` state evidence is recognized for `unwrap_unchecked()`;
+  bare state observations and stale receiver-state evidence after reassignment
+  remain guard-missing false-positive controls. Broader option/result state
+  proof inference remains future work.
 - The `hashbrown#469` `unreachable_unchecked` sites are labeled as
   invalid-value operation cards, and local `Fallibility::Infallible` error-path
   evidence is recognized while other-context and post-evidence fixtures keep
