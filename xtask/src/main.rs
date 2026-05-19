@@ -904,9 +904,8 @@ fn check_calibration_case(
             "fixtures/calibration.toml cases[{idx}] expected_class `{expected_class}` was not found in {fixture}/expected.cards.json"
         ));
     }
-    if let Some(expected_operation_family) = case
-        .get("expected_operation_family")
-        .and_then(toml::Value::as_str)
+    if let Some(expected_operation_family) =
+        optional_case_string(case, "expected_operation_family", idx)?
         && !cards
             .iter()
             .any(|card| json_str(card, "operation_family") == Some(expected_operation_family))
@@ -915,7 +914,7 @@ fn check_calibration_case(
             "fixtures/calibration.toml cases[{idx}] expected_operation_family `{expected_operation_family}` was not found in {fixture}/expected.cards.json"
         ));
     }
-    if let Some(expected_hazard) = case.get("expected_hazard").and_then(toml::Value::as_str)
+    if let Some(expected_hazard) = optional_case_string(case, "expected_hazard", idx)?
         && !cards
             .iter()
             .any(|card| json_array_contains_str(card, "hazards", expected_hazard))
@@ -1173,6 +1172,27 @@ fn required_case_string<'a>(
     } else {
         Ok(value)
     }
+}
+
+fn optional_case_string<'a>(
+    case: &'a toml::map::Map<String, toml::Value>,
+    key: &str,
+    idx: usize,
+) -> Result<Option<&'a str>, String> {
+    let Some(value) = case.get(key) else {
+        return Ok(None);
+    };
+    let Some(value) = value.as_str() else {
+        return Err(format!(
+            "fixtures/calibration.toml cases[{idx}] optional `{key}` must be a string"
+        ));
+    };
+    if value.trim().is_empty() {
+        return Err(format!(
+            "fixtures/calibration.toml cases[{idx}] optional `{key}` is empty"
+        ));
+    }
+    Ok(Some(value))
 }
 
 fn required_case_usize(
@@ -1481,6 +1501,18 @@ mod tests {
         };
         assert!(err.contains("cases[2]"));
         assert!(err.contains("expected_hazards"));
+        Ok(())
+    }
+
+    #[test]
+    fn optional_calibration_strings_reject_wrong_type() -> Result<(), String> {
+        let mut case = toml::map::Map::new();
+        case.insert("expected_hazard".to_string(), toml::Value::Integer(1));
+        let Err(err) = optional_case_string(&case, "expected_hazard", 9) else {
+            return Err("wrong-typed optional calibration field should fail".to_string());
+        };
+        assert!(err.contains("cases[9]"));
+        assert!(err.contains("expected_hazard"));
         Ok(())
     }
 
