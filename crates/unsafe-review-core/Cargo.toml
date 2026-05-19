@@ -17,7 +17,7 @@ name = "unsafe_review_core"
 path = "src/lib.rs"
 
 [dependencies]
-ra_ap_syntax = "0.0.332"
+ra_ap_syntax = "0.0.333"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = { version = "0.8", default-features = false, features = ["parse"] }
