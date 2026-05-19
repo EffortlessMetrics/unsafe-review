@@ -1572,6 +1572,43 @@ mod tests {
     }
 
     #[test]
+    fn scan_file_ignores_nested_block_comments_and_raw_strings() -> Result<(), String> {
+        let root = unique_temp_dir()?;
+        fs::create_dir_all(root.join("src"))
+            .map_err(|err| format!("create temp src failed: {err}"))?;
+        fs::write(
+            root.join("src/lib.rs"),
+            "pub fn safe_text() -> &'static str {\n    /* outer /* unsafe impl Send for Nope {} */ unsafe { core::ptr::read(ptr) } */\n    r#\"unsafe { core::ptr::read(ptr) }\"#\n}\n",
+        )
+        .map_err(|err| format!("write temp source failed: {err}"))?;
+
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        assert!(
+            sites.is_empty(),
+            "nested comments or raw strings should not emit cards: {sites:#?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn text_detection_keeps_code_before_trailing_comment() {
+        let mut state = LineCommentState::default();
+        let detection_line = line_for_text_detection(
+            "    unsafe { core::ptr::read(ptr) } // mention transmute::<u8, bool>",
+            &mut state,
+        );
+
+        assert_eq!(detection_line.trim(), "unsafe { core::ptr::read(ptr) }");
+        assert_eq!(state.block_depth, 0);
+        assert_eq!(
+            detect_site(detection_line.trim()),
+            Some((UnsafeSiteKind::Operation, OperationFamily::RawPointerRead))
+        );
+    }
+
+    #[test]
     fn scan_file_does_not_classify_static_lifetime_mut_reference_as_static_mut()
     -> Result<(), String> {
         let root = unique_temp_dir()?;
