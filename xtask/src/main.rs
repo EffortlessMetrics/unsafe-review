@@ -388,15 +388,28 @@ fn check_calibration() -> Result<(), String> {
         }
     }
 
+    let mut required_fixtures = BTreeSet::new();
     for (idx, fixture) in required.iter().enumerate() {
         let Some(fixture) = fixture.as_str() else {
             return Err(format!(
                 "fixtures/calibration.toml required_core_fixtures[{idx}] must be a string"
             ));
         };
+        if !required_fixtures.insert(fixture.to_string()) {
+            return Err(format!(
+                "fixtures/calibration.toml contains duplicate required core fixture `{fixture}`"
+            ));
+        }
         if !fixtures.contains(fixture) {
             return Err(format!(
                 "fixtures/calibration.toml required core fixture `{fixture}` has no case"
+            ));
+        }
+    }
+    for fixture in &fixtures {
+        if !required_fixtures.contains(fixture) {
+            return Err(format!(
+                "fixtures/calibration.toml case fixture `{fixture}` is missing from required_core_fixtures"
             ));
         }
     }
