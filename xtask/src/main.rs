@@ -9,6 +9,7 @@ const REQUIRED_DOCS: &[&str] = &[
     "docs/MISSION.md",
     "docs/ROADMAP.md",
     "docs/specs/README.md",
+    "docs/status/SUPPORT_SUMMARY.md",
     "docs/status/SUPPORT_TIERS.md",
 ];
 
@@ -79,7 +80,18 @@ const ZERO_CARD_EXPECTATION_FIELDS: &[&str] = &[
     "expected_hazard",
 ];
 
+const SUPPORT_TIERS_DOC: &str = "docs/status/SUPPORT_TIERS.md";
+const SUPPORT_SUMMARY_DOC: &str = "docs/status/SUPPORT_SUMMARY.md";
 const KNOWN_SUPPORT_TIERS: &[&str] = &["scaffold", "experimental", "planned", "deferred"];
+const KNOWN_SUPPORT_SUMMARY_POSTURES: &[&str] = &["Experimental", "Deferred or planned"];
+const SUPPORT_SUMMARY_REQUIRED_PHRASES: &[&str] = &[
+    "memory-safety proof",
+    "UB-free claim",
+    "Miri-clean claim",
+    "site-execution proof",
+    "calibrated policy gate",
+    "SUPPORT_TIERS.md",
+];
 const DOGFOOD_MANIFEST: &str = "docs/dogfood/corpus.toml";
 const DOGFOOD_INDEX: &str = "docs/dogfood/index.json";
 const DOGFOOD_TARGET_KINDS: &[&str] = &["repo-snapshot", "pr-diff"];
@@ -307,7 +319,7 @@ fn looks_like_counted_card_id(value: &str) -> bool {
 }
 
 fn check_support_tiers() -> Result<(), String> {
-    let path = "docs/status/SUPPORT_TIERS.md";
+    let path = SUPPORT_TIERS_DOC;
     let text = read_to_string(Path::new(path))?;
     let mut rows = 0usize;
     for (line_no, line) in text.lines().enumerate() {
@@ -325,7 +337,42 @@ fn check_support_tiers() -> Result<(), String> {
     if rows == 0 {
         return Err(format!("{path} has no support-tier rows"));
     }
+    check_support_summary()?;
     println!("check-support-tiers: ok");
+    Ok(())
+}
+
+fn check_support_summary() -> Result<(), String> {
+    let path = SUPPORT_SUMMARY_DOC;
+    let text = read_to_string(Path::new(path))?;
+    check_support_summary_text(path, &text)
+}
+
+fn check_support_summary_text(path: &str, text: &str) -> Result<(), String> {
+    for phrase in SUPPORT_SUMMARY_REQUIRED_PHRASES {
+        if !text.contains(phrase) {
+            return Err(format!(
+                "{path} must include trust-boundary phrase `{phrase}`"
+            ));
+        }
+    }
+
+    let mut rows = 0usize;
+    for (line_no, line) in text.lines().enumerate() {
+        let Some(posture) = support_summary_posture_from_row(line) else {
+            continue;
+        };
+        rows += 1;
+        if !KNOWN_SUPPORT_SUMMARY_POSTURES.contains(&posture) {
+            return Err(format!(
+                "{path}:{} uses unknown support summary posture `{posture}`",
+                line_no + 1
+            ));
+        }
+    }
+    if rows == 0 {
+        return Err(format!("{path} has no current-posture rows"));
+    }
     Ok(())
 }
 
@@ -2042,8 +2089,20 @@ fn support_capability_from_row(line: &str) -> Option<&str> {
     columns.first().copied()
 }
 
+fn support_summary_posture_from_row(line: &str) -> Option<&str> {
+    if !line.starts_with('|') || line.contains("---") || line.contains("Surface") {
+        return None;
+    }
+    let columns = line
+        .split('|')
+        .map(str::trim)
+        .filter(|column| !column.is_empty())
+        .collect::<Vec<_>>();
+    (columns.len() == 4).then(|| columns[1])
+}
+
 fn support_tier_capabilities() -> Result<BTreeSet<String>, String> {
-    let path = workspace_path("docs/status/SUPPORT_TIERS.md");
+    let path = workspace_path(SUPPORT_TIERS_DOC);
     let text = read_to_string(&path)?;
     let mut capabilities = BTreeSet::new();
     for line in text.lines() {
@@ -2142,6 +2201,44 @@ mod tests {
             Some("Review cards")
         );
         assert_eq!(support_capability_from_row("|---|---|"), None);
+    }
+
+    #[test]
+    fn support_summary_parser_reads_current_posture_column() {
+        assert_eq!(
+            support_summary_posture_from_row(
+                "| ReviewCard schema | Experimental | Fixture-backed | Stable schema |"
+            ),
+            Some("Experimental")
+        );
+        assert_eq!(
+            support_summary_posture_from_row("| Label | Meaning |"),
+            None
+        );
+        assert_eq!(
+            support_summary_posture_from_row(
+                "| Surface | Current posture | Evidence | Not claimed |"
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn support_summary_rejects_unknown_current_posture() -> Result<(), String> {
+        let mut text = SUPPORT_SUMMARY_REQUIRED_PHRASES.join("\n");
+        text.push_str(
+            "\n| Surface | Current posture | Evidence | Not claimed |\n\
+             |---|---|---|---|\n\
+             | ReviewCard schema | Unsupported | Fixture-backed | Safety |\n",
+        );
+
+        let Err(err) = check_support_summary_text(SUPPORT_SUMMARY_DOC, &text) else {
+            return Err("unknown support summary posture should fail".to_string());
+        };
+
+        assert!(err.contains("unknown support summary posture"));
+        assert!(err.contains("Unsupported"));
+        Ok(())
     }
 
     #[test]
