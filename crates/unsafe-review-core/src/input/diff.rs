@@ -166,6 +166,25 @@ index 1111111..2222222 100644
     }
 
     #[test]
+    fn contains_near_uses_six_line_review_window() {
+        let diff = r#"diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -20,0 +21,1 @@
++unsafe { core::ptr::read(ptr) };
+"#;
+
+        let index = parse_unified_diff(diff);
+        let path = PathBuf::from("src/lib.rs");
+
+        assert!(index.contains_near(&path, 15));
+        assert!(index.contains_near(&path, 27));
+        assert!(!index.contains_near(&path, 14));
+        assert!(!index.contains_near(&path, 28));
+        assert!(!index.contains_near(&PathBuf::from("src/other.rs"), 21));
+    }
+
+    #[test]
     fn parse_unified_diff_tracks_added_lines_across_multiple_hunks() {
         let diff = r#"diff --git a/src/lib.rs b/src/lib.rs
 --- a/src/lib.rs
