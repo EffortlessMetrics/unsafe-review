@@ -247,6 +247,7 @@ mod tests {
         "raw_pointer_write_bytes",
         "raw_pointer_write_maybeuninit",
         "raw_pointer_write_volatile",
+        "ptr_copy_overlapping",
         "copy_nonoverlapping",
         "str_from_utf8_unchecked",
         "zeroed_invalid_value",

@@ -814,6 +814,26 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn ptr_copy_uses_overlapping_copy_operation_family() -> Result<(), String> {
+        let output = fixture_output("ptr_copy_overlapping")?;
+        let card = single_card("ptr_copy_overlapping", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::PtrCopy);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(card.hazards.contains(&HazardKind::PointerValidity));
+        assert!(!card.hazards.contains(&HazardKind::AliasingOrProvenance));
+        assert!(
+            card.obligations
+                .iter()
+                .all(|obligation| obligation.key != "non-overlap"),
+            "ptr::copy permits overlap and should not inherit the copy_nonoverlapping obligation"
+        );
+        assert!(card.id.0.contains("ptr-copy"));
+        Ok(())
+    }
+
+    #[test]
     fn str_from_utf8_unchecked_uses_utf8_operation_family() -> Result<(), String> {
         let output = fixture_output("str_from_utf8_unchecked")?;
         let card = single_card("str_from_utf8_unchecked", &output)?;

@@ -20,6 +20,11 @@ pub(crate) fn hazards_for(family: &OperationFamily) -> Vec<HazardKind> {
             HazardKind::Bounds,
             HazardKind::AliasingOrProvenance,
         ],
+        OperationFamily::PtrCopy => vec![
+            HazardKind::PointerValidity,
+            HazardKind::Bounds,
+            HazardKind::InitializedMemory,
+        ],
         OperationFamily::CopyNonOverlapping => vec![
             HazardKind::PointerValidity,
             HazardKind::Bounds,
@@ -178,6 +183,13 @@ pub(crate) fn obligations_for(family: &OperationFamily) -> Vec<SafetyObligation>
         OperationFamily::CopyNonOverlapping => vec![
             SafetyObligation::new("non-overlap", "source and destination do not overlap"),
             SafetyObligation::new("valid-range", "both ranges are valid for count elements"),
+        ],
+        OperationFamily::PtrCopy => vec![
+            SafetyObligation::new("valid-range", "both ranges are valid for count elements"),
+            SafetyObligation::new(
+                "initialized",
+                "source range is initialized for count elements",
+            ),
         ],
         OperationFamily::UnsafeImplSendSync => vec![SafetyObligation::new(
             "thread-safety",
