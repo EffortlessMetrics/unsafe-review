@@ -1,0 +1,5 @@
+[package]
+name = "static-mut-global-state"
+version = "0.0.0"
+edition = "2024"
+publish = false

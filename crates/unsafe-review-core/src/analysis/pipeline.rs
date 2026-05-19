@@ -765,6 +765,32 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn static_mut_global_state_routes_to_concurrency_review() -> Result<(), String> {
+        let output = fixture_output("static_mut_global_state")?;
+        let card = single_card("static_mut_global_state", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::StaticMut);
+        assert_eq!(card.operation.family, OperationFamily::StaticMut);
+        assert_eq!(card.class, ReviewClass::RequiresLoom);
+        assert!(card.hazards.contains(&HazardKind::StaticMutGlobalState));
+        assert!(
+            card.routes
+                .iter()
+                .any(|route| route.kind == WitnessKind::Loom)
+        );
+        assert!(
+            card.routes
+                .iter()
+                .any(|route| route.kind == WitnessKind::Shuttle)
+        );
+        assert!(
+            card.next_action.summary.contains("Loom/Shuttle"),
+            "static mut global state should route reviewers to concurrency witnesses"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn copy_nonoverlapping_uses_copy_operation_family() -> Result<(), String> {
         let output = fixture_output("copy_nonoverlapping")?;
         let card = single_card("copy_nonoverlapping", &output)?;

@@ -35,6 +35,7 @@ required_core_fixtures = [
   "slice_from_raw_parts_mut_maybeuninit",
   "vec_from_raw_parts",
   "box_from_raw",
+  "static_mut_global_state",
   "transmute_invalid_value",
   "transmute_copy_invalid_value",
   "multiline_transmute_copy_invalid_value",
@@ -385,6 +386,16 @@ expected_cards = 1
 expected_class = "guard_missing"
 expected_operation_family = "box_from_raw"
 expected_hazard = "drop_or_deallocation"
+
+[[cases]]
+fixture = "static_mut_global_state"
+kind = "positive"
+claim = "static mut global state routes to concurrency review instead of Miri-first review"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "requires_loom"
+expected_operation_family = "static_mut"
+expected_hazard = "static_mut_global_state"
 
 [[cases]]
 fixture = "transmute_invalid_value"
