@@ -50,6 +50,7 @@ const CALIBRATION_CASE_FIELDS: &[&str] = &[
 ];
 const OPERATION_FAMILY_REGISTRY: &str =
     "docs/specs/appendices/UNSAFE-REVIEW-SPEC-0005-appendix-operation-family-registry.md";
+const OPERATION_FAMILY_REGISTRY_COLUMNS: usize = 9;
 const OPERATION_FAMILY_SOURCE: &str = "crates/unsafe-review-core/src/domain/operation.rs";
 const HAZARD_KIND_SOURCE: &str = "crates/unsafe-review-core/src/domain/hazard.rs";
 const OPERATION_FAMILY_REGISTRY_WITNESS_ROUTES: &[&str] = &[
@@ -1142,6 +1143,12 @@ fn operation_family_registry_rows_from_text(text: &str) -> Result<BTreeSet<Strin
         else {
             continue;
         };
+        if columns.len() != OPERATION_FAMILY_REGISTRY_COLUMNS {
+            return Err(format!(
+                "{OPERATION_FAMILY_REGISTRY} operation_family `{family}` must have {OPERATION_FAMILY_REGISTRY_COLUMNS} columns, found {}",
+                columns.len()
+            ));
+        }
         if !rows.insert(family.to_string()) {
             return Err(format!(
                 "{OPERATION_FAMILY_REGISTRY} contains duplicate operation_family row `{family}`"
@@ -2226,13 +2233,26 @@ mod tests {
 
     #[test]
     fn operation_registry_parser_rejects_duplicate_rows() -> Result<(), String> {
-        let text = "| `raw_pointer_read` | a |\n| `raw_pointer_read` | b |\n";
+        let text = "| `raw_pointer_read` | shape | hazards | not hazards | keys | route | fixtures | controls | limits |\n| `raw_pointer_read` | shape | hazards | not hazards | keys | route | fixtures | controls | limits |\n";
 
         let Err(err) = operation_family_registry_rows_from_text(text) else {
             return Err("duplicate registry row should fail".to_string());
         };
 
         assert!(err.contains("duplicate operation_family row"));
+        assert!(err.contains("raw_pointer_read"));
+        Ok(())
+    }
+
+    #[test]
+    fn operation_registry_parser_rejects_wrong_column_count() -> Result<(), String> {
+        let text = "| `raw_pointer_read` | shape | hazards |\n";
+
+        let Err(err) = operation_family_registry_rows_from_text(text) else {
+            return Err("wrong registry row shape should fail".to_string());
+        };
+
+        assert!(err.contains("must have 9 columns"));
         assert!(err.contains("raw_pointer_read"));
         Ok(())
     }
