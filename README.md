@@ -129,6 +129,7 @@ cargo xtask check-pr
 - [Roadmap](docs/ROADMAP.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [CLI guide](docs/CLI.md)
+- [ReviewCard trust boundary](docs/explanation/review-cards-and-trust-boundary.md)
 - [Specifications](docs/specs/README.md)
 - [ADRs](docs/adr/README.md)
 - [Implementation plan](plans/0.1.0/implementation-plan.md)
