@@ -12,6 +12,15 @@ const REQUIRED_DOCS: &[&str] = &[
     "docs/status/SUPPORT_SUMMARY.md",
     "docs/status/SUPPORT_TIERS.md",
 ];
+const FRONT_DOOR_MARKDOWN_DOCS: &[&str] = &[
+    "README.md",
+    "docs/README.md",
+    "docs/FIRST_USE.md",
+    "docs/CLI.md",
+    "crates/unsafe-review/README.md",
+    "crates/unsafe-review-cli/README.md",
+    "crates/unsafe-review-core/README.md",
+];
 
 const POLICY_FILES: &[&str] = &[
     "policy/unsafe-review.toml",
@@ -174,6 +183,9 @@ fn run(args: Vec<String>) -> Result<(), String> {
 fn check_docs() -> Result<(), String> {
     for path in REQUIRED_DOCS {
         require_file(path)?;
+    }
+    for path in FRONT_DOOR_MARKDOWN_DOCS {
+        check_markdown_local_links(path)?;
     }
     check_docs_map_paths("docs/README.md")?;
     check_index(
@@ -2084,6 +2096,75 @@ fn check_docs_map_paths(path: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn check_markdown_local_links(path: &str) -> Result<(), String> {
+    let source = workspace_path(path);
+    let text = read_to_string(&source)?;
+    for target in markdown_link_targets(&text) {
+        let Some(local) = local_markdown_link_target(&target) else {
+            continue;
+        };
+        let resolved = markdown_link_path(&source, local);
+        if !resolved.exists() {
+            return Err(format!("{path} references missing local link `{target}`"));
+        }
+    }
+    Ok(())
+}
+
+fn markdown_link_targets(text: &str) -> Vec<String> {
+    let mut targets = Vec::new();
+    let mut rest = text;
+    while let Some(label_start) = rest.find('[') {
+        rest = &rest[label_start + 1..];
+        let Some(label_end) = rest.find(']') else {
+            break;
+        };
+        let after_label = &rest[label_end + 1..];
+        let Some(after_open) = after_label.strip_prefix('(') else {
+            rest = after_label;
+            continue;
+        };
+        let Some(target_end) = after_open.find(')') else {
+            break;
+        };
+        let target = after_open[..target_end].trim();
+        if !target.is_empty() {
+            targets.push(target.to_string());
+        }
+        rest = &after_open[target_end + 1..];
+    }
+    targets
+}
+
+fn local_markdown_link_target(target: &str) -> Option<&str> {
+    let target = target
+        .split_once('#')
+        .map_or(target, |(path, _)| path)
+        .trim();
+    if target.is_empty()
+        || target.starts_with('#')
+        || target.starts_with("http://")
+        || target.starts_with("https://")
+        || target.starts_with("mailto:")
+        || target.starts_with("file:")
+        || target.starts_with("sandbox:")
+    {
+        return None;
+    }
+    Some(target)
+}
+
+fn markdown_link_path(source: &Path, target: &str) -> PathBuf {
+    let target_path = Path::new(target);
+    if target_path.is_absolute() {
+        return target_path.to_path_buf();
+    }
+    source.parent().map_or_else(
+        || target_path.to_path_buf(),
+        |parent| parent.join(target_path),
+    )
+}
+
 fn markdown_code_spans(text: &str) -> Vec<String> {
     let mut spans = Vec::new();
     let mut current = String::new();
@@ -3457,6 +3538,31 @@ OperationFamily::RawPointerRead => vec![
     #[test]
     fn docs_map_paths_point_at_existing_repository_files() -> Result<(), String> {
         check_docs_map_paths("../docs/README.md")
+    }
+
+    #[test]
+    fn front_door_markdown_links_point_at_existing_local_targets() -> Result<(), String> {
+        for path in FRONT_DOOR_MARKDOWN_DOCS {
+            check_markdown_local_links(path)?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn markdown_link_target_parser_finds_plain_local_links() {
+        let targets = markdown_link_targets(
+            "[First use](docs/FIRST_USE.md) [external](https://example.com) [anchor](#trust)",
+        );
+
+        assert!(targets.contains(&"docs/FIRST_USE.md".to_string()));
+        assert!(targets.contains(&"https://example.com".to_string()));
+        assert!(targets.contains(&"#trust".to_string()));
+        assert_eq!(
+            local_markdown_link_target("docs/FIRST_USE.md#install"),
+            Some("docs/FIRST_USE.md")
+        );
+        assert_eq!(local_markdown_link_target("https://example.com"), None);
+        assert_eq!(local_markdown_link_target("#trust"), None);
     }
 
     #[test]
