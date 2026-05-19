@@ -3818,10 +3818,22 @@ mod tests {
             "Err(_) => unsafe { hint::unreachable_unchecked() },",
             vec![],
         );
+        let post_infallible = site_with_family(
+            OperationFamily::UnreachableUnchecked,
+            vec![
+                "match allocate(Fallibility::Fallible) {",
+                "    Ok(value) => value,",
+                "    // SAFETY: this fixture intentionally makes a later call infallible.",
+            ],
+            "Err(_) => unsafe { hint::unreachable_unchecked() },",
+            vec!["};", "let _after = allocate(Fallibility::Infallible);"],
+        );
 
         let evidence = obligation_evidence(&unreachable, &obligations, &contract, &reach);
+        let post_evidence = obligation_evidence(&post_infallible, &obligations, &contract, &reach);
 
         assert!(!evidence[0].discharge.present);
+        assert!(!post_evidence[0].discharge.present);
     }
 
     #[test]
