@@ -70,6 +70,7 @@ const OPERATION_FAMILY_REGISTRY_REQUIRED_TEXT_COLUMNS: &[(usize, &str)] = &[
 const OPERATION_FAMILY_REGISTRY_OBLIGATION_KEYS_COLUMN: (usize, &str) =
     (4, "obligation / evidence keys");
 const OPERATION_FAMILY_SOURCE: &str = "crates/unsafe-review-core/src/domain/operation.rs";
+const SAFETY_OBLIGATION_SOURCE: &str = "crates/unsafe-review-core/src/analysis/obligations.rs";
 const HAZARD_KIND_SOURCE: &str = "crates/unsafe-review-core/src/domain/hazard.rs";
 const WITNESS_KIND_SOURCE: &str = "crates/unsafe-review-core/src/domain/witness.rs";
 const ZERO_CARD_EXPECTATION_FIELDS: &[&str] = &[
@@ -1000,13 +1001,16 @@ fn check_operation_family_registry_coverage(
     check_operation_family_registry_header()?;
     let registry_families = operation_family_registry_rows()?;
     let known_operation_families = operation_family_labels()?;
+    let known_obligation_keys = safety_obligation_labels()?;
     let known_hazards = hazard_kind_labels()?;
     let known_witness_routes = witness_kind_labels()?;
+    let registry_obligation_keys = operation_family_registry_obligation_keys()?;
     let registry_hazards = operation_family_registry_hazards()?;
     let registry_fixture_proofs = operation_family_registry_fixture_proofs()?;
     let registry_witness_routes = operation_family_registry_witness_routes()?;
     let registry = OperationFamilyRegistryView {
         families: &registry_families,
+        obligation_keys: &registry_obligation_keys,
         hazards: &registry_hazards,
         fixture_proofs: &registry_fixture_proofs,
         witness_routes: &registry_witness_routes,
@@ -1015,6 +1019,7 @@ fn check_operation_family_registry_coverage(
         calibration_families,
         calibration_fixtures_by_family,
         &known_operation_families,
+        &known_obligation_keys,
         &known_hazards,
         &known_witness_routes,
         &registry,
@@ -1050,6 +1055,7 @@ fn check_operation_family_registry_header_from_text(text: &str) -> Result<(), St
 
 struct OperationFamilyRegistryView<'a> {
     families: &'a BTreeSet<String>,
+    obligation_keys: &'a BTreeMap<String, BTreeSet<String>>,
     hazards: &'a BTreeMap<String, BTreeSet<String>>,
     fixture_proofs: &'a BTreeMap<String, BTreeSet<String>>,
     witness_routes: &'a BTreeMap<String, BTreeSet<String>>,
@@ -1059,6 +1065,7 @@ fn check_operation_family_registry_coverage_with_registry(
     calibration_families: &BTreeSet<String>,
     calibration_fixtures_by_family: &BTreeMap<String, BTreeSet<String>>,
     known_operation_families: &BTreeSet<String>,
+    known_obligation_keys: &BTreeSet<String>,
     known_hazards: &BTreeSet<String>,
     known_witness_routes: &BTreeSet<String>,
     registry: &OperationFamilyRegistryView<'_>,
@@ -1099,6 +1106,23 @@ fn check_operation_family_registry_coverage_with_registry(
     }
 
     for family in registry.families {
+        let Some(obligation_keys) = registry.obligation_keys.get(family) else {
+            return Err(format!(
+                "{OPERATION_FAMILY_REGISTRY} operation_family `{family}` is missing obligation/evidence key metadata"
+            ));
+        };
+        let unknown_obligation_keys = obligation_keys
+            .iter()
+            .filter(|key| !known_obligation_keys.contains(key.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        if !unknown_obligation_keys.is_empty() {
+            return Err(format!(
+                "{OPERATION_FAMILY_REGISTRY} operation_family `{family}` cites unknown obligation/evidence key(s): {}",
+                unknown_obligation_keys.join(", ")
+            ));
+        }
+
         let Some(hazards) = registry.hazards.get(family) else {
             return Err(format!(
                 "{OPERATION_FAMILY_REGISTRY} operation_family `{family}` is missing hazard metadata"
@@ -1243,6 +1267,55 @@ fn validate_operation_family_registry_required_text(
     Ok(())
 }
 
+fn operation_family_registry_obligation_keys() -> Result<BTreeMap<String, BTreeSet<String>>, String>
+{
+    let text = read_to_string(&workspace_path(OPERATION_FAMILY_REGISTRY))?;
+    operation_family_registry_obligation_keys_from_text(&text)
+}
+
+fn operation_family_registry_obligation_keys_from_text(
+    text: &str,
+) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
+    let mut keys_by_family = BTreeMap::new();
+    for line in text.lines() {
+        let columns = registry_columns(line);
+        let Some(first) = columns.first() else {
+            continue;
+        };
+        let Some(family) = first
+            .strip_prefix('`')
+            .and_then(|value| value.strip_suffix('`'))
+        else {
+            continue;
+        };
+        let (idx, name) = OPERATION_FAMILY_REGISTRY_OBLIGATION_KEYS_COLUMN;
+        let Some(value) = columns.get(idx) else {
+            return Err(format!(
+                "{OPERATION_FAMILY_REGISTRY} operation_family `{family}` is missing {name} column"
+            ));
+        };
+        let keys = registry_key_tokens(value)
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        if keys.is_empty() {
+            return Err(format!(
+                "{OPERATION_FAMILY_REGISTRY} operation_family `{family}` {name} column has no key tokens"
+            ));
+        }
+        if keys_by_family.insert(family.to_string(), keys).is_some() {
+            return Err(format!(
+                "{OPERATION_FAMILY_REGISTRY} contains duplicate operation_family row `{family}`"
+            ));
+        }
+    }
+    if keys_by_family.is_empty() {
+        return Err(format!(
+            "{OPERATION_FAMILY_REGISTRY} contains no operation_family registry rows"
+        ));
+    }
+    Ok(keys_by_family)
+}
+
 fn is_placeholder_registry_text(value: &str) -> bool {
     matches!(
         value.trim().to_ascii_lowercase().as_str(),
@@ -1288,6 +1361,38 @@ fn operation_family_labels_from_text(text: &str) -> Result<BTreeSet<String>, Str
     };
     as_str_labels_from_text(operation_family_impl)
         .ok_or_else(|| format!("{OPERATION_FAMILY_SOURCE} has no OperationFamily::as_str labels"))
+}
+
+fn safety_obligation_labels() -> Result<BTreeSet<String>, String> {
+    let text = read_to_string(&workspace_path(SAFETY_OBLIGATION_SOURCE))?;
+    safety_obligation_labels_from_text(&text)
+}
+
+fn safety_obligation_labels_from_text(text: &str) -> Result<BTreeSet<String>, String> {
+    let mut labels = BTreeSet::new();
+    let mut rest = text;
+    while let Some((_, suffix)) = rest.split_once("SafetyObligation::new(") {
+        let Some(label) = first_quoted_text(suffix) else {
+            return Err(format!(
+                "{SAFETY_OBLIGATION_SOURCE} has SafetyObligation::new without a string key"
+            ));
+        };
+        labels.insert(label.to_string());
+        rest = suffix;
+    }
+    if labels.is_empty() {
+        Err(format!(
+            "{SAFETY_OBLIGATION_SOURCE} has no SafetyObligation::new labels"
+        ))
+    } else {
+        Ok(labels)
+    }
+}
+
+fn first_quoted_text(text: &str) -> Option<&str> {
+    let (_, suffix) = text.split_once('"')?;
+    let (value, _) = suffix.split_once('"')?;
+    Some(value)
 }
 
 fn hazard_kind_labels() -> Result<BTreeSet<String>, String> {
@@ -2007,12 +2112,14 @@ mod tests {
 
     fn registry_view<'a>(
         families: &'a BTreeSet<String>,
+        obligation_keys: &'a BTreeMap<String, BTreeSet<String>>,
         hazards: &'a BTreeMap<String, BTreeSet<String>>,
         fixture_proofs: &'a BTreeMap<String, BTreeSet<String>>,
         witness_routes: &'a BTreeMap<String, BTreeSet<String>>,
     ) -> OperationFamilyRegistryView<'a> {
         OperationFamilyRegistryView {
             families,
+            obligation_keys,
             hazards,
             fixture_proofs,
             witness_routes,
@@ -2179,7 +2286,12 @@ mod tests {
             "raw_pointer_read".to_string(),
             BTreeSet::from(["pointer_validity".to_string()]),
         )]);
+        let registry_obligation_keys = BTreeMap::from([(
+            "raw_pointer_read".to_string(),
+            BTreeSet::from(["pointer-live".to_string()]),
+        )]);
         let known_operation_families = BTreeSet::from(["raw_pointer_read".to_string()]);
+        let known_obligation_keys = BTreeSet::from(["pointer-live".to_string()]);
         let known_hazards = BTreeSet::from(["pointer_validity".to_string()]);
         let known_witness_routes = BTreeSet::from(["miri".to_string()]);
         let registry_fixtures = BTreeMap::from([(
@@ -2192,6 +2304,7 @@ mod tests {
         )]);
         let registry = registry_view(
             &registry_families,
+            &registry_obligation_keys,
             &registry_hazards,
             &registry_fixtures,
             &registry_routes,
@@ -2201,6 +2314,7 @@ mod tests {
             &calibration_families,
             &calibration_fixtures,
             &known_operation_families,
+            &known_obligation_keys,
             &known_hazards,
             &known_witness_routes,
             &registry,
@@ -2222,8 +2336,13 @@ mod tests {
         )]);
         let registry_families = BTreeSet::from(["spooky_operation".to_string()]);
         let known_operation_families = BTreeSet::from(["raw_pointer_read".to_string()]);
+        let known_obligation_keys = BTreeSet::from(["pointer-live".to_string()]);
         let known_hazards = BTreeSet::from(["pointer_validity".to_string()]);
         let known_witness_routes = BTreeSet::from(["miri".to_string()]);
+        let registry_obligation_keys = BTreeMap::from([(
+            "spooky_operation".to_string(),
+            BTreeSet::from(["pointer-live".to_string()]),
+        )]);
         let registry_hazards = BTreeMap::from([(
             "spooky_operation".to_string(),
             BTreeSet::from(["pointer_validity".to_string()]),
@@ -2238,6 +2357,7 @@ mod tests {
         )]);
         let registry = registry_view(
             &registry_families,
+            &registry_obligation_keys,
             &registry_hazards,
             &registry_fixtures,
             &registry_routes,
@@ -2247,6 +2367,7 @@ mod tests {
             &calibration_families,
             &calibration_fixtures,
             &known_operation_families,
+            &known_obligation_keys,
             &known_hazards,
             &known_witness_routes,
             &registry,
@@ -2271,7 +2392,12 @@ mod tests {
             "raw_pointer_read".to_string(),
             BTreeSet::from(["spooky_action".to_string()]),
         )]);
+        let registry_obligation_keys = BTreeMap::from([(
+            "raw_pointer_read".to_string(),
+            BTreeSet::from(["pointer-live".to_string()]),
+        )]);
         let known_operation_families = BTreeSet::from(["raw_pointer_read".to_string()]);
+        let known_obligation_keys = BTreeSet::from(["pointer-live".to_string()]);
         let known_hazards = BTreeSet::from(["pointer_validity".to_string()]);
         let known_witness_routes = BTreeSet::from(["miri".to_string()]);
         let registry_fixtures = BTreeMap::from([(
@@ -2284,6 +2410,7 @@ mod tests {
         )]);
         let registry = registry_view(
             &registry_families,
+            &registry_obligation_keys,
             &registry_hazards,
             &registry_fixtures,
             &registry_routes,
@@ -2293,6 +2420,7 @@ mod tests {
             &calibration_families,
             &calibration_fixtures,
             &known_operation_families,
+            &known_obligation_keys,
             &known_hazards,
             &known_witness_routes,
             &registry,
@@ -2302,6 +2430,59 @@ mod tests {
 
         assert!(err.contains("unknown hazard"));
         assert!(err.contains("spooky_action"));
+        Ok(())
+    }
+
+    #[test]
+    fn operation_registry_rejects_unknown_obligation_key() -> Result<(), String> {
+        let calibration_families = BTreeSet::from(["raw_pointer_read".to_string()]);
+        let calibration_fixtures = BTreeMap::from([(
+            "raw_pointer_read".to_string(),
+            BTreeSet::from(["raw_pointer_alignment".to_string()]),
+        )]);
+        let registry_families = BTreeSet::from(["raw_pointer_read".to_string()]);
+        let registry_obligation_keys = BTreeMap::from([(
+            "raw_pointer_read".to_string(),
+            BTreeSet::from(["shape-proof".to_string()]),
+        )]);
+        let registry_hazards = BTreeMap::from([(
+            "raw_pointer_read".to_string(),
+            BTreeSet::from(["pointer_validity".to_string()]),
+        )]);
+        let known_operation_families = BTreeSet::from(["raw_pointer_read".to_string()]);
+        let known_obligation_keys = BTreeSet::from(["pointer-live".to_string()]);
+        let known_hazards = BTreeSet::from(["pointer_validity".to_string()]);
+        let known_witness_routes = BTreeSet::from(["miri".to_string()]);
+        let registry_fixtures = BTreeMap::from([(
+            "raw_pointer_read".to_string(),
+            BTreeSet::from(["raw_pointer_alignment".to_string()]),
+        )]);
+        let registry_routes = BTreeMap::from([(
+            "raw_pointer_read".to_string(),
+            BTreeSet::from(["miri".to_string()]),
+        )]);
+        let registry = registry_view(
+            &registry_families,
+            &registry_obligation_keys,
+            &registry_hazards,
+            &registry_fixtures,
+            &registry_routes,
+        );
+
+        let Err(err) = check_operation_family_registry_coverage_with_registry(
+            &calibration_families,
+            &calibration_fixtures,
+            &known_operation_families,
+            &known_obligation_keys,
+            &known_hazards,
+            &known_witness_routes,
+            &registry,
+        ) else {
+            return Err("unknown obligation key should fail".to_string());
+        };
+
+        assert!(err.contains("unknown obligation/evidence key"));
+        assert!(err.contains("shape-proof"));
         Ok(())
     }
 
@@ -2317,7 +2498,12 @@ mod tests {
             "raw_pointer_read".to_string(),
             BTreeSet::from(["pointer_validity".to_string()]),
         )]);
+        let registry_obligation_keys = BTreeMap::from([(
+            "raw_pointer_read".to_string(),
+            BTreeSet::from(["pointer-live".to_string()]),
+        )]);
         let known_operation_families = BTreeSet::from(["raw_pointer_read".to_string()]);
+        let known_obligation_keys = BTreeSet::from(["pointer-live".to_string()]);
         let known_hazards = BTreeSet::from(["pointer_validity".to_string()]);
         let known_witness_routes = BTreeSet::from(["miri".to_string()]);
         let registry_fixtures = BTreeMap::from([(
@@ -2330,6 +2516,7 @@ mod tests {
         )]);
         let registry = registry_view(
             &registry_families,
+            &registry_obligation_keys,
             &registry_hazards,
             &registry_fixtures,
             &registry_routes,
@@ -2339,6 +2526,7 @@ mod tests {
             &calibration_families,
             &calibration_fixtures,
             &known_operation_families,
+            &known_obligation_keys,
             &known_hazards,
             &known_witness_routes,
             &registry,
@@ -2414,6 +2602,44 @@ mod tests {
         let rows = operation_family_registry_rows_from_text(text)?;
 
         assert!(rows.contains("unknown"));
+        Ok(())
+    }
+
+    #[test]
+    fn operation_registry_parser_extracts_obligation_key_names() -> Result<(), String> {
+        let text = "| `raw_pointer_read` | shape | hazards | none | pointer-live, bounds, alignment | miri | `raw_pointer_alignment` | controls | limits |\n";
+
+        let keys = operation_family_registry_obligation_keys_from_text(text)?;
+        let Some(keys) = keys.get("raw_pointer_read") else {
+            return Err("raw_pointer_read obligation key row should be parsed".to_string());
+        };
+
+        assert!(keys.contains("pointer-live"));
+        assert!(keys.contains("bounds"));
+        assert!(keys.contains("alignment"));
+        assert_eq!(keys.len(), 3);
+        Ok(())
+    }
+
+    #[test]
+    fn safety_obligation_parser_extracts_new_labels() -> Result<(), String> {
+        let text = r#"
+OperationFamily::RawPointerRead => vec![
+    SafetyObligation::new("pointer-live", "pointer is live"),
+    SafetyObligation::new("alignment", "pointer is aligned"),
+    SafetyObligation::new(
+        "state-transition",
+        "state transition is valid",
+    ),
+],
+"#;
+
+        let labels = safety_obligation_labels_from_text(text)?;
+
+        assert!(labels.contains("pointer-live"));
+        assert!(labels.contains("alignment"));
+        assert!(labels.contains("state-transition"));
+        assert_eq!(labels.len(), 3);
         Ok(())
     }
 
