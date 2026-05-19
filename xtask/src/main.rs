@@ -388,7 +388,7 @@ fn check_calibration() -> Result<(), String> {
             ));
         }
         kinds.insert(kind.to_string());
-        check_calibration_case(case, fixture, idx)?;
+        check_calibration_case(case, fixture, kind, idx)?;
     }
 
     for kind in CALIBRATION_REQUIRED_KINDS {
@@ -856,6 +856,7 @@ fn check_fixture(dir: &Path) -> Result<(), String> {
 fn check_calibration_case(
     case: &toml::map::Map<String, toml::Value>,
     fixture: &str,
+    kind: &str,
     idx: usize,
 ) -> Result<(), String> {
     let fixture_dir = workspace_path("fixtures").join(fixture);
@@ -878,6 +879,7 @@ fn check_calibration_case(
             cards.len()
         ));
     }
+    check_calibration_kind_card_count(kind, expected_cards, idx)?;
     if expected_cards == 0 {
         check_zero_card_expectations(case, idx)?;
         return Ok(());
@@ -912,6 +914,23 @@ fn check_calibration_case(
         ));
     }
     Ok(())
+}
+
+fn check_calibration_kind_card_count(
+    kind: &str,
+    expected_cards: usize,
+    idx: usize,
+) -> Result<(), String> {
+    match (kind, expected_cards) {
+        ("positive", 0) => Err(format!(
+            "fixtures/calibration.toml cases[{idx}] kind `positive` must expect at least one card"
+        )),
+        ("negative", 0) => Ok(()),
+        ("negative", _) => Err(format!(
+            "fixtures/calibration.toml cases[{idx}] kind `negative` must expect zero cards"
+        )),
+        _ => Ok(()),
+    }
 }
 
 fn check_zero_card_expectations(
@@ -1422,6 +1441,27 @@ mod tests {
         };
         assert!(err.contains("cases[7]"));
         assert!(err.contains("expected_class"));
+        Ok(())
+    }
+
+    #[test]
+    fn calibration_kind_card_counts_match_semantics() -> Result<(), String> {
+        let Err(err) = check_calibration_kind_card_count("positive", 0, 3) else {
+            return Err("positive calibration case with zero cards should fail".to_string());
+        };
+        assert!(err.contains("cases[3]"));
+        assert!(err.contains("positive"));
+
+        let Err(err) = check_calibration_kind_card_count("negative", 1, 4) else {
+            return Err("negative calibration case with cards should fail".to_string());
+        };
+        assert!(err.contains("cases[4]"));
+        assert!(err.contains("negative"));
+
+        check_calibration_kind_card_count("positive", 1, 5)?;
+        check_calibration_kind_card_count("negative", 0, 6)?;
+        check_calibration_kind_card_count("false_positive_control", 0, 7)?;
+        check_calibration_kind_card_count("false_positive_control", 1, 8)?;
         Ok(())
     }
 
