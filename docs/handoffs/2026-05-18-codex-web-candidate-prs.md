@@ -59,6 +59,16 @@ Already landed in this lane:
 - optional calibration expectation type validation
 - cargo subcommand wrapper e2e coverage
 - subcommand-position help flag handling
+- support-summary posture validation and operation-registry obligation-key
+  validation
+- diff parser tests for multihunk diffs, new-file additions, and the exact
+  six-line review window used by changed-line matching
+- cargo-subcommand wrapper coverage for PR summary artifact writing
+- classifier severity tuple coverage for ordinary evidence states
+- safe-repo CLI no-noise coverage
+- syntax line/column property coverage
+- manual fuzz harness shape validation wired into `check-pr` without adding a
+  fuzz workflow
 
 Do not use candidate intake as permission to jump to release work, default
 blocking, automatic comments, witness execution by default, broad workflow
@@ -90,11 +100,11 @@ open candidate queue is empty.
 | Scanner partial-parse recovery | #48 | merged as #103 | closed | current hardening | #103 keeps syntax-backed concrete operation detection available when unrelated parse errors exist, reducing fake unknown wrapper cards in PR artifacts. |
 | Raw pointer write detection | #49, #62 | merged as #95 | closed | current hardening | #95 kept syntax-target behavior and fixture proof, rebuilt narrowly on current main as raw pointer assignment-write detection. |
 | xtask fixture validation | #33, #50, #63, #64 | merged as #92 | closed | current hardening | Fixture validation protects the support-tier proof mechanism by validating fixture layout, golden JSON shape, diff shape, and package naming without broad xtask policy changes. |
-| CLI e2e coverage | #39, #58, #80, #81 | merged as #94 and #289 | closed | current PR/CI projection | #94 kept #81's user-path shape but updated it for landed PR artifacts: JSON, PR summary, SARIF, comment plan, context, and explain. #289 extracted the remaining useful cargo-subcommand wrapper path. |
-| Focused unit coverage | #44, #61, #86, #87 | merged as #93 and #284 | closed | current hardening | #93 is the canonical core-only slice for classifier, evidence, and diff parser invariants. #284 added the remaining route-precedence regression coverage for concurrency and FFI cards. |
-| Property testing | #43, #60, #84, #85 | merged as #115 | closed | later hardening | #115 extracted the narrow core invariant slice: unified-diff new-file coordinates, removed-only file tracking, slug token stability, and path-display normalization. It added no fuzz workflow, mutation workflow, product surface, or policy authority. |
-| Fuzzing | #42, #59, #82, #83 | merged as #285 | closed | later hardening | #285 extracted only the useful manual analyzer fuzz harness. Scheduled or blocking fuzz workflow surface remains out of scope. |
-| Mutation-sensitive tests | #41, #79 | merged as #119 | closed | current hardening | #119 extracted the current-lane-safe tests for obligation/hazard mapping, concrete-operation suppression, and diff-vs-repo scanner filtering. #41 and #79 were closed as superseded. |
+| CLI e2e coverage | #39, #58, #80, #81 | merged as #94, #289, #350, and #353 | closed | current PR/CI projection | #94 kept #81's user-path shape but updated it for landed PR artifacts: JSON, PR summary, SARIF, comment plan, context, and explain. #289 extracted the remaining useful cargo-subcommand wrapper path. #350 added cargo-subcommand wrapper coverage for PR summary artifact writing, and #353 added no-noise safe repo output coverage. |
+| Focused unit coverage | #44, #61, #86, #87 | merged as #93, #284, #349, and #352 | closed | current hardening | #93 is the canonical core-only slice for classifier, evidence, and diff parser invariants. #284 added the remaining route-precedence regression coverage for concurrency and FFI cards. #349 added multihunk and new-file diff parser coverage, and #352 pinned ordinary evidence-state class, priority, and confidence tuples. |
+| Property testing | #43, #60, #84, #85 | merged as #115 and #354 | closed | later hardening | #115 extracted the narrow core invariant slice: unified-diff new-file coordinates, removed-only file tracking, slug token stability, and path-display normalization. #354 added syntax line/column coordinate property coverage. These added no fuzz workflow, mutation workflow, product surface, or policy authority. |
+| Fuzzing | #42, #59, #82, #83 | merged as #285 and #355 | closed | later hardening | #285 extracted only the useful manual analyzer fuzz harness. #355 validates the harness shape and docs in `check-pr` without compiling fuzz or adding a workflow. Scheduled or blocking fuzz workflow surface remains out of scope. |
+| Mutation-sensitive tests | #41, #79 | merged as #119, #351, and #352 | closed | current hardening | #119 extracted the current-lane-safe tests for obligation/hazard mapping, concrete-operation suppression, and diff-vs-repo scanner filtering. #351 pinned the exact changed-line review window boundary, and #352 pinned classifier severity tuples. #41 and #79 were closed as superseded. |
 | Mutation workflow/config | #57, #78 | merged as #286 for test-only slice | closed | later hardening | #286 extracted raw pointer write method-form scanner tests from the stale mutation candidates. Mutation workflow/config surface remains deferred. |
 | CLI ergonomics and diff handling | #31, #45, #46, #47 | merged as #104, #112, and #290 | closed | current PR/CI projection | #104 kept current-lane fixes: stdin diffs, root-relative diff files, current-directory `--out`, JSON aliases, duplicate card-id rejection, and no `--fail-on-gaps` policy behavior. #112 extracted the useful current-lane slice from stale #46: `--flag=value` parsing, stricter missing-value handling, and help text aligned with advisory artifact outputs. #290 extracted subcommand-position `--help` / `-h` handling. |
 | Documentation usage guides | #36, #37, #53, #56, #72, #73, #76, #77 | merged as #143, #144, and #287 | closed | current docs | #143 added the canonical current-surface CLI guide. #144 extracted the crate README link. #287 extracted review-card trust-boundary explanation docs. Direct duplicates were closed as superseded. |
@@ -112,8 +122,8 @@ dogfood-calibrated evidence lane. The remaining ideas are option inventory only:
 
 | Former PRs | Theme | Disposition | Target lane | Reason |
 |---:|---|---|---|---|
-| #42, #59, #82, #83 | Fuzzing | extracted and closed | later hardening | #285 kept the compileable manual harness. Scheduled or blocking fuzz workflow surface remains deferred. |
-| #57, #78 | Mutation workflow/config | extracted and closed | later hardening | #286 kept scanner regression tests. Mutation workflows remain deferred. |
+| #42, #59, #82, #83 | Fuzzing | extracted and closed | later hardening | #285 kept the compileable manual harness. #355 added shape validation to `check-pr`; scheduled or blocking fuzz workflow surface remains deferred. |
+| #57, #78 | Mutation workflow/config | extracted and closed | later hardening | #286 kept scanner regression tests. #351 and #352 kept useful mutation-sensitive diff/classifier assertions. Mutation workflows remain deferred. |
 | #76 | Documentation overview | superseded and closed | later docs | #287 kept the useful trust-boundary explanation slice. Broad overview docs should be rebuilt from current surfaces if needed. |
 | #35, #54, #70, #71 | Diataxis docs structure | closed | later docs | Broad documentation restructuring is not active-lane work and risks creating competing source-of-truth pages. |
 | #38, #52, #68, #69 | Spec expansion | closed | later source-of-truth | Specs should follow concrete behavior gaps and proof artifacts, not outrun implementation. |
