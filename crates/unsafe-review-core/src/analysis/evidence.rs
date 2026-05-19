@@ -378,6 +378,8 @@ fn has_unwrap_unchecked_receiver_state_evidence(lower: &str) -> bool {
 
     before_call.contains(&format!("{receiver}.is_some()"))
         || before_call.contains(&format!("{receiver}.is_ok()"))
+        || has_receiver_early_return_guard(before_call, receiver, "is_none")
+        || has_receiver_early_return_guard(before_call, receiver, "is_err")
 }
 
 fn unwrap_unchecked_receiver_context(compact: &str) -> Option<(&str, &str)> {
@@ -390,6 +392,17 @@ fn unwrap_unchecked_receiver_context(compact: &str) -> Option<(&str, &str)> {
         .unwrap_or(0);
     let receiver = &before_call[receiver_start..];
     (!receiver.is_empty()).then_some((before_call, receiver))
+}
+
+fn has_receiver_early_return_guard(before_call: &str, receiver: &str, predicate: &str) -> bool {
+    let guard = format!("if{receiver}.{predicate}(){{");
+    let Some((_prefix, after_guard)) = before_call.split_once(&guard) else {
+        return false;
+    };
+    after_guard
+        .split_once('}')
+        .map_or(after_guard, |(guard_body, _after)| guard_body)
+        .contains("return")
 }
 
 fn has_unreachable_unchecked_infallible_path_evidence(lower: &str) -> bool {
@@ -1368,6 +1381,60 @@ mod tests {
             vec![],
             "unsafe { option.unwrap_unchecked() }",
             vec!["if option.is_some() {}"],
+        );
+
+        let evidence = obligation_evidence(&unchecked, &obligations, &contract, &reach);
+
+        assert!(!evidence[0].discharge.present);
+    }
+
+    #[test]
+    fn unwrap_unchecked_early_return_state_guard_discharges_valid_value_obligation() {
+        let obligations = vec![SafetyObligation::new(
+            "valid-value",
+            "value is known to be `Some` or `Ok` before `unwrap_unchecked`",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let option = site_with_family(
+            OperationFamily::UnwrapUnchecked,
+            vec!["if option.is_none() {", "    return 0;", "}"],
+            "unsafe { option.unwrap_unchecked() }",
+            vec![],
+        );
+        let result = site_with_family(
+            OperationFamily::UnwrapUnchecked,
+            vec!["if result.is_err() {", "    return 0;", "}"],
+            "unsafe { result.unwrap_unchecked() }",
+            vec![],
+        );
+
+        let option_evidence = obligation_evidence(&option, &obligations, &contract, &reach);
+        let result_evidence = obligation_evidence(&result, &obligations, &contract, &reach);
+
+        assert!(option_evidence[0].discharge.present);
+        assert!(result_evidence[0].discharge.present);
+    }
+
+    #[test]
+    fn unwrap_unchecked_early_return_guard_requires_returning_branch() {
+        let obligations = vec![SafetyObligation::new(
+            "valid-value",
+            "value is known to be `Some` or `Ok` before `unwrap_unchecked`",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let unchecked = site_with_family(
+            OperationFamily::UnwrapUnchecked,
+            vec!["if option.is_none() {", "    observe_none();", "}"],
+            "unsafe { option.unwrap_unchecked() }",
+            vec![],
         );
 
         let evidence = obligation_evidence(&unchecked, &obligations, &contract, &reach);
