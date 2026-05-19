@@ -266,6 +266,7 @@ mod tests {
         "target_feature_safety_docs",
         "split_raw_pointer_read_call",
         "maybeuninit_assume_init",
+        "maybeuninit_assume_init_read",
         "vec_set_len",
         "vec_set_len_initialized_loop",
         "vec_set_len_call_result_init",

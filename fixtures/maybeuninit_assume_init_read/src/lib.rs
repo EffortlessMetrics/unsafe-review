@@ -1,0 +1,20 @@
+use core::mem::MaybeUninit;
+
+pub fn read_slot(init: bool) -> u32 {
+    let mut slot = MaybeUninit::<u32>::uninit();
+    if init {
+        slot.write(7);
+    }
+    // SAFETY: caller expects initialized slot, but this fixture leaves one branch uninitialized.
+    unsafe { slot.assume_init_read() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::read_slot;
+
+    #[test]
+    fn reads_slot() {
+        let _value = read_slot(true);
+    }
+}
