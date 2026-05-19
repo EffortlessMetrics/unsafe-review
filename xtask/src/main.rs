@@ -67,6 +67,8 @@ const OPERATION_FAMILY_REGISTRY_REQUIRED_TEXT_COLUMNS: &[(usize, &str)] = &[
     (7, "known false-positive controls"),
     (8, "known limits"),
 ];
+const OPERATION_FAMILY_REGISTRY_OBLIGATION_KEYS_COLUMN: (usize, &str) =
+    (4, "obligation / evidence keys");
 const OPERATION_FAMILY_SOURCE: &str = "crates/unsafe-review-core/src/domain/operation.rs";
 const HAZARD_KIND_SOURCE: &str = "crates/unsafe-review-core/src/domain/hazard.rs";
 const WITNESS_KIND_SOURCE: &str = "crates/unsafe-review-core/src/domain/witness.rs";
@@ -1210,6 +1212,23 @@ fn validate_operation_family_registry_required_text(
             ));
         }
     }
+    let (idx, name) = OPERATION_FAMILY_REGISTRY_OBLIGATION_KEYS_COLUMN;
+    let Some(value) = columns.get(idx) else {
+        return Err(format!(
+            "{OPERATION_FAMILY_REGISTRY} operation_family `{family}` is missing {name} column"
+        ));
+    };
+    if family == "unknown" {
+        if value.trim() != "unknown" {
+            return Err(format!(
+                "{OPERATION_FAMILY_REGISTRY} operation_family `unknown` {name} column must stay `unknown`"
+            ));
+        }
+    } else if is_placeholder_registry_text(value) {
+        return Err(format!(
+            "{OPERATION_FAMILY_REGISTRY} operation_family `{family}` {name} column must name concrete obligation/evidence keys, not `{value}`"
+        ));
+    }
     Ok(())
 }
 
@@ -2338,6 +2357,32 @@ mod tests {
         assert!(err.contains("detected syntax shapes"));
         assert!(err.contains("raw_pointer_read"));
         assert!(err.contains("todo"));
+        Ok(())
+    }
+
+    #[test]
+    fn operation_registry_parser_rejects_unknown_obligation_keys_for_concrete_family()
+    -> Result<(), String> {
+        let text = "| `raw_pointer_read` | shape | hazards | none | unknown | miri | `raw_pointer_alignment` | controls | limits |\n";
+
+        let Err(err) = operation_family_registry_rows_from_text(text) else {
+            return Err("unknown obligation keys should fail for concrete families".to_string());
+        };
+
+        assert!(err.contains("obligation / evidence keys"));
+        assert!(err.contains("raw_pointer_read"));
+        assert!(err.contains("unknown"));
+        Ok(())
+    }
+
+    #[test]
+    fn operation_registry_parser_allows_unknown_obligation_keys_for_unknown_family()
+    -> Result<(), String> {
+        let text = "| `unknown` | changed unsafe fallback shapes | unknown | none | unknown | human-deep-review | `split_unsafe_block` | concrete operation cards suppress duplicate wrapper cards | unknown is a review fallback, not proof |\n";
+
+        let rows = operation_family_registry_rows_from_text(text)?;
+
+        assert!(rows.contains("unknown"));
         Ok(())
     }
 
