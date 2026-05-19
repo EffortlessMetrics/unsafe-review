@@ -1631,6 +1631,7 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
         for fixture in [
             "unreachable_unchecked_other_infallible_not_guard",
             "unreachable_unchecked_post_infallible_not_guard",
+            "unreachable_unchecked_closed_infallible_match_not_guard",
         ] {
             let output = fixture_output(fixture)?;
             let card = single_card(fixture, &output)?;

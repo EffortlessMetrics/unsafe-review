@@ -129,9 +129,9 @@ These are not failures; they are the next unsupported or weakly verified areas:
   proof inference remains future work.
 - The `hashbrown#469` `unreachable_unchecked` sites are labeled as
   invalid-value operation cards, and local `Fallibility::Infallible` error-path
-  evidence is recognized while other-context and post-evidence fixtures keep
-  false positives pinned. Broader control-flow reachability proof inference
-  remains future work.
+  evidence is recognized while other-context, post-evidence, and closed-match
+  fixtures keep false positives pinned. Broader control-flow reachability proof
+  inference remains future work.
 - The `hashbrown#469` multi-line `impl Trait` parameter owners now resolve to
   enclosing function names instead of `Fn`, but deeper callee-contract inference
   remains future work.

@@ -1109,11 +1109,27 @@ fn has_unreachable_unchecked_infallible_path_evidence(lower: &str) -> bool {
         return false;
     };
     let match_context = &before_call[match_pos..];
-    let Some((match_head, _arms)) = match_context.split_once('{') else {
+    let Some((match_head, after_open)) = match_context.split_once('{') else {
         return false;
     };
+    if !match_head.contains("fallibility::infallible") {
+        return false;
+    }
 
-    match_head.contains("fallibility::infallible")
+    let mut depth = 1usize;
+    for ch in after_open.chars() {
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+    }
+    true
 }
 
 fn has_from_utf8_unchecked_validation_evidence(lower: &str) -> bool {
@@ -4369,12 +4385,26 @@ mod tests {
             "Err(_) => unsafe { hint::unreachable_unchecked() },",
             vec!["};", "let _after = allocate(Fallibility::Infallible);"],
         );
+        let closed_infallible = site_with_family(
+            OperationFamily::UnreachableUnchecked,
+            vec![
+                "let _observed = match allocate(Fallibility::Infallible) {",
+                "    Ok(value) => value,",
+                "    Err(_) => 0,",
+                "};",
+            ],
+            "unsafe { hint::unreachable_unchecked() }",
+            vec![],
+        );
 
         let evidence = obligation_evidence(&unreachable, &obligations, &contract, &reach);
         let post_evidence = obligation_evidence(&post_infallible, &obligations, &contract, &reach);
+        let closed_evidence =
+            obligation_evidence(&closed_infallible, &obligations, &contract, &reach);
 
         assert!(!evidence[0].discharge.present);
         assert!(!post_evidence[0].discharge.present);
+        assert!(!closed_evidence[0].discharge.present);
     }
 
     #[test]
