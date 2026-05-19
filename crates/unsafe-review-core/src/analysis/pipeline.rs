@@ -374,6 +374,11 @@ mod tests {
                 false,
             ),
             (
+                "raw_pointer_read_volatile",
+                OperationFamily::RawPointerRead,
+                true,
+            ),
+            (
                 "raw_pointer_write_assignment",
                 OperationFamily::RawPointerWrite,
                 true,

@@ -381,7 +381,7 @@ fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
             OperationFamily::RawPointerReadUnaligned,
         ));
     }
-    if line.contains(".read()") || line.contains("ptr::read") {
+    if line.contains(".read()") || line.contains(".read_volatile(") || line.contains("ptr::read") {
         return Some((UnsafeSiteKind::Operation, OperationFamily::RawPointerRead));
     }
     if is_raw_pointer_write(line) {
@@ -1353,6 +1353,14 @@ mod tests {
                 "{line} should be classified as a raw pointer write"
             );
         }
+    }
+
+    #[test]
+    fn text_detection_classifies_volatile_pointer_read_as_raw_read() {
+        assert_eq!(
+            detect_site("unsafe { register.read_volatile() }"),
+            Some((UnsafeSiteKind::Operation, OperationFamily::RawPointerRead))
+        );
     }
 
     #[test]
