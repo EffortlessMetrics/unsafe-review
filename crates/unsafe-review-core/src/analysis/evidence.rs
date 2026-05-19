@@ -1301,15 +1301,27 @@ fn has_size_assert_eq(compact: &str, left: &str, right: &str) -> bool {
 }
 
 fn has_u8_bool_value_guard(before_call: &str, argument: &str) -> bool {
-    before_call.contains(&format!("{argument}<=1"))
-        || before_call.contains(&format!("1>={argument}"))
-        || before_call.contains(&format!("{argument}<2"))
-        || before_call.contains(&format!("2>{argument}"))
-        || before_call.contains(&format!("matches!({argument},0|1)"))
-        || before_call.contains(&format!("matches!({argument},1|0)"))
-        || before_call.contains(&format!("{argument}==0||{argument}==1"))
-        || before_call.contains(&format!("{argument}==1||{argument}==0"))
+    [
+        format!("{argument}<=1"),
+        format!("1>={argument}"),
+        format!("{argument}<2"),
+        format!("2>{argument}"),
+        format!("matches!({argument},0|1)"),
+        format!("matches!({argument},1|0)"),
+        format!("{argument}==0||{argument}==1"),
+        format!("{argument}==1||{argument}==0"),
+    ]
+    .iter()
+    .any(|predicate| has_u8_bool_value_predicate_guard(before_call, predicate))
         || has_u8_bool_invalid_early_return_guard(before_call, argument)
+}
+
+fn has_u8_bool_value_predicate_guard(before_call: &str, predicate: &str) -> bool {
+    before_call.contains(&format!("assert!({predicate})"))
+        || before_call.contains(&format!("assert!({predicate},"))
+        || before_call.contains(&format!("debug_assert!({predicate})"))
+        || before_call.contains(&format!("debug_assert!({predicate},"))
+        || before_call.contains(&format!("if{predicate}{{"))
 }
 
 fn has_u8_bool_invalid_early_return_guard(before_call: &str, argument: &str) -> bool {
@@ -3849,16 +3861,25 @@ mod tests {
             "unsafe { core::mem::transmute::<u8, char>(value) }",
             vec![],
         );
+        let observed_predicate = site_with_family(
+            OperationFamily::Transmute,
+            vec!["let _valid_bool_byte = value <= 1;"],
+            "unsafe { core::mem::transmute::<u8, bool>(value) }",
+            vec![],
+        );
 
         let other_arg_evidence = obligation_evidence(&other_arg, &obligations, &contract, &reach);
         let post_call_evidence =
             obligation_evidence(&post_call_guard, &obligations, &contract, &reach);
         let unsupported_pair_evidence =
             obligation_evidence(&unsupported_pair, &obligations, &contract, &reach);
+        let observed_predicate_evidence =
+            obligation_evidence(&observed_predicate, &obligations, &contract, &reach);
 
         assert!(!other_arg_evidence[0].discharge.present);
         assert!(!post_call_evidence[0].discharge.present);
         assert!(!unsupported_pair_evidence[0].discharge.present);
+        assert!(!observed_predicate_evidence[0].discharge.present);
     }
 
     #[test]
