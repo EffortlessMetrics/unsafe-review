@@ -232,8 +232,16 @@ fn discharge_state_for(
                 && has_drop_in_place_box_origin_evidence(&site.operation.expression, lower))
                 || (family == &OperationFamily::BoxFromRaw
                     && has_box_from_raw_origin_evidence(&site.operation.expression, lower))
+                || (family == &OperationFamily::VecFromRawParts
+                    && has_vec_from_raw_parts_origin_evidence(&site.operation.expression, lower))
             {
-                EvidenceState::present("Box::into_raw ownership evidence was detected")
+                if family == &OperationFamily::VecFromRawParts {
+                    EvidenceState::present(
+                        "ManuallyDrop Vec raw-parts ownership evidence was detected",
+                    )
+                } else {
+                    EvidenceState::present("Box::into_raw ownership evidence was detected")
+                }
             } else {
                 EvidenceState::missing("No obligation-specific guard code was detected")
             }
@@ -474,6 +482,21 @@ fn has_vec_from_raw_parts_capacity_evidence(expression: &str, lower: &str) -> bo
     has_len_cap_bound_guard(before_call, len, cap)
 }
 
+fn has_vec_from_raw_parts_origin_evidence(expression: &str, lower: &str) -> bool {
+    let compact = compact_code(lower);
+    let compact_expression = compact_code(&expression.to_ascii_lowercase());
+    let Some((ptr, _len, _cap)) = vec_from_raw_parts_arguments(&compact_expression) else {
+        return false;
+    };
+    let call_pos = compact
+        .find(&compact_expression)
+        .or_else(|| compact.find("vec::from_raw_parts("));
+    let Some(call_pos) = call_pos else {
+        return false;
+    };
+    has_same_pointer_vec_raw_parts_origin_before(&compact[..call_pos], ptr)
+}
+
 fn vec_from_raw_parts_arguments(compact_expression: &str) -> Option<(&str, &str, &str)> {
     let marker = "from_raw_parts(";
     let call_pos = compact_expression.find(marker)?;
@@ -692,6 +715,48 @@ fn has_same_pointer_box_into_raw_before(before_call: &str, pointer: &str) -> boo
             return false;
         };
         binding == pointer && box_into_raw_argument(right).is_some()
+    })
+}
+
+fn has_same_pointer_vec_raw_parts_origin_before(before_call: &str, pointer: &str) -> bool {
+    let mut prior_statements = String::new();
+    for statement in before_call.split(';') {
+        let Some((left, right)) = statement.split_once('=') else {
+            prior_statements.push_str(statement);
+            prior_statements.push(';');
+            continue;
+        };
+        let Some(binding) = let_binding_name(left) else {
+            prior_statements.push_str(statement);
+            prior_statements.push(';');
+            continue;
+        };
+        if binding == pointer
+            && let Some(receiver) = vec_raw_pointer_receiver(right)
+            && vec_raw_pointer_receiver_has_manually_drop_origin(&prior_statements, receiver)
+        {
+            return true;
+        }
+        prior_statements.push_str(statement);
+        prior_statements.push(';');
+    }
+    false
+}
+
+fn vec_raw_pointer_receiver(right_side: &str) -> Option<&str> {
+    receiver_before_marker(right_side, ".as_mut_ptr(")
+        .or_else(|| receiver_before_marker(right_side, ".as_ptr("))
+}
+
+fn vec_raw_pointer_receiver_has_manually_drop_origin(before_call: &str, receiver: &str) -> bool {
+    before_call.split(';').any(|statement| {
+        let Some((left, right)) = statement.split_once('=') else {
+            return false;
+        };
+        let Some(binding) = let_binding_name(left) else {
+            return false;
+        };
+        binding == receiver && right.contains("manuallydrop::new(")
     })
 }
 
@@ -2091,6 +2156,73 @@ mod tests {
         );
         assert!(
             !obligation_evidence(&after_call, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+    }
+
+    #[test]
+    fn vec_from_raw_parts_origin_discharges_ownership_for_same_pointer() {
+        let obligations = vec![SafetyObligation::new(
+            "ownership",
+            "the constructed Vec receives unique ownership and will not double-free",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let matching = site_with_family(
+            OperationFamily::VecFromRawParts,
+            vec![
+                "let mut raw = core::mem::ManuallyDrop::new(input);",
+                "let ptr = raw.as_mut_ptr();",
+            ],
+            "unsafe { Vec::from_raw_parts(ptr, len, cap) }",
+            vec![],
+        );
+        let other_pointer = site_with_family(
+            OperationFamily::VecFromRawParts,
+            vec![
+                "let mut raw = core::mem::ManuallyDrop::new(input);",
+                "let other = raw.as_mut_ptr();",
+            ],
+            "unsafe { Vec::from_raw_parts(ptr, len, cap) }",
+            vec![],
+        );
+        let unmanaged_pointer = site_with_family(
+            OperationFamily::VecFromRawParts,
+            vec!["let ptr = input.as_mut_ptr();"],
+            "unsafe { Vec::from_raw_parts(ptr, len, cap) }",
+            vec![],
+        );
+        let out_of_order_origin = site_with_family(
+            OperationFamily::VecFromRawParts,
+            vec![
+                "let ptr = raw.as_mut_ptr();",
+                "let mut raw = core::mem::ManuallyDrop::new(input);",
+            ],
+            "unsafe { Vec::from_raw_parts(ptr, len, cap) }",
+            vec![],
+        );
+
+        assert!(
+            obligation_evidence(&matching, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
+            !obligation_evidence(&other_pointer, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
+            !obligation_evidence(&unmanaged_pointer, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
+            !obligation_evidence(&out_of_order_origin, &obligations, &contract, &reach)[0]
                 .discharge
                 .present
         );

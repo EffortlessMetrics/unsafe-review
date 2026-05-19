@@ -1062,6 +1062,20 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn vec_from_raw_parts_manuallydrop_origin_marks_ownership_evidence_only() -> Result<(), String>
+    {
+        let output = fixture_output("vec_from_raw_parts_manuallydrop_origin")?;
+        let card = single_card("vec_from_raw_parts_manuallydrop_origin", &output)?;
+
+        assert_eq!(card.operation.family, OperationFamily::VecFromRawParts);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(obligation_discharge_present(card, "ownership"));
+        assert!(!obligation_discharge_present(card, "alignment"));
+        assert!(!obligation_discharge_present(card, "capacity"));
+        Ok(())
+    }
+
+    #[test]
     fn box_from_raw_uses_ownership_operation_family() -> Result<(), String> {
         let output = fixture_output("box_from_raw")?;
         let card = single_card("box_from_raw", &output)?;

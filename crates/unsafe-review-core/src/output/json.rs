@@ -270,6 +270,7 @@ mod tests {
         "vec_from_raw_parts",
         "vec_from_raw_parts_capacity_guard",
         "vec_from_raw_parts_capacity_observed_not_guard",
+        "vec_from_raw_parts_manuallydrop_origin",
         "box_from_raw",
         "box_from_raw_box_origin",
         "static_mut_global_state",
