@@ -838,8 +838,53 @@ fn maybeuninit_slice_return_type(before_call: &str) -> bool {
 
 fn has_maybeuninit_raw_write_context(lower: &str) -> bool {
     let compact = compact_code(lower);
-    (compact.contains("write_bytes(") || compact.contains("ptr::write("))
-        && compact.contains("maybeuninit")
+    has_maybeuninit_write_bytes_target_context(&compact)
+        || has_maybeuninit_ptr_write_value_context(&compact)
+}
+
+fn has_maybeuninit_write_bytes_target_context(compact: &str) -> bool {
+    let Some(write_pos) = compact.find("write_bytes(") else {
+        return false;
+    };
+    let before_write = &compact[..write_pos];
+    if maybeuninit_slice_parameter_before_write(before_write)
+        || maybeuninit_impl_receiver_before_write(before_write)
+    {
+        return true;
+    }
+
+    let Some(receiver) = receiver_before_marker(compact, ".write_bytes(") else {
+        return false;
+    };
+    receiver.contains("maybeuninit")
+}
+
+fn maybeuninit_slice_parameter_before_write(before_write: &str) -> bool {
+    let Some(fn_pos) = before_write.rfind("fn") else {
+        return false;
+    };
+    let fn_context = &before_write[fn_pos..];
+    let signature = fn_context
+        .split_once('{')
+        .map_or(fn_context, |(signature, _body)| signature);
+
+    signature.contains("maybeuninit") && signature.contains('&') && signature.contains('[')
+}
+
+fn maybeuninit_impl_receiver_before_write(before_write: &str) -> bool {
+    let Some(impl_pos) = before_write.rfind("impl") else {
+        return false;
+    };
+    let impl_context = &before_write[impl_pos..];
+    let header = impl_context
+        .split_once('{')
+        .map_or(impl_context, |(header, _body)| header);
+
+    header.contains("for[") && header.contains("maybeuninit")
+}
+
+fn has_maybeuninit_ptr_write_value_context(compact: &str) -> bool {
+    compact.contains("ptr::write(") && compact.contains("maybeuninit::new(")
 }
 
 fn has_u8_write_bytes_context(lower: &str) -> bool {
@@ -2095,6 +2140,32 @@ mod tests {
 
         assert!(evidence[0].discharge.present);
         assert!(!evidence[1].discharge.present);
+    }
+
+    #[test]
+    fn maybeuninit_raw_write_evidence_must_belong_to_target() {
+        let obligations = vec![SafetyObligation::new(
+            "initialized",
+            "memory is initialized for the accessed type",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let unrelated = site_with_family(
+            OperationFamily::RawPointerWrite,
+            vec![
+                "pub fn fill_tag(ptr: *mut u16, len: usize, byte: u8) {",
+                "    let _scratch: core::mem::MaybeUninit<u16> = core::mem::MaybeUninit::uninit();",
+            ],
+            "unsafe { ptr.write_bytes(byte, len) }",
+            vec!["}"],
+        );
+
+        let evidence = obligation_evidence(&unrelated, &obligations, &contract, &reach);
+
+        assert!(!evidence[0].discharge.present);
     }
 
     #[test]
