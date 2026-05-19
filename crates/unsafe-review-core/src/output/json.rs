@@ -218,6 +218,10 @@ mod tests {
     const FIXTURE_GOLDENS: &[&str] = &[
         "raw_pointer_alignment",
         "raw_pointer_alignment_receipted",
+        "raw_pointer_alignment_is_aligned_guard",
+        "raw_pointer_alignment_observed_not_guard",
+        "raw_pointer_alignment_closed_branch_not_guard",
+        "raw_pointer_alignment_reassigned_pointer_not_guard",
         "align_of_only_not_guard",
         "alignment_other_pointer_not_guard",
         "comment_alignment_not_guard",

@@ -11,6 +11,13 @@ Recent core smoke proof additions include
 `get_unchecked_mut_reassigned_index_not_guard`, which pin that positive bounds
 branches must still dominate `get_unchecked`, bare predicate observations are
 not guards, and reassigned checked indexes do not discharge bounds evidence.
+Recent guard-evidence additions include
+`raw_pointer_alignment_is_aligned_guard`,
+`raw_pointer_alignment_observed_not_guard`,
+`raw_pointer_alignment_closed_branch_not_guard`, and
+`raw_pointer_alignment_reassigned_pointer_not_guard`, which pin same-pointer
+`is_aligned` guard evidence without treating observations, closed branches, or
+stale checked pointers as alignment discharge.
 
 | Capability | Tier | Surface | Proof | Known limits |
 |---|---|---|---|---|

@@ -1922,13 +1922,114 @@ fn has_alignment_guard(site: &ScannedSite, lower: &str) -> bool {
 
 fn has_same_receiver_alignment_guard(compact: &str, receiver: &str) -> bool {
     let receiver = compact_code(&receiver.to_ascii_lowercase());
-    contains_receiver_fragment(compact, &format!("{receiver}.addr()%"))
+    has_same_receiver_alignment_method_guard(compact, &receiver)
+        || contains_receiver_fragment(compact, &format!("{receiver}.addr()%"))
         || contains_receiver_fragment(compact, &format!("{receiver}asusize)%"))
         || contains_receiver_fragment(compact, &format!("{receiver}asusize%"))
         || contains_receiver_fragment(compact, &format!("({receiver}asusize)%"))
         || contains_receiver_fragment(compact, &format!("({receiver}asusize%"))
-        || same_receiver_method_call(compact, &receiver, "is_aligned")
-        || same_receiver_method_call(compact, &receiver, "align_offset")
+}
+
+fn has_same_receiver_alignment_method_guard(compact: &str, receiver: &str) -> bool {
+    has_alignment_assertion_guard(compact, receiver)
+        || has_alignment_open_positive_branch_guard(compact, receiver)
+        || has_alignment_early_return_guard(compact, receiver)
+}
+
+fn has_alignment_assertion_guard(compact: &str, receiver: &str) -> bool {
+    ["assert!(", "debug_assert!("].into_iter().any(|prefix| {
+        let mut cursor = compact;
+        let mut offset = 0usize;
+        while let Some(pos) = cursor.find(prefix) {
+            let statement_start = offset + pos + prefix.len();
+            let after_prefix = &compact[statement_start..];
+            let statement_end = after_prefix.find(';').unwrap_or(after_prefix.len());
+            let statement = &after_prefix[..statement_end];
+            let after_statement = &after_prefix[statement_end..];
+            if alignment_condition_is_positive(statement, receiver)
+                && !contains_simple_assignment_to(after_statement, receiver)
+            {
+                return true;
+            }
+            let next = pos + prefix.len();
+            offset += next;
+            cursor = &cursor[next..];
+        }
+        false
+    })
+}
+
+fn has_alignment_open_positive_branch_guard(compact: &str, receiver: &str) -> bool {
+    alignment_if_guards(compact).any(|guard| {
+        alignment_condition_is_positive(guard.condition, receiver)
+            && branch_still_open_at_operation(guard.after_body_start)
+            && !contains_simple_assignment_to(guard.after_body_start, receiver)
+    })
+}
+
+fn has_alignment_early_return_guard(compact: &str, receiver: &str) -> bool {
+    alignment_if_guards(compact).any(|guard| {
+        if !alignment_condition_is_negative(guard.condition, receiver) {
+            return false;
+        }
+        let (guard_body, after_guard_body) = guard
+            .after_body_start
+            .split_once('}')
+            .map_or((guard.after_body_start, ""), |(guard_body, after)| {
+                (guard_body, after)
+            });
+        guard_body.contains("return") && !contains_simple_assignment_to(after_guard_body, receiver)
+    })
+}
+
+struct AlignmentIfGuard<'a> {
+    condition: &'a str,
+    after_body_start: &'a str,
+}
+
+fn alignment_if_guards(compact: &str) -> impl Iterator<Item = AlignmentIfGuard<'_>> {
+    let mut guards = Vec::new();
+    let mut cursor = compact;
+    let mut offset = 0usize;
+    while let Some(pos) = cursor.find("if") {
+        let start = offset + pos;
+        let before = compact[..start].chars().next_back();
+        if before.is_some_and(is_receiver_path_char) {
+            let next = pos + 2;
+            offset += next;
+            cursor = &cursor[next..];
+            continue;
+        }
+        let after_if = &compact[start + 2..];
+        if let Some(brace_pos) = after_if.find('{') {
+            guards.push(AlignmentIfGuard {
+                condition: &after_if[..brace_pos],
+                after_body_start: &after_if[brace_pos + 1..],
+            });
+        }
+        let next = pos + 2;
+        offset += next;
+        cursor = &cursor[next..];
+    }
+    guards.into_iter()
+}
+
+fn alignment_condition_is_positive(condition: &str, receiver: &str) -> bool {
+    if same_receiver_method_call(condition, receiver, "is_aligned") {
+        return !condition.starts_with('!')
+            && !condition.contains(".is_aligned()==false")
+            && !condition.contains(".is_aligned()!=true");
+    }
+    same_receiver_method_call(condition, receiver, "align_offset") && condition.contains("==0")
+}
+
+fn alignment_condition_is_negative(condition: &str, receiver: &str) -> bool {
+    if same_receiver_method_call(condition, receiver, "is_aligned") {
+        return condition.starts_with('!')
+            || condition.contains(".is_aligned()==false")
+            || condition.contains(".is_aligned()!=true");
+    }
+    same_receiver_method_call(condition, receiver, "align_offset") && condition.contains("!=0")
 }
 
 fn same_receiver_method_call(compact: &str, receiver: &str, method: &str) -> bool {
@@ -2355,6 +2456,41 @@ mod tests {
             "ptr.cast::<Header>().read()",
             vec![],
         );
+        let matching_method_assertion = site_with_context(
+            vec!["assert!(ptr.cast::<Header>().is_aligned());"],
+            "ptr.cast::<Header>().read()",
+            vec![],
+        );
+        let matching_open_branch_guard = site_with_context(
+            vec!["if ptr.cast::<Header>().is_aligned() {"],
+            "ptr.cast::<Header>().read()",
+            vec!["}"],
+        );
+        let observed_method = site_with_context(
+            vec![
+                "let aligned = ptr.cast::<Header>().is_aligned();",
+                "observe(aligned);",
+            ],
+            "ptr.cast::<Header>().read()",
+            vec![],
+        );
+        let closed_positive_branch = site_with_context(
+            vec![
+                "if ptr.cast::<Header>().is_aligned() {",
+                "    observe(ptr);",
+                "}",
+            ],
+            "ptr.cast::<Header>().read()",
+            vec![],
+        );
+        let reassigned_pointer = site_with_context(
+            vec![
+                "if !ptr.cast::<Header>().is_aligned() { return None; }",
+                "ptr = other_ptr;",
+            ],
+            "ptr.cast::<Header>().read()",
+            vec![],
+        );
         let post_guard = site_with_context(
             vec![],
             "ptr.cast::<Header>().read()",
@@ -2377,10 +2513,27 @@ mod tests {
                 .present
         );
         assert!(
-            !obligation_evidence(&post_guard, &obligations, &contract, &reach)[0]
+            obligation_evidence(&matching_method_assertion, &obligations, &contract, &reach)[0]
                 .discharge
                 .present
         );
+        assert!(
+            obligation_evidence(&matching_open_branch_guard, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        for stale in [
+            observed_method,
+            closed_positive_branch,
+            reassigned_pointer,
+            post_guard,
+        ] {
+            assert!(
+                !obligation_evidence(&stale, &obligations, &contract, &reach)[0]
+                    .discharge
+                    .present
+            );
+        }
     }
 
     #[test]
