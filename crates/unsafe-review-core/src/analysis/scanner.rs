@@ -807,6 +807,7 @@ fn is_raw_pointer_write(line: &str) -> bool {
     line.contains("ptr::write")
         || line.contains("ptr::write_volatile")
         || line.contains("ptr::write_bytes")
+        || line.contains(".write_volatile(")
         || line.contains("ptr.write(")
         || line.contains("ptr.write_volatile(")
         || line.contains("ptr.write_bytes(")
@@ -1346,6 +1347,20 @@ mod tests {
             "unsafe { ptr.write_bytes(byte, len) }",
             "unsafe { self.as_mut_ptr().write_bytes(tag.0, self.len()) }",
             "unsafe { core::ptr::write_bytes(ptr, byte, len) }",
+        ] {
+            assert_eq!(
+                detect_site(line),
+                Some((UnsafeSiteKind::Operation, OperationFamily::RawPointerWrite)),
+                "{line} should be classified as a raw pointer write"
+            );
+        }
+    }
+
+    #[test]
+    fn text_detection_classifies_volatile_pointer_write_as_raw_write() {
+        for line in [
+            "unsafe { register.write_volatile(value) }",
+            "unsafe { core::ptr::write_volatile(register, value) }",
         ] {
             assert_eq!(
                 detect_site(line),
