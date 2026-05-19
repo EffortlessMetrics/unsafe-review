@@ -232,12 +232,25 @@ fn discharge_state_for(
             }
         }
         "non-null" | "pointer-live" => {
-            if family == &OperationFamily::DropInPlace
+            if family == &OperationFamily::VecFromRawParts
+                && has_vec_from_raw_parts_origin_pointer_live_evidence(
+                    &site.operation.expression,
+                    lower,
+                )
+            {
+                EvidenceState::present(
+                    "Vec::from_raw_parts same-origin pointer/capacity evidence was detected",
+                )
+            } else if family == &OperationFamily::DropInPlace
                 && has_drop_in_place_box_origin_evidence(&site.operation.expression, lower)
             {
                 EvidenceState::present("Box::into_raw origin evidence was detected")
             } else if has_nullability_guard(site, lower) {
                 EvidenceState::present("Nullability guard code was detected")
+            } else if family == &OperationFamily::VecFromRawParts {
+                EvidenceState::missing(
+                    "No Vec::from_raw_parts same-origin pointer/capacity evidence was detected",
+                )
             } else {
                 EvidenceState::missing("No nullability guard code was detected")
             }
@@ -532,6 +545,26 @@ fn has_vec_from_raw_parts_origin_initialized_evidence(expression: &str, lower: &
         .is_some_and(|receiver| receiver == ptr_receiver)
 }
 
+fn has_vec_from_raw_parts_origin_pointer_live_evidence(expression: &str, lower: &str) -> bool {
+    let compact = compact_code(lower);
+    let compact_expression = compact_code(&expression.to_ascii_lowercase());
+    let Some((ptr, _len, cap)) = vec_from_raw_parts_arguments(&compact_expression) else {
+        return false;
+    };
+    let call_pos = compact
+        .find(&compact_expression)
+        .or_else(|| compact.find("vec::from_raw_parts("));
+    let Some(call_pos) = call_pos else {
+        return false;
+    };
+    let before_call = &compact[..call_pos];
+    let Some(ptr_receiver) = vec_raw_parts_pointer_origin_receiver_before(before_call, ptr) else {
+        return false;
+    };
+    vec_raw_parts_capacity_origin_receiver(before_call, cap)
+        .is_some_and(|receiver| receiver == ptr_receiver)
+}
+
 fn has_vec_from_raw_parts_origin_evidence(expression: &str, lower: &str) -> bool {
     let compact = compact_code(lower);
     let compact_expression = compact_code(&expression.to_ascii_lowercase());
@@ -628,40 +661,9 @@ fn has_len_cap_early_return(before_call: &str, predicate: &str) -> bool {
 }
 
 fn has_vec_from_raw_parts_same_origin_len_cap(before_call: &str, len: &str, cap: &str) -> bool {
-    let len = compact_code(len);
-    let cap = compact_code(cap);
-    if len.is_empty() || cap.is_empty() {
-        return false;
-    }
-
-    let mut origin_receivers = Vec::new();
-    let mut len_receiver = None;
-    let mut cap_receiver = None;
-    for statement in before_call.split(';') {
-        let Some((left, right)) = statement.split_once('=') else {
-            continue;
-        };
-        let Some(binding) = let_binding_name(left) else {
-            continue;
-        };
-        if right.contains("manuallydrop::new(") {
-            origin_receivers.push(binding.to_string());
-        }
-        if binding == len
-            && let Some(receiver) = receiver_before_marker(right, ".len(")
-            && origin_receivers.iter().any(|origin| origin == receiver)
-        {
-            len_receiver = Some(receiver.to_string());
-        }
-        if binding == cap
-            && let Some(receiver) = receiver_before_marker(right, ".capacity(")
-            && origin_receivers.iter().any(|origin| origin == receiver)
-        {
-            cap_receiver = Some(receiver.to_string());
-        }
-    }
-
-    len_receiver.is_some() && len_receiver == cap_receiver
+    vec_raw_parts_len_origin_receiver(before_call, len).is_some_and(|receiver| {
+        vec_raw_parts_capacity_origin_receiver(before_call, cap) == Some(receiver)
+    })
 }
 
 fn has_set_len_capacity_evidence(lower: &str) -> bool {
@@ -873,6 +875,33 @@ fn vec_raw_parts_len_origin_receiver(before_call: &str, len: &str) -> Option<Str
         }
         if binding == len
             && let Some(receiver) = receiver_before_marker(right, ".len(")
+            && origin_receivers.iter().any(|origin| origin == receiver)
+        {
+            return Some(receiver.to_string());
+        }
+    }
+    None
+}
+
+fn vec_raw_parts_capacity_origin_receiver(before_call: &str, cap: &str) -> Option<String> {
+    let cap = compact_code(cap);
+    if cap.is_empty() {
+        return None;
+    }
+
+    let mut origin_receivers = Vec::new();
+    for statement in before_call.split(';') {
+        let Some((left, right)) = statement.split_once('=') else {
+            continue;
+        };
+        let Some(binding) = let_binding_name(left) else {
+            continue;
+        };
+        if right.contains("manuallydrop::new(") {
+            origin_receivers.push(binding.to_string());
+        }
+        if binding == cap
+            && let Some(receiver) = receiver_before_marker(right, ".capacity(")
             && origin_receivers.iter().any(|origin| origin == receiver)
         {
             return Some(receiver.to_string());
@@ -2328,6 +2357,65 @@ mod tests {
         );
         assert!(
             !obligation_evidence(&mismatched_origin, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
+            !obligation_evidence(&observed_without_origin, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+    }
+
+    #[test]
+    fn vec_from_raw_parts_origin_discharges_pointer_live_for_same_pointer_and_capacity() {
+        let obligations = vec![SafetyObligation::new(
+            "pointer-live",
+            "pointer was allocated by a compatible allocator for `capacity` elements",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let matching = site_with_family(
+            OperationFamily::VecFromRawParts,
+            vec![
+                "let mut raw = core::mem::ManuallyDrop::new(input);",
+                "let ptr = raw.as_mut_ptr();",
+                "let cap = raw.capacity();",
+            ],
+            "unsafe { Vec::from_raw_parts(ptr, len, cap) }",
+            vec![],
+        );
+        let mismatched_capacity_origin = site_with_family(
+            OperationFamily::VecFromRawParts,
+            vec![
+                "let mut raw = core::mem::ManuallyDrop::new(input);",
+                "let other = core::mem::ManuallyDrop::new(spare);",
+                "let ptr = raw.as_mut_ptr();",
+                "let cap = other.capacity();",
+            ],
+            "unsafe { Vec::from_raw_parts(ptr, len, cap) }",
+            vec![],
+        );
+        let observed_without_origin = site_with_family(
+            OperationFamily::VecFromRawParts,
+            vec![
+                "let ptr = input.as_mut_ptr();",
+                "let cap = input.capacity();",
+            ],
+            "unsafe { Vec::from_raw_parts(ptr, len, cap) }",
+            vec![],
+        );
+
+        assert!(
+            obligation_evidence(&matching, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
+            !obligation_evidence(&mismatched_capacity_origin, &obligations, &contract, &reach)[0]
                 .discharge
                 .present
         );

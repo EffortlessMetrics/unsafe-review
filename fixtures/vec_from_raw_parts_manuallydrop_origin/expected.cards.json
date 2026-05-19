@@ -40,9 +40,9 @@
           "summary": "Nearby `SAFETY:` comment was detected"
         },
         "discharge": {
-          "present": false,
-          "state": "missing",
-          "summary": "No nullability guard code was detected"
+          "present": true,
+          "state": "present",
+          "summary": "Vec::from_raw_parts same-origin pointer/capacity evidence was detected"
         },
         "reach": {
           "present": false,
