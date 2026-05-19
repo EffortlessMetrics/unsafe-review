@@ -241,6 +241,7 @@ mod tests {
         "split_unsafe_block",
         "raw_pointer_deref",
         "raw_pointer_read_unaligned",
+        "raw_pointer_read_volatile",
         "raw_pointer_read_len_capacity_assert",
         "raw_pointer_write_assignment",
         "raw_pointer_write_bytes",
