@@ -33,6 +33,7 @@ required_core_fixtures = [
   "slice_from_raw_parts_mut",
   "slice_from_raw_parts_mut_maybeuninit",
   "vec_from_raw_parts",
+  "box_from_raw",
   "transmute_invalid_value",
   "transmute_copy_invalid_value",
   "multiline_transmute_copy_invalid_value",
@@ -362,6 +363,16 @@ support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"
 expected_operation_family = "vec_from_raw_parts"
+expected_hazard = "drop_or_deallocation"
+
+[[cases]]
+fixture = "box_from_raw"
+kind = "positive"
+claim = "Box::from_raw reports ownership and deallocation obligations instead of a generic unsafe function call"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "box_from_raw"
 expected_hazard = "drop_or_deallocation"
 
 [[cases]]

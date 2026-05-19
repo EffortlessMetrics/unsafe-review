@@ -743,6 +743,26 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn box_from_raw_uses_ownership_operation_family() -> Result<(), String> {
+        let output = fixture_output("box_from_raw")?;
+        let card = single_card("box_from_raw", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::BoxFromRaw);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(card.hazards.contains(&HazardKind::DropOrDeallocation));
+        assert!(card.id.0.contains("from-raw"));
+        assert!(
+            card.obligation_evidence
+                .iter()
+                .any(|evidence| evidence.obligation.key == "ownership"
+                    && !evidence.discharge.present),
+            "Box::from_raw ownership obligation should remain missing without allocator proof"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn copy_nonoverlapping_uses_copy_operation_family() -> Result<(), String> {
         let output = fixture_output("copy_nonoverlapping")?;
         let card = single_card("copy_nonoverlapping", &output)?;
