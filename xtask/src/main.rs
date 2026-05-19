@@ -83,6 +83,25 @@ const ZERO_CARD_EXPECTATION_FIELDS: &[&str] = &[
 const SUPPORT_TIERS_DOC: &str = "docs/status/SUPPORT_TIERS.md";
 const SUPPORT_SUMMARY_DOC: &str = "docs/status/SUPPORT_SUMMARY.md";
 const KNOWN_SUPPORT_TIERS: &[&str] = &["scaffold", "experimental", "planned", "deferred"];
+const SUPPORT_PROOF_TERMS: &[&str] = &[
+    "test",
+    "tests",
+    "fixture",
+    "fixtures",
+    "golden",
+    "goldens",
+    "e2e",
+    "xtask",
+    "workflow",
+    "handoff",
+    "dogfood",
+    "parser",
+    "renderer",
+    "manifest",
+    "serde",
+    "round-trip",
+    "adr",
+];
 const KNOWN_SUPPORT_SUMMARY_POSTURES: &[&str] = &["Experimental", "Deferred or planned"];
 const SUPPORT_SUMMARY_REQUIRED_PHRASES: &[&str] = &[
     "memory-safety proof",
@@ -336,24 +355,39 @@ fn looks_like_counted_card_id(value: &str) -> bool {
 fn check_support_tiers() -> Result<(), String> {
     let path = SUPPORT_TIERS_DOC;
     let text = read_to_string(Path::new(path))?;
+    check_support_tiers_text(path, &text)?;
+    check_support_summary()?;
+    println!("check-support-tiers: ok");
+    Ok(())
+}
+
+fn check_support_tiers_text(path: &str, text: &str) -> Result<(), String> {
     let mut rows = 0usize;
     for (line_no, line) in text.lines().enumerate() {
-        let Some(tier) = support_tier_from_row(line) else {
+        let Some(row) = support_tier_row_from_line(line, path, line_no + 1)? else {
             continue;
         };
         rows += 1;
-        if !KNOWN_SUPPORT_TIERS.contains(&tier) {
+        if !KNOWN_SUPPORT_TIERS.contains(&row.tier) {
             return Err(format!(
-                "{path}:{} uses unknown support tier `{tier}`",
-                line_no + 1
+                "{path}:{} uses unknown support tier `{}`",
+                line_no + 1,
+                row.tier
+            ));
+        }
+        if matches!(row.tier, "scaffold" | "experimental")
+            && !support_proof_cell_has_evidence_term(row.proof)
+        {
+            return Err(format!(
+                "{path}:{} proof for `{}` must name concrete evidence such as tests, fixtures, dogfood, workflows, or an ADR",
+                line_no + 1,
+                row.capability
             ));
         }
     }
     if rows == 0 {
         return Err(format!("{path} has no support-tier rows"));
     }
-    check_support_summary()?;
-    println!("check-support-tiers: ok");
     Ok(())
 }
 
@@ -2251,28 +2285,104 @@ fn is_text_file(path: &Path) -> bool {
         .is_some_and(|ext| matches!(ext.to_str(), Some("md" | "toml" | "yml" | "yaml" | "txt")))
 }
 
+#[cfg(test)]
 fn support_tier_from_row(line: &str) -> Option<&str> {
-    if !line.starts_with('|') || line.contains("---") || line.contains("Capability") {
+    let Ok(Some(row)) = support_tier_row_from_line(line, "support tier table", 0) else {
         return None;
-    }
-    let columns = line
-        .split('|')
-        .map(str::trim)
-        .filter(|column| !column.is_empty())
-        .collect::<Vec<_>>();
-    columns.get(1).copied()
+    };
+    Some(row.tier)
 }
 
 fn support_capability_from_row(line: &str) -> Option<&str> {
-    if !line.starts_with('|') || line.contains("---") || line.contains("Capability") {
+    let Ok(Some(row)) = support_tier_row_from_line(line, "support tier table", 0) else {
         return None;
+    };
+    Some(row.capability)
+}
+
+struct SupportTierRow<'a> {
+    capability: &'a str,
+    tier: &'a str,
+    proof: &'a str,
+}
+
+fn support_tier_row_from_line<'a>(
+    line: &'a str,
+    path: &str,
+    line_no: usize,
+) -> Result<Option<SupportTierRow<'a>>, String> {
+    if !line.starts_with('|') || line.contains("---") || line.contains("Capability") {
+        return Ok(None);
     }
-    let columns = line
-        .split('|')
-        .map(str::trim)
-        .filter(|column| !column.is_empty())
-        .collect::<Vec<_>>();
-    columns.first().copied()
+    let columns = markdown_table_columns(line);
+    if columns.len() != 5 {
+        return Err(format!(
+            "{path}:{line_no} support-tier rows must have 5 columns, found {}",
+            columns.len()
+        ));
+    }
+    for (idx, name) in [
+        (0, "Capability"),
+        (1, "Tier"),
+        (2, "Surface"),
+        (3, "Proof"),
+        (4, "Known limits"),
+    ] {
+        reject_placeholder_cell(path, line_no, name, columns[idx])?;
+    }
+    Ok(Some(SupportTierRow {
+        capability: columns[0],
+        tier: columns[1],
+        proof: columns[3],
+    }))
+}
+
+fn markdown_table_columns(line: &str) -> Vec<&str> {
+    let mut columns = Vec::new();
+    let mut start = 0usize;
+    let mut in_code = false;
+    for (idx, ch) in line.char_indices() {
+        if ch == '`' {
+            in_code = !in_code;
+        } else if ch == '|' && !in_code {
+            let column = line[start..idx].trim();
+            if !column.is_empty() {
+                columns.push(column);
+            }
+            start = idx + ch.len_utf8();
+        }
+    }
+    let column = line[start..].trim();
+    if !column.is_empty() {
+        columns.push(column);
+    }
+    columns
+}
+
+fn reject_placeholder_cell(
+    path: &str,
+    line_no: usize,
+    column: &str,
+    value: &str,
+) -> Result<(), String> {
+    let normalized = value.trim().to_ascii_lowercase();
+    if normalized.is_empty()
+        || matches!(
+            normalized.as_str(),
+            "-" | "n/a" | "na" | "none" | "todo" | "tbd" | "placeholder"
+        )
+    {
+        Err(format!(
+            "{path}:{line_no} `{column}` cell must not be empty or placeholder"
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn support_proof_cell_has_evidence_term(proof: &str) -> bool {
+    let proof = proof.to_ascii_lowercase();
+    SUPPORT_PROOF_TERMS.iter().any(|term| proof.contains(term))
 }
 
 fn support_summary_posture_from_row(line: &str) -> Option<&str> {
@@ -2378,6 +2488,54 @@ mod tests {
             Some("scaffold")
         );
         assert_eq!(support_tier_from_row("|---|---|"), None);
+    }
+
+    #[test]
+    fn support_tier_rows_reject_placeholder_proof_cells() -> Result<(), String> {
+        let text = "| Capability | Tier | Surface | Proof | Known limits |\n\
+                    |---|---|---|---|---|\n\
+                    | ReviewCard schema | experimental | CLI JSON | TBD | source-based only |\n";
+
+        let Err(err) = check_support_tiers_text("support.md", text) else {
+            return Err("placeholder proof should fail".to_string());
+        };
+
+        assert!(err.contains("Proof"));
+        assert!(err.contains("placeholder"));
+        Ok(())
+    }
+
+    #[test]
+    fn support_tier_rows_require_proof_terms_for_usable_tiers() -> Result<(), String> {
+        let text = "| Capability | Tier | Surface | Proof | Known limits |\n\
+                    |---|---|---|---|---|\n\
+                    | ReviewCard schema | experimental | CLI JSON | human-reviewed claim text | source-based only |\n";
+
+        let Err(err) = check_support_tiers_text("support.md", text) else {
+            return Err("proof without concrete evidence terms should fail".to_string());
+        };
+
+        assert!(err.contains("must name concrete evidence"));
+        assert!(err.contains("ReviewCard schema"));
+        Ok(())
+    }
+
+    #[test]
+    fn support_tier_rows_accept_planned_placeholder_proof_source() -> Result<(), String> {
+        let text = "| Capability | Tier | Surface | Proof | Known limits |\n\
+                    |---|---|---|---|---|\n\
+                    | Future adapter | deferred | optional adapter | ADR needed | not default |\n";
+
+        check_support_tiers_text("support.md", text)
+    }
+
+    #[test]
+    fn support_tier_rows_keep_code_span_pipes_inside_cells() -> Result<(), String> {
+        let text = "| Capability | Tier | Surface | Proof | Known limits |\n\
+                    |---|---|---|---|---|\n\
+                    | Sanitizer receipt adapter | experimental | `--tool asan|msan|tsan|lsan` | parser tests cover saved logs | saved output only |\n";
+
+        check_support_tiers_text("support.md", text)
     }
 
     #[test]
