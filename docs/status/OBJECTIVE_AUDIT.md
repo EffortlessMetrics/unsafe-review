@@ -66,7 +66,9 @@ These are not failures; they are the next unsupported or weakly verified areas:
   drop/deallocation invariants remain unsupported semantic work.
 - Real PR-diff dogfood shows `Vec::set_len` guard evidence still needs broader
   modeling; visible `MaybeUninit::new` initialization loops and const `CAP`
-  capacity facts now have fixture coverage and an `arrayvec#288` rerun receipt;
+  capacity facts now have fixture coverage, same-vector
+  `Vec::with_capacity(new_len)` capacity evidence has fixture coverage, and
+  `arrayvec#288` has a rerun receipt;
   non-zero shrink and `set_len(0)` clear evidence also have fixture and
   dogfood-rerun coverage, start-bound shrink evidence has fixture and
   `rust-smallvec#277` dogfood-rerun coverage, and last-index shrink evidence
