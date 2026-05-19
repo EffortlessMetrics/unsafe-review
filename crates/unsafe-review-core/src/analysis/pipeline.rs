@@ -852,6 +852,24 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn nonnull_new_guard_for_other_pointer_is_not_evidence() -> Result<(), String> {
+        let output = fixture_output("nonnull_other_guard_not_evidence")?;
+        let card = single_card("nonnull_other_guard_not_evidence", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::NonNullUnchecked);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(!card.discharge.present);
+        assert!(!obligation_discharge_present(card, "non-null"));
+        assert!(
+            card.missing.iter().any(|missing| missing.kind == "guard"),
+            "checking a different pointer must not resolve this card's guard prompt"
+        );
+        assert!(card.id.0.contains("nonnull-unchecked"));
+        Ok(())
+    }
+
+    #[test]
     fn nested_unsafe_operation_does_not_emit_parent_duplicate() -> Result<(), String> {
         let output = fixture_output("nested_unsafe_operation_call_dedupe")?;
         let card = single_card("nested_unsafe_operation_call_dedupe", &output)?;

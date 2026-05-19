@@ -1,0 +1,11 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,0 +1,6 @@
++use core::ptr::NonNull;
++
++pub fn expose_nonnull(ptr: *mut u8, other: *mut u8) -> Option<NonNull<u8>> {
++    NonNull::new(other)?;
++    // SAFETY: this fixture intentionally validates `other`, not `ptr`.
++    Some(unsafe { NonNull::new_unchecked(ptr) })
++}
