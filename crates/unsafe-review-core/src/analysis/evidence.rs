@@ -185,6 +185,12 @@ fn discharge_state_for(
                 EvidenceState::present(
                     "Vec::from_raw_parts length/capacity guard code was detected",
                 )
+            } else if family == &OperationFamily::VecFromRawParts
+                && has_vec_from_raw_parts_origin_len_cap_evidence(&site.operation.expression, lower)
+            {
+                EvidenceState::present(
+                    "Vec::from_raw_parts same-origin len/capacity evidence was detected",
+                )
             } else if has_capacity_guard(family, lower) {
                 EvidenceState::present("Capacity guard code was detected")
             } else {
@@ -482,6 +488,21 @@ fn has_vec_from_raw_parts_capacity_evidence(expression: &str, lower: &str) -> bo
     has_len_cap_bound_guard(before_call, len, cap)
 }
 
+fn has_vec_from_raw_parts_origin_len_cap_evidence(expression: &str, lower: &str) -> bool {
+    let compact = compact_code(lower);
+    let compact_expression = compact_code(&expression.to_ascii_lowercase());
+    let Some((_ptr, len, cap)) = vec_from_raw_parts_arguments(&compact_expression) else {
+        return false;
+    };
+    let call_pos = compact
+        .find(&compact_expression)
+        .or_else(|| compact.find("vec::from_raw_parts("));
+    let Some(call_pos) = call_pos else {
+        return false;
+    };
+    has_vec_from_raw_parts_same_origin_len_cap(&compact[..call_pos], len, cap)
+}
+
 fn has_vec_from_raw_parts_origin_evidence(expression: &str, lower: &str) -> bool {
     let compact = compact_code(lower);
     let compact_expression = compact_code(&expression.to_ascii_lowercase());
@@ -575,6 +596,43 @@ fn has_len_cap_early_return(before_call: &str, predicate: &str) -> bool {
         .split_once('}')
         .map_or(after_guard, |(guard_body, _after)| guard_body)
         .contains("return")
+}
+
+fn has_vec_from_raw_parts_same_origin_len_cap(before_call: &str, len: &str, cap: &str) -> bool {
+    let len = compact_code(len);
+    let cap = compact_code(cap);
+    if len.is_empty() || cap.is_empty() {
+        return false;
+    }
+
+    let mut origin_receivers = Vec::new();
+    let mut len_receiver = None;
+    let mut cap_receiver = None;
+    for statement in before_call.split(';') {
+        let Some((left, right)) = statement.split_once('=') else {
+            continue;
+        };
+        let Some(binding) = let_binding_name(left) else {
+            continue;
+        };
+        if right.contains("manuallydrop::new(") {
+            origin_receivers.push(binding.to_string());
+        }
+        if binding == len
+            && let Some(receiver) = receiver_before_marker(right, ".len(")
+            && origin_receivers.iter().any(|origin| origin == receiver)
+        {
+            len_receiver = Some(receiver.to_string());
+        }
+        if binding == cap
+            && let Some(receiver) = receiver_before_marker(right, ".capacity(")
+            && origin_receivers.iter().any(|origin| origin == receiver)
+        {
+            cap_receiver = Some(receiver.to_string());
+        }
+    }
+
+    len_receiver.is_some() && len_receiver == cap_receiver
 }
 
 fn has_set_len_capacity_evidence(lower: &str) -> bool {
@@ -2156,6 +2214,62 @@ mod tests {
         );
         assert!(
             !obligation_evidence(&after_call, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+    }
+
+    #[test]
+    fn vec_from_raw_parts_capacity_accepts_same_manuallydrop_origin_len_and_cap() {
+        let obligations = vec![SafetyObligation::new(
+            "capacity",
+            "`len` is at most `capacity`",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let same_origin = site_with_family(
+            OperationFamily::VecFromRawParts,
+            vec![
+                "let mut raw = core::mem::ManuallyDrop::new(input);",
+                "let len = raw.len();",
+                "let cap = raw.capacity();",
+            ],
+            "unsafe { Vec::from_raw_parts(ptr, len, cap) }",
+            vec![],
+        );
+        let mismatched_origin = site_with_family(
+            OperationFamily::VecFromRawParts,
+            vec![
+                "let raw = core::mem::ManuallyDrop::new(input);",
+                "let other = core::mem::ManuallyDrop::new(spare);",
+                "let len = raw.len();",
+                "let cap = other.capacity();",
+            ],
+            "unsafe { Vec::from_raw_parts(ptr, len, cap) }",
+            vec![],
+        );
+        let observed_without_origin = site_with_family(
+            OperationFamily::VecFromRawParts,
+            vec!["let len = input.len();", "let cap = input.capacity();"],
+            "unsafe { Vec::from_raw_parts(ptr, len, cap) }",
+            vec![],
+        );
+
+        assert!(
+            obligation_evidence(&same_origin, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
+            !obligation_evidence(&mismatched_origin, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
+            !obligation_evidence(&observed_without_origin, &obligations, &contract, &reach)[0]
                 .discharge
                 .present
         );
