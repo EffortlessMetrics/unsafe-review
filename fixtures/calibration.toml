@@ -36,6 +36,8 @@ required_core_fixtures = [
   "unwrap_unchecked_infallible_result",
   "unwrap_unchecked_is_some_guard",
   "unwrap_unchecked_is_ok_guard",
+  "unwrap_unchecked_is_none_return_guard",
+  "unwrap_unchecked_is_err_return_guard",
   "unreachable_unchecked_path",
   "unreachable_unchecked_infallible_path",
   "get_unchecked_mut_bounds",
@@ -414,6 +416,26 @@ expected_hazard = "invalid_value"
 fixture = "unwrap_unchecked_is_ok_guard"
 kind = "positive"
 claim = "unwrap_unchecked recognizes same-receiver is_ok guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_is_none_return_guard"
+kind = "positive"
+claim = "unwrap_unchecked recognizes same-receiver is_none early-return guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_is_err_return_guard"
+kind = "positive"
+claim = "unwrap_unchecked recognizes same-receiver is_err early-return guard evidence"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guarded_unwitnessed"
