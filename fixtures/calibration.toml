@@ -76,6 +76,7 @@ required_core_fixtures = [
   "vec_from_raw_parts",
   "vec_from_raw_parts_capacity_guard",
   "vec_from_raw_parts_capacity_observed_not_guard",
+  "vec_from_raw_parts_manuallydrop_origin",
   "box_from_raw",
   "box_from_raw_box_origin",
   "static_mut_global_state",
@@ -850,6 +851,16 @@ expected_cards = 1
 expected_class = "guard_missing"
 expected_operation_family = "vec_from_raw_parts"
 expected_hazard = "bounds"
+
+[[cases]]
+fixture = "vec_from_raw_parts_manuallydrop_origin"
+kind = "positive"
+claim = "Vec::from_raw_parts recognizes same-pointer ManuallyDrop raw-parts ownership evidence without discharging alignment or capacity"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_from_raw_parts"
+expected_hazard = "leak_or_ownership_transfer"
 
 [[cases]]
 fixture = "box_from_raw"
