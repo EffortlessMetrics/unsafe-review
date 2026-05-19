@@ -98,6 +98,7 @@ fn line_starts(text: &str) -> Vec<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     #[test]
     fn parses_complete_rust_source_without_errors() {
@@ -137,5 +138,29 @@ mod tests {
 
         assert!(!parsed.parse_errors.is_empty());
         assert!(parsed.nodes.iter().any(|node| node.kind == "SOURCE_FILE"));
+    }
+
+    proptest! {
+        #[test]
+        fn parsed_node_spans_are_valid_text_slices(chars in proptest::collection::vec(any::<char>(), 0..512)) {
+            let text = chars.into_iter().collect::<String>();
+            let parsed = parse_source(text.clone());
+
+            prop_assert_eq!(parsed.text.as_str(), text.as_str());
+            prop_assert!(!parsed.nodes.is_empty());
+
+            for node in &parsed.nodes {
+                prop_assert!(node.start <= node.end);
+                prop_assert!(node.end <= parsed.text.len());
+                prop_assert!(parsed.text.is_char_boundary(node.start));
+                prop_assert!(parsed.text.is_char_boundary(node.end));
+                prop_assert_eq!(
+                    parsed.text.get(node.start..node.end),
+                    Some(node.snippet.as_str())
+                );
+                prop_assert!(node.line >= 1);
+                prop_assert!(node.column >= 1);
+            }
+        }
     }
 }
