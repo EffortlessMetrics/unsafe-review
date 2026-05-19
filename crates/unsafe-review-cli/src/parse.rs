@@ -10,6 +10,12 @@ pub(crate) fn parse(args: Vec<String>) -> Result<Command, String> {
     if rest.is_empty() {
         return Ok(Command::Help);
     }
+    if rest
+        .iter()
+        .any(|arg| matches!(arg.as_str(), "--help" | "-h"))
+    {
+        return Ok(Command::Help);
+    }
     let command = rest.remove(0);
     match command.as_str() {
         "--help" | "-h" | "help" => Ok(Command::Help),
@@ -678,6 +684,19 @@ mod tests {
             return Err("expected check command".to_string());
         };
         assert_eq!(options.format, Format::PrSummary);
+        Ok(())
+    }
+
+    #[test]
+    fn parses_help_flag_after_subcommand_as_help() -> Result<(), String> {
+        assert_eq!(
+            parse(args(["unsafe-review", "check", "--help"]))?,
+            Command::Help
+        );
+        assert_eq!(
+            parse(args(["unsafe-review", "receipt", "audit", "-h"]))?,
+            Command::Help
+        );
         Ok(())
     }
 
