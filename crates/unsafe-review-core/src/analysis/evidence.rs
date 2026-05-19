@@ -1436,7 +1436,10 @@ fn compact_code(lower: &str) -> String {
 fn has_alignment_guard(site: &ScannedSite, lower: &str) -> bool {
     let compact = compact_code(lower);
     if let Some(receiver) = raw_pointer_alignment_receiver(&site.operation.expression) {
-        return has_same_receiver_alignment_guard(&compact, &receiver);
+        let guard_scope = code_before_operation(lower, &site.operation.expression)
+            .unwrap_or_else(|| lower.to_string());
+        let guard_compact = compact_code(&guard_scope);
+        return has_same_receiver_alignment_guard(&guard_compact, &receiver);
     }
     lower.contains("is_aligned")
         || lower.contains("align_offset")
@@ -1878,6 +1881,11 @@ mod tests {
             "ptr.cast::<Header>().read()",
             vec![],
         );
+        let post_guard = site_with_context(
+            vec![],
+            "ptr.cast::<Header>().read()",
+            vec!["if !ptr.cast::<Header>().is_aligned() { return None; }"],
+        );
 
         assert!(
             !obligation_evidence(&other_pointer_guard, &obligations, &contract, &reach)[0]
@@ -1891,6 +1899,11 @@ mod tests {
         );
         assert!(
             obligation_evidence(&matching_method_guard, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
+            !obligation_evidence(&post_guard, &obligations, &contract, &reach)[0]
                 .discharge
                 .present
         );
