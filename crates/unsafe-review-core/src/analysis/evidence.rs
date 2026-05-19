@@ -162,7 +162,7 @@ fn discharge_state_for(
         "alignment" => {
             if family == &OperationFamily::RawPointerWrite && has_u8_write_bytes_context(lower) {
                 EvidenceState::present("u8 raw write alignment evidence was detected")
-            } else if has_alignment_guard(lower) {
+            } else if has_alignment_guard(site, lower) {
                 EvidenceState::present("Alignment guard code was detected")
             } else {
                 EvidenceState::missing("No alignment guard code was detected")
@@ -782,8 +782,11 @@ fn compact_code(lower: &str) -> String {
         .collect()
 }
 
-fn has_alignment_guard(lower: &str) -> bool {
+fn has_alignment_guard(site: &ScannedSite, lower: &str) -> bool {
     let compact = compact_code(lower);
+    if let Some(receiver) = raw_pointer_alignment_receiver(&site.operation.expression) {
+        return has_same_receiver_alignment_guard(&compact, &receiver);
+    }
     lower.contains("is_aligned")
         || lower.contains("align_offset")
         || lower.contains("addr() %")
@@ -791,6 +794,91 @@ fn has_alignment_guard(lower: &str) -> bool {
         || compact.contains("addr()%")
         || compact.contains("asusize)%")
         || compact.contains("asusize%")
+}
+
+fn has_same_receiver_alignment_guard(compact: &str, receiver: &str) -> bool {
+    let receiver = compact_code(&receiver.to_ascii_lowercase());
+    contains_receiver_fragment(compact, &format!("{receiver}.addr()%"))
+        || contains_receiver_fragment(compact, &format!("{receiver}asusize)%"))
+        || contains_receiver_fragment(compact, &format!("{receiver}asusize%"))
+        || contains_receiver_fragment(compact, &format!("({receiver}asusize)%"))
+        || contains_receiver_fragment(compact, &format!("({receiver}asusize%"))
+        || same_receiver_method_call(compact, &receiver, "is_aligned")
+        || same_receiver_method_call(compact, &receiver, "align_offset")
+}
+
+fn same_receiver_method_call(compact: &str, receiver: &str, method: &str) -> bool {
+    let direct = format!("{receiver}.{method}");
+    if contains_receiver_fragment(compact, &direct) {
+        return true;
+    }
+    let cast_prefix = format!("{receiver}.cast");
+    let mut cursor = compact;
+    let mut offset = 0usize;
+    while let Some(pos) = cursor.find(&cast_prefix) {
+        let start = offset + pos;
+        let before = compact[..start].chars().next_back();
+        let starts_on_boundary = before.is_none_or(|ch| !is_receiver_path_char(ch));
+        let after_receiver = &compact[start + receiver.len()..];
+        let end = after_receiver
+            .find([';', '{', '}'])
+            .unwrap_or(after_receiver.len());
+        if starts_on_boundary && after_receiver[..end].contains(&format!(".{method}")) {
+            return true;
+        }
+        let next = pos + cast_prefix.len();
+        offset += next;
+        cursor = &cursor[next..];
+    }
+    false
+}
+
+fn contains_receiver_fragment(compact: &str, fragment: &str) -> bool {
+    let mut cursor = compact;
+    let mut offset = 0usize;
+    while let Some(pos) = cursor.find(fragment) {
+        let start = offset + pos;
+        let before = compact[..start].chars().next_back();
+        if before.is_none_or(|ch| !is_receiver_path_char(ch)) {
+            return true;
+        }
+        let next = pos + fragment.len();
+        offset += next;
+        cursor = &cursor[next..];
+    }
+    false
+}
+
+fn raw_pointer_alignment_receiver(expression: &str) -> Option<String> {
+    let compact = compact_code(&expression.to_ascii_lowercase());
+    if let Some(receiver) = receiver_before_marker(&compact, ".cast::<") {
+        return Some(receiver.to_string());
+    }
+    if let Some(receiver) = receiver_before_marker(&compact, ".read(") {
+        return Some(receiver.to_string());
+    }
+    if let Some(receiver) = receiver_before_marker(&compact, ".read_volatile(") {
+        return Some(receiver.to_string());
+    }
+    if let Some(receiver) = receiver_before_marker(&compact, ".write(") {
+        return Some(receiver.to_string());
+    }
+    if let Some(receiver) = receiver_before_marker(&compact, ".write_volatile(") {
+        return Some(receiver.to_string());
+    }
+    None
+}
+
+fn receiver_before_marker<'a>(compact: &'a str, marker: &str) -> Option<&'a str> {
+    let pos = compact.find(marker)?;
+    let before_marker = &compact[..pos];
+    let receiver_start = before_marker
+        .char_indices()
+        .rev()
+        .find_map(|(idx, ch)| (!is_receiver_path_char(ch)).then_some(idx + ch.len_utf8()))
+        .unwrap_or(0);
+    let receiver = &before_marker[receiver_start..];
+    (!receiver.is_empty()).then_some(receiver)
 }
 
 fn has_nullability_guard(site: &ScannedSite, lower: &str) -> bool {
@@ -1105,6 +1193,50 @@ mod tests {
         );
         assert!(
             obligation_evidence(&modulo_guard, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+    }
+
+    #[test]
+    fn alignment_guard_must_match_raw_pointer_receiver_when_known() {
+        let obligations = vec![SafetyObligation::new(
+            "alignment",
+            "pointer is aligned for the accessed type",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let other_pointer_guard = site_with_context(
+            vec!["if (other_ptr as usize) % core::mem::align_of::<Header>() != 0 { return None; }"],
+            "ptr.cast::<Header>().read()",
+            vec![],
+        );
+        let matching_modulo_guard = site_with_context(
+            vec!["if (ptr as usize) % core::mem::align_of::<Header>() != 0 { return None; }"],
+            "ptr.cast::<Header>().read()",
+            vec![],
+        );
+        let matching_method_guard = site_with_context(
+            vec!["if !ptr.cast::<Header>().is_aligned() { return None; }"],
+            "ptr.cast::<Header>().read()",
+            vec![],
+        );
+
+        assert!(
+            !obligation_evidence(&other_pointer_guard, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
+            obligation_evidence(&matching_modulo_guard, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
+            obligation_evidence(&matching_method_guard, &obligations, &contract, &reach)[0]
                 .discharge
                 .present
         );
