@@ -179,7 +179,13 @@ fn discharge_state_for(
             }
         }
         "capacity" => {
-            if has_capacity_guard(family, lower) {
+            if family == &OperationFamily::VecFromRawParts
+                && has_vec_from_raw_parts_capacity_evidence(&site.operation.expression, lower)
+            {
+                EvidenceState::present(
+                    "Vec::from_raw_parts length/capacity guard code was detected",
+                )
+            } else if has_capacity_guard(family, lower) {
                 EvidenceState::present("Capacity guard code was detected")
             } else {
                 EvidenceState::missing("No capacity guard code was detected")
@@ -427,7 +433,106 @@ fn has_capacity_guard(family: &OperationFamily, lower: &str) -> bool {
     if family == &OperationFamily::VecSetLen {
         return has_set_len_capacity_evidence(lower);
     }
+    if family == &OperationFamily::VecFromRawParts {
+        return false;
+    }
     lower.contains("capacity") || lower.contains("cap()")
+}
+
+fn has_vec_from_raw_parts_capacity_evidence(expression: &str, lower: &str) -> bool {
+    let compact = compact_code(lower);
+    let compact_expression = compact_code(&expression.to_ascii_lowercase());
+    let Some((_ptr, len, cap)) = vec_from_raw_parts_arguments(&compact_expression) else {
+        return false;
+    };
+    let call_pos = compact
+        .find(&compact_expression)
+        .or_else(|| compact.find("vec::from_raw_parts("));
+    let Some(call_pos) = call_pos else {
+        return false;
+    };
+    let before_call = &compact[..call_pos];
+    has_len_cap_bound_guard(before_call, len, cap)
+}
+
+fn vec_from_raw_parts_arguments(compact_expression: &str) -> Option<(&str, &str, &str)> {
+    let marker = "from_raw_parts(";
+    let call_pos = compact_expression.find(marker)?;
+    let after_marker = &compact_expression[call_pos + marker.len()..];
+    let end = matching_call_argument_end(after_marker)?;
+    let args = split_top_level_arguments(&after_marker[..end]);
+    if args.len() == 3 && args.iter().all(|arg| !arg.is_empty()) {
+        Some((args[0], args[1], args[2]))
+    } else {
+        None
+    }
+}
+
+fn split_top_level_arguments(text: &str) -> Vec<&str> {
+    let mut args = Vec::new();
+    let mut start = 0usize;
+    let mut angle_depth = 0usize;
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut brace_depth = 0usize;
+    for (idx, ch) in text.char_indices() {
+        match ch {
+            '<' => angle_depth += 1,
+            '>' => angle_depth = angle_depth.saturating_sub(1),
+            '(' => paren_depth += 1,
+            ')' => paren_depth = paren_depth.saturating_sub(1),
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth = bracket_depth.saturating_sub(1),
+            '{' => brace_depth += 1,
+            '}' => brace_depth = brace_depth.saturating_sub(1),
+            ',' if angle_depth == 0
+                && paren_depth == 0
+                && bracket_depth == 0
+                && brace_depth == 0 =>
+            {
+                args.push(text[start..idx].trim());
+                start = idx + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    args.push(text[start..].trim());
+    args
+}
+
+fn has_len_cap_bound_guard(before_call: &str, len: &str, cap: &str) -> bool {
+    let len = compact_code(len);
+    let cap = compact_code(cap);
+    if len.is_empty() || cap.is_empty() {
+        return false;
+    }
+    let len_lte_cap = format!("{len}<={cap}");
+    let cap_gte_len = format!("{cap}>={len}");
+    let len_gt_cap = format!("{len}>{cap}");
+    let cap_lt_len = format!("{cap}<{len}");
+    has_len_cap_bound_predicate(before_call, &len_lte_cap)
+        || has_len_cap_bound_predicate(before_call, &cap_gte_len)
+        || has_len_cap_early_return(before_call, &len_gt_cap)
+        || has_len_cap_early_return(before_call, &cap_lt_len)
+}
+
+fn has_len_cap_bound_predicate(before_call: &str, predicate: &str) -> bool {
+    before_call.contains(&format!("assert!({predicate})"))
+        || before_call.contains(&format!("assert!({predicate},"))
+        || before_call.contains(&format!("debug_assert!({predicate})"))
+        || before_call.contains(&format!("debug_assert!({predicate},"))
+        || before_call.contains(&format!("if{predicate}{{"))
+}
+
+fn has_len_cap_early_return(before_call: &str, predicate: &str) -> bool {
+    let guard = format!("if{predicate}{{");
+    let Some((_prefix, after_guard)) = before_call.split_once(&guard) else {
+        return false;
+    };
+    after_guard
+        .split_once('}')
+        .map_or(after_guard, |(guard_body, _after)| guard_body)
+        .contains("return")
 }
 
 fn has_set_len_capacity_evidence(lower: &str) -> bool {
@@ -1681,6 +1786,53 @@ mod tests {
         );
         assert!(
             obligation_evidence(&bounded, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+    }
+
+    #[test]
+    fn vec_from_raw_parts_capacity_guard_must_match_len_and_cap_arguments() {
+        let obligations = vec![SafetyObligation::new(
+            "capacity",
+            "`len` is at most `capacity`",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let bounded = site_with_family(
+            OperationFamily::VecFromRawParts,
+            vec!["if len > cap {", "    return None;", "}"],
+            "Some(unsafe { Vec::from_raw_parts(buf, len, cap) })",
+            vec![],
+        );
+        let unrelated_capacity = site_with_family(
+            OperationFamily::VecFromRawParts,
+            vec!["let capacity = other_cap;", "assert!(len <= capacity);"],
+            "unsafe { Vec::from_raw_parts(buf, len, cap) }",
+            vec![],
+        );
+        let after_call = site_with_family(
+            OperationFamily::VecFromRawParts,
+            vec![],
+            "unsafe { Vec::from_raw_parts(buf, len, cap) }",
+            vec!["assert!(len <= cap);"],
+        );
+
+        assert!(
+            obligation_evidence(&bounded, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
+            !obligation_evidence(&unrelated_capacity, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
+            !obligation_evidence(&after_call, &obligations, &contract, &reach)[0]
                 .discharge
                 .present
         );
