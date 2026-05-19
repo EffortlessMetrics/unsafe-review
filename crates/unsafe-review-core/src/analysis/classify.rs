@@ -144,9 +144,12 @@ mod tests {
                 &contract(false),
                 &discharge(false),
                 &reach("unreached")
+            ),
+            (
+                ReviewClass::ContractMissing,
+                Priority::High,
+                Confidence::High
             )
-            .0,
-            ReviewClass::ContractMissing
         );
         assert_eq!(
             classify(
@@ -154,9 +157,12 @@ mod tests {
                 &contract(true),
                 &discharge(false),
                 &reach("owner_reached")
+            ),
+            (
+                ReviewClass::GuardMissing,
+                Priority::High,
+                Confidence::Medium
             )
-            .0,
-            ReviewClass::GuardMissing
         );
         assert_eq!(
             classify(
@@ -164,9 +170,12 @@ mod tests {
                 &contract(true),
                 &discharge(true),
                 &reach("unreached")
+            ),
+            (
+                ReviewClass::UnsafeUnreached,
+                Priority::Medium,
+                Confidence::Medium
             )
-            .0,
-            ReviewClass::UnsafeUnreached
         );
         assert_eq!(
             classify(
@@ -174,9 +183,12 @@ mod tests {
                 &contract(true),
                 &discharge(true),
                 &reach("owner_reached")
+            ),
+            (
+                ReviewClass::GuardedUnwitnessed,
+                Priority::Medium,
+                Confidence::Medium
             )
-            .0,
-            ReviewClass::GuardedUnwitnessed
         );
     }
 }
