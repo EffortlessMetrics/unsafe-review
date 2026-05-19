@@ -97,6 +97,14 @@ const DOGFOOD_INDEX: &str = "docs/dogfood/index.json";
 const DOGFOOD_TARGET_KINDS: &[&str] = &["repo-snapshot", "pr-diff"];
 const DOGFOOD_TARGET_STATUSES: &[&str] = &["active", "parked", "retired"];
 const DOGFOOD_ARTIFACT_STATUSES: &[&str] = &["checked_in", "local_untracked", "remote_manual"];
+const FUZZ_REQUIRED_FILES: &[&str] = &[
+    "docs/FUZZING.md",
+    "fuzz/.gitignore",
+    "fuzz/Cargo.lock",
+    "fuzz/Cargo.toml",
+    "fuzz/corpus/analyze/basic",
+    "fuzz/fuzz_targets/analyze.rs",
+];
 
 fn main() {
     if let Err(err) = run(std::env::args().collect()) {
@@ -109,7 +117,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
     match args.get(1).map(|arg| arg.as_str()) {
         None | Some("help") | Some("--help") => {
             println!(
-                "xtask commands: check-pr, check-docs, check-policy, check-support-tiers, check-fixtures, check-calibration, check-dogfood, check-advisory-artifacts <dir>"
+                "xtask commands: check-pr, check-docs, check-policy, check-support-tiers, check-fixtures, check-calibration, check-dogfood, check-fuzz, check-advisory-artifacts <dir>"
             );
             Ok(())
         }
@@ -120,6 +128,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
             check_fixtures()?;
             check_calibration()?;
             check_dogfood()?;
+            check_manual_fuzz_harness()?;
             check_tracked_generated_artifacts()?;
             println!("check-pr: ok");
             Ok(())
@@ -130,6 +139,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
         Some("check-fixtures") => check_fixtures(),
         Some("check-calibration") => check_calibration(),
         Some("check-dogfood") => check_dogfood(),
+        Some("check-fuzz") => check_manual_fuzz_harness(),
         Some("check-advisory-artifacts") => {
             let Some(dir) = args.get(2) else {
                 return Err("usage: cargo xtask check-advisory-artifacts <dir>".to_string());
@@ -792,6 +802,91 @@ fn check_dogfood_index(
         ));
     }
 
+    Ok(())
+}
+
+fn check_manual_fuzz_harness() -> Result<(), String> {
+    for path in FUZZ_REQUIRED_FILES {
+        require_repo_file(path)?;
+    }
+
+    let workspace = parse_toml_file(&repo_path("Cargo.toml"))?;
+    let excludes = workspace
+        .get("workspace")
+        .and_then(|workspace| workspace.get("exclude"))
+        .and_then(toml::Value::as_array)
+        .ok_or_else(|| "Cargo.toml workspace.exclude must list fuzz".to_string())?;
+    if !excludes
+        .iter()
+        .any(|entry| entry.as_str().is_some_and(|entry| entry == "fuzz"))
+    {
+        return Err("Cargo.toml workspace.exclude must list fuzz".to_string());
+    }
+
+    let fuzz_manifest = parse_toml_file(&repo_path("fuzz/Cargo.toml"))?;
+    if fuzz_manifest
+        .get("package")
+        .and_then(|package| package.get("publish"))
+        .and_then(toml::Value::as_bool)
+        .unwrap_or(true)
+    {
+        return Err("fuzz/Cargo.toml package.publish must be false".to_string());
+    }
+    let cargo_fuzz = fuzz_manifest
+        .get("package")
+        .and_then(|package| package.get("metadata"))
+        .and_then(|metadata| metadata.get("cargo-fuzz"))
+        .and_then(toml::Value::as_bool)
+        .unwrap_or(false);
+    if !cargo_fuzz {
+        return Err("fuzz/Cargo.toml package.metadata.cargo-fuzz must be true".to_string());
+    }
+    let bins = fuzz_manifest
+        .get("bin")
+        .and_then(toml::Value::as_array)
+        .ok_or_else(|| "fuzz/Cargo.toml must define an analyze fuzz target".to_string())?;
+    let has_analyze_target = bins.iter().any(|bin| {
+        bin.get("name").and_then(toml::Value::as_str) == Some("analyze")
+            && bin.get("path").and_then(toml::Value::as_str) == Some("fuzz_targets/analyze.rs")
+    });
+    if !has_analyze_target {
+        return Err("fuzz/Cargo.toml must define analyze at fuzz_targets/analyze.rs".to_string());
+    }
+
+    let fuzz_docs = read_to_string(&repo_path("docs/FUZZING.md"))?;
+    for phrase in [
+        "manual `cargo-fuzz` harness",
+        "not part of the default PR gate",
+        "does not prove soundness",
+    ] {
+        if !fuzz_docs.contains(phrase) {
+            return Err(format!("docs/FUZZING.md must include `{phrase}`"));
+        }
+    }
+
+    let target = read_to_string(&repo_path("fuzz/fuzz_targets/analyze.rs"))?;
+    for phrase in [
+        "fuzz_target!",
+        "DiffSource::Text",
+        "render_json",
+        "MAX_SOURCE_BYTES",
+        "MAX_DIFF_BYTES",
+    ] {
+        if !target.contains(phrase) {
+            return Err(format!(
+                "fuzz/fuzz_targets/analyze.rs must include `{phrase}`"
+            ));
+        }
+    }
+
+    let ignore = read_to_string(&repo_path("fuzz/.gitignore"))?;
+    for ignored in ["artifacts/", "target/"] {
+        if !ignore.lines().any(|line| line.trim() == ignored) {
+            return Err(format!("fuzz/.gitignore must ignore `{ignored}`"));
+        }
+    }
+
+    println!("check-fuzz: ok");
     Ok(())
 }
 
@@ -1985,6 +2080,14 @@ fn require_file(path: &str) -> Result<(), String> {
     }
 }
 
+fn require_repo_file(path: &str) -> Result<(), String> {
+    if repo_path(path).is_file() {
+        Ok(())
+    } else {
+        Err(format!("required file missing: {path}"))
+    }
+}
+
 fn require_fixture_file(dir: &Path, relative: &str) -> Result<(), String> {
     let path = dir.join(relative);
     if path.is_file() {
@@ -2007,6 +2110,12 @@ fn workspace_path(relative: &str) -> PathBuf {
             .join("..")
             .join(relative)
     }
+}
+
+fn repo_path(relative: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join(relative)
 }
 
 fn fixture_dirs(dir: &Path) -> Result<Vec<PathBuf>, String> {
@@ -2962,6 +3071,11 @@ impl WitnessKind {
     #[test]
     fn dogfood_manifest_validates_current_corpus_contract() -> Result<(), String> {
         check_dogfood()
+    }
+
+    #[test]
+    fn manual_fuzz_harness_validates_current_shape() -> Result<(), String> {
+        check_manual_fuzz_harness()
     }
 
     #[test]
