@@ -142,6 +142,22 @@ mod tests {
 
     proptest! {
         #[test]
+        fn line_column_tracks_ascii_newlines(lines in proptest::collection::vec("[ -~]{0,24}", 1..30)) {
+            let text = lines.join("\n");
+            let line_starts = line_starts(&text);
+            let mut line_start = 0usize;
+
+            for (line_index, line) in lines.iter().enumerate() {
+                for column_offset in 0..=line.len() {
+                    let position = line_column(&text, line_start + column_offset, &line_starts);
+                    prop_assert_eq!(position.line, line_index + 1);
+                    prop_assert_eq!(position.column, column_offset + 1);
+                }
+                line_start = line_start.saturating_add(line.len()).saturating_add(1);
+            }
+        }
+
+        #[test]
         fn parsed_node_spans_are_valid_text_slices(chars in proptest::collection::vec(any::<char>(), 0..512)) {
             let text = chars.into_iter().collect::<String>();
             let parsed = parse_source(text.clone());
