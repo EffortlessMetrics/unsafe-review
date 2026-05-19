@@ -1394,35 +1394,45 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
 
     #[test]
     fn transmute_bool_value_observation_is_not_guard_evidence() -> Result<(), String> {
-        let output = fixture_output("transmute_bool_value_observed_not_guard")?;
-        let card = single_card("transmute_bool_value_observed_not_guard", &output)?;
+        for fixture in [
+            "transmute_bool_value_observed_not_guard",
+            "transmute_bool_closed_if_observed_not_guard",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
 
-        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
-        assert_eq!(card.operation.family, OperationFamily::Transmute);
-        assert_eq!(card.class, ReviewClass::GuardMissing);
-        assert!(obligation_discharge_present(card, "layout"));
-        assert!(!obligation_discharge_present(card, "valid-value"));
-        assert!(
-            card.missing.iter().any(|missing| missing.kind == "guard"),
-            "observing a bool-domain predicate must not resolve this card's guard prompt"
-        );
+            assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+            assert_eq!(card.operation.family, OperationFamily::Transmute);
+            assert_eq!(card.class, ReviewClass::GuardMissing);
+            assert!(obligation_discharge_present(card, "layout"));
+            assert!(!obligation_discharge_present(card, "valid-value"));
+            assert!(
+                card.missing.iter().any(|missing| missing.kind == "guard"),
+                "{fixture} must not resolve this card's guard prompt"
+            );
+        }
         Ok(())
     }
 
     #[test]
     fn transmute_copy_bool_value_observation_is_not_guard_evidence() -> Result<(), String> {
-        let output = fixture_output("transmute_copy_bool_value_observed_not_guard")?;
-        let card = single_card("transmute_copy_bool_value_observed_not_guard", &output)?;
+        for fixture in [
+            "transmute_copy_bool_value_observed_not_guard",
+            "transmute_copy_bool_closed_if_observed_not_guard",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
 
-        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
-        assert_eq!(card.operation.family, OperationFamily::Transmute);
-        assert_eq!(card.class, ReviewClass::GuardMissing);
-        assert!(obligation_discharge_present(card, "layout"));
-        assert!(!obligation_discharge_present(card, "valid-value"));
-        assert!(
-            card.missing.iter().any(|missing| missing.kind == "guard"),
-            "observing a referenced-byte bool-domain predicate must not resolve this card's guard prompt"
-        );
+            assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+            assert_eq!(card.operation.family, OperationFamily::Transmute);
+            assert_eq!(card.class, ReviewClass::GuardMissing);
+            assert!(obligation_discharge_present(card, "layout"));
+            assert!(!obligation_discharge_present(card, "valid-value"));
+            assert!(
+                card.missing.iter().any(|missing| missing.kind == "guard"),
+                "{fixture} must not resolve this card's guard prompt"
+            );
+        }
         Ok(())
     }
 
