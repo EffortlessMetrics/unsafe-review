@@ -243,6 +243,13 @@ fn discharge_state_for(
                 EvidenceState::missing("No obligation-specific guard code was detected")
             }
         }
+        "layout" => {
+            if family == &OperationFamily::Transmute && has_transmute_layout_size_evidence(lower) {
+                EvidenceState::present("Transmute layout size evidence was detected")
+            } else {
+                EvidenceState::missing("No obligation-specific guard code was detected")
+            }
+        }
         "unreachable" => {
             if family == &OperationFamily::UnreachableUnchecked
                 && has_unreachable_unchecked_infallible_path_evidence(lower)
@@ -499,6 +506,77 @@ fn has_zeroed_known_valid_zero_type(lower: &str) -> bool {
             | "u128"
             | "usize"
     )
+}
+
+fn has_transmute_layout_size_evidence(lower: &str) -> bool {
+    let compact = compact_code(lower);
+    let Some((before_call, source_type, destination_type)) = transmute_call_context(&compact)
+    else {
+        return false;
+    };
+    let normalized = normalize_size_of_paths(before_call);
+    has_size_of_equality(&normalized, source_type, destination_type)
+}
+
+fn transmute_call_context(compact: &str) -> Option<(&str, &str, &str)> {
+    for marker in ["transmute::<", "transmute_copy::<"] {
+        let Some(marker_start) = compact.find(marker) else {
+            continue;
+        };
+        let before_call = &compact[..marker_start];
+        let start = marker_start + marker.len();
+        let after_marker = &compact[start..];
+        let end = matching_generic_argument_end(after_marker)?;
+        let arguments = &after_marker[..end];
+        if let Some((source_type, destination_type)) = split_top_level_pair(arguments) {
+            return Some((before_call, source_type, destination_type));
+        }
+    }
+    None
+}
+
+fn split_top_level_pair(text: &str) -> Option<(&str, &str)> {
+    let mut angle_depth = 0usize;
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    for (idx, ch) in text.char_indices() {
+        match ch {
+            '<' => angle_depth += 1,
+            '>' => angle_depth = angle_depth.saturating_sub(1),
+            '(' => paren_depth += 1,
+            ')' => paren_depth = paren_depth.saturating_sub(1),
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth = bracket_depth.saturating_sub(1),
+            ',' if angle_depth == 0 && paren_depth == 0 && bracket_depth == 0 => {
+                let left = &text[..idx];
+                let right = &text[idx + 1..];
+                return (!left.is_empty() && !right.is_empty()).then_some((left, right));
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn normalize_size_of_paths(compact: &str) -> String {
+    compact
+        .replace("core::mem::size_of", "size_of")
+        .replace("std::mem::size_of", "size_of")
+        .replace("mem::size_of", "size_of")
+}
+
+fn has_size_of_equality(compact: &str, left_type: &str, right_type: &str) -> bool {
+    let left = format!("size_of::<{left_type}>()");
+    let right = format!("size_of::<{right_type}>()");
+    compact.contains(&format!("{left}=={right}"))
+        || compact.contains(&format!("{right}=={left}"))
+        || has_size_assert_eq(compact, &left, &right)
+        || has_size_assert_eq(compact, &right, &left)
+}
+
+fn has_size_assert_eq(compact: &str, left: &str, right: &str) -> bool {
+    compact.contains(&format!("assert_eq!({left},{right}"))
+        || compact.contains(&format!("debug_assert_eq!({left},{right}"))
 }
 
 fn zeroed_target_type(compact: &str) -> Option<&str> {
@@ -1673,6 +1751,79 @@ mod tests {
         );
 
         let evidence = obligation_evidence(&zeroed, &obligations, &contract, &reach);
+
+        assert!(!evidence[0].discharge.present);
+    }
+
+    #[test]
+    fn transmute_size_equality_discharges_layout_obligation_only() {
+        let obligations = vec![
+            SafetyObligation::new("layout", "source and destination layouts are compatible"),
+            SafetyObligation::new(
+                "valid-value",
+                "destination value satisfies Rust validity rules",
+            ),
+        ];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let transmute = site_with_family(
+            OperationFamily::Transmute,
+            vec!["assert_eq!(core::mem::size_of::<u8>(), core::mem::size_of::<bool>());"],
+            "unsafe { core::mem::transmute::<u8, bool>(value) }",
+            vec![],
+        );
+
+        let evidence = obligation_evidence(&transmute, &obligations, &contract, &reach);
+
+        assert!(evidence[0].discharge.present);
+        assert!(!evidence[1].discharge.present);
+    }
+
+    #[test]
+    fn transmute_size_equality_requires_matching_type_pair() {
+        let obligations = vec![SafetyObligation::new(
+            "layout",
+            "source and destination layouts are compatible",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let transmute = site_with_family(
+            OperationFamily::Transmute,
+            vec!["assert_eq!(core::mem::size_of::<u8>(), core::mem::size_of::<u16>());"],
+            "unsafe { core::mem::transmute::<u8, bool>(value) }",
+            vec![],
+        );
+
+        let evidence = obligation_evidence(&transmute, &obligations, &contract, &reach);
+
+        assert!(!evidence[0].discharge.present);
+    }
+
+    #[test]
+    fn transmute_size_equality_must_precede_call() {
+        let obligations = vec![SafetyObligation::new(
+            "layout",
+            "source and destination layouts are compatible",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let transmute = site_with_family(
+            OperationFamily::Transmute,
+            vec![],
+            "unsafe { core::mem::transmute::<u8, bool>(value) }",
+            vec!["assert_eq!(core::mem::size_of::<u8>(), core::mem::size_of::<bool>());"],
+        );
+
+        let evidence = obligation_evidence(&transmute, &obligations, &contract, &reach);
 
         assert!(!evidence[0].discharge.present);
     }

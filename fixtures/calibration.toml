@@ -64,6 +64,7 @@ required_core_fixtures = [
   "box_from_raw",
   "static_mut_global_state",
   "transmute_invalid_value",
+  "transmute_layout_size_guard",
   "transmute_copy_invalid_value",
   "multiline_transmute_copy_invalid_value",
   "unsafe_impl_send",
@@ -699,6 +700,16 @@ expected_hazard = "static_mut_global_state"
 fixture = "transmute_invalid_value"
 kind = "positive"
 claim = "transmute::<u8, bool> reports invalid-value/layout obligations"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_layout_size_guard"
+kind = "positive"
+claim = "transmute::<u8, bool> recognizes explicit size_of layout evidence while keeping valid-value evidence missing"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"
