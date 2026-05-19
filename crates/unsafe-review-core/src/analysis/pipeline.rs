@@ -1393,6 +1393,23 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn transmute_bool_value_observation_is_not_guard_evidence() -> Result<(), String> {
+        let output = fixture_output("transmute_bool_value_observed_not_guard")?;
+        let card = single_card("transmute_bool_value_observed_not_guard", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::Transmute);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(obligation_discharge_present(card, "layout"));
+        assert!(!obligation_discharge_present(card, "valid-value"));
+        assert!(
+            card.missing.iter().any(|missing| missing.kind == "guard"),
+            "observing a bool-domain predicate must not resolve this card's guard prompt"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn zeroed_uses_valid_zero_operation_family() -> Result<(), String> {
         let output = fixture_output("zeroed_invalid_value")?;
         let card = single_card("zeroed_invalid_value", &output)?;

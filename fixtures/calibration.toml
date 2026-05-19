@@ -97,6 +97,7 @@ required_core_fixtures = [
   "transmute_layout_size_guard",
   "transmute_bool_valid_value_guard",
   "transmute_bool_invalid_return_guard",
+  "transmute_bool_value_observed_not_guard",
   "transmute_copy_invalid_value",
   "transmute_copy_layout_size_guard",
   "transmute_copy_bool_valid_value_guard",
@@ -1074,6 +1075,16 @@ claim = "transmute::<u8, bool> recognizes explicit size_of layout evidence and u
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guarded_unwitnessed"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_bool_value_observed_not_guard"
+kind = "false_positive_control"
+claim = "transmute::<u8, bool> does not accept a bare bool byte-domain observation as valid-value evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
 expected_operation_family = "transmute"
 expected_hazard = "invalid_value"
 
