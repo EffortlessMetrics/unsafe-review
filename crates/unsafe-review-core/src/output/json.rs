@@ -305,6 +305,8 @@ mod tests {
         "unsafe_impl_sync_generic_bound",
         "ffi_sanitizer_route",
         "get_unchecked_mut_bounds",
+        "get_unchecked_mut_len_guard",
+        "get_unchecked_mut_other_len_not_guard",
         "pin_new_unchecked",
     ];
 
