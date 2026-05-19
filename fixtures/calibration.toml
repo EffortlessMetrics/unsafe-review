@@ -25,6 +25,7 @@ required_core_fixtures = [
   "raw_pointer_write_bytes",
   "raw_pointer_write_maybeuninit",
   "raw_pointer_write_volatile",
+  "ptr_copy_overlapping",
   "copy_nonoverlapping",
   "str_from_utf8_unchecked",
   "zeroed_invalid_value",
@@ -298,6 +299,16 @@ expected_cards = 1
 expected_class = "guard_missing"
 expected_operation_family = "copy_nonoverlapping"
 expected_hazard = "aliasing_or_provenance"
+
+[[cases]]
+fixture = "ptr_copy_overlapping"
+kind = "positive"
+claim = "ptr::copy reports overlapping-copy range obligations instead of a generic unsafe function call or copy_nonoverlapping non-overlap obligation"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "ptr_copy"
+expected_hazard = "pointer_validity"
 
 [[cases]]
 fixture = "str_from_utf8_unchecked"
