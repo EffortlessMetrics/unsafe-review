@@ -719,6 +719,38 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn get_unchecked_mut_uses_bounds_operation_family() -> Result<(), String> {
+        let output = fixture_output("get_unchecked_mut_bounds")?;
+        let card = single_card("get_unchecked_mut_bounds", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::GetUnchecked);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(card.hazards.contains(&HazardKind::Bounds));
+        assert!(!obligation_discharge_present(card, "bounds"));
+        assert!(card.id.0.contains("get-unchecked-mut"));
+        Ok(())
+    }
+
+    #[test]
+    fn pin_new_unchecked_uses_pin_operation_family() -> Result<(), String> {
+        let output = fixture_output("pin_new_unchecked")?;
+        let card = single_card("pin_new_unchecked", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::PinUnchecked);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(card.hazards.contains(&HazardKind::PinInvariant));
+        assert!(!obligation_discharge_present(card, "pin"));
+        assert!(
+            card.next_action.verify_commands.is_empty(),
+            "Pin invariant review should not invent a generic witness command"
+        );
+        assert!(card.id.0.contains("new-unchecked"));
+        Ok(())
+    }
+
+    #[test]
     fn adjacent_unchanged_unsafe_fn_is_not_reported_by_neighboring_change() -> Result<(), String> {
         let output = fixture_output("adjacent_unchanged_unsafe_fn_no_card")?;
 

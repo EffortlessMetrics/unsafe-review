@@ -26,6 +26,8 @@ required_core_fixtures = [
   "unwrap_unchecked_infallible_result",
   "unreachable_unchecked_path",
   "unreachable_unchecked_infallible_path",
+  "get_unchecked_mut_bounds",
+  "pin_new_unchecked",
   "raw_pointer_write_bytes",
   "raw_pointer_write_maybeuninit",
   "raw_pointer_write_volatile",
@@ -304,6 +306,26 @@ expected_cards = 1
 expected_class = "guarded_unwitnessed"
 expected_operation_family = "unreachable_unchecked"
 expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "get_unchecked_mut_bounds"
+kind = "positive"
+claim = "get_unchecked_mut reports missing bounds evidence instead of a generic unsafe function call"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "pin_new_unchecked"
+kind = "positive"
+claim = "Pin::new_unchecked reports missing pin invariant evidence without inventing a generic witness"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "pin_unchecked"
+expected_hazard = "pin_invariant"
 
 [[cases]]
 fixture = "raw_pointer_write_bytes"
