@@ -1052,6 +1052,7 @@ fn has_from_utf8_unchecked_validation_evidence(lower: &str) -> bool {
 
     before_call.contains(&format!("{validation}.is_ok()"))
         || has_validation_early_return_guard(before_call, &validation, "is_err")
+        || has_validation_question_mark_guard(before_call, &validation)
 }
 
 fn from_utf8_unchecked_argument_context(compact: &str) -> Option<(&str, &str)> {
@@ -1086,6 +1087,10 @@ fn has_validation_early_return_guard(before_call: &str, validation: &str, predic
         .split_once('}')
         .map_or(after_guard, |(guard_body, _after)| guard_body)
         .contains("return")
+}
+
+fn has_validation_question_mark_guard(before_call: &str, validation: &str) -> bool {
+    before_call.contains(&format!("{validation}?;"))
 }
 
 fn has_zeroed_known_valid_zero_type(lower: &str) -> bool {
@@ -3365,12 +3370,21 @@ mod tests {
             "unsafe { core::str::from_utf8_unchecked(bytes) }",
             vec![],
         );
+        let question_mark = site_with_family(
+            OperationFamily::StrFromUtf8Unchecked,
+            vec!["core::str::from_utf8(bytes)?;"],
+            "unsafe { core::str::from_utf8_unchecked(bytes) }",
+            vec![],
+        );
 
         let checked_evidence = obligation_evidence(&checked, &obligations, &contract, &reach);
         let return_evidence = obligation_evidence(&early_return, &obligations, &contract, &reach);
+        let question_mark_evidence =
+            obligation_evidence(&question_mark, &obligations, &contract, &reach);
 
         assert!(checked_evidence[0].discharge.present);
         assert!(return_evidence[0].discharge.present);
+        assert!(question_mark_evidence[0].discharge.present);
     }
 
     #[test]
@@ -3387,6 +3401,12 @@ mod tests {
             "unsafe { core::str::from_utf8_unchecked(bytes) }",
             vec!["}"],
         );
+        let wrong_buffer_question_mark = site_with_family(
+            OperationFamily::StrFromUtf8Unchecked,
+            vec!["core::str::from_utf8(other)?;"],
+            "unsafe { core::str::from_utf8_unchecked(bytes) }",
+            vec![],
+        );
         let non_returning_branch = site_with_family(
             OperationFamily::StrFromUtf8Unchecked,
             vec![
@@ -3400,10 +3420,13 @@ mod tests {
 
         let wrong_buffer_evidence =
             obligation_evidence(&wrong_buffer, &obligations, &contract, &reach);
+        let wrong_buffer_question_mark_evidence =
+            obligation_evidence(&wrong_buffer_question_mark, &obligations, &contract, &reach);
         let non_returning_evidence =
             obligation_evidence(&non_returning_branch, &obligations, &contract, &reach);
 
         assert!(!wrong_buffer_evidence[0].discharge.present);
+        assert!(!wrong_buffer_question_mark_evidence[0].discharge.present);
         assert!(!non_returning_evidence[0].discharge.present);
     }
 
