@@ -507,7 +507,20 @@ fn unchecked_constructor_receiver(compact_expression: &str) -> Option<&str> {
 
 fn has_unwrap_unchecked_infallible_result_evidence(lower: &str) -> bool {
     let compact = compact_code(lower);
-    compact.contains("fallibility::infallible") && compact.contains("result.unwrap_unchecked(")
+    let Some((before_call, receiver)) = unwrap_unchecked_receiver_context(&compact) else {
+        return false;
+    };
+    has_infallible_assignment_to_receiver(before_call, receiver)
+}
+
+fn has_infallible_assignment_to_receiver(before_call: &str, receiver: &str) -> bool {
+    let let_assignment = format!("let{receiver}=");
+    let assignment = format!("{receiver}=");
+    before_call.split(';').any(|statement| {
+        statement.contains("fallibility::infallible")
+            && (contains_receiver_fragment(statement, &let_assignment)
+                || contains_receiver_fragment(statement, &assignment))
+    })
 }
 
 fn has_unwrap_unchecked_receiver_state_evidence(lower: &str) -> bool {
@@ -2093,6 +2106,32 @@ mod tests {
         );
 
         let evidence = obligation_evidence(&option_unwrap, &obligations, &contract, &reach);
+
+        assert!(!evidence[0].discharge.present);
+    }
+
+    #[test]
+    fn unwrap_unchecked_infallible_result_must_match_receiver_assignment() {
+        let obligations = vec![SafetyObligation::new(
+            "valid-value",
+            "value is known to be `Some` or `Ok` before `unwrap_unchecked`",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let other_result = site_with_family(
+            OperationFamily::UnwrapUnchecked,
+            vec![
+                "let other_result = reserve_rehash(additional, Fallibility::Infallible);",
+                "let result = reserve_rehash(additional, Fallibility::Fallible);",
+            ],
+            "unsafe { result.unwrap_unchecked() }",
+            vec![],
+        );
+
+        let evidence = obligation_evidence(&other_result, &obligations, &contract, &reach);
 
         assert!(!evidence[0].discharge.present);
     }

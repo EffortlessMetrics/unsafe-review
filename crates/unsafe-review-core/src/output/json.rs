@@ -289,6 +289,7 @@ mod tests {
         "atomic_pointer_state_swap",
         "unwrap_unchecked_result",
         "unwrap_unchecked_infallible_result",
+        "unwrap_unchecked_other_infallible_not_guard",
         "unreachable_unchecked_path",
         "unreachable_unchecked_infallible_path",
         "transmute_invalid_value",
