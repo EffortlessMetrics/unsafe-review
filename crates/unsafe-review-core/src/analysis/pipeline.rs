@@ -1351,6 +1351,30 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn str_from_utf8_unchecked_validation_guards_are_discharged() -> Result<(), String> {
+        for fixture in [
+            "str_from_utf8_unchecked_is_ok_guard",
+            "str_from_utf8_unchecked_is_err_return_guard",
+            "str_from_utf8_unchecked_question_mark_guard",
+            "str_from_utf8_unchecked_match_return_guard",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
+
+            assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+            assert_eq!(card.operation.family, OperationFamily::StrFromUtf8Unchecked);
+            assert_eq!(card.class, ReviewClass::GuardedUnwitnessed);
+            assert!(
+                card.obligation_evidence.iter().any(
+                    |evidence| evidence.obligation.key == "utf8" && evidence.discharge.present
+                ),
+                "{fixture} should discharge same-buffer UTF-8 validation evidence"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
     fn zeroed_uses_valid_zero_operation_family() -> Result<(), String> {
         let output = fixture_output("zeroed_invalid_value")?;
         let card = single_card("zeroed_invalid_value", &output)?;
