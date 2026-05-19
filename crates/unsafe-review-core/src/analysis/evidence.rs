@@ -239,6 +239,10 @@ fn discharge_state_for(
                 EvidenceState::present(
                     "Same-receiver Option/Result state evidence was detected before unwrap_unchecked",
                 )
+            } else if family == &OperationFamily::Transmute
+                && has_transmute_u8_bool_valid_value_evidence(lower)
+            {
+                EvidenceState::present("Transmute u8-to-bool valid-value evidence was detected")
             } else {
                 EvidenceState::missing("No obligation-specific guard code was detected")
             }
@@ -510,7 +514,8 @@ fn has_zeroed_known_valid_zero_type(lower: &str) -> bool {
 
 fn has_transmute_layout_size_evidence(lower: &str) -> bool {
     let compact = compact_code(lower);
-    let Some((before_call, source_type, destination_type)) = transmute_call_context(&compact)
+    let Some((before_call, source_type, destination_type, _argument)) =
+        transmute_call_context(&compact)
     else {
         return false;
     };
@@ -518,7 +523,20 @@ fn has_transmute_layout_size_evidence(lower: &str) -> bool {
     has_size_of_equality(&normalized, source_type, destination_type)
 }
 
-fn transmute_call_context(compact: &str) -> Option<(&str, &str, &str)> {
+fn has_transmute_u8_bool_valid_value_evidence(lower: &str) -> bool {
+    let compact = compact_code(lower);
+    let Some((before_call, source_type, destination_type, argument)) =
+        transmute_call_context(&compact)
+    else {
+        return false;
+    };
+    if source_type != "u8" || destination_type != "bool" || !is_simple_identifier(argument) {
+        return false;
+    }
+    has_u8_bool_value_guard(before_call, argument)
+}
+
+fn transmute_call_context(compact: &str) -> Option<(&str, &str, &str, &str)> {
     for marker in ["transmute::<", "transmute_copy::<"] {
         let Some(marker_start) = compact.find(marker) else {
             continue;
@@ -528,8 +546,12 @@ fn transmute_call_context(compact: &str) -> Option<(&str, &str, &str)> {
         let after_marker = &compact[start..];
         let end = matching_generic_argument_end(after_marker)?;
         let arguments = &after_marker[..end];
+        let after_arguments = after_marker.get(end + 1..)?;
+        let after_open = after_arguments.strip_prefix('(')?;
+        let argument_end = matching_call_argument_end(after_open)?;
+        let argument = &after_open[..argument_end];
         if let Some((source_type, destination_type)) = split_top_level_pair(arguments) {
-            return Some((before_call, source_type, destination_type));
+            return Some((before_call, source_type, destination_type, argument));
         }
     }
     None
@@ -577,6 +599,26 @@ fn has_size_of_equality(compact: &str, left_type: &str, right_type: &str) -> boo
 fn has_size_assert_eq(compact: &str, left: &str, right: &str) -> bool {
     compact.contains(&format!("assert_eq!({left},{right}"))
         || compact.contains(&format!("debug_assert_eq!({left},{right}"))
+}
+
+fn has_u8_bool_value_guard(before_call: &str, argument: &str) -> bool {
+    before_call.contains(&format!("{argument}<=1"))
+        || before_call.contains(&format!("1>={argument}"))
+        || before_call.contains(&format!("{argument}<2"))
+        || before_call.contains(&format!("2>{argument}"))
+        || before_call.contains(&format!("matches!({argument},0|1)"))
+        || before_call.contains(&format!("matches!({argument},1|0)"))
+        || before_call.contains(&format!("{argument}==0||{argument}==1"))
+        || before_call.contains(&format!("{argument}==1||{argument}==0"))
+}
+
+fn is_simple_identifier(text: &str) -> bool {
+    let mut chars = text.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first == '_' || first.is_ascii_alphabetic())
+        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
 
 fn zeroed_target_type(compact: &str) -> Option<&str> {
@@ -1853,6 +1895,74 @@ mod tests {
         let evidence = obligation_evidence(&transmute, &obligations, &contract, &reach);
 
         assert!(!evidence[0].discharge.present);
+    }
+
+    #[test]
+    fn transmute_u8_bool_guard_discharges_valid_value_obligation_only() {
+        let obligations = vec![
+            SafetyObligation::new("layout", "source and destination layouts are compatible"),
+            SafetyObligation::new(
+                "valid-value",
+                "destination value satisfies Rust validity rules",
+            ),
+        ];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let transmute = site_with_family(
+            OperationFamily::Transmute,
+            vec!["assert!(value <= 1);"],
+            "unsafe { core::mem::transmute::<u8, bool>(value) }",
+            vec![],
+        );
+
+        let evidence = obligation_evidence(&transmute, &obligations, &contract, &reach);
+
+        assert!(!evidence[0].discharge.present);
+        assert!(evidence[1].discharge.present);
+    }
+
+    #[test]
+    fn transmute_u8_bool_guard_requires_same_argument_and_preceding_guard() {
+        let obligations = vec![SafetyObligation::new(
+            "valid-value",
+            "destination value satisfies Rust validity rules",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let other_arg = site_with_family(
+            OperationFamily::Transmute,
+            vec!["assert!(other <= 1);"],
+            "unsafe { core::mem::transmute::<u8, bool>(value) }",
+            vec![],
+        );
+        let post_call_guard = site_with_family(
+            OperationFamily::Transmute,
+            vec![],
+            "unsafe { core::mem::transmute::<u8, bool>(value) }",
+            vec!["assert!(value <= 1);"],
+        );
+        let unsupported_pair = site_with_family(
+            OperationFamily::Transmute,
+            vec!["assert!(value <= 1);"],
+            "unsafe { core::mem::transmute::<u8, char>(value) }",
+            vec![],
+        );
+
+        let other_arg_evidence = obligation_evidence(&other_arg, &obligations, &contract, &reach);
+        let post_call_evidence =
+            obligation_evidence(&post_call_guard, &obligations, &contract, &reach);
+        let unsupported_pair_evidence =
+            obligation_evidence(&unsupported_pair, &obligations, &contract, &reach);
+
+        assert!(!other_arg_evidence[0].discharge.present);
+        assert!(!post_call_evidence[0].discharge.present);
+        assert!(!unsupported_pair_evidence[0].discharge.present);
     }
 
     #[test]
