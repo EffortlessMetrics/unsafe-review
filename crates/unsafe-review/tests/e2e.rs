@@ -354,6 +354,19 @@ fn repo_inventory_and_badges_count_open_gaps_without_safety_claim() -> Result<()
 }
 
 #[test]
+fn safe_repo_human_output_stays_quiet() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("safe_code_no_cards");
+
+    let output = run_success([os("repo"), os("--root"), fixture.as_os_str().to_os_string()])?;
+    let text = stdout_text(&output)?;
+
+    assert!(text.contains("cards: 0, open gaps: 0"));
+    assert!(text.contains("No unsafe-review cards found."));
+
+    Ok(())
+}
+
+#[test]
 fn outcome_compares_existing_json_snapshots_without_safety_claim() -> Result<(), Box<dyn Error>> {
     let before_fixture = fixture_root("safe_code_no_cards");
     let after_fixture = fixture_root("raw_pointer_alignment");
