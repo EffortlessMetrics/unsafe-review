@@ -539,6 +539,7 @@ fn has_set_len_capacity_evidence(lower: &str) -> bool {
     has_set_len_shrink_evidence(lower)
         || has_set_len_call_result_initialization_evidence(lower)
         || has_set_len_const_cap_evidence(lower)
+        || has_set_len_with_capacity_evidence(lower)
         || has_capacity_bound_guard(lower)
 }
 
@@ -561,6 +562,58 @@ fn has_capacity_bound_guard(lower: &str) -> bool {
 fn has_set_len_const_cap_evidence(lower: &str) -> bool {
     let compact = compact_code(lower);
     compact.contains(".set_len(cap)")
+}
+
+fn has_set_len_with_capacity_evidence(lower: &str) -> bool {
+    let compact = compact_code(lower);
+    let Some((receiver, new_len)) = set_len_receiver_and_argument(&compact) else {
+        return false;
+    };
+    compact.split(';').any(|statement| {
+        let Some((left, right)) = statement.split_once('=') else {
+            return false;
+        };
+        let Some(binding) = let_binding_name(left) else {
+            return false;
+        };
+        binding == receiver && with_capacity_argument(right).is_some_and(|arg| arg == new_len)
+    })
+}
+
+fn set_len_receiver_and_argument(compact: &str) -> Option<(&str, &str)> {
+    let marker = ".set_len(";
+    let call_pos = compact.find(marker)?;
+    let before_call = &compact[..call_pos];
+    let receiver_start = before_call
+        .char_indices()
+        .rev()
+        .find_map(|(idx, ch)| (!is_receiver_path_char(ch)).then_some(idx + ch.len_utf8()))
+        .unwrap_or(0);
+    let receiver = &before_call[receiver_start..];
+    let argument_text = &compact[call_pos + marker.len()..];
+    let argument_end = matching_call_argument_end(argument_text)?;
+    let argument = &argument_text[..argument_end];
+    (!receiver.is_empty() && !argument.is_empty()).then_some((receiver, argument))
+}
+
+fn let_binding_name(left_side: &str) -> Option<&str> {
+    let let_pos = left_side.rfind("let")?;
+    let rest = &left_side[let_pos + "let".len()..];
+    let rest = rest.strip_prefix("mut").unwrap_or(rest);
+    let end = rest
+        .char_indices()
+        .find_map(|(idx, ch)| (!(ch == '_' || ch.is_ascii_alphanumeric())).then_some(idx))
+        .unwrap_or(rest.len());
+    (end > 0).then_some(&rest[..end])
+}
+
+fn with_capacity_argument(right_side: &str) -> Option<&str> {
+    let marker = "with_capacity(";
+    let call_pos = right_side.find(marker)? + marker.len();
+    let argument_text = &right_side[call_pos..];
+    let argument_end = matching_call_argument_end(argument_text)?;
+    let argument = &argument_text[..argument_end];
+    (!argument.is_empty()).then_some(argument)
 }
 
 fn has_set_len_initialization_evidence(lower: &str) -> bool {
@@ -1786,6 +1839,53 @@ mod tests {
         );
         assert!(
             obligation_evidence(&bounded, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+    }
+
+    #[test]
+    fn set_len_with_capacity_discharges_capacity_only_for_same_receiver_and_len() {
+        let obligations = vec![SafetyObligation::new(
+            "capacity",
+            "new length is at most capacity",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let matching = site_with_family(
+            OperationFamily::VecSetLen,
+            vec!["let mut values = Vec::with_capacity(new_len);"],
+            "unsafe { values.set_len(new_len); }",
+            vec![],
+        );
+        let other_len = site_with_family(
+            OperationFamily::VecSetLen,
+            vec!["let mut values = Vec::with_capacity(capacity);"],
+            "unsafe { values.set_len(new_len); }",
+            vec![],
+        );
+        let other_receiver = site_with_family(
+            OperationFamily::VecSetLen,
+            vec!["let mut other = Vec::with_capacity(new_len);"],
+            "unsafe { values.set_len(new_len); }",
+            vec![],
+        );
+
+        assert!(
+            obligation_evidence(&matching, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
+            !obligation_evidence(&other_len, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
+            !obligation_evidence(&other_receiver, &obligations, &contract, &reach)[0]
                 .discharge
                 .present
         );

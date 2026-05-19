@@ -285,6 +285,7 @@ mod tests {
         "vec_set_len",
         "vec_set_len_initialized_loop",
         "vec_set_len_capacity_observed_not_guard",
+        "vec_set_len_with_capacity",
         "vec_set_len_call_result_init",
         "vec_set_len_shrink",
         "vec_set_len_last_index_shrink",

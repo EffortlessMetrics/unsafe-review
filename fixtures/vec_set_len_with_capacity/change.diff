@@ -1,0 +1,10 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,0 +1,6 @@
++pub fn allocate_len(new_len: usize) -> Vec<u8> {
++    let mut values = Vec::with_capacity(new_len);
++    // SAFETY: this fixture intentionally omits initialization evidence for the new length.
++    unsafe { values.set_len(new_len) };
++    values
++}
