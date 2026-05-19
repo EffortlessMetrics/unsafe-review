@@ -3,35 +3,84 @@
 Status: accepted
 Owner: core/spec
 Created: 2026-05-17
+Updated: 2026-05-19
 Linked proposal: ../proposals/UNSAFE-REVIEW-PROP-0001-product-contract.md
 Linked plan: ../../plans/0.1.0/implementation-plan.md
+Registry appendix: ./appendices/UNSAFE-REVIEW-SPEC-0005-appendix-operation-family-registry.md
 
-## Problem
+## Contract
 
-`unsafe-review` needs a precise, checkable behavior contract for hazard taxonomy and obligations.
+`unsafe-review` must map each detected unsafe operation to an `operation_family`, hazard set, and obligation set using the registry appendix as the canonical table for promoted rows.
 
-## Behavior
+## States / schema
 
-Map operations to hazards and safety obligations such as alignment, initialized memory, pointer validity, layout, FFI, pin, and concurrency.
+This spec constrains fields already carried by `ReviewCard` and its JSON projections. It must not create a second PR/SARIF/LSP/agent truth.
 
-## Non-goals
+Required current JSON card fields for this spec surface:
 
-- no soundness claim
-- no hidden blocking unless policy mode explicitly enables it
-- no duplicate truth outside this spec and linked policy files
+- `operation_family` (string; required)
+- `hazards[]` (non-empty array; required)
+- `obligations[]` (non-empty array; required)
+- `obligation_evidence[]`, with per-obligation `contract`, `discharge`, `reach`, and `witness` states
+- `missing[]` for unresolved obligation messages
+- `verify_commands[]` for reviewer witness routes
 
-## Required evidence
+Internal route objects and downstream projections may carry richer witness metadata, but those fields must be derived from the `ReviewCard` rather than reclassifying the finding.
 
-- fixture-backed examples for positive and negative cases
-- JSON output contract coverage
-- human output smoke coverage
-- policy documentation when behavior is configurable
+## Matching / precedence rules
 
-## Acceptance examples
+1. Match syntax-backed operation shape first.
+2. If syntax match fails, text fallback may classify only when it can identify a known registry family.
+3. If syntax and fallback both match the same site, syntax-backed result wins for location/snippet and family ID.
+4. If a concrete family is detected within an `unsafe` block, suppress parent "unknown unsafe block" cards unless the block has independent contract risk.
 
-- A changed unsafe seam produces one review card with stable identity.
-- The card includes missing evidence and a next action.
-- If evidence is not knowable statically, the card names the limitation instead of overclaiming.
+## Counts as evidence
+
+- Operation-family entries listed in the registry appendix with fixture references.
+- Hazard/obligation sets that exactly match the selected family row.
+- Witness commands or projection route fields derived from family-hazard routing.
+
+## Does not count
+
+- Free-form hazard labels not in registry.
+- Family-specific hazard leakage (for example alignment hazard on `*_unaligned` families).
+- Comment-only statements used as discharge evidence.
+
+## Fixtures
+
+All promoted families must cite fixture names in the registry appendix and corresponding calibration entries.
+
+## Dogfood
+
+Support-tier claims for a family must include dogfood proof or explicit "fixture-only" limitations.
+
+## Output examples
+
+```json
+{
+  "operation_family": "raw_pointer_read",
+  "hazards": ["pointer_validity", "alignment", "initialized_memory", "same_allocation"],
+  "obligations": [
+    "pointer is live and dereferenceable for the accessed type",
+    "buffer has enough bytes for the accessed type",
+    "pointer is aligned for the accessed type",
+    "memory is initialized for the accessed type",
+    "access remains inside one live allocation"
+  ],
+  "obligation_evidence": [
+    {
+      "key": "alignment",
+      "description": "pointer is aligned for the accessed type",
+      "contract": {"present": false, "state": "missing", "summary": "No contract evidence found"},
+      "discharge": {"present": false, "state": "missing", "summary": "No guard evidence found"},
+      "reach": {"present": false, "state": "missing", "summary": "No static test relation found"},
+      "witness": {"present": false, "state": "missing", "summary": "No witness receipt imported"}
+    }
+  ],
+  "missing": ["alignment evidence is missing"],
+  "verify_commands": ["cargo +nightly miri test"]
+}
+```
 
 ## CI proof
 
@@ -42,4 +91,9 @@ cargo test --workspace
 
 ## Promotion rule
 
-Move from experimental to usable alpha only after fixture, golden, and dogfood receipts exist.
+A new or changed family is promotable only with:
+
+1. registry row,
+2. fixture + calibration coverage,
+3. golden output assertion, and
+4. support-tier update (or explicit fixture-only limitation).

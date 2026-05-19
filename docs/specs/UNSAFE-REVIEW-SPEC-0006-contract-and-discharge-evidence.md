@@ -3,35 +3,66 @@
 Status: accepted
 Owner: core/spec
 Created: 2026-05-17
+Updated: 2026-05-19
 Linked proposal: ../proposals/UNSAFE-REVIEW-PROP-0001-product-contract.md
 Linked plan: ../../plans/0.1.0/implementation-plan.md
 
-## Problem
+## Contract
 
-`unsafe-review` needs a precise, checkable behavior contract for contract and discharge evidence.
+`unsafe-review` must classify evidence into explicit lanes and apply operand/receiver-sensitive rules before counting discharge evidence.
 
-## Behavior
+## Evidence lanes
 
-Mine # Safety docs, SAFETY comments, asserts, length/capacity/alignment/nullability guards, type wrappers, privacy boundaries, and policy receipts.
+- `contract`: docs, `# Safety`, `SAFETY:` comments, unsafe API precondition text.
+- `discharge`: local executable guards, matching wrappers, matching constructor/privacy boundaries.
+- `reach`: static relation from tests/harness inventory only.
+- `witness`: imported receipt evidence only.
 
-## Non-goals
+## Matching / precedence rules
 
-- no soundness claim
-- no hidden blocking unless policy mode explicitly enables it
-- no duplicate truth outside this spec and linked policy files
+1. Contract evidence never auto-discharges obligations by itself.
+2. Discharge evidence must match target operand/receiver/buffer identity when the rule is identity-sensitive.
+3. Later checks do not retroactively discharge earlier unsafe operations.
+4. Non-returning error branches do not count as guard discharge.
 
-## Required evidence
+## Counts as evidence
 
-- fixture-backed examples for positive and negative cases
-- JSON output contract coverage
-- human output smoke coverage
-- policy documentation when behavior is configurable
+| Evidence rule | Counts when | Does not count when | Fixture proof |
+|---|---|---|---|
+| Alignment guard | executable check like `is_aligned`, `align_offset`, modulo/equality check over same pointer before use | bare `align_of` mention; comment text; unrelated pointer | `raw_pointer_alignment`, `align_of_only_not_guard`, `alignment_other_pointer_not_guard`, `comment_alignment_not_guard` |
+| NonNull guard | `NonNull::new(ptr)` or equivalent non-null check for the same pointer then `new_unchecked(ptr)` | guard applies to different pointer or non-returning error branch | `nonnull_new_guard`, `nonnull_other_guard_not_evidence`, `nonnull_is_null_nonreturning_not_guard` |
+| UTF-8 validation | `str::from_utf8(buf).is_ok()` or a returning error path before `from_utf8_unchecked(buf)` | no validation, validation after use, or validation that does not dominate the unchecked call | `str_from_utf8_unchecked`, `str_from_utf8_unchecked_is_ok_guard`, `str_from_utf8_unchecked_is_err_return_guard` |
+| unwrap_unchecked state | same receiver has pre-check (`is_some` / `is_ok`) or returning `None` / `Err` path before the unchecked call | other receiver; check after unchecked call; unrelated infallible expression | `unwrap_unchecked_is_some_guard`, `unwrap_unchecked_is_ok_guard`, `unwrap_unchecked_is_none_return_guard`, `unwrap_unchecked_is_err_return_guard`, `unwrap_unchecked_other_infallible_not_guard` |
+| Bounds guard | `len/capacity` relation executable and relevant to operation family | unrelated length variable; comment-only claim; capacity observation without a guard | `vec_set_len`, `raw_pointer_read_len_capacity_assert`, `get_unchecked_mut_len_guard`, `get_unchecked_mut_other_len_not_guard`, `vec_set_len_capacity_observed_not_guard` |
 
-## Acceptance examples
+## Does not count
 
-- A changed unsafe seam produces one review card with stable identity.
-- The card includes missing evidence and a next action.
-- If evidence is not knowable statically, the card names the limitation instead of overclaiming.
+- Comments as discharge evidence.
+- Policy receipt metadata as contract/discharge substitution (receipts only populate witness lane).
+- Family-incompatible rules (e.g., requiring alignment for `write_unaligned`).
+
+## Fixtures
+
+Every evidence rule in this spec must name at least one positive and one negative fixture (or explicit limitation).
+
+## Output examples
+
+```json
+{
+  "obligation_evidence": [
+    {
+      "key": "alignment",
+      "description": "pointer is aligned for the accessed type",
+      "contract": {"present": true, "state": "present", "summary": "SAFETY comment explains alignment contract"},
+      "discharge": {"present": false, "state": "missing", "summary": "No alignment guard code was detected"},
+      "reach": {"present": false, "state": "missing", "summary": "No static test relation found"},
+      "witness": {"present": false, "state": "missing", "summary": "No imported witness receipt was found"}
+    }
+  ],
+  "missing": ["alignment evidence is missing"],
+  "verify_commands": ["cargo +nightly miri test"]
+}
+```
 
 ## CI proof
 
@@ -42,4 +73,4 @@ cargo test --workspace
 
 ## Promotion rule
 
-Move from experimental to usable alpha only after fixture, golden, and dogfood receipts exist.
+Rule changes are promotable only when fixture/golden coverage includes at least one "does not count" case proving false-positive control.
