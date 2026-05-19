@@ -351,7 +351,9 @@ fn unsafe_call_path(expression: &str) -> String {
 mod tests {
     use super::*;
     use crate::api::{AnalysisMode, DiffSource, PolicyMode, Scope};
-    use crate::domain::{HazardKind, OperationFamily, ReviewCard, ReviewClass, UnsafeSiteKind};
+    use crate::domain::{
+        HazardKind, OperationFamily, ReviewCard, ReviewClass, UnsafeSiteKind, WitnessKind,
+    };
     use std::fs;
     use std::path::Path;
     use std::path::PathBuf;
@@ -758,6 +760,32 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
                 .any(|evidence| evidence.obligation.key == "ownership"
                     && !evidence.discharge.present),
             "Box::from_raw ownership obligation should remain missing without allocator proof"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn static_mut_global_state_routes_to_concurrency_review() -> Result<(), String> {
+        let output = fixture_output("static_mut_global_state")?;
+        let card = single_card("static_mut_global_state", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::StaticMut);
+        assert_eq!(card.operation.family, OperationFamily::StaticMut);
+        assert_eq!(card.class, ReviewClass::RequiresLoom);
+        assert!(card.hazards.contains(&HazardKind::StaticMutGlobalState));
+        assert!(
+            card.routes
+                .iter()
+                .any(|route| route.kind == WitnessKind::Loom)
+        );
+        assert!(
+            card.routes
+                .iter()
+                .any(|route| route.kind == WitnessKind::Shuttle)
+        );
+        assert!(
+            card.next_action.summary.contains("Loom/Shuttle"),
+            "static mut global state should route reviewers to concurrency witnesses"
         );
         Ok(())
     }

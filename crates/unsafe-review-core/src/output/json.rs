@@ -254,6 +254,7 @@ mod tests {
         "slice_from_raw_parts_mut_maybeuninit",
         "vec_from_raw_parts",
         "box_from_raw",
+        "static_mut_global_state",
         "safe_reference_deref_no_cards",
         "imports_not_unsafe_operations",
         "cfg_target_feature_not_operation",
