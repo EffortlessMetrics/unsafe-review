@@ -1,0 +1,89 @@
+[
+  {
+    "id": "UR-vec-set-len-call-result-init-src-lib-rs-push-encoded-operation-vec_set_len-set-len-bf6dd61a7148-initialized_memory-c1",
+    "class": "unsafe_unreached",
+    "priority": "medium",
+    "confidence": "medium",
+    "site": {
+      "file": "src/lib.rs",
+      "line": 7,
+      "column": 9,
+      "kind": "operation",
+      "owner": "push_encoded",
+      "visibility": "private",
+      "public_api_surface": false,
+      "snippet": "out.set_len(len + n);"
+    },
+    "operation_family": "vec_set_len",
+    "hazards": [
+      "initialized_memory",
+      "bounds"
+    ],
+    "obligations": [
+      "new length is at most capacity",
+      "elements in the extended range are initialized"
+    ],
+    "obligation_evidence": [
+      {
+        "key": "capacity",
+        "description": "new length is at most capacity",
+        "contract": {
+          "present": true,
+          "state": "present",
+          "summary": "Nearby `SAFETY:` comment was detected"
+        },
+        "discharge": {
+          "present": true,
+          "state": "present",
+          "summary": "Capacity guard code was detected"
+        },
+        "reach": {
+          "present": false,
+          "state": "missing",
+          "summary": "No static test mention of owner `push_encoded` was found"
+        },
+        "witness": {
+          "present": false,
+          "state": "missing",
+          "summary": "No imported witness receipt was found"
+        }
+      },
+      {
+        "key": "initialized",
+        "description": "elements in the extended range are initialized",
+        "contract": {
+          "present": true,
+          "state": "present",
+          "summary": "Nearby `SAFETY:` comment was detected"
+        },
+        "discharge": {
+          "present": true,
+          "state": "present",
+          "summary": "Initialization evidence was detected"
+        },
+        "reach": {
+          "present": false,
+          "state": "missing",
+          "summary": "No static test mention of owner `push_encoded` was found"
+        },
+        "witness": {
+          "present": false,
+          "state": "missing",
+          "summary": "No imported witness receipt was found"
+        }
+      }
+    ],
+    "contract": "Nearby `SAFETY:` comment was detected",
+    "discharge": "All inferred safety obligations have visible local discharge evidence",
+    "reach": "No static test mention of owner `push_encoded` was found",
+    "witness": "No imported witness receipt was found",
+    "missing": [
+      "No related test path was found by static search",
+      "No witness receipt imported for this card"
+    ],
+    "verify_commands": [
+      "cargo +nightly miri test push_encoded",
+      "cargo +nightly careful test push_encoded"
+    ]
+  }
+]

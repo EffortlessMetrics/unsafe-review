@@ -1,0 +1,26 @@
+id = "unsafe-review-0-1-review-card-loop"
+title = "unsafe-review 0.1 review-card loop"
+status = "active"
+owner = "core/product"
+created = "2026-05-17"
+
+objective = """
+Build the stable-first unsafe contract review scaffold: source scanner, review cards,
+policy docs, repo inventory, badges, and packet-ready outputs.
+"""
+
+end_state = [
+  "Diff mode emits review cards for changed unsafe seams.",
+  "Repo mode emits inventory and badge data.",
+  "Every card names contract, guard, reach, and witness evidence.",
+  "No output claims memory-safety proof.",
+]
+
+[[work_item]]
+id = "review-card-loop-v1"
+status = "done"
+spec = "docs/specs/UNSAFE-REVIEW-SPEC-0002-review-card-schema.md"
+plan = "plans/0.1.0/implementation-plan.md"
+commands = [
+  "cargo xtask check-pr"
+]

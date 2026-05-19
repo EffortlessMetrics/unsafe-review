@@ -1,0 +1,5 @@
+[package]
+name = "private-unsafe-helper-safety-comment"
+version = "0.0.0"
+edition = "2024"
+publish = false

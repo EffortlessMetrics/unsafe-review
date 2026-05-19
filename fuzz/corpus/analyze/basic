@@ -1,0 +1,4 @@
+pub unsafe fn read(ptr: *const u8) -> u8 {
+    // SAFETY: caller provides a valid pointer.
+    unsafe { core::ptr::read(ptr) }
+}

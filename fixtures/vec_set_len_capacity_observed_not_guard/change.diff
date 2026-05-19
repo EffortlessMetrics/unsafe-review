@@ -1,0 +1,13 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,0 +1,8 @@
++pub fn extend_len(values: &mut Vec<u8>, new_len: usize) {
++    let capacity = values.capacity();
++    record_capacity(capacity);
++    // SAFETY: this fixture intentionally observes capacity without bounding new_len.
++    unsafe { values.set_len(new_len) }
++}
++
++fn record_capacity(_capacity: usize) {}
+

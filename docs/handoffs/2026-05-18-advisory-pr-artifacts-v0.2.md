@@ -1,0 +1,569 @@
+# Advisory PR artifacts v0.2 handoff
+
+Date: 2026-05-18
+Status: closed as experimental advisory artifact loop
+Owner: CLI/CI/product
+
+## What landed
+
+The PR/CI projection lane now projects existing `ReviewCard`s into advisory PR
+artifacts without creating new analyzer truth or policy authority.
+
+The lane now has:
+
+- local PR summary Markdown output
+- local SARIF output
+- advisory GitHub workflow artifact upload
+- artifact-only inline comment plan JSON
+- scanner false-positive hardening for comments and string literals
+- fixture validation in `xtask check-pr`
+- focused classifier, evidence, and diff parser unit coverage
+- CLI e2e coverage for JSON, PR summary, SARIF, comment plan, context, and
+  explain outputs
+- raw pointer assignment-write fixture coverage
+- minimal CI hardening for locked checks, docs build, read-only checkout
+  credentials, PR-run cancellation, manual dispatch, and job timeout
+- in-workflow advisory artifact contract verification before upload
+
+The workflow renders and verifies these artifacts before upload:
+
+```text
+target/unsafe-review/cards.json
+target/unsafe-review/pr-summary.md
+target/unsafe-review/cards.sarif
+target/unsafe-review/comment-plan.json
+```
+
+The verifier command is:
+
+```bash
+cargo run --locked -p xtask -- check-advisory-artifacts target/unsafe-review
+```
+
+## Proof
+
+The merged lane was validated with the recurring workspace gates:
+
+```bash
+rtk cargo fmt --check
+rtk cargo check --workspace --all-targets --locked
+rtk cargo clippy --workspace --all-targets --locked -- -D warnings
+rtk cargo test --workspace --all-targets --locked
+rtk cargo run --locked -p xtask -- check-pr
+```
+
+Targeted proof added during the lane includes:
+
+```bash
+rtk cargo xtask check-fixtures
+rtk cargo test -p unsafe-review-core fixture_card_goldens_match_rendered_json
+rtk cargo test -p unsafe-review-core raw_pointer_v1_operation_cards_are_concrete
+rtk cargo test -p unsafe-review-core pr_summary
+rtk cargo test -p unsafe-review-core sarif
+rtk cargo test -p unsafe-review-core comment_plan
+rtk cargo test -p unsafe-review --test e2e
+rtk cargo run --locked -p xtask -- check-advisory-artifacts target/unsafe-review
+```
+
+The CI workflow now also runs a docs build:
+
+```bash
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
+```
+
+## Dogfood receipt
+
+The advisory artifact loop has been checked against a real PR workflow artifact,
+not only local renderer tests.
+
+Receipt:
+
+- PR: `#104 cli: harden diff input ergonomics`
+- Workflow: `unsafe-review`
+- Run: `26013330481`
+- Branch: `cli/diff-input-ergonomics`
+- Artifact: `unsafe-review`
+- Artifact id: `7049477825`
+- Artifact digest: `sha256:6368cbe9372a84ae23e8ad587ee75715026fd322bc2fcce692778673c700b10c`
+
+Downloaded artifact contents:
+
+```text
+cards.json
+cards.sarif
+comment-plan.json
+pr-summary.md
+```
+
+Verification command:
+
+```bash
+rtk cargo run --locked -p xtask -- check-advisory-artifacts target/advisory-artifact-104/unsafe-review
+```
+
+Result:
+
+```text
+check-advisory-artifacts: ok (target/advisory-artifact-104/unsafe-review)
+```
+
+This receipt proves the current advisory workflow produced and uploaded the four
+expected artifacts for a real PR, and that the repo verifier accepted their
+advisory policy, plan-only comment mode, projection card identity consistency,
+result counts, parseability, and trust-boundary text. It does not prove
+memory safety, witness execution, code-scanning approval, or policy readiness.
+
+## Unsafe-adjacent dogfood follow-up
+
+The `#102 analysis: distinguish unaligned raw pointer reads` PR provided a
+stronger unsafe-adjacent dogfood sample because it changed raw-pointer fixture
+and scanner code.
+
+Receipt:
+
+- PR: `#102 analysis: distinguish unaligned raw pointer reads`
+- Workflow: `unsafe-review`
+- Run: `26012554821`
+- Branch: `analysis/read-unaligned-card-v1`
+- Artifact: `unsafe-review`
+- Artifact id: `7049234818`
+- Artifact digest: `sha256:afb743e2547cc06cf406f56e9a85f5e0620f8bf5561dd267dc7e62d5c28a0fae`
+
+The downloaded artifact passed the artifact-contract verifier:
+
+```bash
+rtk cargo run --locked -p xtask -- check-advisory-artifacts target/advisory-artifact-102/unsafe-review
+```
+
+The artifact also exposed dogfood noise: it contained five cards, four of which
+came from detector implementation strings in `scanner.rs`, such as
+`line.contains("get_unchecked")`, rather than from unsafe operations. That
+finding was fixed by `#107 fix: ignore syntax string literal detector text`.
+
+After `#107`, rerunning the `#102` diff locally produced one card: the intended
+`raw_pointer_read_unaligned` fixture card. This confirms the PR artifact loop is
+useful as a noise-finding dogfood path, while the support tier should remain
+experimental and advisory.
+
+The `#107` advisory workflow artifact then confirmed the scanner-only fix no
+longer generated unsafe-review noise:
+
+- PR: `#107 fix: ignore syntax string literal detector text`
+- Workflow: `unsafe-review`
+- Run: `26013722196`
+- Branch: `fix/syntax-string-literal-detection`
+- Artifact: `unsafe-review`
+- Artifact id: `7049611451`
+- Artifact digest: `sha256:d4f0730666ea5f3a7a8a243b6d6957c037cefbddd3da802b8e2d2e9fcd4445c5`
+
+Verification command:
+
+```bash
+rtk cargo run --locked -p xtask -- check-advisory-artifacts target/advisory-artifact-107/unsafe-review
+```
+
+Result:
+
+```text
+check-advisory-artifacts: ok (target/advisory-artifact-107/unsafe-review)
+```
+
+The downloaded `cards.json` summary for `#107` reported:
+
+```text
+changed_rust_files: 1
+cards: 0
+open_actionable_gaps: 0
+```
+
+## Docs-only quieting receipt
+
+The advisory workflow is configured to skip docs-only pull requests:
+
+```yaml
+paths-ignore:
+  - "docs/**"
+  - "**/*.md"
+```
+
+The `#109 docs: record clean string-literal artifact dogfood` PR changed only:
+
+```text
+docs/handoffs/2026-05-18-advisory-pr-artifacts-v0.2.md
+```
+
+Its status rollup contained the CI, CodeRabbit, and GitGuardian checks, but no
+`unsafe-review advisory` workflow check. A run-list query for the branch also
+returned no `unsafe-review` workflow runs:
+
+```bash
+rtk gh run list --workflow unsafe-review --branch docs/string-literal-dogfood-receipt --json databaseId,headBranch,status,conclusion,event,displayTitle,url --limit 10
+```
+
+Result:
+
+```json
+[]
+```
+
+This receipt proves docs-only PRs can be quiet for the advisory artifact
+workflow. It does not change the advisory workflow's manual `workflow_dispatch`
+behavior, and it does not imply any policy gate.
+
+## Post-closeout stabilization receipts
+
+The first dogfood stabilization fixes after lane closeout stayed within the
+advisory artifact loop: they reduced observed noise and made artifact commands
+less error-prone without adding new analyzer truth, comments, witnesses, or
+blocking policy.
+
+### Repo-mode deref-assignment false positive
+
+Repo-mode self-dogfood found a product-code card in
+`crates/unsafe-review-core/src/analysis/pipeline.rs` from ordinary
+mutable-reference code:
+
+```text
+*next += 1;
+```
+
+That line updates an identity counter. It is not a raw-pointer write seam. The
+fix in `#111 fix: avoid text fallback deref write cards` removed bare
+deref-assignment classification from text fallback detection while preserving
+syntax-backed detection for real unsafe raw pointer assignments such as:
+
+```text
+unsafe { *ptr = value; }
+```
+
+Validation included:
+
+```bash
+rtk cargo test -p unsafe-review-core text_detection_does_not_classify_deref_assignments_as_writes --locked
+rtk cargo test -p unsafe-review-core syntax_detection_classifies_unsafe_raw_pointer_assignments_as_writes --locked
+rtk cargo test -p unsafe-review-core fixture_card_goldens_match_rendered_json --locked
+rtk cargo run --quiet --locked -p unsafe-review -- repo --format json --out target/dogfood/repo-self-after-fix.json
+```
+
+The repo-mode result after the fix was:
+
+```text
+cards: 23
+open_actionable_gaps: 23
+product_code_cards: 0
+fixture_cards: 23
+```
+
+The repo-mode self-dogfood check was refreshed after the in-workflow artifact
+verifier landed:
+
+- Base: `origin/main` at `e57785b`
+- Command:
+
+```bash
+rtk cargo run --quiet --locked -p unsafe-review -- repo --format json --out target/dogfood/repo-self-current.json
+```
+
+Result:
+
+```text
+cards: 23
+open_actionable_gaps: 23
+product_code_cards: 0
+fixture_cards: 23
+```
+
+This confirms the current repository snapshot still emits only fixture cards in
+repo mode. It does not make repo inventory a promoted support tier or imply the
+repository is safe or UB-free.
+
+### Equals-style artifact flags
+
+Candidate PR `#46` contained useful CLI parser hardening but was stale and
+overlapped with already-landed diff-input ergonomics. The current-lane slice was
+rebuilt as `#112 cli: accept equals-style flag values`.
+
+The merged behavior accepts artifact-oriented invocations such as:
+
+```bash
+rtk cargo run --quiet --locked -p unsafe-review -- check --root=fixtures/raw_pointer_alignment --diff=change.diff --format=sarif --out=target/dogfood/equals-flags/cards.sarif
+```
+
+It also rejects missing flag values such as `--diff --json` while preserving
+`--diff -` for stdin diff input. This is CLI stabilization for the advisory
+artifact path, not new policy authority.
+
+The advisory workflow artifact for `#112` was then downloaded and verified:
+
+- PR: `#112 cli: accept equals-style flag values`
+- Workflow: `unsafe-review`
+- Run: `26014327438`
+- Branch: `cli/equals-style-flags`
+- Artifact: `unsafe-review`
+- Artifact id: `7049824978`
+- Artifact digest: `sha256:d9743e8b29c709c356cc1c1d12a3a1368071561a6ccea20e173d6ce2dcf35a92`
+
+Verification command:
+
+```bash
+rtk cargo run --locked -p xtask -- check-advisory-artifacts target/advisory-artifact-112
+```
+
+Result:
+
+```text
+check-advisory-artifacts: ok (target/advisory-artifact-112)
+```
+
+The downloaded `cards.json` summary reported:
+
+```text
+changed_rust_files: 2
+cards: 0
+open_actionable_gaps: 0
+```
+
+### Canonical cards JSON trust boundary
+
+The `#117 artifact: add cards json trust boundary` PR closed an artifact
+contract gap: `cards.json` is the canonical `ReviewCard` artifact, but the
+trust-boundary text was only enforced in PR summary, SARIF, and comment-plan
+outputs. The merged change added `trust_boundary` to top-level `cards.json` and
+made `xtask check-advisory-artifacts` reject artifact sets where that field is
+missing or incomplete.
+
+The advisory workflow artifact for `#117` was downloaded and verified:
+
+- PR: `#117 artifact: add cards json trust boundary`
+- Workflow: `unsafe-review`
+- Run: `26014930037`
+- Branch: `artifact/cards-json-trust-boundary`
+- Artifact: `unsafe-review`
+- Artifact id: `7050035092`
+- Artifact digest: `sha256:a131bd604188fe77b67cb15808fdf42d9bff2d923a60a58db6d60555d6d6c037`
+
+Verification command:
+
+```bash
+rtk cargo run --locked -p xtask -- check-advisory-artifacts target/advisory-artifact-117
+```
+
+Result:
+
+```text
+check-advisory-artifacts: ok (target/advisory-artifact-117)
+```
+
+The downloaded `cards.json` summary reported zero cards for the verifier-only
+change, and its top-level `trust_boundary` field contained:
+
+```text
+Static unsafe contract review only; this is not a proof of memory safety, not UB-free status, and not a Miri result unless a witness receipt is attached.
+```
+
+### Mutation-sensitive analyzer invariant tests
+
+The `#119 test: add obligation and scanner invariants` PR extracted the useful
+test-only slice from mutation-testing candidates without adding mutation
+workflow surface. It changed Rust analyzer files and added unsafe-looking test
+snippets, but those snippets were not unsafe-adjacent product changes that
+should produce PR artifact cards.
+
+The advisory workflow artifact for `#119` was downloaded and verified:
+
+- PR: `#119 test: add obligation and scanner invariants`
+- Workflow: `unsafe-review`
+- Run: `26015190073`
+- Branch: `test/obligation-scanner-invariants`
+- Artifact: `unsafe-review`
+- Artifact id: `7050129880`
+- Artifact digest: `sha256:f627208d940d1caa766fdee8752880de56988a2e057886ba5fa5fb88ca375857`
+
+Verification command:
+
+```bash
+rtk cargo run --locked -p xtask -- check-advisory-artifacts target/advisory-artifact-119
+```
+
+Result:
+
+```text
+check-advisory-artifacts: ok (target/advisory-artifact-119)
+```
+
+The downloaded `cards.json` summary reported:
+
+```text
+changed_rust_files: 2
+cards: 0
+open_actionable_gaps: 0
+```
+
+This receipt is useful because it exercises the advisory workflow on a real
+Rust PR with analyzer test fixtures and unsafe-looking snippets while keeping
+the artifact loop quiet. It does not promote mutation testing, enable a
+mutation workflow, or prove analyzer completeness.
+
+### In-workflow artifact contract verification
+
+The `#125 ci: verify advisory artifacts before upload` PR moved artifact
+contract checking into the advisory workflow itself. The workflow now renders
+the four advisory artifacts, runs:
+
+```bash
+cargo run --locked -p xtask -- check-advisory-artifacts target/unsafe-review
+```
+
+and only then uploads the artifact set. The job remains read-only, advisory, and
+free of Miri, sanitizer, Loom, Kani, comment-posting, or blocking-policy
+behavior.
+
+The advisory workflow for `#125` showed the new verifier step passing before
+upload:
+
+- PR: `#125 ci: verify advisory artifacts before upload`
+- Workflow: `unsafe-review`
+- Run: `26015915336`
+- Branch: `ci/verify-advisory-artifacts`
+- Artifact: `unsafe-review`
+- Artifact id: `7050382836`
+- Artifact digest: `sha256:7dfee8c8709b31d6f2fcae1b93df40b0b1b95799eed3b30a3591ec9d7c2588ad`
+
+Downloaded artifact contents:
+
+```text
+cards.json
+cards.sarif
+comment-plan.json
+pr-summary.md
+```
+
+Verification command:
+
+```bash
+rtk cargo run --locked -p xtask -- check-advisory-artifacts target/advisory-artifact-125
+```
+
+Result:
+
+```text
+check-advisory-artifacts: ok (target/advisory-artifact-125)
+```
+
+The downloaded `cards.json` summary reported:
+
+```text
+changed_rust_files: 0
+cards: 0
+open_actionable_gaps: 0
+```
+
+This receipt proves the advisory workflow can reject malformed artifact sets
+before publishing them as dogfood evidence. It does not make the workflow
+blocking policy, and it does not promote any artifact surface beyond
+experimental advisory status.
+
+## Current support posture
+
+The PR artifact surfaces are experimental and advisory. They are suitable for
+dogfood on real PRs, not for release-grade policy gating.
+
+The repo may claim:
+
+- PR artifacts are projected from existing `ReviewCard`s
+- the advisory workflow uploads cards JSON, PR summary Markdown, SARIF, and
+  comment-plan JSON
+- SARIF is a code-scanning-compatible projection of static review evidence
+- the comment plan is artifact-only and does not post comments
+- CI and advisory workflows remain read-only and non-blocking
+
+The repo must not claim:
+
+- memory-safety proof
+- UB-free status
+- Miri, sanitizer, Loom, or Kani success without imported receipts
+- automatic PR comments
+- default blocking or branch-protection policy
+- that SARIF upload means code-scanning approval or safety proof
+
+## Subsequent status
+
+This handoff preserves the state at advisory PR artifact lane closeout. Later
+lanes have since landed saved LSP and bounded agent projections, repo posture
+and policy surfaces, exact-card witness receipt import, and witness-plan output.
+The "Known limits" below describe what was outside this lane at closeout, not
+the full current repo state.
+
+For current posture, read this handoff together with:
+
+- `docs/handoffs/2026-05-18-lsp-agent-projection-v0.3.md`
+- `docs/handoffs/2026-05-18-repo-policy-v0.4.md`
+- `docs/handoffs/2026-05-18-witness-receipt-import-v0.5.md`
+- `docs/status/SUPPORT_TIERS.md`
+
+## Known limits
+
+- Artifacts are only as good as the underlying `ReviewCard`s.
+- False positives and false negatives remain possible.
+- Docs-only PR quieting depends on the advisory workflow path filters and should
+  be watched during dogfood.
+- Comment-plan JSON is not a posting policy.
+- SARIF is advisory and should not be interpreted as a gate.
+- No witness tools run by default.
+- No receipt import, baseline, suppression, repo badge, LSP, or agent packet
+  surface is part of this lane.
+
+## Completion audit
+
+The advisory PR artifact stabilization lane is closed at experimental support.
+It is dogfoodable, not policy-ready.
+
+| Done criterion | Evidence | Remaining limit |
+|---|---|---|
+| Advisory workflow artifacts are stable and dogfoodable | `#125` runs `cargo run --locked -p xtask -- check-advisory-artifacts target/unsafe-review` before upload; `#126` records run `26015915336`, artifact id `7050382836`, and a downloaded-artifact verifier pass | Artifact correctness still depends on underlying `ReviewCard` quality |
+| Workflow uploads `cards.json`, `pr-summary.md`, `cards.sarif`, and `comment-plan.json` | `#104`, `#112`, `#117`, `#119`, and `#125` receipts record downloaded artifacts containing all four files | Uploading artifacts is not code-scanning approval or a safety proof |
+| Docs-only and no-risk PRs stay quiet | `#109`, `#120`, `#121`, `#122`, `#123`, `#124`, `#126`, `#127`, and `#128` docs-only branches had no advisory workflow run; `#119` Rust test-only analyzer invariant PR produced zero cards | Path filters should still be watched during dogfood |
+| Comment plan remains artifact-only | `comment-plan.json` is verified as `mode = plan_only` and `policy = advisory`; no workflow step posts comments | Comment planning is not a posting policy |
+| SARIF and PR summary project the same review cards | `check-advisory-artifacts` verifies SARIF result card IDs and comment-plan card IDs against `cards.json` and verifies result counts | SARIF remains advisory static review evidence |
+| Trust boundary appears in every PR artifact surface | `check-advisory-artifacts` verifies trust-boundary text in `cards.json`, `pr-summary.md`, `cards.sarif`, and `comment-plan.json` | No artifact may claim memory-safety proof, UB-free status, Miri success, or site execution without a receipt |
+| Support tiers stay experimental/advisory | `docs/status/SUPPORT_TIERS.md` keeps PR summary, SARIF, workflow, and comment plan as `experimental`; repo inventory stays `scaffold` | No baseline, no-new-debt, blocking, receipt, LSP, or agent-packet promotion happened in this lane |
+| The repo can dogfood without reviewer noise | Current repo-mode dogfood at `e57785b` reported `cards: 23`, `fixture_cards: 23`, and `product_code_cards: 0` | Repo-mode counts fixtures and is not a promoted repo posture surface |
+
+## Dogfood path
+
+Use real PRs to inspect artifact usefulness before adding more product surface:
+
+1. Open or update a PR that changes unsafe-adjacent Rust.
+2. Confirm the advisory workflow uploads all four artifacts.
+3. Read `pr-summary.md` first for reviewer guidance.
+4. Inspect `cards.json` for the canonical card data.
+5. Inspect `cards.sarif` for code-scanning projection shape.
+6. Inspect `comment-plan.json` for proposed inline comments, without posting
+   them.
+7. Record noisy cards, missing cards, and unclear wording as fixture or renderer
+   follow-ups.
+
+For downloaded or locally rendered artifacts, run:
+
+```bash
+rtk cargo xtask check-advisory-artifacts target/unsafe-review
+```
+
+This verifies the four-file artifact contract, advisory policy, plan-only
+comment mode, JSON/SARIF parseability, projection card IDs, result counts, and
+trust-boundary text.
+
+## Next lane
+
+The next durable lane should be dogfood-driven stabilization, not new product
+surface. Prefer narrow PRs that reduce observed artifact noise or ambiguity.
+
+Defer these until dogfood evidence justifies them:
+
+- LSP projection
+- agent packets
+- baseline or no-new-debt policy
+- repo badges
+- witness receipt import
+- fuzz or mutation workflows
+- blocking CI policy

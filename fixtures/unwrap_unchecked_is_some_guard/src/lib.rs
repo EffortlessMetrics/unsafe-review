@@ -1,0 +1,18 @@
+pub fn extract(option: Option<u8>) -> u8 {
+    if option.is_some() {
+        // SAFETY: the branch above checked that this option is Some.
+        unsafe { option.unwrap_unchecked() }
+    } else {
+        0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract;
+
+    #[test]
+    fn extracts_some_value() {
+        assert_eq!(extract(Some(7)), 7);
+    }
+}

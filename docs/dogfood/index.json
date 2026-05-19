@@ -1,0 +1,83 @@
+{
+  "schema_version": "0.1",
+  "status": "experimental",
+  "updated": "2026-05-18",
+  "manifest": "docs/dogfood/corpus.toml",
+  "trust_boundary": "Dogfood corpus records are static unsafe contract review evidence, not a proof of memory safety, not UB-free status, and not a Miri result unless an exact witness receipt is attached.",
+  "summary": {
+    "repositories": 7,
+    "targets": 30,
+    "repo_snapshots": 7,
+    "pr_diffs": 23,
+    "checked_in_scan_outputs": 0,
+    "artifact_statuses": {
+      "local_untracked": 30
+    }
+  },
+  "repositories": [
+    {
+      "repository": "servo/rust-smallvec",
+      "snapshot_targets": ["smallvec-capped"],
+      "pr_diff_targets": ["smallvec-pr407", "smallvec-pr277", "smallvec-pr64", "smallvec-pr254"],
+      "primary_exercise": "Raw pointer reads/writes, Vec::set_len, pointer arithmetic, unsafe impls, owner inference"
+    },
+    {
+      "repository": "bluss/arrayvec",
+      "snapshot_targets": ["arrayvec-capped"],
+      "pr_diff_targets": ["arrayvec-pr308", "arrayvec-pr137", "arrayvec-pr138", "arrayvec-pr187", "arrayvec-pr174", "arrayvec-pr288"],
+      "primary_exercise": "MaybeUninit, Vec::set_len, raw pointer reads/writes, raw pointer accessor soundness fixes, UTF-8, drop/deallocation cards"
+    },
+    {
+      "repository": "BurntSushi/memchr",
+      "snapshot_targets": ["memchr-capped"],
+      "pr_diff_targets": ["memchr-pr215"],
+      "primary_exercise": "SIMD target-feature contracts, pointer arithmetic, unchecked constructors"
+    },
+    {
+      "repository": "rust-lang/hashbrown",
+      "snapshot_targets": ["hashbrown-capped"],
+      "pr_diff_targets": ["hashbrown-pr469", "hashbrown-pr501", "hashbrown-pr556", "hashbrown-pr657", "hashbrown-pr667", "hashbrown-pr692", "hashbrown-pr681", "hashbrown-pr693"],
+      "primary_exercise": "Large-file syntax scanning, MaybeUninit, pointer arithmetic, unchecked/infallible operations, unsafe-call contract gaps, dedupe"
+    },
+    {
+      "repository": "tokio-rs/bytes",
+      "snapshot_targets": ["bytes-capped"],
+      "pr_diff_targets": ["bytes-pr826"],
+      "primary_exercise": "Vec::from_raw_parts, slice construction, ownership-transfer review cards"
+    },
+    {
+      "repository": "crossbeam-rs/crossbeam",
+      "snapshot_targets": ["crossbeam-capped"],
+      "pr_diff_targets": ["crossbeam-pr1226", "crossbeam-pr1187"],
+      "primary_exercise": "Unsafe Send/Sync, atomics, raw pointer, ownership-transfer, strict-provenance Miri cfg cards, and atomic pointer state transitions"
+    },
+    {
+      "repository": "tokio-rs/mio",
+      "snapshot_targets": ["mio-capped"],
+      "pr_diff_targets": ["mio-pr1388"],
+      "primary_exercise": "Unsafe function call contracts, Vec::set_len, zeroed values, pointer operations, socket address layout conversions, and unsafe Send/Sync route cards"
+    }
+  ],
+  "recorded_outcomes": [
+    {
+      "id": "memchr-target-feature-contract-evidence",
+      "target": "memchr-capped",
+      "before": "target/dogfood-work/memchr.unsafe-review.after-slice-end-pointer-evidence.json",
+      "after": "target/dogfood-work/memchr.unsafe-review.after-target-feature-contract-evidence.json",
+      "summary": {
+        "new": 0,
+        "resolved": 0,
+        "improved": 10,
+        "regressed": 0,
+        "unchanged": 40
+      },
+      "notes": "Documented target_feature declarations moved from guard_missing to guarded_unwitnessed without claiming target-feature availability, site execution, or soundness."
+    }
+  ],
+  "limitations": [
+    "The corpus is selected and capped, not ecosystem-wide calibration.",
+    "Saved-output artifacts are local_untracked under target/dogfood-work.",
+    "Outcome comparison reads saved snapshots only and does not rerun analysis.",
+    "Dogfood records do not execute witness tools or make policy decisions."
+  ]
+}

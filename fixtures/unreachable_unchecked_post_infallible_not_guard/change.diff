@@ -1,0 +1,36 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,0 +1,29 @@
++enum Fallibility {
++    Infallible,
++    Fallible,
++}
++
++fn allocate(fallibility: Fallibility) -> Result<u8, ()> {
++    match fallibility {
++        Fallibility::Infallible => Ok(7),
++        Fallibility::Fallible => Err(()),
++    }
++}
++
++pub fn with_capacity() -> u8 {
++    let value = match allocate(Fallibility::Fallible) {
++        Ok(value) => value,
++        // SAFETY: fixture deliberately places the infallible evidence after this arm.
++        Err(_) => unsafe { core::hint::unreachable_unchecked() },
++    };
++
++    let _after = allocate(Fallibility::Infallible);
++    value
++}
++
++#[cfg(test)]
++mod tests {
++    use super::with_capacity;
++
++    #[test]
++    fn mentions_with_capacity() {
++        let _ = stringify!(with_capacity);
++    }
++}

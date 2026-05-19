@@ -1,0 +1,59 @@
+[
+  {
+    "id": "UR-public-unsafe-fn-with-safety-docs-src-lib-rs-caller-must-uphold-contract-unsafe_fn-unknown-caller-must-uphold-contract-cca3b740b7f7-unknown-c1",
+    "class": "guarded_unwitnessed",
+    "priority": "medium",
+    "confidence": "medium",
+    "site": {
+      "file": "src/lib.rs",
+      "line": 6,
+      "column": 1,
+      "kind": "unsafe_fn",
+      "owner": "caller_must_uphold_contract",
+      "visibility": "public",
+      "public_api_surface": true,
+      "snippet": "pub unsafe fn caller_must_uphold_contract(ptr: *const u8) -> usize {"
+    },
+    "operation_family": "unknown",
+    "hazards": [
+      "unknown"
+    ],
+    "obligations": [
+      "unsafe contract could not be inferred from this syntax shape"
+    ],
+    "obligation_evidence": [
+      {
+        "key": "unknown",
+        "description": "unsafe contract could not be inferred from this syntax shape",
+        "contract": {
+          "present": true,
+          "state": "present",
+          "summary": "Nearby `# Safety` documentation was detected"
+        },
+        "discharge": {
+          "present": true,
+          "state": "present",
+          "summary": "Public unsafe API declaration is a caller-contract site; local guard evidence is not expected at the declaration"
+        },
+        "reach": {
+          "present": true,
+          "state": "present",
+          "summary": "1 related test file(s) mention owner `caller_must_uphold_contract`"
+        },
+        "witness": {
+          "present": false,
+          "state": "missing",
+          "summary": "No imported witness receipt was found"
+        }
+      }
+    ],
+    "contract": "Nearby `# Safety` documentation was detected",
+    "discharge": "Public unsafe API declaration is a caller-contract site; local guard evidence is not expected at the declaration",
+    "reach": "1 related test file(s) mention owner `caller_must_uphold_contract`",
+    "witness": "No imported witness receipt was found",
+    "missing": [
+      "No witness receipt imported for this card"
+    ],
+    "verify_commands": []
+  }
+]

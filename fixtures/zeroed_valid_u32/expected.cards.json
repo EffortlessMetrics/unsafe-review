@@ -1,0 +1,64 @@
+[
+  {
+    "id": "UR-zeroed-valid-u32-fixture-src-lib-rs-zero-u32-operation-zeroed-u32-99b4683810af-invalid_value-c1",
+    "class": "guarded_unwitnessed",
+    "priority": "medium",
+    "confidence": "medium",
+    "site": {
+      "file": "src/lib.rs",
+      "line": 3,
+      "column": 5,
+      "kind": "operation",
+      "owner": "zero_u32",
+      "visibility": "private",
+      "public_api_surface": false,
+      "snippet": "unsafe { core::mem::zeroed::<u32>() }"
+    },
+    "operation_family": "zeroed",
+    "hazards": [
+      "invalid_value",
+      "layout_or_repr",
+      "aliasing_or_provenance"
+    ],
+    "obligations": [
+      "all-zero bit pattern is a valid value for the target type"
+    ],
+    "obligation_evidence": [
+      {
+        "key": "valid-zero",
+        "description": "all-zero bit pattern is a valid value for the target type",
+        "contract": {
+          "present": true,
+          "state": "present",
+          "summary": "Nearby `SAFETY:` comment was detected"
+        },
+        "discharge": {
+          "present": true,
+          "state": "present",
+          "summary": "Known valid-zero target type evidence was detected before zeroed"
+        },
+        "reach": {
+          "present": true,
+          "state": "present",
+          "summary": "1 related test file(s) mention owner `zero_u32`"
+        },
+        "witness": {
+          "present": false,
+          "state": "missing",
+          "summary": "No imported witness receipt was found"
+        }
+      }
+    ],
+    "contract": "Nearby `SAFETY:` comment was detected",
+    "discharge": "All inferred safety obligations have visible local discharge evidence",
+    "reach": "1 related test file(s) mention owner `zero_u32`",
+    "witness": "No imported witness receipt was found",
+    "missing": [
+      "No witness receipt imported for this card"
+    ],
+    "verify_commands": [
+      "cargo +nightly miri test zero_u32",
+      "cargo +nightly careful test zero_u32"
+    ]
+  }
+]

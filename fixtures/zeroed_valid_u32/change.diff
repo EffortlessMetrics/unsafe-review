@@ -1,0 +1,18 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,0 +1,13 @@
++pub fn zero_u32() -> u32 {
++    // SAFETY: zero is a valid bit pattern for u32.
++    unsafe { core::mem::zeroed::<u32>() }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::zero_u32;
++
++    #[test]
++    fn returns_zero() {
++        assert_eq!(zero_u32(), 0);
++    }
++}

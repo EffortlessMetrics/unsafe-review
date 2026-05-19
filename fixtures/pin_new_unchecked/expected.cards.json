@@ -1,0 +1,60 @@
+[
+  {
+    "id": "UR-pin-new-unchecked-src-lib-rs-pin-mut-unchecked-operation-pin_unchecked-new-unchecked-d53a20abc752-pin_invariant-c1",
+    "class": "guard_missing",
+    "priority": "high",
+    "confidence": "medium",
+    "site": {
+      "file": "src/lib.rs",
+      "line": 5,
+      "column": 5,
+      "kind": "operation",
+      "owner": "pin_mut_unchecked",
+      "visibility": "private",
+      "public_api_surface": false,
+      "snippet": "unsafe { Pin::new_unchecked(value) }"
+    },
+    "operation_family": "pin_unchecked",
+    "hazards": [
+      "pin_invariant"
+    ],
+    "obligations": [
+      "value will not move and projections preserve pinning invariants"
+    ],
+    "obligation_evidence": [
+      {
+        "key": "pin",
+        "description": "value will not move and projections preserve pinning invariants",
+        "contract": {
+          "present": true,
+          "state": "present",
+          "summary": "Nearby `SAFETY:` comment was detected"
+        },
+        "discharge": {
+          "present": false,
+          "state": "missing",
+          "summary": "No obligation-specific guard code was detected"
+        },
+        "reach": {
+          "present": true,
+          "state": "present",
+          "summary": "1 related test file(s) mention owner `pin_mut_unchecked`"
+        },
+        "witness": {
+          "present": false,
+          "state": "missing",
+          "summary": "No imported witness receipt was found"
+        }
+      }
+    ],
+    "contract": "Nearby `SAFETY:` comment was detected",
+    "discharge": "No visible local guard detected",
+    "reach": "1 related test file(s) mention owner `pin_mut_unchecked`",
+    "witness": "No imported witness receipt was found",
+    "missing": [
+      "Missing visible local guard for inferred safety obligations",
+      "No witness receipt imported for this card"
+    ],
+    "verify_commands": []
+  }
+]

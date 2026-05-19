@@ -1,0 +1,19 @@
+pub fn byte_to_bool_or_false(value: u8) -> bool {
+    assert_eq!(core::mem::size_of::<u8>(), core::mem::size_of::<bool>());
+    if value > 1 {
+        return false;
+    }
+    // SAFETY: size equality is checked, and invalid bool byte patterns return before transmute.
+    unsafe { core::mem::transmute::<u8, bool>(value) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::byte_to_bool_or_false;
+
+    #[test]
+    fn converts_known_bool_byte() {
+        let _value = byte_to_bool_or_false(1);
+    }
+}
+

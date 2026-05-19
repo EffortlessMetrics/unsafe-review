@@ -1,0 +1,63 @@
+[
+  {
+    "id": "UR-unwrap-unchecked-post-check-not-guard-fixture-src-lib-rs-extract-operation-unwrap_unchecked-unwrap-unchecked-8f1c78d084ca-invalid_value-c1",
+    "class": "guard_missing",
+    "priority": "high",
+    "confidence": "medium",
+    "site": {
+      "file": "src/lib.rs",
+      "line": 3,
+      "column": 5,
+      "kind": "operation",
+      "owner": "extract",
+      "visibility": "private",
+      "public_api_surface": false,
+      "snippet": "let value = unsafe { option.unwrap_unchecked() };"
+    },
+    "operation_family": "unwrap_unchecked",
+    "hazards": [
+      "invalid_value"
+    ],
+    "obligations": [
+      "value is known to be `Some` or `Ok` before `unwrap_unchecked`"
+    ],
+    "obligation_evidence": [
+      {
+        "key": "valid-value",
+        "description": "value is known to be `Some` or `Ok` before `unwrap_unchecked`",
+        "contract": {
+          "present": true,
+          "state": "present",
+          "summary": "Nearby `SAFETY:` comment was detected"
+        },
+        "discharge": {
+          "present": false,
+          "state": "missing",
+          "summary": "No obligation-specific guard code was detected"
+        },
+        "reach": {
+          "present": true,
+          "state": "present",
+          "summary": "1 related test file(s) mention owner `extract`"
+        },
+        "witness": {
+          "present": false,
+          "state": "missing",
+          "summary": "No imported witness receipt was found"
+        }
+      }
+    ],
+    "contract": "Nearby `SAFETY:` comment was detected",
+    "discharge": "No visible local guard detected",
+    "reach": "1 related test file(s) mention owner `extract`",
+    "witness": "No imported witness receipt was found",
+    "missing": [
+      "Missing visible local guard for inferred safety obligations",
+      "No witness receipt imported for this card"
+    ],
+    "verify_commands": [
+      "cargo +nightly miri test extract",
+      "cargo +nightly careful test extract"
+    ]
+  }
+]

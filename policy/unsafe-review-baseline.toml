@@ -1,0 +1,15 @@
+schema_version = "0.1"
+policy = "unsafe-review-baseline"
+owner = "core/policy"
+status = "empty"
+
+# Non-empty ledgers use:
+#
+# [[entries]]
+# card_id = "UR-...-c1"
+# owner = "team-or-person"
+# reason = "why this current card is accepted"
+# evidence = "review link, issue, or receipt"
+# review_after = "2026-08-01"
+#
+# check-policy validates the shape. Analysis matches exact card_id values only.

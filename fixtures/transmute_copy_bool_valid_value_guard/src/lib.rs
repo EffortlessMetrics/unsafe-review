@@ -1,0 +1,17 @@
+pub fn copy_byte_to_bool_checked(value: u8) -> bool {
+    debug_assert_eq!(core::mem::size_of::<u8>(), core::mem::size_of::<bool>());
+    assert!(value <= 1);
+    // SAFETY: size equality and the bool byte domain are checked locally.
+    unsafe { core::mem::transmute_copy::<u8, bool>(&value) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::copy_byte_to_bool_checked;
+
+    #[test]
+    fn copies_known_bool_byte() {
+        let _value = copy_byte_to_bool_checked(1);
+    }
+}
+

@@ -1,0 +1,16 @@
+schema_version = "0.1"
+policy = "unsafe-review-suppressions"
+owner = "core/policy"
+status = "empty"
+
+# Non-empty ledgers use:
+#
+# [[entries]]
+# card_id = "UR-...-c1"
+# owner = "team-or-person"
+# reason = "why this card is suppressed"
+# evidence = "review link, issue, or receipt"
+# expires = "2026-08-01"
+#
+# `review_after` may be used instead of `expires` for non-expiring reviews.
+# check-policy validates the shape. Analysis matches exact card_id values only.

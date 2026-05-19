@@ -1,0 +1,63 @@
+[
+{
+    "id":  "UR-nonnull-other-guard-not-evidence-fixture-src-lib-rs-expose-nonnull-operation-nonnull_unchecked-nonnull-unchecked-eee16b5e2cd1-pointer_validity-c1",
+    "class":  "guard_missing",
+    "priority":  "high",
+    "confidence":  "medium",
+    "site":  {
+                 "file":  "src/lib.rs",
+                 "line":  6,
+                 "column":  5,
+                 "kind":  "operation",
+                 "owner":  "expose_nonnull",
+                 "visibility":  "private",
+                 "public_api_surface":  false,
+                 "snippet":  "Some(unsafe { NonNull::new_unchecked(ptr) })"
+             },
+    "operation_family":  "nonnull_unchecked",
+    "hazards":  [
+                    "pointer_validity"
+                ],
+    "obligations":  [
+                        "pointer is non-null before constructing NonNull"
+                    ],
+    "obligation_evidence":  [
+                                {
+                                    "key":  "non-null",
+                                    "description":  "pointer is non-null before constructing NonNull",
+                                    "contract":  {
+                                                     "present":  true,
+                                                     "state":  "present",
+                                                     "summary":  "Nearby `SAFETY:` comment was detected"
+                                                 },
+                                    "discharge":  {
+                                                      "present":  false,
+                                                      "state":  "missing",
+                                                      "summary":  "No nullability guard code was detected"
+                                                  },
+                                    "reach":  {
+                                                  "present":  true,
+                                                  "state":  "present",
+                                                  "summary":  "1 related test file(s) mention owner `expose_nonnull`"
+                                              },
+                                    "witness":  {
+                                                    "present":  false,
+                                                    "state":  "missing",
+                                                    "summary":  "No imported witness receipt was found"
+                                                }
+                                }
+                            ],
+    "contract":  "Nearby `SAFETY:` comment was detected",
+    "discharge":  "No visible local guard detected",
+    "reach":  "1 related test file(s) mention owner `expose_nonnull`",
+    "witness":  "No imported witness receipt was found",
+    "missing":  [
+                    "Missing visible local guard for inferred safety obligations",
+                    "No witness receipt imported for this card"
+                ],
+    "verify_commands":  [
+                            "cargo +nightly miri test expose_nonnull",
+                            "cargo +nightly careful test expose_nonnull"
+                        ]
+}
+]

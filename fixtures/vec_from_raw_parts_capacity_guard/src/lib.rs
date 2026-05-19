@@ -1,0 +1,8 @@
+pub fn rebuild_vec(buf: *mut u8, len: usize, cap: usize) -> Option<Vec<u8>> {
+    if len > cap {
+        return None;
+    }
+    // SAFETY: fixture models a visible length/capacity guard but no allocator or ownership proof.
+    Some(unsafe { Vec::from_raw_parts(buf, len, cap) })
+}
+

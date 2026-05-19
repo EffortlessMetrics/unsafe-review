@@ -1,0 +1,4 @@
+[package]
+name = "multiline-unsafe-fn-call-wrapper-fixture"
+version = "0.0.0"
+edition = "2024"

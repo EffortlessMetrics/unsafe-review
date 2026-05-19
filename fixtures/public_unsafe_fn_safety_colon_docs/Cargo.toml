@@ -1,0 +1,4 @@
+[package]
+name = "public-unsafe-fn-safety-colon-docs-fixture"
+version = "0.0.0"
+edition = "2024"

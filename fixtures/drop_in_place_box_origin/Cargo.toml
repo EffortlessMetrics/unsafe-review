@@ -1,0 +1,5 @@
+[package]
+name = "drop-in-place-box-origin-fixture"
+version = "0.1.0"
+edition = "2024"
+

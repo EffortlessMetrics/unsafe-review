@@ -1,0 +1,20 @@
+pub fn clear_vec(values: &mut Vec<u8>) {
+    // SAFETY: setting the length to zero cannot exceed capacity and does not
+    // introduce an initialized extended range.
+    unsafe {
+        values.set_len(0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clear_vec;
+
+    #[test]
+    fn clear_vec_resets_length() {
+        let mut values = vec![1, 2, 3];
+        clear_vec(&mut values);
+        assert!(values.is_empty());
+    }
+}
+

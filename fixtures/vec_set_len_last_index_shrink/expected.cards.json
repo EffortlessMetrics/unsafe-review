@@ -1,0 +1,88 @@
+[
+  {
+    "id": "UR-vec-set-len-last-index-shrink-fixture-src-lib-rs-pop-last-operation-vec_set_len-set-len-82e9f3ead077-initialized_memory-c1",
+    "class": "guarded_unwitnessed",
+    "priority": "medium",
+    "confidence": "medium",
+    "site": {
+      "file": "src/lib.rs",
+      "line": 9,
+      "column": 9,
+      "kind": "operation",
+      "owner": "pop_last",
+      "visibility": "private",
+      "public_api_surface": false,
+      "snippet": "values.set_len(last_index);"
+    },
+    "operation_family": "vec_set_len",
+    "hazards": [
+      "initialized_memory",
+      "bounds"
+    ],
+    "obligations": [
+      "new length is at most capacity",
+      "elements in the extended range are initialized"
+    ],
+    "obligation_evidence": [
+      {
+        "key": "capacity",
+        "description": "new length is at most capacity",
+        "contract": {
+          "present": true,
+          "state": "present",
+          "summary": "Nearby `SAFETY:` comment was detected"
+        },
+        "discharge": {
+          "present": true,
+          "state": "present",
+          "summary": "Capacity guard code was detected"
+        },
+        "reach": {
+          "present": true,
+          "state": "present",
+          "summary": "1 related test file(s) mention owner `pop_last`"
+        },
+        "witness": {
+          "present": false,
+          "state": "missing",
+          "summary": "No imported witness receipt was found"
+        }
+      },
+      {
+        "key": "initialized",
+        "description": "elements in the extended range are initialized",
+        "contract": {
+          "present": true,
+          "state": "present",
+          "summary": "Nearby `SAFETY:` comment was detected"
+        },
+        "discharge": {
+          "present": true,
+          "state": "present",
+          "summary": "Initialization evidence was detected"
+        },
+        "reach": {
+          "present": true,
+          "state": "present",
+          "summary": "1 related test file(s) mention owner `pop_last`"
+        },
+        "witness": {
+          "present": false,
+          "state": "missing",
+          "summary": "No imported witness receipt was found"
+        }
+      }
+    ],
+    "contract": "Nearby `SAFETY:` comment was detected",
+    "discharge": "All inferred safety obligations have visible local discharge evidence",
+    "reach": "1 related test file(s) mention owner `pop_last`",
+    "witness": "No imported witness receipt was found",
+    "missing": [
+      "No witness receipt imported for this card"
+    ],
+    "verify_commands": [
+      "cargo +nightly miri test pop_last",
+      "cargo +nightly careful test pop_last"
+    ]
+  }
+]

@@ -1,0 +1,221 @@
+<p align="center">
+  <img src="unsafe-review-logo.svg" alt="unsafe-review warning mark" width="120" />
+</p>
+
+<h1 align="center">unsafe-review</h1>
+
+<p align="center">
+  <em>Advisory unsafe-contract review for Rust PRs.</em>
+</p>
+
+<!-- Badge rows are advisory evidence signals. Generated unsafe-review badge JSON comes from `unsafe-review badges --out badges/`; badges never imply memory-safety proof, Miri-clean status, or UB-free status. -->
+
+<p align="center">
+  <a href="https://github.com/EffortlessMetrics/unsafe-review/actions/workflows/ci.yml"><img src="https://github.com/EffortlessMetrics/unsafe-review/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/EffortlessMetrics/unsafe-review/releases"><img src="https://img.shields.io/github/v/release/EffortlessMetrics/unsafe-review?sort=semver&label=release" alt="GitHub release" /></a>
+  <a href="https://crates.io/crates/unsafe-review"><img src="https://img.shields.io/crates/d/unsafe-review.svg?label=crates.io%20downloads" alt="crates.io downloads" /></a>
+  <a href="https://docs.rs/unsafe-review"><img src="https://docs.rs/unsafe-review/badge.svg" alt="docs.rs" /></a>
+</p>
+
+<p align="center">
+  <a href="docs/deferred/editor-extension.md"><img src="https://img.shields.io/badge/VS%20Code-extension%20planned-0078D4" alt="VS Code extension planned" /></a>
+  <a href="docs/deferred/editor-extension.md"><img src="https://img.shields.io/badge/Open%20VSX-planned-C160EF" alt="Open VSX extension planned" /></a>
+</p>
+
+<p align="center">
+  <a href="https://doc.rust-lang.org/cargo/reference/manifest.html#the-rust-version-field"><img src="https://img.shields.io/badge/MSRV-1.95-blue.svg" alt="MSRV" /></a>
+  <a href="#license"><img src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg" alt="License: MIT OR Apache-2.0" /></a>
+</p>
+
+`unsafe-review` points reviewers and coding agents at changed Rust unsafe seams
+that are missing review evidence: a safety contract, local guard, test reach, or
+witness receipt.
+
+It does not prove unsafe Rust sound. It makes unsafe Rust reviewable.
+
+The first useful run should feel small:
+
+```text
+one PR
+-> one changed unsafe contract
+-> one missing evidence gap
+-> one recommended guard, test, or witness route
+```
+
+Miri asks:
+
+```text
+Did this concrete execution hit UB?
+```
+
+`unsafe-review` asks the cheaper PR-time question:
+
+```text
+Does this unsafe change have the safety contract, guard, test reach,
+and witness route needed to make review credible?
+```
+
+## Trust boundary
+
+`unsafe-review` reports static review evidence. It is not a proof of memory
+safety, not a UB-free claim, and not a Miri result unless a matching witness
+receipt is attached.
+
+It is advisory by default: no witness execution, no automatic comments, no source
+edits, and no default blocking policy.
+
+## Install
+
+```bash
+cargo install unsafe-review --locked
+unsafe-review --version
+unsafe-review doctor
+```
+
+Programmatic users should depend on `unsafe-review-core`. Most users should
+install the `unsafe-review` façade crate.
+
+## Quick start
+
+```bash
+# Review the current PR against main
+unsafe-review check --base origin/main
+
+# Write the reviewer-facing summary
+unsafe-review check --base origin/main \
+  --format pr-summary \
+  --out target/unsafe-review/pr-summary.md
+
+# Write machine-readable cards
+unsafe-review check --base origin/main \
+  --format json \
+  --out target/unsafe-review/cards.json
+
+# Explain one card
+unsafe-review explain <card-id>
+```
+
+Try the bundled smoke fixture:
+
+```bash
+unsafe-review check \
+  --root fixtures/raw_pointer_alignment \
+  --diff fixtures/raw_pointer_alignment/change.diff \
+  --format pr-summary
+```
+
+## What unsafe-review produces
+
+| Surface | Output | Use |
+|---|---|---|
+| Review cards | JSON / human / Markdown | The canonical evidence object |
+| PR summary | `pr-summary.md` | Reviewer first screen |
+| SARIF | `cards.sarif` | Code scanning / CI artifact |
+| Comment plan | `comment-plan.json` | Proposed comments, not posted |
+| Saved LSP projection | `lsp.json` | Read-only editor diagnostics and hovers |
+| Agent packet | `context <card-id> --json` | Bounded LLM repair context |
+| Receipt audit | JSON / Markdown | Match saved witness receipts to cards |
+| Outcome comparison | JSON / Markdown | Compare saved snapshots |
+| Repo posture | JSON / Markdown / badge JSON | Count open review gaps, not safety |
+| Policy report | JSON / Markdown | Advisory no-new-debt simulation |
+
+## Choose a path
+
+| If you need to... | Start with... | Typical output |
+|---|---|---|
+| Review a PR | `unsafe-review check --base origin/main` | ReviewCards and PR summary |
+| Feed CI artifacts | `--format json`, `--format sarif`, `--format pr-summary` | Uploaded advisory artifacts |
+| Explain one finding | `unsafe-review explain <card-id>` | Human-readable contract gap |
+| Hand work to an agent | `unsafe-review context <card-id> --json` | Bounded repair packet |
+| Audit saved witness receipts | `unsafe-review receipt audit` | Matched / stale / duplicate receipt report |
+| Compare before/after posture | `unsafe-review outcome --before before.json --after after.json` | New / resolved / improved / regressed cards |
+| Inspect repo posture | `unsafe-review repo --format markdown` | Open unsafe-review gaps |
+| Simulate policy | `unsafe-review policy report` | Advisory no-new-debt report |
+
+## What works today
+
+- **Fixture-backed ReviewCards** for many core unsafe operation families.
+- **Dogfood-backed evidence rules** across selected real Rust crates and PR diffs.
+- **Advisory PR artifacts**: cards JSON, PR summary, SARIF, and comment-plan.
+- **Read-only projections** for saved LSP/editor output and bounded agent packets.
+- **Saved receipt audit** for imported witness metadata.
+- **Outcome and repo posture reports** for before/after movement and open gaps.
+- **Advisory policy reports** for no-new-debt simulation.
+
+Everything above remains experimental and advisory. No current surface is
+calibrated as a blocking policy gate.
+
+## Status at a glance
+
+The README is the front door, not the support ledger. Current proof and support
+posture live in the status docs.
+
+| Area | Status source |
+|---|---|
+| Support posture | [Support summary](docs/status/SUPPORT_SUMMARY.md) |
+| Claim-to-proof ledger | [Support tiers](docs/status/SUPPORT_TIERS.md) |
+| First-use guide | [First-use guide](docs/FIRST_USE.md) |
+| ReviewCard trust boundary | [ReviewCard explanation](docs/explanation/review-cards-and-trust-boundary.md) |
+| Dogfood evidence | [Dogfood index](docs/dogfood/index.md) |
+| CLI reference | [CLI guide](docs/CLI.md) |
+
+## Crate surface
+
+```text
+unsafe-review          # product facade / install handle
+unsafe-review-cli      # CLI adapter and rendering
+unsafe-review-core     # SDK / analysis engine
+xtask                  # repo automation, not product surface
+```
+
+The crate boundary policy is: design seams like microcrates, implement most as module
+families, and publish only seams that deserve a support promise.
+
+## Development
+
+```bash
+cargo fmt --check
+cargo check --workspace --all-targets --locked
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+cargo run --locked -p xtask -- check-pr
+cargo run --locked -p xtask -- check-calibration
+cargo run --locked -p xtask -- check-dogfood
+```
+
+## Documentation map
+
+- [First-use guide](docs/FIRST_USE.md)
+- [Mission and vision](docs/MISSION.md)
+- [Roadmap](docs/ROADMAP.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [CLI guide](docs/CLI.md)
+- [ReviewCard trust boundary](docs/explanation/review-cards-and-trust-boundary.md)
+- [Specifications](docs/specs/README.md)
+- [ADRs](docs/adr/README.md)
+- [Implementation plan](plans/0.1.0/implementation-plan.md)
+- [Support summary](docs/status/SUPPORT_SUMMARY.md)
+- [Support tiers](docs/status/SUPPORT_TIERS.md)
+- [Dogfood index](docs/dogfood/index.md)
+- [Policy ledgers](policy/)
+
+## Fuzzing
+
+The repository includes a manual `cargo-fuzz` harness for analyzer robustness.
+It is not part of the default PR gate. See [Fuzzing](docs/FUZZING.md) for the
+harness input contract.
+
+```bash
+cargo install cargo-fuzz
+cargo fuzz run analyze
+```
+
+## License
+
+Licensed under either of:
+
+- Apache License, Version 2.0
+- MIT license

@@ -1,0 +1,13 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,0 +1,9 @@
++pub struct Header(u32);
++
++pub fn write_unaligned_header(bytes: &mut [u8], header: Header) {
++    assert!(bytes.len() >= core::mem::size_of::<Header>());
++    let ptr = bytes.as_mut_ptr().cast::<Header>();
++    // SAFETY: length is checked above; write_unaligned intentionally does not
++    // require alignment, so this card should not ask for an alignment guard.
++    unsafe { core::ptr::write_unaligned(ptr, header) }
++}

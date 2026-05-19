@@ -1,0 +1,5 @@
+[package]
+name = "drop-in-place-deallocation-fixture"
+version = "0.0.0"
+edition = "2024"
+

@@ -1,0 +1,13 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,0 +1,9 @@
++extern crate std;
++
++use core::ptr::copy_nonoverlapping;
++pub use core::mem::transmute as cast_value;
++
++pub fn checked_len(bytes: &[u8]) -> usize {
++    bytes.len()
++}
++

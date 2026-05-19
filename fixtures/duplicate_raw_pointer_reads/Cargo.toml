@@ -1,0 +1,5 @@
+[package]
+name = "duplicate-raw-pointer-reads"
+version = "0.0.0"
+edition = "2024"
+publish = false

@@ -1,0 +1,24 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,0 +1,20 @@
++enum Fallibility {
++    Infallible,
++    Fallible,
++}
++
++fn reserve_rehash(fallibility: Fallibility) -> Result<u8, ()> {
++    match fallibility {
++        Fallibility::Infallible => Ok(7),
++        Fallibility::Fallible => Err(()),
++    }
++}
++
++pub fn reserve() -> u8 {
++    let other_result = reserve_rehash(Fallibility::Infallible);
++    let result = reserve_rehash(Fallibility::Fallible);
++    let _ = other_result;
++
++    // SAFETY: this fixture intentionally makes a different result infallible.
++    unsafe { result.unwrap_unchecked() }
++}

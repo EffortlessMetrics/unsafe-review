@@ -1,0 +1,22 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -12,6 +12,19 @@ impl<const CAP: usize> ArrayString<CAP> {
+     pub fn capacity(&self) -> usize {
+         CAP
+     }
++
++    pub fn try_push(&mut self, c: char) -> Result<(), ()> {
++        let len = self.len();
++        let ptr = self.xs[len..].as_mut_ptr();
++        let remaining_cap = self.capacity() - len;
++        // SAFETY: `ptr` points to `remaining_cap` bytes.
++        match unsafe { encode_utf8(c, ptr, remaining_cap) } {
++            Ok(n) => {
++                self.len = len + n;
++                Ok(())
++            }
++            Err(_) => Err(()),
++        }
++    }
+ }

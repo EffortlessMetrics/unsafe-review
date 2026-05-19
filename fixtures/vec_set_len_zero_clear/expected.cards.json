@@ -1,0 +1,88 @@
+[
+  {
+    "id": "UR-vec-set-len-zero-clear-fixture-src-lib-rs-clear-vec-operation-vec_set_len-set-len-32e66e057877-initialized_memory-c1",
+    "class": "guarded_unwitnessed",
+    "priority": "medium",
+    "confidence": "medium",
+    "site": {
+      "file": "src/lib.rs",
+      "line": 5,
+      "column": 9,
+      "kind": "operation",
+      "owner": "clear_vec",
+      "visibility": "private",
+      "public_api_surface": false,
+      "snippet": "values.set_len(0);"
+    },
+    "operation_family": "vec_set_len",
+    "hazards": [
+      "initialized_memory",
+      "bounds"
+    ],
+    "obligations": [
+      "new length is at most capacity",
+      "elements in the extended range are initialized"
+    ],
+    "obligation_evidence": [
+      {
+        "key": "capacity",
+        "description": "new length is at most capacity",
+        "contract": {
+          "present": true,
+          "state": "present",
+          "summary": "Nearby `SAFETY:` comment was detected"
+        },
+        "discharge": {
+          "present": true,
+          "state": "present",
+          "summary": "Capacity guard code was detected"
+        },
+        "reach": {
+          "present": true,
+          "state": "present",
+          "summary": "1 related test file(s) mention owner `clear_vec`"
+        },
+        "witness": {
+          "present": false,
+          "state": "missing",
+          "summary": "No imported witness receipt was found"
+        }
+      },
+      {
+        "key": "initialized",
+        "description": "elements in the extended range are initialized",
+        "contract": {
+          "present": true,
+          "state": "present",
+          "summary": "Nearby `SAFETY:` comment was detected"
+        },
+        "discharge": {
+          "present": true,
+          "state": "present",
+          "summary": "Initialization evidence was detected"
+        },
+        "reach": {
+          "present": true,
+          "state": "present",
+          "summary": "1 related test file(s) mention owner `clear_vec`"
+        },
+        "witness": {
+          "present": false,
+          "state": "missing",
+          "summary": "No imported witness receipt was found"
+        }
+      }
+    ],
+    "contract": "Nearby `SAFETY:` comment was detected",
+    "discharge": "All inferred safety obligations have visible local discharge evidence",
+    "reach": "1 related test file(s) mention owner `clear_vec`",
+    "witness": "No imported witness receipt was found",
+    "missing": [
+      "No witness receipt imported for this card"
+    ],
+    "verify_commands": [
+      "cargo +nightly miri test clear_vec",
+      "cargo +nightly careful test clear_vec"
+    ]
+  }
+]

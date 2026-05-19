@@ -1,0 +1,1748 @@
+schema_version = "0.1"
+status = "experimental"
+
+required_core_fixtures = [
+  "raw_pointer_alignment",
+  "raw_pointer_alignment_receipted",
+  "align_of_only_not_guard",
+  "alignment_other_pointer_not_guard",
+  "raw_pointer_alignment_post_check_not_guard",
+  "raw_pointer_alignment_is_aligned_guard",
+  "raw_pointer_alignment_observed_not_guard",
+  "raw_pointer_alignment_closed_branch_not_guard",
+  "raw_pointer_alignment_reassigned_pointer_not_guard",
+  "raw_pointer_alignment_modulo_guard",
+  "raw_pointer_alignment_modulo_observed_not_guard",
+  "raw_pointer_alignment_modulo_closed_branch_not_guard",
+  "raw_pointer_alignment_modulo_reassigned_pointer_not_guard",
+  "raw_pointer_deref",
+  "raw_pointer_read_unaligned",
+  "raw_pointer_write_assignment",
+  "raw_pointer_write_unaligned",
+  "split_raw_pointer_read_call",
+  "split_unsafe_block",
+  "public_unsafe_fn_missing_safety",
+  "public_unsafe_trait_missing_safety",
+  "public_unsafe_fn_safety_comment_not_docs",
+  "split_public_unsafe_fn_missing_safety",
+  "public_unsafe_fn_with_safety_docs",
+  "public_unsafe_fn_safety_colon_docs",
+  "documented_private_unsafe_fn",
+  "private_unsafe_helper_safety_comment",
+  "local_safety_colon_comment",
+  "maybeuninit_assume_init",
+  "maybeuninit_assume_init_read",
+  "maybeuninit_assume_init_ref",
+  "maybeuninit_assume_init_mut",
+  "maybeuninit_assume_init_drop",
+  "vec_set_len",
+  "vec_set_len_initialized_loop",
+  "vec_set_len_capacity_observed_not_guard",
+  "vec_set_len_unrelated_capacity_comparison_not_guard",
+  "vec_set_len_cap_argument_not_guard",
+  "vec_set_len_with_capacity",
+  "vec_set_len_call_result_init",
+  "vec_set_len_shrink",
+  "vec_set_len_last_index_shrink",
+  "vec_set_len_start_bound_shrink",
+  "vec_set_len_zero_clear",
+  "vec_set_len_post_init_not_guard",
+  "drop_in_place_deallocation",
+  "drop_in_place_box_origin",
+  "drop_in_place_reassigned_origin_not_guard",
+  "atomic_pointer_state_swap",
+  "unwrap_unchecked_result",
+  "unwrap_unchecked_infallible_result",
+  "unwrap_unchecked_other_infallible_not_guard",
+  "unwrap_unchecked_is_some_guard",
+  "unwrap_unchecked_is_ok_guard",
+  "unwrap_unchecked_is_some_observed_not_guard",
+  "unwrap_unchecked_is_ok_observed_not_guard",
+  "unwrap_unchecked_if_let_some_guard",
+  "unwrap_unchecked_if_let_ok_guard",
+  "unwrap_unchecked_other_if_let_not_guard",
+  "unwrap_unchecked_other_if_let_ok_not_guard",
+  "unwrap_unchecked_post_check_not_guard",
+  "unwrap_unchecked_guard_then_reassigned_not_guard",
+  "unwrap_unchecked_is_none_return_guard",
+  "unwrap_unchecked_is_err_return_guard",
+  "unreachable_unchecked_path",
+  "unreachable_unchecked_infallible_path",
+  "unreachable_unchecked_other_infallible_not_guard",
+  "unreachable_unchecked_post_infallible_not_guard",
+  "unreachable_unchecked_closed_infallible_match_not_guard",
+  "get_unchecked_mut_bounds",
+  "get_unchecked_mut_len_guard",
+  "get_unchecked_mut_other_len_not_guard",
+  "get_unchecked_mut_post_check_not_guard",
+  "get_unchecked_mut_bounds_observed_not_guard",
+  "get_unchecked_mut_closed_bounds_not_guard",
+  "get_unchecked_mut_reassigned_index_not_guard",
+  "pin_new_unchecked",
+  "raw_pointer_write_bytes",
+  "raw_pointer_write_other_u8_not_guard",
+  "raw_pointer_write_maybeuninit",
+  "raw_pointer_write_other_maybeuninit_not_guard",
+  "raw_pointer_write_volatile",
+  "ptr_copy_overlapping",
+  "ptr_replace_value",
+  "copy_nonoverlapping",
+  "str_from_utf8_unchecked",
+  "str_from_utf8_unchecked_is_ok_guard",
+  "str_from_utf8_unchecked_is_err_return_guard",
+  "str_from_utf8_unchecked_question_mark_guard",
+  "str_from_utf8_unchecked_match_return_guard",
+  "str_from_utf8_unchecked_post_validation_not_guard",
+  "str_from_utf8_unchecked_other_buffer_not_guard",
+  "str_from_utf8_unchecked_is_ok_observed_not_guard",
+  "str_from_utf8_unchecked_guard_then_reassigned_not_guard",
+  "zeroed_invalid_value",
+  "zeroed_valid_u32",
+  "inline_asm_human_review",
+  "raw_pointer_read_volatile",
+  "raw_pointer_read_len_capacity_assert",
+  "pointer_arithmetic_num_ctrl_bytes_guard",
+  "pointer_arithmetic_slice_end",
+  "slice_from_raw_parts_mut",
+  "slice_from_raw_parts_mut_maybeuninit",
+  "slice_from_raw_parts_mut_other_maybeuninit_not_guard",
+  "vec_from_raw_parts",
+  "vec_from_raw_parts_capacity_guard",
+  "vec_from_raw_parts_capacity_assert_guard",
+  "vec_from_raw_parts_capacity_observed_not_guard",
+  "vec_from_raw_parts_capacity_value_observed_not_guard",
+  "vec_from_raw_parts_capacity_closed_branch_not_guard",
+  "vec_from_raw_parts_capacity_reassigned_not_guard",
+  "vec_from_raw_parts_manuallydrop_origin",
+  "box_from_raw",
+  "box_from_raw_box_origin",
+  "box_from_raw_reassigned_origin_not_guard",
+  "static_mut_global_state",
+  "transmute_invalid_value",
+  "transmute_layout_size_guard",
+  "transmute_bool_valid_value_guard",
+  "transmute_bool_invalid_return_guard",
+  "transmute_bool_value_observed_not_guard",
+  "transmute_bool_closed_if_observed_not_guard",
+  "transmute_bool_guard_then_reassigned_not_guard",
+  "transmute_copy_invalid_value",
+  "transmute_copy_layout_size_guard",
+  "transmute_copy_bool_valid_value_guard",
+  "transmute_copy_bool_invalid_return_guard",
+  "transmute_copy_bool_value_observed_not_guard",
+  "transmute_copy_bool_closed_if_observed_not_guard",
+  "transmute_copy_bool_guard_then_reassigned_not_guard",
+  "multiline_transmute_copy_invalid_value",
+  "unsafe_impl_send",
+  "unsafe_impl_send_generic_owner",
+  "unsafe_impl_sync_generic_bound",
+  "ffi_sanitizer_route",
+  "safe_code_no_cards",
+  "safe_reference_deref_no_cards",
+  "imports_not_unsafe_operations",
+  "cfg_target_feature_not_operation",
+  "target_feature_safety_docs",
+  "attributed_unsafe_fn_no_duplicate",
+  "inline_unsafe_raw_pointer_deref_no_duplicate",
+  "unsafe_fn_call_wrapper",
+  "multiline_unsafe_fn_call_wrapper",
+  "unsafe_fn_call_encode_utf8_remaining_cap",
+  "unchecked_constructor_availability_guard",
+  "unchecked_constructor_availability_assert_guard",
+  "unchecked_constructor_unavailable_return_guard",
+  "unchecked_constructor_other_availability_not_guard",
+  "unchecked_constructor_availability_observed_not_guard",
+  "unchecked_constructor_availability_closed_branch_not_guard",
+  "nonnull_new_guard",
+  "nonnull_other_guard_not_evidence",
+  "nonnull_is_null_nonreturning_not_guard",
+  "nonnull_observed_not_guard",
+  "nonnull_post_check_not_guard",
+  "impl_trait_bound_owner_inference",
+  "nested_unsafe_operation_call_dedupe",
+  "adjacent_unchanged_unsafe_fn_no_card",
+  "comment_alignment_not_guard",
+]
+
+[[cases]]
+fixture = "raw_pointer_alignment"
+kind = "positive"
+claim = "raw pointer read with length evidence still reports missing alignment guard evidence"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_read"
+expected_hazard = "alignment"
+
+[[cases]]
+fixture = "raw_pointer_alignment_receipted"
+kind = "positive"
+claim = "matching witness receipts make witness evidence present without hiding the missing alignment guard"
+support_tier = "Witness receipt import"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_read"
+expected_hazard = "alignment"
+
+[[cases]]
+fixture = "align_of_only_not_guard"
+kind = "false_positive_control"
+claim = "bare align_of calculations do not count as pointer alignment guard evidence"
+support_tier = "Guard evidence mining"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_read"
+expected_hazard = "alignment"
+
+[[cases]]
+fixture = "alignment_other_pointer_not_guard"
+kind = "false_positive_control"
+claim = "alignment guards for another pointer do not discharge raw pointer read alignment evidence"
+support_tier = "Guard evidence mining"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_read"
+expected_hazard = "alignment"
+
+[[cases]]
+fixture = "raw_pointer_alignment_post_check_not_guard"
+kind = "false_positive_control"
+claim = "alignment guards after a raw pointer read do not discharge raw pointer read alignment evidence"
+support_tier = "Guard evidence mining"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_read"
+expected_hazard = "alignment"
+
+[[cases]]
+fixture = "raw_pointer_alignment_is_aligned_guard"
+kind = "positive"
+claim = "same-pointer is_aligned early-return guards discharge raw pointer read alignment evidence"
+support_tier = "Guard evidence mining"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_read"
+expected_hazard = "alignment"
+
+[[cases]]
+fixture = "raw_pointer_alignment_observed_not_guard"
+kind = "false_positive_control"
+claim = "observed is_aligned values do not discharge raw pointer read alignment evidence"
+support_tier = "Guard evidence mining"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_read"
+expected_hazard = "alignment"
+
+[[cases]]
+fixture = "raw_pointer_alignment_closed_branch_not_guard"
+kind = "false_positive_control"
+claim = "closed positive is_aligned branches do not discharge raw pointer read alignment evidence"
+support_tier = "Guard evidence mining"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_read"
+expected_hazard = "alignment"
+
+[[cases]]
+fixture = "raw_pointer_alignment_reassigned_pointer_not_guard"
+kind = "false_positive_control"
+claim = "is_aligned guards do not discharge raw pointer read alignment evidence after the checked pointer is reassigned"
+support_tier = "Guard evidence mining"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_read"
+expected_hazard = "alignment"
+
+[[cases]]
+fixture = "raw_pointer_alignment_modulo_guard"
+kind = "positive"
+claim = "same-pointer modulo early-return guards discharge raw pointer read alignment evidence"
+support_tier = "Guard evidence mining"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_read"
+expected_hazard = "alignment"
+
+[[cases]]
+fixture = "raw_pointer_alignment_modulo_observed_not_guard"
+kind = "false_positive_control"
+claim = "observed modulo alignment values do not discharge raw pointer read alignment evidence"
+support_tier = "Guard evidence mining"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_read"
+expected_hazard = "alignment"
+
+[[cases]]
+fixture = "raw_pointer_alignment_modulo_closed_branch_not_guard"
+kind = "false_positive_control"
+claim = "closed positive modulo alignment branches do not discharge raw pointer read alignment evidence"
+support_tier = "Guard evidence mining"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_read"
+expected_hazard = "alignment"
+
+[[cases]]
+fixture = "raw_pointer_alignment_modulo_reassigned_pointer_not_guard"
+kind = "false_positive_control"
+claim = "modulo alignment guards do not discharge raw pointer read alignment evidence after the checked pointer is reassigned"
+support_tier = "Guard evidence mining"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_read"
+expected_hazard = "alignment"
+
+[[cases]]
+fixture = "raw_pointer_deref"
+kind = "positive"
+claim = "raw pointer dereference reports pointer, alignment, initialization, and allocation obligations"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_deref"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "raw_pointer_read_unaligned"
+kind = "positive"
+claim = "read_unaligned reports raw pointer read obligations without requiring an alignment hazard"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_read_unaligned"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "raw_pointer_write_assignment"
+kind = "positive"
+claim = "raw pointer assignment reports raw pointer write obligations instead of an unknown unsafe block"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_write"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "raw_pointer_write_unaligned"
+kind = "positive"
+claim = "write_unaligned reports raw pointer write obligations without requiring an alignment hazard"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_write_unaligned"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "split_raw_pointer_read_call"
+kind = "positive"
+claim = "split raw pointer read call syntax normalizes to a concrete raw pointer read card"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_read"
+expected_hazard = "alignment"
+
+[[cases]]
+fixture = "split_unsafe_block"
+kind = "positive"
+claim = "split unsafe block syntax emits a single unknown unsafe-block card when no concrete operation is found"
+support_tier = "Diff unsafe site inventory"
+expected_cards = 1
+expected_class = "contract_missing"
+expected_operation_family = "unknown"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "public_unsafe_fn_missing_safety"
+kind = "positive"
+claim = "public unsafe function without a # Safety contract reports contract_missing"
+support_tier = "Contract evidence mining"
+expected_cards = 1
+expected_class = "contract_missing"
+
+[[cases]]
+fixture = "public_unsafe_trait_missing_safety"
+kind = "positive"
+claim = "public unsafe trait without a # Safety contract reports contract_missing"
+support_tier = "Contract evidence mining"
+expected_cards = 1
+expected_class = "contract_missing"
+expected_operation_family = "unknown"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "public_unsafe_fn_safety_comment_not_docs"
+kind = "positive"
+claim = "public unsafe function requires # Safety docs and does not accept a local SAFETY comment as public API docs"
+support_tier = "Contract evidence mining"
+expected_cards = 1
+expected_class = "contract_missing"
+expected_operation_family = "unknown"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "split_public_unsafe_fn_missing_safety"
+kind = "positive"
+claim = "split public unsafe function syntax still reports missing # Safety docs"
+support_tier = "Contract evidence mining"
+expected_cards = 1
+expected_class = "contract_missing"
+expected_operation_family = "unknown"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "public_unsafe_fn_with_safety_docs"
+kind = "positive"
+claim = "public unsafe function with a # Safety contract does not report a missing local declaration guard"
+support_tier = "Contract evidence mining"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "unknown"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "public_unsafe_fn_safety_colon_docs"
+kind = "positive"
+claim = "public unsafe function with Safety: doc prose is treated as documented contract evidence"
+support_tier = "Contract evidence mining"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "unknown"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "documented_private_unsafe_fn"
+kind = "positive"
+claim = "private unsafe function with a # Safety contract does not report a missing local declaration guard"
+support_tier = "Contract evidence mining"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "unknown"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "private_unsafe_helper_safety_comment"
+kind = "positive"
+claim = "private unsafe helper can use nearby SAFETY comments as contract evidence without satisfying guard evidence"
+support_tier = "Contract evidence mining"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unknown"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "local_safety_colon_comment"
+kind = "positive"
+claim = "local Safety: comments are treated as unsafe contract evidence like SAFETY: comments"
+support_tier = "Contract evidence mining"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unsafe_fn_call"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "maybeuninit_assume_init"
+kind = "positive"
+claim = "MaybeUninit::assume_init reports missing initialization evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_read"
+kind = "positive"
+claim = "MaybeUninit::assume_init_read reports missing initialization evidence instead of a generic unsafe function call"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_ref"
+kind = "positive"
+claim = "MaybeUninit::assume_init_ref reports missing initialization evidence instead of a generic unsafe function call"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_mut"
+kind = "positive"
+claim = "MaybeUninit::assume_init_mut reports missing initialization evidence instead of a generic unsafe function call"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_drop"
+kind = "positive"
+claim = "MaybeUninit::assume_init_drop reports missing initialization evidence instead of a generic unsafe function call"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len"
+kind = "positive"
+claim = "Vec::set_len reports missing initialized-range and capacity evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_initialized_loop"
+kind = "positive"
+claim = "Vec::set_len recognizes visible MaybeUninit::new initialization and const CAP capacity evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_capacity_observed_not_guard"
+kind = "false_positive_control"
+claim = "Vec::set_len capacity observations without a new_len bound do not discharge capacity evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_unrelated_capacity_comparison_not_guard"
+kind = "false_positive_control"
+claim = "Vec::set_len does not accept unrelated capacity comparisons unless they bound the set_len argument"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_cap_argument_not_guard"
+kind = "false_positive_control"
+claim = "Vec::set_len does not accept a local argument named cap as capacity evidence without a const-capacity context"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_with_capacity"
+kind = "positive"
+claim = "Vec::set_len recognizes same-vector Vec::with_capacity(new_len) as capacity evidence without discharging initialization"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_call_result_init"
+kind = "positive"
+claim = "Vec::set_len recognizes encoded-byte call result length as initialized-range evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "unsafe_unreached"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_shrink"
+kind = "positive"
+claim = "Vec::set_len recognizes new_len <= current len as shrink evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_last_index_shrink"
+kind = "positive"
+claim = "Vec::set_len recognizes last_index = self.len - 1 after a non-empty guard as shrink evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_start_bound_shrink"
+kind = "positive"
+claim = "Vec::set_len recognizes start <= end <= len as shrink evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_zero_clear"
+kind = "positive"
+claim = "Vec::set_len recognizes clear-to-zero as no initialized extended range and zero capacity evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_post_init_not_guard"
+kind = "false_positive_control"
+claim = "Vec::set_len does not accept initialization evidence that appears only after the set_len call"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "drop_in_place_deallocation"
+kind = "positive"
+claim = "ptr::drop_in_place reports drop/deallocation obligations instead of unknown unsafe syntax"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "drop_in_place"
+expected_hazard = "drop_or_deallocation"
+
+[[cases]]
+fixture = "drop_in_place_box_origin"
+kind = "positive"
+claim = "ptr::drop_in_place recognizes same-pointer Box::into_raw origin evidence without importing a witness"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "drop_in_place"
+expected_hazard = "drop_or_deallocation"
+
+[[cases]]
+fixture = "drop_in_place_reassigned_origin_not_guard"
+kind = "false_positive_control"
+claim = "ptr::drop_in_place does not accept Box::into_raw origin evidence after the raw pointer is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "drop_in_place"
+expected_hazard = "drop_or_deallocation"
+
+[[cases]]
+fixture = "atomic_pointer_state_swap"
+kind = "positive"
+claim = "atomic pointer null swap state transitions are classified as unsafe-adjacent review cards"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "requires_loom"
+expected_operation_family = "atomic_pointer_state"
+expected_hazard = "atomic_ordering"
+
+[[cases]]
+fixture = "unwrap_unchecked_result"
+kind = "positive"
+claim = "unwrap_unchecked reports invalid-value obligations instead of a generic unsafe function call"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_infallible_result"
+kind = "positive"
+claim = "unwrap_unchecked recognizes local Fallibility::Infallible result evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_other_infallible_not_guard"
+kind = "false_positive_control"
+claim = "unwrap_unchecked does not accept Fallibility::Infallible evidence assigned to another result"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_is_some_guard"
+kind = "positive"
+claim = "unwrap_unchecked recognizes same-receiver is_some guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_is_ok_guard"
+kind = "positive"
+claim = "unwrap_unchecked recognizes same-receiver is_ok guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_is_some_observed_not_guard"
+kind = "false_positive_control"
+claim = "unwrap_unchecked does not accept a bare is_some observation as guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_is_ok_observed_not_guard"
+kind = "false_positive_control"
+claim = "unwrap_unchecked does not accept a bare is_ok observation as guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_if_let_some_guard"
+kind = "positive"
+claim = "unwrap_unchecked recognizes same-receiver if-let Some as_ref guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_if_let_ok_guard"
+kind = "positive"
+claim = "unwrap_unchecked recognizes same-receiver if-let Ok as_ref guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_other_if_let_not_guard"
+kind = "false_positive_control"
+claim = "unwrap_unchecked does not accept if-let Some as_ref evidence for another receiver"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_other_if_let_ok_not_guard"
+kind = "false_positive_control"
+claim = "unwrap_unchecked does not accept if-let Ok as_ref evidence for another receiver"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_post_check_not_guard"
+kind = "false_positive_control"
+claim = "unwrap_unchecked does not accept post-call is_some checks as guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_guard_then_reassigned_not_guard"
+kind = "false_positive_control"
+claim = "unwrap_unchecked does not accept stale receiver-state guards after receiver reassignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_is_none_return_guard"
+kind = "positive"
+claim = "unwrap_unchecked recognizes same-receiver is_none early-return guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_is_err_return_guard"
+kind = "positive"
+claim = "unwrap_unchecked recognizes same-receiver is_err early-return guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unreachable_unchecked_path"
+kind = "positive"
+claim = "unreachable_unchecked reports an unreachable-path obligation instead of a generic unsafe function call"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unreachable_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unreachable_unchecked_infallible_path"
+kind = "positive"
+claim = "unreachable_unchecked recognizes local Fallibility::Infallible error-path evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "unreachable_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unreachable_unchecked_other_infallible_not_guard"
+kind = "false_positive_control"
+claim = "unreachable_unchecked does not accept Fallibility::Infallible evidence from another match context"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unreachable_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unreachable_unchecked_post_infallible_not_guard"
+kind = "false_positive_control"
+claim = "unreachable_unchecked does not accept infallible-path evidence after the unchecked operation"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unreachable_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unreachable_unchecked_closed_infallible_match_not_guard"
+kind = "false_positive_control"
+claim = "unreachable_unchecked does not accept a closed infallible match before a later unchecked operation"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unreachable_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "get_unchecked_mut_bounds"
+kind = "positive"
+claim = "get_unchecked_mut reports missing bounds evidence instead of a generic unsafe function call"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_len_guard"
+kind = "positive"
+claim = "get_unchecked_mut recognizes same-receiver len guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_other_len_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept len guard evidence from another receiver"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_post_check_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept bounds checks after the unchecked access as evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_bounds_observed_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept a bare bounds predicate observation as guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_closed_bounds_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept a closed positive bounds branch before the unchecked access as guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_reassigned_index_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept bounds evidence after the checked index is reassigned before use"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "pin_new_unchecked"
+kind = "positive"
+claim = "Pin::new_unchecked reports missing pin invariant evidence without inventing a generic witness"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "pin_unchecked"
+expected_hazard = "pin_invariant"
+
+[[cases]]
+fixture = "raw_pointer_write_bytes"
+kind = "positive"
+claim = "raw pointer write_bytes to *mut u8 reports raw pointer write obligations and recognizes u8 alignment/value evidence only"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_write"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "raw_pointer_write_other_u8_not_guard"
+kind = "false_positive_control"
+claim = "raw pointer write_bytes does not treat an unrelated *mut u8 binding as target evidence"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_write"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "raw_pointer_write_maybeuninit"
+kind = "positive"
+claim = "raw pointer write_bytes recognizes MaybeUninit destination evidence for initialized-memory only"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_write"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "raw_pointer_write_other_maybeuninit_not_guard"
+kind = "false_positive_control"
+claim = "raw pointer write_bytes does not treat unrelated MaybeUninit mentions as initialized-memory evidence"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_write"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "raw_pointer_write_volatile"
+kind = "positive"
+claim = "method-form write_volatile reports raw pointer write obligations instead of a generic unsafe function call"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_write"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "copy_nonoverlapping"
+kind = "positive"
+claim = "copy_nonoverlapping reports non-overlap and valid-range obligations instead of a generic unsafe function call"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "copy_nonoverlapping"
+expected_hazard = "aliasing_or_provenance"
+
+[[cases]]
+fixture = "ptr_copy_overlapping"
+kind = "positive"
+claim = "ptr::copy reports overlapping-copy range obligations instead of a generic unsafe function call or copy_nonoverlapping non-overlap obligation"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "ptr_copy"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "ptr_replace_value"
+kind = "positive"
+claim = "ptr::replace reports read-write pointer and drop-ownership obligations instead of a generic unsafe function call"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "ptr_replace"
+expected_hazard = "drop_or_deallocation"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked"
+kind = "positive"
+claim = "str::from_utf8_unchecked reports UTF-8 validity obligations instead of a generic unsafe function call"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_is_ok_guard"
+kind = "positive"
+claim = "str::from_utf8_unchecked recognizes same-buffer from_utf8 is_ok guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_is_err_return_guard"
+kind = "positive"
+claim = "str::from_utf8_unchecked recognizes same-buffer from_utf8 is_err early-return evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_question_mark_guard"
+kind = "positive"
+claim = "str::from_utf8_unchecked recognizes same-buffer from_utf8 question-mark propagation evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_match_return_guard"
+kind = "positive"
+claim = "str::from_utf8_unchecked recognizes same-buffer from_utf8 match-return evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_post_validation_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not accept validation after the unchecked conversion as UTF-8 evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_other_buffer_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not accept validation of another byte slice as UTF-8 evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_is_ok_observed_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not accept a bare is_ok observation as UTF-8 validation evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_guard_then_reassigned_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not accept UTF-8 validation evidence that is stale after buffer reassignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "zeroed_invalid_value"
+kind = "positive"
+claim = "mem::zeroed reports valid-zero obligations instead of a generic unsafe function call"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "zeroed"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "zeroed_valid_u32"
+kind = "positive"
+claim = "mem::zeroed recognizes a known valid-zero primitive target type"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "zeroed"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "inline_asm_human_review"
+kind = "positive"
+claim = "inline asm reports assembly/target hazards and routes to human review instead of a generic unsafe function call"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "inline_asm"
+expected_hazard = "inline_asm"
+
+[[cases]]
+fixture = "raw_pointer_read_len_capacity_assert"
+kind = "positive"
+claim = "raw pointer read recognizes len/capacity equality assertions as bounds evidence"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_read"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "raw_pointer_read_volatile"
+kind = "positive"
+claim = "method-form read_volatile reports raw pointer read obligations instead of a generic unsafe function call"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_read"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "pointer_arithmetic_num_ctrl_bytes_guard"
+kind = "positive"
+claim = "pointer arithmetic recognizes index < num_ctrl_bytes as bounds guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "pointer_arithmetic"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "pointer_arithmetic_slice_end"
+kind = "positive"
+claim = "pointer arithmetic recognizes slice start plus same-slice len end-pointer evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "pointer_arithmetic"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "slice_from_raw_parts_mut"
+kind = "positive"
+claim = "slice::from_raw_parts_mut reports slice range obligations instead of a generic unsafe function call"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "slice_from_raw_parts"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "slice_from_raw_parts_mut_maybeuninit"
+kind = "positive"
+claim = "slice::from_raw_parts_mut recognizes MaybeUninit element slices as initialized-memory evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "slice_from_raw_parts"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "slice_from_raw_parts_mut_other_maybeuninit_not_guard"
+kind = "false_positive_control"
+claim = "slice::from_raw_parts_mut does not treat unrelated MaybeUninit mentions as initialized-memory evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "slice_from_raw_parts"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_from_raw_parts"
+kind = "positive"
+claim = "Vec::from_raw_parts reports Vec ownership and deallocation obligations instead of slice range obligations"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_from_raw_parts"
+expected_hazard = "drop_or_deallocation"
+
+[[cases]]
+fixture = "vec_from_raw_parts_capacity_guard"
+kind = "positive"
+claim = "Vec::from_raw_parts recognizes a same-call len/capacity guard while leaving allocator and ownership evidence missing"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_from_raw_parts"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "vec_from_raw_parts_capacity_assert_guard"
+kind = "positive"
+claim = "Vec::from_raw_parts recognizes a same-call len/capacity assertion while leaving allocator and ownership evidence missing"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_from_raw_parts"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "vec_from_raw_parts_capacity_observed_not_guard"
+kind = "false_positive_control"
+claim = "Vec::from_raw_parts does not accept capacity mentions unless they bound the cap argument passed to the call"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_from_raw_parts"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "vec_from_raw_parts_capacity_value_observed_not_guard"
+kind = "false_positive_control"
+claim = "Vec::from_raw_parts does not accept bare len/cap relation observations as capacity evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_from_raw_parts"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "vec_from_raw_parts_capacity_closed_branch_not_guard"
+kind = "false_positive_control"
+claim = "Vec::from_raw_parts does not accept closed positive len/cap branches as capacity evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_from_raw_parts"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "vec_from_raw_parts_capacity_reassigned_not_guard"
+kind = "false_positive_control"
+claim = "Vec::from_raw_parts does not accept len/cap evidence after the checked cap argument is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_from_raw_parts"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "vec_from_raw_parts_manuallydrop_origin"
+kind = "positive"
+claim = "Vec::from_raw_parts recognizes same-pointer ManuallyDrop raw-parts pointer/capacity, ownership, initialized-range, and len/capacity evidence without discharging alignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_from_raw_parts"
+expected_hazard = "leak_or_ownership_transfer"
+
+[[cases]]
+fixture = "box_from_raw"
+kind = "positive"
+claim = "Box::from_raw reports ownership and deallocation obligations instead of a generic unsafe function call"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "box_from_raw"
+expected_hazard = "drop_or_deallocation"
+
+[[cases]]
+fixture = "box_from_raw_box_origin"
+kind = "positive"
+claim = "Box::from_raw recognizes same-pointer Box::into_raw origin evidence without importing a witness"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "box_from_raw"
+expected_hazard = "drop_or_deallocation"
+
+[[cases]]
+fixture = "box_from_raw_reassigned_origin_not_guard"
+kind = "false_positive_control"
+claim = "Box::from_raw does not accept Box::into_raw origin evidence after the raw pointer is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "box_from_raw"
+expected_hazard = "drop_or_deallocation"
+
+[[cases]]
+fixture = "static_mut_global_state"
+kind = "positive"
+claim = "static mut global state routes to concurrency review instead of Miri-first review"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "requires_loom"
+expected_operation_family = "static_mut"
+expected_hazard = "static_mut_global_state"
+
+[[cases]]
+fixture = "transmute_invalid_value"
+kind = "positive"
+claim = "transmute::<u8, bool> reports invalid-value/layout obligations"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_layout_size_guard"
+kind = "positive"
+claim = "transmute::<u8, bool> recognizes explicit size_of layout evidence while keeping valid-value evidence missing"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_bool_valid_value_guard"
+kind = "positive"
+claim = "transmute::<u8, bool> recognizes explicit size_of layout evidence and u8 bool-domain evidence while keeping witness evidence missing"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_bool_invalid_return_guard"
+kind = "positive"
+claim = "transmute::<u8, bool> recognizes explicit size_of layout evidence and u8 invalid-byte early-return evidence while keeping witness evidence missing"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_bool_value_observed_not_guard"
+kind = "false_positive_control"
+claim = "transmute::<u8, bool> does not accept a bare bool byte-domain observation as valid-value evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_bool_closed_if_observed_not_guard"
+kind = "false_positive_control"
+claim = "transmute::<u8, bool> does not accept a closed positive bool-domain branch before the call as valid-value evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_bool_guard_then_reassigned_not_guard"
+kind = "false_positive_control"
+claim = "transmute::<u8, bool> does not accept bool-domain evidence that is stale after reassignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_copy_invalid_value"
+kind = "positive"
+claim = "transmute_copy::<u8, bool> reports invalid-value/layout obligations instead of a generic unsafe function call"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_copy_layout_size_guard"
+kind = "positive"
+claim = "transmute_copy::<u8, bool> recognizes explicit size_of layout evidence while keeping valid-value evidence missing"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_copy_bool_valid_value_guard"
+kind = "positive"
+claim = "transmute_copy::<u8, bool> recognizes explicit size_of layout evidence and referenced u8 bool-domain evidence while keeping witness evidence missing"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_copy_bool_invalid_return_guard"
+kind = "positive"
+claim = "transmute_copy::<u8, bool> recognizes explicit size_of layout evidence and referenced u8 invalid-byte early-return evidence while keeping witness evidence missing"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_copy_bool_value_observed_not_guard"
+kind = "false_positive_control"
+claim = "transmute_copy::<u8, bool> does not accept a bare referenced-byte bool-domain observation as valid-value evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_copy_bool_closed_if_observed_not_guard"
+kind = "false_positive_control"
+claim = "transmute_copy::<u8, bool> does not accept a closed positive referenced-byte bool-domain branch before the call as valid-value evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_copy_bool_guard_then_reassigned_not_guard"
+kind = "false_positive_control"
+claim = "transmute_copy::<u8, bool> does not accept referenced-byte bool-domain evidence that is stale after reassignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "multiline_transmute_copy_invalid_value"
+kind = "positive"
+claim = "multi-line transmute_copy::<u8, bool> keeps a syntax-backed call snippet and transmute obligations"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unsafe_impl_send"
+kind = "positive"
+claim = "unsafe impl Send routes to concurrency witness review"
+support_tier = "Witness routing"
+expected_cards = 1
+expected_class = "requires_loom"
+expected_operation_family = "unsafe_impl_send_sync"
+expected_hazard = "send_sync_invariant"
+
+[[cases]]
+fixture = "unsafe_impl_send_generic_owner"
+kind = "positive"
+claim = "generic unsafe impl Send uses the implemented type as owner instead of a preceding function"
+support_tier = "Witness routing"
+expected_cards = 1
+expected_class = "requires_loom"
+expected_operation_family = "unsafe_impl_send_sync"
+expected_hazard = "send_sync_invariant"
+
+[[cases]]
+fixture = "unsafe_impl_sync_generic_bound"
+kind = "positive"
+claim = "generic unsafe impl Sync with a Send bound is classified as Sync and uses the implemented type owner"
+support_tier = "Witness routing"
+expected_cards = 1
+expected_class = "requires_loom"
+expected_operation_family = "unsafe_impl_send_sync"
+expected_hazard = "send_sync_invariant"
+
+[[cases]]
+fixture = "ffi_sanitizer_route"
+kind = "positive"
+claim = "unsafe extern C boundary routes away from Miri-first review"
+support_tier = "Witness routing"
+expected_cards = 1
+expected_class = "miri_unsupported"
+expected_operation_family = "ffi"
+expected_hazard = "ffi_abi"
+
+[[cases]]
+fixture = "safe_code_no_cards"
+kind = "negative"
+claim = "safe Rust changes emit no review cards"
+support_tier = "Diff unsafe site inventory"
+expected_cards = 0
+
+[[cases]]
+fixture = "imports_not_unsafe_operations"
+kind = "false_positive_control"
+claim = "extern crate and import-only unsafe operation paths emit no review cards"
+support_tier = "Diff unsafe site inventory"
+expected_cards = 0
+
+[[cases]]
+fixture = "cfg_target_feature_not_operation"
+kind = "false_positive_control"
+claim = "cfg target_feature predicates emit no review cards"
+support_tier = "Diff unsafe site inventory"
+expected_cards = 0
+
+[[cases]]
+fixture = "target_feature_safety_docs"
+kind = "positive"
+claim = "documented target-feature declarations are caller-contract sites and do not require local attribute guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "target_feature"
+expected_hazard = "target_feature"
+
+[[cases]]
+fixture = "attributed_unsafe_fn_no_duplicate"
+kind = "false_positive_control"
+claim = "attributed unsafe fn declarations are not duplicated by fallback line scanning"
+support_tier = "Diff unsafe site inventory"
+expected_cards = 2
+expected_class = "contract_missing"
+expected_operation_family = "unknown"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "inline_unsafe_raw_pointer_deref_no_duplicate"
+kind = "false_positive_control"
+claim = "inline unsafe blocks containing concrete raw pointer derefs do not emit duplicate unknown wrapper cards"
+support_tier = "Diff unsafe site inventory"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_deref"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "unsafe_fn_call_wrapper"
+kind = "positive"
+claim = "unsafe call wrappers emit unsafe_fn_call cards instead of unknown unsafe-block cards"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unsafe_fn_call"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "multiline_unsafe_fn_call_wrapper"
+kind = "positive"
+claim = "multi-line unsafe call wrappers emit unsafe_fn_call cards instead of unknown unsafe-block cards"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unsafe_fn_call"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "unsafe_fn_call_encode_utf8_remaining_cap"
+kind = "positive"
+claim = "unsafe encode_utf8 calls recognize remaining capacity argument evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "unsafe_fn_call"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "unchecked_constructor_availability_guard"
+kind = "positive"
+claim = "non-NonNull new_unchecked constructors are unsafe-call cards and recognize local is_available guards"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "unsafe_fn_call"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "unchecked_constructor_availability_assert_guard"
+kind = "positive"
+claim = "non-NonNull new_unchecked constructors recognize same-receiver is_available assertions"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "unsafe_fn_call"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "unchecked_constructor_unavailable_return_guard"
+kind = "positive"
+claim = "non-NonNull new_unchecked constructors recognize unavailable-path early returns"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "unsafe_fn_call"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "unchecked_constructor_other_availability_not_guard"
+kind = "false_positive_control"
+claim = "new_unchecked constructor availability evidence must come from the same receiver before the call"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unsafe_fn_call"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "unchecked_constructor_availability_observed_not_guard"
+kind = "false_positive_control"
+claim = "new_unchecked constructor availability observations do not discharge callee-contract evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unsafe_fn_call"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "unchecked_constructor_availability_closed_branch_not_guard"
+kind = "false_positive_control"
+claim = "new_unchecked constructor closed availability branches do not discharge callee-contract evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unsafe_fn_call"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "nonnull_new_guard"
+kind = "positive"
+claim = "NonNull::new guard evidence discharges the non-null obligation for NonNull::new_unchecked"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "nonnull_other_guard_not_evidence"
+kind = "false_positive_control"
+claim = "NonNull::new evidence for a different pointer does not discharge the non-null obligation"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "nonnull_is_null_nonreturning_not_guard"
+kind = "false_positive_control"
+claim = "same-pointer is_null observation without an early exit does not discharge the non-null obligation"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "nonnull_observed_not_guard"
+kind = "false_positive_control"
+claim = "bare same-pointer NonNull::new observation does not discharge the non-null obligation"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "nonnull_post_check_not_guard"
+kind = "false_positive_control"
+claim = "same-pointer nullability evidence after NonNull::new_unchecked does not discharge the non-null obligation"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "impl_trait_bound_owner_inference"
+kind = "false_positive_control"
+claim = "multi-line impl Trait bounds do not replace the real function owner on unsafe-call wrapper cards"
+support_tier = "Diff unsafe site inventory"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unsafe_fn_call"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "nested_unsafe_operation_call_dedupe"
+kind = "false_positive_control"
+claim = "nested unsafe operations do not also emit parent-call duplicate cards"
+support_tier = "Diff unsafe site inventory"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "adjacent_unchanged_unsafe_fn_no_card"
+kind = "false_positive_control"
+claim = "adjacent unchanged unsafe declarations do not emit cards when a neighboring safe function changes"
+support_tier = "Diff unsafe site inventory"
+expected_cards = 0
+
+[[cases]]
+fixture = "safe_reference_deref_no_cards"
+kind = "negative"
+claim = "safe reference dereference emits no unsafe review card"
+support_tier = "Raw pointer card slice"
+expected_cards = 0
+
+[[cases]]
+fixture = "comment_alignment_not_guard"
+kind = "false_positive_control"
+claim = "TODO/comment text mentioning alignment does not count as guard evidence"
+support_tier = "Guard evidence mining"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_read"
+expected_hazard = "alignment"
