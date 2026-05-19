@@ -941,6 +941,25 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn get_unchecked_mut_bounds_evidence_requires_same_receiver() -> Result<(), String> {
+        let guarded = fixture_output("get_unchecked_mut_len_guard")?;
+        let guarded_card = single_card("get_unchecked_mut_len_guard", &guarded)?;
+        assert_eq!(guarded_card.operation.family, OperationFamily::GetUnchecked);
+        assert_eq!(guarded_card.class, ReviewClass::GuardedUnwitnessed);
+        assert!(obligation_discharge_present(guarded_card, "bounds"));
+
+        let other_guard = fixture_output("get_unchecked_mut_other_len_not_guard")?;
+        let other_guard_card = single_card("get_unchecked_mut_other_len_not_guard", &other_guard)?;
+        assert_eq!(
+            other_guard_card.operation.family,
+            OperationFamily::GetUnchecked
+        );
+        assert_eq!(other_guard_card.class, ReviewClass::GuardMissing);
+        assert!(!obligation_discharge_present(other_guard_card, "bounds"));
+        Ok(())
+    }
+
+    #[test]
     fn pin_new_unchecked_uses_pin_operation_family() -> Result<(), String> {
         let output = fixture_output("pin_new_unchecked")?;
         let card = single_card("pin_new_unchecked", &output)?;

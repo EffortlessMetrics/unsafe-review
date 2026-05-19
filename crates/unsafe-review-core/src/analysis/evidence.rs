@@ -169,7 +169,7 @@ fn discharge_state_for(
             }
         }
         "bounds" | "valid-range" => {
-            if has_length_or_bounds_guard(lower)
+            if has_bounds_guard(site, lower)
                 || (family == &OperationFamily::PointerArithmetic
                     && has_slice_end_pointer_arithmetic_evidence(lower))
             {
@@ -329,6 +329,65 @@ fn has_length_or_bounds_guard(lower: &str) -> bool {
     let has_comparison = lower.contains(">=") || lower.contains('<');
     (has_comparison && (lower.contains("len") || lower.contains("num_ctrl_bytes")))
         || has_len_capacity_equality_guard(lower)
+}
+
+fn has_bounds_guard(site: &ScannedSite, lower: &str) -> bool {
+    if site.operation.family == OperationFamily::GetUnchecked
+        && let Some((receiver, index)) =
+            get_unchecked_receiver_and_index(&site.operation.expression)
+    {
+        return has_get_unchecked_bounds_guard(lower, &receiver, &index);
+    }
+    has_length_or_bounds_guard(lower)
+}
+
+fn get_unchecked_receiver_and_index(expression: &str) -> Option<(String, String)> {
+    let compact = compact_code(&expression.to_ascii_lowercase());
+    for marker in [".get_unchecked_mut(", ".get_unchecked("] {
+        let Some(receiver) = receiver_before_marker(&compact, marker) else {
+            continue;
+        };
+        let call_pos = compact.find(marker)? + marker.len();
+        let argument_text = &compact[call_pos..];
+        let argument_end = matching_call_argument_end(argument_text)?;
+        let index = &argument_text[..argument_end];
+        if !receiver.is_empty() && !index.is_empty() {
+            return Some((receiver.to_string(), index.to_string()));
+        }
+    }
+    None
+}
+
+fn has_get_unchecked_bounds_guard(lower: &str, receiver: &str, index: &str) -> bool {
+    let compact = compact_code(lower);
+    let receiver = compact_code(&receiver.to_ascii_lowercase());
+    let index = compact_code(&index.to_ascii_lowercase());
+    if receiver.is_empty() || index.is_empty() {
+        return false;
+    }
+    let len = format!("{receiver}.len()");
+    has_get_unchecked_bounds_predicate(&compact, &format!("{index}<{len}"))
+        || has_get_unchecked_bounds_predicate(&compact, &format!("{len}>{index}"))
+        || has_get_unchecked_bounds_early_return(&compact, &format!("{index}>={len}"))
+        || has_get_unchecked_bounds_early_return(&compact, &format!("{len}<={index}"))
+}
+
+fn has_get_unchecked_bounds_predicate(compact: &str, predicate: &str) -> bool {
+    contains_receiver_fragment(compact, predicate)
+        || compact.contains(&format!("if{predicate}"))
+        || compact.contains(&format!("assert!({predicate}"))
+        || compact.contains(&format!("debug_assert!({predicate}"))
+}
+
+fn has_get_unchecked_bounds_early_return(compact: &str, predicate: &str) -> bool {
+    let guard = format!("if{predicate}{{");
+    let Some((_prefix, after_guard)) = compact.split_once(&guard) else {
+        return false;
+    };
+    after_guard
+        .split_once('}')
+        .map_or(after_guard, |(guard_body, _after)| guard_body)
+        .contains("return")
 }
 
 fn has_len_capacity_equality_guard(lower: &str) -> bool {
@@ -1839,6 +1898,53 @@ mod tests {
         let evidence = obligation_evidence(&raw_read, &obligations, &contract, &reach);
 
         assert!(evidence[0].discharge.present);
+    }
+
+    #[test]
+    fn get_unchecked_bounds_guard_must_match_receiver_when_known() {
+        let obligations = vec![SafetyObligation::new(
+            "bounds",
+            "index is in bounds for the collection",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let other_receiver_guard = site_with_family(
+            OperationFamily::GetUnchecked,
+            vec!["if index < other_values.len() {"],
+            "unsafe { values.get_unchecked_mut(index) }",
+            vec!["}"],
+        );
+        let matching_guard = site_with_family(
+            OperationFamily::GetUnchecked,
+            vec!["if index < values.len() {"],
+            "unsafe { values.get_unchecked_mut(index) }",
+            vec!["}"],
+        );
+        let matching_return_guard = site_with_family(
+            OperationFamily::GetUnchecked,
+            vec!["if index >= values.len() { return None; }"],
+            "unsafe { values.get_unchecked_mut(index) }",
+            vec![],
+        );
+
+        assert!(
+            !obligation_evidence(&other_receiver_guard, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
+            obligation_evidence(&matching_guard, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
+            obligation_evidence(&matching_return_guard, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
     }
 
     #[test]

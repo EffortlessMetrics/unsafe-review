@@ -1,0 +1,62 @@
+[
+    {
+        "id":  "UR-get-unchecked-mut-len-guard-fixture-src-lib-rs-pick-checked-operation-get_unchecked-get-unchecked-c7a7d2b051de-bounds-c1",
+        "class":  "guarded_unwitnessed",
+        "priority":  "medium",
+        "confidence":  "medium",
+        "site":  {
+                     "file":  "src/lib.rs",
+                     "line":  4,
+                     "column":  9,
+                     "kind":  "operation",
+                     "owner":  "pick_checked",
+                     "visibility":  "private",
+                     "public_api_surface":  false,
+                     "snippet":  "Some(unsafe { values.get_unchecked_mut(index) })"
+                 },
+        "operation_family":  "get_unchecked",
+        "hazards":  [
+                        "bounds"
+                    ],
+        "obligations":  [
+                            "index is in bounds for the collection"
+                        ],
+        "obligation_evidence":  [
+                                    {
+                                        "key":  "bounds",
+                                        "description":  "index is in bounds for the collection",
+                                        "contract":  {
+                                                         "present":  true,
+                                                         "state":  "present",
+                                                         "summary":  "Nearby `SAFETY:` comment was detected"
+                                                     },
+                                        "discharge":  {
+                                                          "present":  true,
+                                                          "state":  "present",
+                                                          "summary":  "Length or bounds guard code was detected"
+                                                      },
+                                        "reach":  {
+                                                      "present":  true,
+                                                      "state":  "present",
+                                                      "summary":  "1 related test file(s) mention owner `pick_checked`"
+                                                  },
+                                        "witness":  {
+                                                        "present":  false,
+                                                        "state":  "missing",
+                                                        "summary":  "No imported witness receipt was found"
+                                                    }
+                                    }
+                                ],
+        "contract":  "Nearby `SAFETY:` comment was detected",
+        "discharge":  "All inferred safety obligations have visible local guard evidence",
+        "reach":  "1 related test file(s) mention owner `pick_checked`",
+        "witness":  "No imported witness receipt was found",
+        "missing":  [
+                        "No witness receipt imported for this card"
+                    ],
+        "verify_commands":  [
+                                "cargo +nightly miri test pick_checked",
+                                "cargo +nightly careful test pick_checked"
+                            ]
+    }
+]
