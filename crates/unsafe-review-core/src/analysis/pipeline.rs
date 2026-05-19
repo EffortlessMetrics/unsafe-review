@@ -775,6 +775,25 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn zeroed_uses_valid_zero_operation_family() -> Result<(), String> {
+        let output = fixture_output("zeroed_invalid_value")?;
+        let card = single_card("zeroed_invalid_value", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::Zeroed);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(card.hazards.contains(&HazardKind::InvalidValue));
+        assert!(card.id.0.contains("zeroed"));
+        assert!(
+            card.obligation_evidence.iter().any(|evidence| {
+                evidence.obligation.key == "valid-zero" && !evidence.discharge.present
+            }),
+            "valid-zero obligation should remain missing without target-type evidence"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn pointer_arithmetic_num_ctrl_bytes_guard_is_discharged() -> Result<(), String> {
         let output = fixture_output("pointer_arithmetic_num_ctrl_bytes_guard")?;
         let card = single_card("pointer_arithmetic_num_ctrl_bytes_guard", &output)?;
