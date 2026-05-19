@@ -1,0 +1,90 @@
+[
+  {
+    "id": "UR-transmute-bool-invalid-return-guard-src-lib-rs-byte-to-bool-or-false-operation-transmute-u8-bool-bdefdb7b6120-invalid_value-c1",
+    "class": "guarded_unwitnessed",
+    "priority": "medium",
+    "confidence": "medium",
+    "site": {
+      "file": "src/lib.rs",
+      "line": 7,
+      "column": 5,
+      "kind": "operation",
+      "owner": "byte_to_bool_or_false",
+      "visibility": "private",
+      "public_api_surface": false,
+      "snippet": "unsafe { core::mem::transmute::<u8, bool>(value) }"
+    },
+    "operation_family": "transmute",
+    "hazards": [
+      "invalid_value",
+      "layout_or_repr",
+      "aliasing_or_provenance"
+    ],
+    "obligations": [
+      "source and destination layouts are compatible",
+      "destination value satisfies Rust validity rules"
+    ],
+    "obligation_evidence": [
+      {
+        "key": "layout",
+        "description": "source and destination layouts are compatible",
+        "contract": {
+          "present": true,
+          "state": "present",
+          "summary": "Nearby `SAFETY:` comment was detected"
+        },
+        "discharge": {
+          "present": true,
+          "state": "present",
+          "summary": "Transmute layout size evidence was detected"
+        },
+        "reach": {
+          "present": true,
+          "state": "present",
+          "summary": "1 related test file(s) mention owner `byte_to_bool_or_false`"
+        },
+        "witness": {
+          "present": false,
+          "state": "missing",
+          "summary": "No imported witness receipt was found"
+        }
+      },
+      {
+        "key": "valid-value",
+        "description": "destination value satisfies Rust validity rules",
+        "contract": {
+          "present": true,
+          "state": "present",
+          "summary": "Nearby `SAFETY:` comment was detected"
+        },
+        "discharge": {
+          "present": true,
+          "state": "present",
+          "summary": "Transmute u8-to-bool valid-value evidence was detected"
+        },
+        "reach": {
+          "present": true,
+          "state": "present",
+          "summary": "1 related test file(s) mention owner `byte_to_bool_or_false`"
+        },
+        "witness": {
+          "present": false,
+          "state": "missing",
+          "summary": "No imported witness receipt was found"
+        }
+      }
+    ],
+    "contract": "Nearby `SAFETY:` comment was detected",
+    "discharge": "All inferred safety obligations have visible local guard evidence",
+    "reach": "1 related test file(s) mention owner `byte_to_bool_or_false`",
+    "witness": "No imported witness receipt was found",
+    "missing": [
+      "No witness receipt imported for this card"
+    ],
+    "verify_commands": [
+      "cargo +nightly miri test byte_to_bool_or_false",
+      "cargo +nightly careful test byte_to_bool_or_false"
+    ]
+  }
+]
+
