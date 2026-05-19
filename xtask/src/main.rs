@@ -369,6 +369,18 @@ fn check_calibration() -> Result<(), String> {
         }
     }
 
+    for dir in fixture_dirs(&workspace_path("fixtures"))? {
+        let fixture = fixture_dir_name(&dir)?;
+        if FIXTURE_EXPECTED_CARDS_EXCEPTIONS.contains(&fixture) {
+            continue;
+        }
+        if dir.join("expected.cards.json").is_file() && !fixtures.contains(fixture) {
+            return Err(format!(
+                "fixture `{fixture}` has expected.cards.json but no fixtures/calibration.toml case"
+            ));
+        }
+    }
+
     println!("check-calibration: ok ({} cases)", cases.len());
     Ok(())
 }
