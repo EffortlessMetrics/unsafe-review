@@ -18,6 +18,11 @@ Recent guard-evidence additions include
 `raw_pointer_alignment_reassigned_pointer_not_guard`, which pin same-pointer
 `is_aligned` guard evidence without treating observations, closed branches, or
 stale checked pointers as alignment discharge.
+The same stale-evidence controls are also pinned for same-pointer modulo
+alignment checks through `raw_pointer_alignment_modulo_guard`,
+`raw_pointer_alignment_modulo_observed_not_guard`,
+`raw_pointer_alignment_modulo_closed_branch_not_guard`, and
+`raw_pointer_alignment_modulo_reassigned_pointer_not_guard`.
 
 | Capability | Tier | Surface | Proof | Known limits |
 |---|---|---|---|---|

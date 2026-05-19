@@ -1,0 +1,22 @@
+pub struct Header(u32);
+
+pub fn read_header(bytes: &[u8]) -> Option<Header> {
+    assert!(bytes.len() >= core::mem::size_of::<Header>());
+    let ptr = bytes.as_ptr();
+    if (ptr as usize) % core::mem::align_of::<Header>() != 0 {
+        return None;
+    }
+    // SAFETY: length and alignment are checked above; this fixture still leaves
+    // the broader pointer validity obligations to unsafe-review.
+    Some(unsafe { ptr.cast::<Header>().read() })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::read_header;
+
+    #[test]
+    fn mentions_read_header() {
+        let _ = stringify!(read_header);
+    }
+}
