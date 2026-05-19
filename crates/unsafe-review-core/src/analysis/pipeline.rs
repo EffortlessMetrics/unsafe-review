@@ -551,7 +551,11 @@ mod tests {
 
     #[test]
     fn raw_pointer_v1_evidence_stays_obligation_specific() -> Result<(), String> {
-        for fixture in ["raw_pointer_alignment", "comment_alignment_not_guard"] {
+        for fixture in [
+            "raw_pointer_alignment",
+            "align_of_only_not_guard",
+            "comment_alignment_not_guard",
+        ] {
             let output = fixture_output(fixture)?;
             let card = single_card(fixture, &output)?;
 

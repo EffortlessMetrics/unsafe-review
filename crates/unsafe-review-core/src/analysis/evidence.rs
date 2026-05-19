@@ -733,11 +733,14 @@ fn compact_code(lower: &str) -> String {
 }
 
 fn has_alignment_guard(lower: &str) -> bool {
+    let compact = compact_code(lower);
     lower.contains("is_aligned")
         || lower.contains("align_offset")
-        || lower.contains("align_of")
         || lower.contains("addr() %")
         || lower.contains("as usize %")
+        || compact.contains("addr()%")
+        || compact.contains("asusize)%")
+        || compact.contains("asusize%")
 }
 
 fn has_nullability_guard(site: &ScannedSite, lower: &str) -> bool {
@@ -1007,6 +1010,40 @@ mod tests {
         );
         assert!(
             obligation_evidence(&local_guard, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+    }
+
+    #[test]
+    fn bare_align_of_does_not_discharge_alignment() {
+        let obligations = vec![SafetyObligation::new(
+            "alignment",
+            "pointer is aligned for the accessed type",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let align_of_only = site_with_context(
+            vec!["let _required = core::mem::align_of::<Header>();"],
+            "ptr.read()",
+            vec![],
+        );
+        let modulo_guard = site_with_context(
+            vec!["if (ptr as usize) % core::mem::align_of::<Header>() != 0 { return None; }"],
+            "ptr.read()",
+            vec![],
+        );
+
+        assert!(
+            !obligation_evidence(&align_of_only, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
+            obligation_evidence(&modulo_guard, &obligations, &contract, &reach)[0]
                 .discharge
                 .present
         );
