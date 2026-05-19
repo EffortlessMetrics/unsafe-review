@@ -38,6 +38,16 @@ const FIXTURE_PACKAGE_PREFIX_EXCEPTIONS: &[(&str, &str)] =
     &[("raw_pointer_alignment_line_drift", "raw-pointer-alignment")];
 
 const CALIBRATION_REQUIRED_KINDS: &[&str] = &["positive", "negative", "false_positive_control"];
+const CALIBRATION_CASE_FIELDS: &[&str] = &[
+    "fixture",
+    "kind",
+    "claim",
+    "support_tier",
+    "expected_cards",
+    "expected_class",
+    "expected_operation_family",
+    "expected_hazard",
+];
 const ZERO_CARD_EXPECTATION_FIELDS: &[&str] = &[
     "expected_class",
     "expected_operation_family",
@@ -363,6 +373,7 @@ fn check_calibration() -> Result<(), String> {
                 "fixtures/calibration.toml cases[{idx}] must be a TOML table"
             ));
         };
+        check_calibration_case_fields(case, idx)?;
         let fixture = required_case_string(case, "fixture", idx)?;
         let kind = required_case_string(case, "kind", idx)?;
         let claim = required_case_string(case, "claim", idx)?;
@@ -916,6 +927,20 @@ fn check_calibration_case(
     Ok(())
 }
 
+fn check_calibration_case_fields(
+    case: &toml::map::Map<String, toml::Value>,
+    idx: usize,
+) -> Result<(), String> {
+    for field in case.keys() {
+        if !CALIBRATION_CASE_FIELDS.contains(&field.as_str()) {
+            return Err(format!(
+                "fixtures/calibration.toml cases[{idx}] uses unknown field `{field}`"
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn check_calibration_kind_card_count(
     kind: &str,
     expected_cards: usize,
@@ -1441,6 +1466,21 @@ mod tests {
         };
         assert!(err.contains("cases[7]"));
         assert!(err.contains("expected_class"));
+        Ok(())
+    }
+
+    #[test]
+    fn calibration_cases_reject_unknown_fields() -> Result<(), String> {
+        let mut case = toml::map::Map::new();
+        case.insert(
+            "expected_hazards".to_string(),
+            toml::Value::String("alignment".to_string()),
+        );
+        let Err(err) = check_calibration_case_fields(&case, 2) else {
+            return Err("calibration case with unknown field should fail".to_string());
+        };
+        assert!(err.contains("cases[2]"));
+        assert!(err.contains("expected_hazards"));
         Ok(())
     }
 
