@@ -948,6 +948,24 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn nonnull_new_observation_is_not_guard_evidence() -> Result<(), String> {
+        let output = fixture_output("nonnull_observed_not_guard")?;
+        let card = single_card("nonnull_observed_not_guard", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::NonNullUnchecked);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(!card.discharge.present);
+        assert!(!obligation_discharge_present(card, "non-null"));
+        assert!(
+            card.missing.iter().any(|missing| missing.kind == "guard"),
+            "observing NonNull::new without checking the result must not resolve this card's guard prompt"
+        );
+        assert!(card.id.0.contains("nonnull-unchecked"));
+        Ok(())
+    }
+
+    #[test]
     fn nonnull_post_check_is_not_guard_evidence() -> Result<(), String> {
         let output = fixture_output("nonnull_post_check_not_guard")?;
         let card = single_card("nonnull_post_check_not_guard", &output)?;

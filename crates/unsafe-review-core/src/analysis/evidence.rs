@@ -1618,10 +1618,14 @@ fn has_nullability_guard(site: &ScannedSite, lower: &str) -> bool {
         let guard_scope = code_before_operation(lower, &site.operation.expression)
             .unwrap_or_else(|| lower.to_string());
         let guard_compact = compact_code(&guard_scope);
-        return guard_compact.contains(&format!("nonnull::new({arg})"))
+        return has_nonnull_new_question_mark_guard(&guard_compact, &arg)
             || has_null_early_return_guard(&guard_compact, &arg);
     }
     lower.contains("is_null") || compact.contains("nonnull::new(")
+}
+
+fn has_nonnull_new_question_mark_guard(compact: &str, arg: &str) -> bool {
+    compact.contains(&format!("nonnull::new({arg})?"))
 }
 
 fn has_null_early_return_guard(compact: &str, arg: &str) -> bool {
