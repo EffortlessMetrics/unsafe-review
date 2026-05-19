@@ -36,6 +36,7 @@ required_core_fixtures = [
   "vec_set_len_start_bound_shrink",
   "vec_set_len_zero_clear",
   "drop_in_place_deallocation",
+  "drop_in_place_box_origin",
   "atomic_pointer_state_swap",
   "unwrap_unchecked_result",
   "unwrap_unchecked_infallible_result",
@@ -446,6 +447,16 @@ claim = "ptr::drop_in_place reports drop/deallocation obligations instead of unk
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"
+expected_operation_family = "drop_in_place"
+expected_hazard = "drop_or_deallocation"
+
+[[cases]]
+fixture = "drop_in_place_box_origin"
+kind = "positive"
+claim = "ptr::drop_in_place recognizes same-pointer Box::into_raw origin evidence without importing a witness"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
 expected_operation_family = "drop_in_place"
 expected_hazard = "drop_or_deallocation"
 

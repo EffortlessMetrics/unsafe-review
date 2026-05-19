@@ -48,7 +48,7 @@
       }
     ],
     "contract": "Nearby `SAFETY:` comment was detected",
-    "discharge": "All inferred safety obligations have visible local guard evidence",
+    "discharge": "All inferred safety obligations have visible local discharge evidence",
     "reach": "1 related test file(s) mention owner `decode`",
     "witness": "No imported witness receipt was found",
     "missing": [
