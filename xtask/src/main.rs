@@ -53,20 +53,7 @@ const OPERATION_FAMILY_REGISTRY: &str =
 const OPERATION_FAMILY_REGISTRY_COLUMNS: usize = 9;
 const OPERATION_FAMILY_SOURCE: &str = "crates/unsafe-review-core/src/domain/operation.rs";
 const HAZARD_KIND_SOURCE: &str = "crates/unsafe-review-core/src/domain/hazard.rs";
-const OPERATION_FAMILY_REGISTRY_WITNESS_ROUTES: &[&str] = &[
-    "miri",
-    "cargo-careful",
-    "asan",
-    "msan",
-    "tsan",
-    "lsan",
-    "loom",
-    "shuttle",
-    "kani",
-    "crux",
-    "human-deep-review",
-    "unsupported",
-];
+const WITNESS_KIND_SOURCE: &str = "crates/unsafe-review-core/src/domain/witness.rs";
 const ZERO_CARD_EXPECTATION_FIELDS: &[&str] = &[
     "expected_class",
     "expected_operation_family",
@@ -995,6 +982,7 @@ fn check_operation_family_registry_coverage(
     let registry_families = operation_family_registry_rows()?;
     let known_operation_families = operation_family_labels()?;
     let known_hazards = hazard_kind_labels()?;
+    let known_witness_routes = witness_kind_labels()?;
     let registry_hazards = operation_family_registry_hazards()?;
     let registry_fixture_proofs = operation_family_registry_fixture_proofs()?;
     let registry_witness_routes = operation_family_registry_witness_routes()?;
@@ -1009,6 +997,7 @@ fn check_operation_family_registry_coverage(
         calibration_fixtures_by_family,
         &known_operation_families,
         &known_hazards,
+        &known_witness_routes,
         &registry,
     )
 }
@@ -1025,6 +1014,7 @@ fn check_operation_family_registry_coverage_with_registry(
     calibration_fixtures_by_family: &BTreeMap<String, BTreeSet<String>>,
     known_operation_families: &BTreeSet<String>,
     known_hazards: &BTreeSet<String>,
+    known_witness_routes: &BTreeSet<String>,
     registry: &OperationFamilyRegistryView<'_>,
 ) -> Result<(), String> {
     let missing_registry_rows = calibration_families
@@ -1107,7 +1097,7 @@ fn check_operation_family_registry_coverage_with_registry(
         };
         let unknown_routes = routes
             .iter()
-            .filter(|route| !OPERATION_FAMILY_REGISTRY_WITNESS_ROUTES.contains(&route.as_str()))
+            .filter(|route| !known_witness_routes.contains(route.as_str()))
             .cloned()
             .collect::<Vec<_>>();
         if !unknown_routes.is_empty() {
@@ -1191,6 +1181,16 @@ fn hazard_kind_labels() -> Result<BTreeSet<String>, String> {
 fn hazard_kind_labels_from_text(text: &str) -> Result<BTreeSet<String>, String> {
     as_str_labels_from_text(text)
         .ok_or_else(|| format!("{HAZARD_KIND_SOURCE} has no HazardKind::as_str labels"))
+}
+
+fn witness_kind_labels() -> Result<BTreeSet<String>, String> {
+    let text = read_to_string(&workspace_path(WITNESS_KIND_SOURCE))?;
+    witness_kind_labels_from_text(&text)
+}
+
+fn witness_kind_labels_from_text(text: &str) -> Result<BTreeSet<String>, String> {
+    as_str_labels_from_text(text)
+        .ok_or_else(|| format!("{WITNESS_KIND_SOURCE} has no WitnessKind::as_str labels"))
 }
 
 fn as_str_labels_from_text(text: &str) -> Option<BTreeSet<String>> {
@@ -2069,6 +2069,7 @@ mod tests {
         )]);
         let known_operation_families = BTreeSet::from(["raw_pointer_read".to_string()]);
         let known_hazards = BTreeSet::from(["pointer_validity".to_string()]);
+        let known_witness_routes = BTreeSet::from(["miri".to_string()]);
         let registry_fixtures = BTreeMap::from([(
             "raw_pointer_read".to_string(),
             BTreeSet::from(["raw_pointer_write_assignment".to_string()]),
@@ -2089,6 +2090,7 @@ mod tests {
             &calibration_fixtures,
             &known_operation_families,
             &known_hazards,
+            &known_witness_routes,
             &registry,
         ) else {
             return Err("wrong-family fixture proof should fail".to_string());
@@ -2109,6 +2111,7 @@ mod tests {
         let registry_families = BTreeSet::from(["spooky_operation".to_string()]);
         let known_operation_families = BTreeSet::from(["raw_pointer_read".to_string()]);
         let known_hazards = BTreeSet::from(["pointer_validity".to_string()]);
+        let known_witness_routes = BTreeSet::from(["miri".to_string()]);
         let registry_hazards = BTreeMap::from([(
             "spooky_operation".to_string(),
             BTreeSet::from(["pointer_validity".to_string()]),
@@ -2133,6 +2136,7 @@ mod tests {
             &calibration_fixtures,
             &known_operation_families,
             &known_hazards,
+            &known_witness_routes,
             &registry,
         ) else {
             return Err("unknown operation family should fail".to_string());
@@ -2157,6 +2161,7 @@ mod tests {
         )]);
         let known_operation_families = BTreeSet::from(["raw_pointer_read".to_string()]);
         let known_hazards = BTreeSet::from(["pointer_validity".to_string()]);
+        let known_witness_routes = BTreeSet::from(["miri".to_string()]);
         let registry_fixtures = BTreeMap::from([(
             "raw_pointer_read".to_string(),
             BTreeSet::from(["raw_pointer_alignment".to_string()]),
@@ -2177,6 +2182,7 @@ mod tests {
             &calibration_fixtures,
             &known_operation_families,
             &known_hazards,
+            &known_witness_routes,
             &registry,
         ) else {
             return Err("unknown hazard should fail".to_string());
@@ -2201,6 +2207,7 @@ mod tests {
         )]);
         let known_operation_families = BTreeSet::from(["raw_pointer_read".to_string()]);
         let known_hazards = BTreeSet::from(["pointer_validity".to_string()]);
+        let known_witness_routes = BTreeSet::from(["miri".to_string()]);
         let registry_fixtures = BTreeMap::from([(
             "raw_pointer_read".to_string(),
             BTreeSet::from(["raw_pointer_alignment".to_string()]),
@@ -2221,6 +2228,7 @@ mod tests {
             &calibration_fixtures,
             &known_operation_families,
             &known_hazards,
+            &known_witness_routes,
             &registry,
         ) else {
             return Err("unknown witness route should fail".to_string());
@@ -2307,6 +2315,29 @@ impl HazardKind {
         assert!(labels.contains("pointer_validity"));
         assert!(labels.contains("alignment"));
         assert_eq!(labels.len(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn witness_kind_parser_extracts_as_str_labels() -> Result<(), String> {
+        let text = r#"
+impl WitnessKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Miri => "miri",
+            Self::CargoCareful => "cargo-careful",
+            Self::HumanDeepReview => "human-deep-review",
+        }
+    }
+}
+"#;
+
+        let labels = witness_kind_labels_from_text(text)?;
+
+        assert!(labels.contains("miri"));
+        assert!(labels.contains("cargo-careful"));
+        assert!(labels.contains("human-deep-review"));
+        assert_eq!(labels.len(), 3);
         Ok(())
     }
 
