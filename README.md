@@ -195,7 +195,8 @@ cargo run --locked -p xtask -- check-dogfood
 ## Fuzzing
 
 The repository includes a manual `cargo-fuzz` harness for analyzer robustness.
-It is not part of the default PR gate.
+It is not part of the default PR gate. See [Fuzzing](docs/FUZZING.md) for the
+harness input contract.
 
 ```bash
 cargo install cargo-fuzz

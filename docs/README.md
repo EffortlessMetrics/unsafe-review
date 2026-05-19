@@ -13,6 +13,7 @@
 | Implementation plans | PR-sized sequence and proof commands | `plans/` |
 | Active lane | current dogfood-calibrated evidence loop | `docs/status/DOGFOOD_CALIBRATED_EVIDENCE_LANE.md` |
 | Dogfood index | selected real-crate dogfood targets and recorded outcome movement | `docs/dogfood/index.md`, `docs/dogfood/index.json` |
+| Fuzzing | manual analyzer robustness harness and input contract | `docs/FUZZING.md` |
 | Support summary | concise support posture front panel | `docs/status/SUPPORT_SUMMARY.md` |
 | Support tiers | detailed product claim to proof ledger | `docs/status/SUPPORT_TIERS.md` |
 | Objective audit | current objective evidence and remaining gaps | `docs/status/OBJECTIVE_AUDIT.md` |
