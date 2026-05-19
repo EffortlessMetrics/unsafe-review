@@ -1001,6 +1001,21 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn slice_from_raw_parts_mut_maybeuninit_evidence_requires_slice_context() -> Result<(), String>
+    {
+        let output = fixture_output("slice_from_raw_parts_mut_other_maybeuninit_not_guard")?;
+        let card = single_card(
+            "slice_from_raw_parts_mut_other_maybeuninit_not_guard",
+            &output,
+        )?;
+
+        assert_eq!(card.operation.family, OperationFamily::SliceFromRawParts);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(!obligation_discharge_present(card, "initialized"));
+        Ok(())
+    }
+
+    #[test]
     fn vec_from_raw_parts_uses_vec_operation_family() -> Result<(), String> {
         let output = fixture_output("vec_from_raw_parts")?;
         let card = single_card("vec_from_raw_parts", &output)?;

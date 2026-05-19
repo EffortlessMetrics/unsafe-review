@@ -1,0 +1,5 @@
+[package]
+name = "slice-from-raw-parts-mut-other-maybeuninit-not-guard-fixture"
+version = "0.1.0"
+edition = "2024"
+
