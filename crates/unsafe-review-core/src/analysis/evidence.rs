@@ -233,6 +233,12 @@ fn discharge_state_for(
                 EvidenceState::present(
                     "Infallible Result state evidence was detected before unwrap_unchecked",
                 )
+            } else if family == &OperationFamily::UnwrapUnchecked
+                && has_unwrap_unchecked_receiver_state_evidence(lower)
+            {
+                EvidenceState::present(
+                    "Same-receiver Option/Result state evidence was detected before unwrap_unchecked",
+                )
             } else {
                 EvidenceState::missing("No obligation-specific guard code was detected")
             }
@@ -364,6 +370,28 @@ fn has_unwrap_unchecked_infallible_result_evidence(lower: &str) -> bool {
     compact.contains("fallibility::infallible") && compact.contains("result.unwrap_unchecked(")
 }
 
+fn has_unwrap_unchecked_receiver_state_evidence(lower: &str) -> bool {
+    let compact = compact_code(lower);
+    let Some((before_call, receiver)) = unwrap_unchecked_receiver_context(&compact) else {
+        return false;
+    };
+
+    before_call.contains(&format!("{receiver}.is_some()"))
+        || before_call.contains(&format!("{receiver}.is_ok()"))
+}
+
+fn unwrap_unchecked_receiver_context(compact: &str) -> Option<(&str, &str)> {
+    let call_pos = compact.find(".unwrap_unchecked(")?;
+    let before_call = &compact[..call_pos];
+    let receiver_start = before_call
+        .char_indices()
+        .rev()
+        .find_map(|(idx, ch)| (!is_receiver_path_char(ch)).then_some(idx + ch.len_utf8()))
+        .unwrap_or(0);
+    let receiver = &before_call[receiver_start..];
+    (!receiver.is_empty()).then_some((before_call, receiver))
+}
+
 fn has_unreachable_unchecked_infallible_path_evidence(lower: &str) -> bool {
     let compact = compact_code(lower);
     compact.contains("fallibility::infallible") && compact.contains("unreachable_unchecked(")
@@ -444,6 +472,10 @@ fn has_nullability_guard(lower: &str) -> bool {
 fn contains_word(text: &str, word: &str) -> bool {
     text.split(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))
         .any(|token| token == word)
+}
+
+fn is_receiver_path_char(ch: char) -> bool {
+    ch == '_' || ch == ':' || ch == '.' || ch.is_ascii_alphanumeric()
 }
 
 pub(crate) fn reach_evidence(
@@ -1262,6 +1294,83 @@ mod tests {
         );
 
         let evidence = obligation_evidence(&option_unwrap, &obligations, &contract, &reach);
+
+        assert!(!evidence[0].discharge.present);
+    }
+
+    #[test]
+    fn unwrap_unchecked_same_receiver_state_discharges_valid_value_obligation() {
+        let obligations = vec![SafetyObligation::new(
+            "valid-value",
+            "value is known to be `Some` or `Ok` before `unwrap_unchecked`",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let option = site_with_family(
+            OperationFamily::UnwrapUnchecked,
+            vec!["if option.is_some() {"],
+            "unsafe { option.unwrap_unchecked() }",
+            vec!["}"],
+        );
+        let result = site_with_family(
+            OperationFamily::UnwrapUnchecked,
+            vec!["if result.is_ok() {"],
+            "unsafe { result.unwrap_unchecked() }",
+            vec!["}"],
+        );
+
+        let option_evidence = obligation_evidence(&option, &obligations, &contract, &reach);
+        let result_evidence = obligation_evidence(&result, &obligations, &contract, &reach);
+
+        assert!(option_evidence[0].discharge.present);
+        assert!(result_evidence[0].discharge.present);
+    }
+
+    #[test]
+    fn unwrap_unchecked_state_evidence_requires_same_receiver() {
+        let obligations = vec![SafetyObligation::new(
+            "valid-value",
+            "value is known to be `Some` or `Ok` before `unwrap_unchecked`",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let unchecked = site_with_family(
+            OperationFamily::UnwrapUnchecked,
+            vec!["if other.is_some() {"],
+            "unsafe { option.unwrap_unchecked() }",
+            vec!["}"],
+        );
+
+        let evidence = obligation_evidence(&unchecked, &obligations, &contract, &reach);
+
+        assert!(!evidence[0].discharge.present);
+    }
+
+    #[test]
+    fn unwrap_unchecked_state_evidence_must_precede_call() {
+        let obligations = vec![SafetyObligation::new(
+            "valid-value",
+            "value is known to be `Some` or `Ok` before `unwrap_unchecked`",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let unchecked = site_with_family(
+            OperationFamily::UnwrapUnchecked,
+            vec![],
+            "unsafe { option.unwrap_unchecked() }",
+            vec!["if option.is_some() {}"],
+        );
+
+        let evidence = obligation_evidence(&unchecked, &obligations, &contract, &reach);
 
         assert!(!evidence[0].discharge.present);
     }
