@@ -898,6 +898,28 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn maybeuninit_assume_init_mut_uses_assume_init_operation_family() -> Result<(), String> {
+        let output = fixture_output("maybeuninit_assume_init_mut")?;
+        let card = single_card("maybeuninit_assume_init_mut", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(
+            card.operation.family,
+            OperationFamily::MaybeUninitAssumeInit
+        );
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(card.hazards.contains(&HazardKind::InitializedMemory));
+        assert!(
+            card.obligation_evidence.iter().any(|evidence| {
+                evidence.obligation.key == "initialized" && !evidence.discharge.present
+            }),
+            "assume_init_mut should keep initialized-memory evidence missing without proof"
+        );
+        assert!(card.id.0.contains("assume-init-mut"));
+        Ok(())
+    }
+
+    #[test]
     fn str_from_utf8_unchecked_uses_utf8_operation_family() -> Result<(), String> {
         let output = fixture_output("str_from_utf8_unchecked")?;
         let card = single_card("str_from_utf8_unchecked", &output)?;
