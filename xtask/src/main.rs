@@ -48,6 +48,8 @@ const CALIBRATION_CASE_FIELDS: &[&str] = &[
     "expected_operation_family",
     "expected_hazard",
 ];
+const OPERATION_FAMILY_REGISTRY: &str =
+    "docs/specs/appendices/UNSAFE-REVIEW-SPEC-0005-appendix-operation-family-registry.md";
 const ZERO_CARD_EXPECTATION_FIELDS: &[&str] = &[
     "expected_class",
     "expected_operation_family",
@@ -366,6 +368,7 @@ fn check_calibration() -> Result<(), String> {
 
     let mut fixtures = BTreeSet::new();
     let mut kinds = BTreeSet::new();
+    let mut operation_families = BTreeSet::new();
     let support_capabilities = support_tier_capabilities()?;
     for (idx, case) in cases.iter().enumerate() {
         let Some(case) = case.as_table() else {
@@ -400,7 +403,13 @@ fn check_calibration() -> Result<(), String> {
         }
         kinds.insert(kind.to_string());
         check_calibration_case(case, fixture, kind, idx)?;
+        if let Some(operation_family) =
+            optional_case_string(case, "expected_operation_family", idx)?
+        {
+            operation_families.insert(operation_family.to_string());
+        }
     }
+    check_operation_family_registry_coverage(&operation_families)?;
 
     for kind in CALIBRATION_REQUIRED_KINDS {
         if !kinds.contains(*kind) {
@@ -955,6 +964,67 @@ fn check_calibration_kind_card_count(
         )),
         _ => Ok(()),
     }
+}
+
+fn check_operation_family_registry_coverage(
+    calibration_families: &BTreeSet<String>,
+) -> Result<(), String> {
+    let registry_families = operation_family_registry_rows()?;
+    let missing_registry_rows = calibration_families
+        .difference(&registry_families)
+        .cloned()
+        .collect::<Vec<_>>();
+    if !missing_registry_rows.is_empty() {
+        return Err(format!(
+            "{OPERATION_FAMILY_REGISTRY} is missing operation_family row(s) for fixture-backed calibration family/families: {}",
+            missing_registry_rows.join(", ")
+        ));
+    }
+
+    let unbacked_registry_rows = registry_families
+        .difference(calibration_families)
+        .cloned()
+        .collect::<Vec<_>>();
+    if !unbacked_registry_rows.is_empty() {
+        return Err(format!(
+            "{OPERATION_FAMILY_REGISTRY} contains operation_family row(s) without fixture-backed calibration family/families: {}",
+            unbacked_registry_rows.join(", ")
+        ));
+    }
+
+    Ok(())
+}
+
+fn operation_family_registry_rows() -> Result<BTreeSet<String>, String> {
+    let text = read_to_string(&workspace_path(OPERATION_FAMILY_REGISTRY))?;
+    let mut rows = BTreeSet::new();
+    for line in text.lines() {
+        let columns = line
+            .split('|')
+            .map(str::trim)
+            .filter(|column| !column.is_empty())
+            .collect::<Vec<_>>();
+        let Some(first) = columns.first() else {
+            continue;
+        };
+        let Some(family) = first
+            .strip_prefix('`')
+            .and_then(|value| value.strip_suffix('`'))
+        else {
+            continue;
+        };
+        if !rows.insert(family.to_string()) {
+            return Err(format!(
+                "{OPERATION_FAMILY_REGISTRY} contains duplicate operation_family row `{family}`"
+            ));
+        }
+    }
+    if rows.is_empty() {
+        return Err(format!(
+            "{OPERATION_FAMILY_REGISTRY} contains no operation_family registry rows"
+        ));
+    }
+    Ok(rows)
 }
 
 fn check_zero_card_expectations(
