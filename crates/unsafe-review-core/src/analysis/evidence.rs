@@ -889,7 +889,19 @@ fn has_maybeuninit_ptr_write_value_context(compact: &str) -> bool {
 
 fn has_u8_write_bytes_context(lower: &str) -> bool {
     let compact = compact_code(lower);
-    compact.contains("write_bytes(") && compact.contains(":*mutu8")
+    let Some(receiver) = receiver_before_marker(&compact, ".write_bytes(") else {
+        return compact.contains("write_bytes(") && compact.contains(":*mutu8");
+    };
+
+    pointer_binding_has_type_before_call(&compact, receiver, "*mutu8")
+}
+
+fn pointer_binding_has_type_before_call(compact: &str, receiver: &str, pointer_type: &str) -> bool {
+    let Some(write_pos) = compact.find("write_bytes(") else {
+        return false;
+    };
+    let before_call = &compact[..write_pos];
+    before_call.contains(&format!("{receiver}:{pointer_type}"))
 }
 
 fn has_set_len_shrink_evidence(lower: &str) -> bool {
@@ -2192,6 +2204,30 @@ mod tests {
         assert!(evidence[0].discharge.present);
         assert!(evidence[1].discharge.present);
         assert!(!evidence[2].discharge.present);
+    }
+
+    #[test]
+    fn u8_write_bytes_evidence_must_match_write_target() {
+        let obligations = vec![
+            SafetyObligation::new("initialized", "memory is initialized for the accessed type"),
+            SafetyObligation::new("alignment", "pointer is aligned for the accessed type"),
+        ];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let raw_write = site_with_family(
+            OperationFamily::RawPointerWrite,
+            vec!["pub fn fill_words(ptr: *mut u16, other: *mut u8, len: usize, byte: u8) {"],
+            "unsafe { ptr.write_bytes(byte, len) }",
+            vec!["}"],
+        );
+
+        let evidence = obligation_evidence(&raw_write, &obligations, &contract, &reach);
+
+        assert!(!evidence[0].discharge.present);
+        assert!(!evidence[1].discharge.present);
     }
 
     #[test]
