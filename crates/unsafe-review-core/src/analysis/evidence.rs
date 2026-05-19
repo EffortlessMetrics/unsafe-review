@@ -1536,8 +1536,11 @@ fn has_nullability_guard(site: &ScannedSite, lower: &str) -> bool {
     let compact = compact_code(lower);
     if let Some(arg) = nonnull_new_unchecked_argument(&site.operation.expression) {
         let arg = compact_code(&arg.to_ascii_lowercase());
-        return compact.contains(&format!("nonnull::new({arg})"))
-            || has_null_early_return_guard(&compact, &arg);
+        let guard_scope = code_before_operation(lower, &site.operation.expression)
+            .unwrap_or_else(|| lower.to_string());
+        let guard_compact = compact_code(&guard_scope);
+        return guard_compact.contains(&format!("nonnull::new({arg})"))
+            || has_null_early_return_guard(&guard_compact, &arg);
     }
     lower.contains("is_null") || compact.contains("nonnull::new(")
 }
@@ -1958,6 +1961,12 @@ mod tests {
             "NonNull::new_unchecked(bucket.as_ptr())",
             vec![],
         );
+        let post_guard = site_with_family(
+            OperationFamily::NonNullUnchecked,
+            vec![],
+            "NonNull::new_unchecked(ptr)",
+            vec!["NonNull::new(ptr)?;"],
+        );
 
         assert!(
             obligation_evidence(&matching_guard, &obligations, &contract, &reach)[0]
@@ -1971,6 +1980,11 @@ mod tests {
         );
         assert!(
             obligation_evidence(&method_guard, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
+            !obligation_evidence(&post_guard, &obligations, &contract, &reach)[0]
                 .discharge
                 .present
         );
@@ -1999,6 +2013,12 @@ mod tests {
             "NonNull::new_unchecked(ptr)",
             vec![],
         );
+        let post_returning_guard = site_with_family(
+            OperationFamily::NonNullUnchecked,
+            vec![],
+            "NonNull::new_unchecked(ptr)",
+            vec!["if ptr.is_null() { return None; }"],
+        );
 
         assert!(
             !obligation_evidence(&non_returning_guard, &obligations, &contract, &reach)[0]
@@ -2007,6 +2027,11 @@ mod tests {
         );
         assert!(
             obligation_evidence(&returning_guard, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
+            !obligation_evidence(&post_returning_guard, &obligations, &contract, &reach)[0]
                 .discharge
                 .present
         );

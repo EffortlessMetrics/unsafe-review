@@ -118,6 +118,7 @@ required_core_fixtures = [
   "nonnull_new_guard",
   "nonnull_other_guard_not_evidence",
   "nonnull_is_null_nonreturning_not_guard",
+  "nonnull_post_check_not_guard",
   "impl_trait_bound_owner_inference",
   "nested_unsafe_operation_call_dedupe",
   "adjacent_unchanged_unsafe_fn_no_card",
@@ -1257,6 +1258,16 @@ expected_hazard = "pointer_validity"
 fixture = "nonnull_is_null_nonreturning_not_guard"
 kind = "false_positive_control"
 claim = "same-pointer is_null observation without an early exit does not discharge the non-null obligation"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "nonnull_post_check_not_guard"
+kind = "false_positive_control"
+claim = "same-pointer nullability evidence after NonNull::new_unchecked does not discharge the non-null obligation"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"
