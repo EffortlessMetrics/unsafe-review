@@ -1228,6 +1228,17 @@ fn validate_operation_family_registry_required_text(
         return Err(format!(
             "{OPERATION_FAMILY_REGISTRY} operation_family `{family}` {name} column must name concrete obligation/evidence keys, not `{value}`"
         ));
+    } else {
+        let invalid_keys = registry_key_tokens(value)
+            .into_iter()
+            .filter(|key| !is_registry_key_token(key))
+            .collect::<Vec<_>>();
+        if !invalid_keys.is_empty() {
+            return Err(format!(
+                "{OPERATION_FAMILY_REGISTRY} operation_family `{family}` {name} column contains invalid key token(s): {}",
+                invalid_keys.join(", ")
+            ));
+        }
     }
     Ok(())
 }
@@ -1237,6 +1248,26 @@ fn is_placeholder_registry_text(value: &str) -> bool {
         value.trim().to_ascii_lowercase().as_str(),
         "" | "none" | "n/a" | "na" | "todo" | "tbd" | "unknown"
     )
+}
+
+fn registry_key_tokens(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn is_registry_key_token(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    !bytes.is_empty()
+        && bytes.first().is_some_and(u8::is_ascii_lowercase)
+        && bytes.last().is_some_and(u8::is_ascii_alphanumeric)
+        && bytes
+            .iter()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'-')
+        && !bytes.windows(2).any(|pair| pair == b"--")
 }
 
 fn operation_family_labels() -> Result<BTreeSet<String>, String> {
@@ -2384,6 +2415,30 @@ mod tests {
 
         assert!(rows.contains("unknown"));
         Ok(())
+    }
+
+    #[test]
+    fn operation_registry_parser_rejects_prose_obligation_keys() -> Result<(), String> {
+        let text = "| `raw_pointer_read` | shape | hazards | none | pointer live proof | miri | `raw_pointer_alignment` | controls | limits |\n";
+
+        let Err(err) = operation_family_registry_rows_from_text(text) else {
+            return Err("prose obligation keys should fail".to_string());
+        };
+
+        assert!(err.contains("invalid key token"));
+        assert!(err.contains("pointer live proof"));
+        Ok(())
+    }
+
+    #[test]
+    fn registry_key_tokens_are_machine_readable() {
+        assert!(is_registry_key_token("pointer-live"));
+        assert!(is_registry_key_token("utf8"));
+        assert!(is_registry_key_token("valid-zero"));
+        assert!(!is_registry_key_token("pointer live"));
+        assert!(!is_registry_key_token("PointerLive"));
+        assert!(!is_registry_key_token("pointer_live"));
+        assert!(!is_registry_key_token("pointer--live"));
     }
 
     #[test]
