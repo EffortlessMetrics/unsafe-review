@@ -838,6 +838,27 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn unchecked_constructor_availability_guard_requires_same_receiver() -> Result<(), String> {
+        let output = fixture_output("unchecked_constructor_other_availability_not_guard")?;
+        let card = single_card(
+            "unchecked_constructor_other_availability_not_guard",
+            &output,
+        )?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::UnsafeFnCall);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(!card.discharge.present);
+        assert!(!obligation_discharge_present(card, "callee-contract"));
+        assert!(
+            card.missing.iter().any(|missing| missing.kind == "guard"),
+            "checking another receiver's availability must not resolve this card's guard prompt"
+        );
+        assert!(card.site.snippet.contains("One::new_unchecked"));
+        Ok(())
+    }
+
+    #[test]
     fn nonnull_new_guard_discharges_non_null_obligation() -> Result<(), String> {
         let output = fixture_output("nonnull_new_guard")?;
         let card = single_card("nonnull_new_guard", &output)?;

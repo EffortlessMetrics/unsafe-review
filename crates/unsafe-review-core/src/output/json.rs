@@ -236,6 +236,7 @@ mod tests {
         "multiline_unsafe_fn_call_wrapper",
         "unsafe_fn_call_encode_utf8_remaining_cap",
         "unchecked_constructor_availability_guard",
+        "unchecked_constructor_other_availability_not_guard",
         "nonnull_new_guard",
         "nonnull_other_guard_not_evidence",
         "nonnull_is_null_nonreturning_not_guard",

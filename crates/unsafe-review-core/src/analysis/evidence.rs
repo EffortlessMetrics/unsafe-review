@@ -219,7 +219,10 @@ fn discharge_state_for(
             {
                 EvidenceState::present("Unsafe call argument guard code was detected")
             } else if family == &OperationFamily::UnsafeFnCall
-                && has_unchecked_constructor_availability_evidence(lower)
+                && has_unchecked_constructor_availability_evidence(
+                    &site.operation.expression,
+                    lower,
+                )
             {
                 EvidenceState::present("Unchecked constructor availability guard code was detected")
             } else {
@@ -419,9 +422,28 @@ fn has_encode_utf8_remaining_capacity_evidence(lower: &str) -> bool {
         && compact.contains("ptr")
 }
 
-fn has_unchecked_constructor_availability_evidence(lower: &str) -> bool {
+fn has_unchecked_constructor_availability_evidence(expression: &str, lower: &str) -> bool {
+    let compact_expression = compact_code(&expression.to_ascii_lowercase());
+    let Some(receiver) = unchecked_constructor_receiver(&compact_expression) else {
+        return false;
+    };
     let compact = compact_code(lower);
-    compact.contains("new_unchecked(") && compact.contains("is_available()")
+    let before_call = compact
+        .find(&compact_expression)
+        .map_or(compact.as_str(), |call_pos| &compact[..call_pos]);
+    before_call.contains(&format!("{receiver}::is_available()"))
+}
+
+fn unchecked_constructor_receiver(compact_expression: &str) -> Option<&str> {
+    let call_pos = compact_expression.find("::new_unchecked")?;
+    let before_call = &compact_expression[..call_pos];
+    let receiver_start = before_call
+        .char_indices()
+        .rev()
+        .find_map(|(idx, ch)| (!is_receiver_path_char(ch)).then_some(idx + ch.len_utf8()))
+        .unwrap_or(0);
+    let receiver = &before_call[receiver_start..];
+    (!receiver.is_empty()).then_some(receiver)
 }
 
 fn has_unwrap_unchecked_infallible_result_evidence(lower: &str) -> bool {
@@ -1477,6 +1499,47 @@ mod tests {
 
         assert!(guarded_evidence[0].discharge.present);
         assert!(!unguarded_evidence[0].discharge.present);
+    }
+
+    #[test]
+    fn unchecked_constructor_availability_guard_requires_same_receiver_and_precedes_call() {
+        let obligations = vec![SafetyObligation::new(
+            "callee-contract",
+            "callee safety preconditions are satisfied",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let other_receiver = site_with_family(
+            OperationFamily::UnsafeFnCall,
+            vec!["if Two::is_available() {"],
+            "unsafe { Some(One::new_unchecked(needle)) }",
+            vec!["}"],
+        );
+        let post_call = site_with_family(
+            OperationFamily::UnsafeFnCall,
+            vec![],
+            "unsafe { Some(One::new_unchecked(needle)) }",
+            vec!["if One::is_available() { record_available(); }"],
+        );
+        let generic_call = site_with_family(
+            OperationFamily::UnsafeFnCall,
+            vec!["if One::is_available() {"],
+            "unsafe { Some(One::new_unchecked::<Needle>(needle)) }",
+            vec!["}"],
+        );
+
+        let other_receiver_evidence =
+            obligation_evidence(&other_receiver, &obligations, &contract, &reach);
+        let post_call_evidence = obligation_evidence(&post_call, &obligations, &contract, &reach);
+        let generic_call_evidence =
+            obligation_evidence(&generic_call, &obligations, &contract, &reach);
+
+        assert!(!other_receiver_evidence[0].discharge.present);
+        assert!(!post_call_evidence[0].discharge.present);
+        assert!(generic_call_evidence[0].discharge.present);
     }
 
     #[test]
