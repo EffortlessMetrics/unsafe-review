@@ -1582,9 +1582,12 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     fn unwrap_unchecked_state_evidence_rejects_wrong_receiver_or_post_check() -> Result<(), String>
     {
         for fixture in [
+            "unwrap_unchecked_is_some_observed_not_guard",
+            "unwrap_unchecked_is_ok_observed_not_guard",
             "unwrap_unchecked_other_if_let_not_guard",
             "unwrap_unchecked_other_if_let_ok_not_guard",
             "unwrap_unchecked_post_check_not_guard",
+            "unwrap_unchecked_guard_then_reassigned_not_guard",
         ] {
             let output = fixture_output(fixture)?;
             let card = single_card(fixture, &output)?;
