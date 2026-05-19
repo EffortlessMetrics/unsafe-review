@@ -883,38 +883,47 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
 
     #[test]
     fn unchecked_constructor_availability_guard_is_unsafe_call_evidence() -> Result<(), String> {
-        let output = fixture_output("unchecked_constructor_availability_guard")?;
-        let card = single_card("unchecked_constructor_availability_guard", &output)?;
+        for fixture in [
+            "unchecked_constructor_availability_guard",
+            "unchecked_constructor_availability_assert_guard",
+            "unchecked_constructor_unavailable_return_guard",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
 
-        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
-        assert_eq!(card.operation.family, OperationFamily::UnsafeFnCall);
-        assert_eq!(card.class, ReviewClass::GuardedUnwitnessed);
-        assert!(card.discharge.present);
-        assert!(obligation_discharge_present(card, "callee-contract"));
-        assert!(card.site.snippet.contains("new_unchecked"));
-        assert!(card.id.0.contains("new-unchecked"));
-        assert!(!card.id.0.contains("-some-"));
+            assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+            assert_eq!(card.operation.family, OperationFamily::UnsafeFnCall);
+            assert_eq!(card.class, ReviewClass::GuardedUnwitnessed);
+            assert!(card.discharge.present);
+            assert!(obligation_discharge_present(card, "callee-contract"));
+            assert!(card.site.snippet.contains("new_unchecked"));
+            assert!(card.id.0.contains("new-unchecked"));
+            assert!(!card.id.0.contains("-some-"));
+        }
         Ok(())
     }
 
     #[test]
     fn unchecked_constructor_availability_guard_requires_same_receiver() -> Result<(), String> {
-        let output = fixture_output("unchecked_constructor_other_availability_not_guard")?;
-        let card = single_card(
+        for fixture in [
             "unchecked_constructor_other_availability_not_guard",
-            &output,
-        )?;
+            "unchecked_constructor_availability_observed_not_guard",
+            "unchecked_constructor_availability_closed_branch_not_guard",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
 
-        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
-        assert_eq!(card.operation.family, OperationFamily::UnsafeFnCall);
-        assert_eq!(card.class, ReviewClass::GuardMissing);
-        assert!(!card.discharge.present);
-        assert!(!obligation_discharge_present(card, "callee-contract"));
-        assert!(
-            card.missing.iter().any(|missing| missing.kind == "guard"),
-            "checking another receiver's availability must not resolve this card's guard prompt"
-        );
-        assert!(card.site.snippet.contains("One::new_unchecked"));
+            assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+            assert_eq!(card.operation.family, OperationFamily::UnsafeFnCall);
+            assert_eq!(card.class, ReviewClass::GuardMissing);
+            assert!(!card.discharge.present);
+            assert!(!obligation_discharge_present(card, "callee-contract"));
+            assert!(
+                card.missing.iter().any(|missing| missing.kind == "guard"),
+                "{fixture} must not resolve this card's guard prompt"
+            );
+            assert!(card.site.snippet.contains("One::new_unchecked"));
+        }
         Ok(())
     }
 
