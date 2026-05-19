@@ -1,0 +1,20 @@
+use core::ptr::NonNull;
+
+pub fn expose_nonnull(ptr: *mut u8) -> Option<NonNull<u8>> {
+    // SAFETY: fixture deliberately checks ptr only after constructing NonNull.
+    let value = unsafe { NonNull::new_unchecked(ptr) };
+    if ptr.is_null() {
+        return None;
+    }
+    Some(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::expose_nonnull;
+
+    #[test]
+    fn mentions_expose_nonnull() {
+        let _ = stringify!(expose_nonnull);
+    }
+}
