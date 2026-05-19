@@ -855,7 +855,7 @@ expected_hazard = "bounds"
 [[cases]]
 fixture = "vec_from_raw_parts_manuallydrop_origin"
 kind = "positive"
-claim = "Vec::from_raw_parts recognizes same-pointer ManuallyDrop raw-parts ownership and len/capacity evidence without discharging alignment"
+claim = "Vec::from_raw_parts recognizes same-pointer ManuallyDrop raw-parts ownership, initialized-range, and len/capacity evidence without discharging alignment"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"
