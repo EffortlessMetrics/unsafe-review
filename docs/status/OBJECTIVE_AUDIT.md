@@ -16,6 +16,9 @@ same-pointer `is_aligned` guards, observations, closed branches, and stale
 checked pointers.
 Modulo alignment guards have the same fixture-backed observation, closed-branch,
 and stale-pointer controls.
+`Vec::from_raw_parts` len/cap capacity evidence now has fixture-backed controls
+for assertions, early returns, bare observations, closed branches, and stale
+checked cap arguments.
 
 The latest closed execution lane is recorded in
 `docs/status/DOGFOOD_CALIBRATED_EVIDENCE_LANE.md` and

@@ -800,29 +800,74 @@ fn has_len_cap_bound_guard(before_call: &str, len: &str, cap: &str) -> bool {
     let cap_gte_len = format!("{cap}>={len}");
     let len_gt_cap = format!("{len}>{cap}");
     let cap_lt_len = format!("{cap}<{len}");
-    has_len_cap_bound_predicate(before_call, &len_lte_cap)
-        || has_len_cap_bound_predicate(before_call, &cap_gte_len)
-        || has_len_cap_early_return(before_call, &len_gt_cap)
-        || has_len_cap_early_return(before_call, &cap_lt_len)
+    has_len_cap_bound_predicate(before_call, &len_lte_cap, &len, &cap)
+        || has_len_cap_bound_predicate(before_call, &cap_gte_len, &len, &cap)
+        || has_len_cap_early_return(before_call, &len_gt_cap, &len, &cap)
+        || has_len_cap_early_return(before_call, &cap_lt_len, &len, &cap)
 }
 
-fn has_len_cap_bound_predicate(before_call: &str, predicate: &str) -> bool {
-    before_call.contains(&format!("assert!({predicate})"))
-        || before_call.contains(&format!("assert!({predicate},"))
-        || before_call.contains(&format!("debug_assert!({predicate})"))
-        || before_call.contains(&format!("debug_assert!({predicate},"))
-        || before_call.contains(&format!("if{predicate}{{"))
+fn has_len_cap_bound_predicate(before_call: &str, predicate: &str, len: &str, cap: &str) -> bool {
+    [
+        format!("assert!({predicate})"),
+        format!("assert!({predicate},"),
+        format!("debug_assert!({predicate})"),
+        format!("debug_assert!({predicate},"),
+    ]
+    .iter()
+    .any(|pattern| has_fresh_len_cap_guard_pattern(before_call, pattern, len, cap))
+        || has_open_len_cap_branch_guard(before_call, predicate, len, cap)
 }
 
-fn has_len_cap_early_return(before_call: &str, predicate: &str) -> bool {
+fn has_fresh_len_cap_guard_pattern(before_call: &str, pattern: &str, len: &str, cap: &str) -> bool {
+    let mut search_from = 0;
+    while let Some(offset) = before_call[search_from..].find(pattern) {
+        let pattern_start = search_from + offset;
+        let after_pattern = &before_call[pattern_start + pattern.len()..];
+        let statement_end = after_pattern.find(';').unwrap_or(after_pattern.len());
+        let after_guard = &after_pattern[statement_end..];
+        if !has_len_cap_assignment(after_guard, len, cap) {
+            return true;
+        }
+        search_from = pattern_start + pattern.len();
+    }
+    false
+}
+
+fn has_open_len_cap_branch_guard(before_call: &str, predicate: &str, len: &str, cap: &str) -> bool {
     let guard = format!("if{predicate}{{");
-    let Some((_prefix, after_guard)) = before_call.split_once(&guard) else {
-        return false;
-    };
-    after_guard
-        .split_once('}')
-        .map_or(after_guard, |(guard_body, _after)| guard_body)
-        .contains("return")
+    let mut search_from = 0;
+    while let Some(offset) = before_call[search_from..].find(&guard) {
+        let guard_start = search_from + offset;
+        let after_guard = &before_call[guard_start + guard.len()..];
+        if branch_still_open_at_operation(after_guard)
+            && !has_len_cap_assignment(after_guard, len, cap)
+        {
+            return true;
+        }
+        search_from = guard_start + guard.len();
+    }
+    false
+}
+
+fn has_len_cap_early_return(before_call: &str, predicate: &str, len: &str, cap: &str) -> bool {
+    let guard = format!("if{predicate}{{");
+    let mut search_from = 0;
+    while let Some(offset) = before_call[search_from..].find(&guard) {
+        let guard_start = search_from + offset;
+        let after_guard = &before_call[guard_start + guard.len()..];
+        let (guard_body, after_guard_body) = after_guard
+            .split_once('}')
+            .map_or((after_guard, ""), |(guard_body, after)| (guard_body, after));
+        if guard_body.contains("return") && !has_len_cap_assignment(after_guard_body, len, cap) {
+            return true;
+        }
+        search_from = guard_start + guard.len();
+    }
+    false
+}
+
+fn has_len_cap_assignment(compact: &str, len: &str, cap: &str) -> bool {
+    contains_simple_assignment_to(compact, len) || contains_simple_assignment_to(compact, cap)
 }
 
 fn has_vec_from_raw_parts_same_origin_len_cap(before_call: &str, len: &str, cap: &str) -> bool {

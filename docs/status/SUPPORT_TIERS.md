@@ -23,6 +23,9 @@ alignment checks through `raw_pointer_alignment_modulo_guard`,
 `raw_pointer_alignment_modulo_observed_not_guard`,
 `raw_pointer_alignment_modulo_closed_branch_not_guard`, and
 `raw_pointer_alignment_modulo_reassigned_pointer_not_guard`.
+`Vec::from_raw_parts` capacity evidence is pinned for same-call len/cap
+assertions and invalid-path early returns, and rejects bare relation
+observations, closed positive branches, and reassigned checked cap arguments.
 
 | Capability | Tier | Surface | Proof | Known limits |
 |---|---|---|---|---|

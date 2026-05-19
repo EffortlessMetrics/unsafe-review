@@ -1,0 +1,16 @@
+pub fn rebuild_vec(buf: *mut u8, len: usize, mut cap: usize) -> Option<Vec<u8>> {
+    if len > cap {
+        return None;
+    }
+    cap = len.saturating_sub(1);
+    // SAFETY: this fixture intentionally changes the checked cap argument before the call.
+    Some(unsafe { Vec::from_raw_parts(buf, len, cap) })
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn mentions_rebuild_vec() {
+        let _ = stringify!(super::rebuild_vec);
+    }
+}
