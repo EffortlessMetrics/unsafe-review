@@ -610,6 +610,25 @@ fn has_u8_bool_value_guard(before_call: &str, argument: &str) -> bool {
         || before_call.contains(&format!("matches!({argument},1|0)"))
         || before_call.contains(&format!("{argument}==0||{argument}==1"))
         || before_call.contains(&format!("{argument}==1||{argument}==0"))
+        || has_u8_bool_invalid_early_return_guard(before_call, argument)
+}
+
+fn has_u8_bool_invalid_early_return_guard(before_call: &str, argument: &str) -> bool {
+    has_invalid_byte_returning_branch(before_call, &format!("{argument}>1"))
+        || has_invalid_byte_returning_branch(before_call, &format!("1<{argument}"))
+        || has_invalid_byte_returning_branch(before_call, &format!("{argument}>=2"))
+        || has_invalid_byte_returning_branch(before_call, &format!("2<={argument}"))
+}
+
+fn has_invalid_byte_returning_branch(before_call: &str, predicate: &str) -> bool {
+    let guard = format!("if{predicate}{{");
+    let Some((_prefix, after_guard)) = before_call.split_once(&guard) else {
+        return false;
+    };
+    after_guard
+        .split_once('}')
+        .map_or(after_guard, |(guard_body, _after)| guard_body)
+        .contains("return")
 }
 
 fn is_simple_identifier(text: &str) -> bool {
@@ -1963,6 +1982,52 @@ mod tests {
         assert!(!other_arg_evidence[0].discharge.present);
         assert!(!post_call_evidence[0].discharge.present);
         assert!(!unsupported_pair_evidence[0].discharge.present);
+    }
+
+    #[test]
+    fn transmute_u8_bool_early_return_guard_discharges_valid_value_obligation() {
+        let obligations = vec![SafetyObligation::new(
+            "valid-value",
+            "destination value satisfies Rust validity rules",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let transmute = site_with_family(
+            OperationFamily::Transmute,
+            vec!["if value > 1 {", "    return false;", "}"],
+            "unsafe { core::mem::transmute::<u8, bool>(value) }",
+            vec![],
+        );
+
+        let evidence = obligation_evidence(&transmute, &obligations, &contract, &reach);
+
+        assert!(evidence[0].discharge.present);
+    }
+
+    #[test]
+    fn transmute_u8_bool_early_return_guard_requires_returning_branch() {
+        let obligations = vec![SafetyObligation::new(
+            "valid-value",
+            "destination value satisfies Rust validity rules",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let transmute = site_with_family(
+            OperationFamily::Transmute,
+            vec!["if value > 1 {", "    log_invalid();", "}"],
+            "unsafe { core::mem::transmute::<u8, bool>(value) }",
+            vec![],
+        );
+
+        let evidence = obligation_evidence(&transmute, &obligations, &contract, &reach);
+
+        assert!(!evidence[0].discharge.present);
     }
 
     #[test]

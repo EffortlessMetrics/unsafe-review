@@ -286,6 +286,7 @@ mod tests {
         "transmute_invalid_value",
         "transmute_layout_size_guard",
         "transmute_bool_valid_value_guard",
+        "transmute_bool_invalid_return_guard",
         "transmute_copy_invalid_value",
         "transmute_copy_layout_size_guard",
         "multiline_transmute_copy_invalid_value",
