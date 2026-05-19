@@ -294,10 +294,42 @@ fn check_fixtures() -> Result<(), String> {
     if dirs.is_empty() {
         return Err("fixtures directory has no fixture cases".to_string());
     }
+    check_fixture_exception_ledgers(&dirs)?;
     for dir in &dirs {
         check_fixture(dir)?;
     }
     println!("check-fixtures: ok ({} fixtures)", dirs.len());
+    Ok(())
+}
+
+fn check_fixture_exception_ledgers(dirs: &[PathBuf]) -> Result<(), String> {
+    let mut fixture_paths = BTreeMap::new();
+    for dir in dirs {
+        let name = fixture_dir_name(dir)?.to_string();
+        fixture_paths.insert(name, dir);
+    }
+
+    for fixture in FIXTURE_EXPECTED_CARDS_EXCEPTIONS {
+        let Some(dir) = fixture_paths.get(*fixture) else {
+            return Err(format!(
+                "expected-card exception fixture `{fixture}` does not exist"
+            ));
+        };
+        if dir.join("expected.cards.json").is_file() {
+            return Err(format!(
+                "expected-card exception fixture `{fixture}` has expected.cards.json"
+            ));
+        }
+    }
+
+    for (fixture, _prefix) in FIXTURE_PACKAGE_PREFIX_EXCEPTIONS {
+        if !fixture_paths.contains_key(*fixture) {
+            return Err(format!(
+                "package-prefix exception fixture `{fixture}` does not exist"
+            ));
+        }
+    }
+
     Ok(())
 }
 
@@ -1327,6 +1359,12 @@ mod tests {
         assert!(FIXTURE_EXPECTED_CARDS_EXCEPTIONS.contains(&"duplicate_raw_pointer_reads"));
         assert!(FIXTURE_EXPECTED_CARDS_EXCEPTIONS.contains(&"raw_pointer_alignment_line_drift"));
         assert!(!FIXTURE_EXPECTED_CARDS_EXCEPTIONS.contains(&"raw_pointer_alignment"));
+    }
+
+    #[test]
+    fn fixture_exception_ledgers_reference_current_fixtures() -> Result<(), String> {
+        let dirs = fixture_dirs(&workspace_path("fixtures"))?;
+        check_fixture_exception_ledgers(&dirs)
     }
 
     #[test]
