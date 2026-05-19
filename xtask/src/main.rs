@@ -38,6 +38,11 @@ const FIXTURE_PACKAGE_PREFIX_EXCEPTIONS: &[(&str, &str)] =
     &[("raw_pointer_alignment_line_drift", "raw-pointer-alignment")];
 
 const CALIBRATION_REQUIRED_KINDS: &[&str] = &["positive", "negative", "false_positive_control"];
+const ZERO_CARD_EXPECTATION_FIELDS: &[&str] = &[
+    "expected_class",
+    "expected_operation_family",
+    "expected_hazard",
+];
 
 const KNOWN_SUPPORT_TIERS: &[&str] = &["scaffold", "experimental", "planned", "deferred"];
 const DOGFOOD_MANIFEST: &str = "docs/dogfood/corpus.toml";
@@ -874,6 +879,7 @@ fn check_calibration_case(
         ));
     }
     if expected_cards == 0 {
+        check_zero_card_expectations(case, idx)?;
         return Ok(());
     }
     let expected_class = required_case_string(case, "expected_class", idx)?;
@@ -904,6 +910,20 @@ fn check_calibration_case(
         return Err(format!(
             "fixtures/calibration.toml cases[{idx}] expected_hazard `{expected_hazard}` was not found in {fixture}/expected.cards.json"
         ));
+    }
+    Ok(())
+}
+
+fn check_zero_card_expectations(
+    case: &toml::map::Map<String, toml::Value>,
+    idx: usize,
+) -> Result<(), String> {
+    for field in ZERO_CARD_EXPECTATION_FIELDS {
+        if case.contains_key(*field) {
+            return Err(format!(
+                "fixtures/calibration.toml cases[{idx}] has expected_cards = 0 and cannot set `{field}`"
+            ));
+        }
     }
     Ok(())
 }
@@ -1388,6 +1408,21 @@ mod tests {
             Some("Review cards")
         );
         assert_eq!(support_capability_from_row("|---|---|"), None);
+    }
+
+    #[test]
+    fn zero_card_calibration_cases_reject_card_expectations() -> Result<(), String> {
+        let mut case = toml::map::Map::new();
+        case.insert(
+            "expected_class".to_string(),
+            toml::Value::String("guard_missing".to_string()),
+        );
+        let Err(err) = check_zero_card_expectations(&case, 7) else {
+            return Err("zero-card case with expected_class should fail".to_string());
+        };
+        assert!(err.contains("cases[7]"));
+        assert!(err.contains("expected_class"));
+        Ok(())
     }
 
     #[test]
