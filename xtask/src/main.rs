@@ -2227,7 +2227,8 @@ fn check_tracked_generated_artifacts() -> Result<(), String> {
 
 fn parse_toml_file(path: &Path) -> Result<toml::Value, String> {
     let text = read_to_string(path)?;
-    text.parse::<toml::Value>()
+    text.parse::<toml::Table>()
+        .map(toml::Value::Table)
         .map_err(|err| format!("{} is not valid TOML: {err}", path.display()))
 }
 
