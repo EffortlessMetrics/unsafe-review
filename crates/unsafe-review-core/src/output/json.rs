@@ -218,6 +218,7 @@ mod tests {
     const FIXTURE_GOLDENS: &[&str] = &[
         "raw_pointer_alignment",
         "raw_pointer_alignment_receipted",
+        "align_of_only_not_guard",
         "comment_alignment_not_guard",
         "safe_code_no_cards",
         "public_unsafe_fn_missing_safety",
