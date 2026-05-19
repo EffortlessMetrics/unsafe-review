@@ -1922,15 +1922,10 @@ fn has_alignment_guard(site: &ScannedSite, lower: &str) -> bool {
 
 fn has_same_receiver_alignment_guard(compact: &str, receiver: &str) -> bool {
     let receiver = compact_code(&receiver.to_ascii_lowercase());
-    has_same_receiver_alignment_method_guard(compact, &receiver)
-        || contains_receiver_fragment(compact, &format!("{receiver}.addr()%"))
-        || contains_receiver_fragment(compact, &format!("{receiver}asusize)%"))
-        || contains_receiver_fragment(compact, &format!("{receiver}asusize%"))
-        || contains_receiver_fragment(compact, &format!("({receiver}asusize)%"))
-        || contains_receiver_fragment(compact, &format!("({receiver}asusize%"))
+    has_same_receiver_alignment_condition_guard(compact, &receiver)
 }
 
-fn has_same_receiver_alignment_method_guard(compact: &str, receiver: &str) -> bool {
+fn has_same_receiver_alignment_condition_guard(compact: &str, receiver: &str) -> bool {
     has_alignment_assertion_guard(compact, receiver)
         || has_alignment_open_positive_branch_guard(compact, receiver)
         || has_alignment_early_return_guard(compact, receiver)
@@ -2020,7 +2015,9 @@ fn alignment_condition_is_positive(condition: &str, receiver: &str) -> bool {
             && !condition.contains(".is_aligned()==false")
             && !condition.contains(".is_aligned()!=true");
     }
-    same_receiver_method_call(condition, receiver, "align_offset") && condition.contains("==0")
+    (same_receiver_method_call(condition, receiver, "align_offset")
+        || same_receiver_alignment_modulo(condition, receiver))
+        && condition.contains("==0")
 }
 
 fn alignment_condition_is_negative(condition: &str, receiver: &str) -> bool {
@@ -2029,7 +2026,17 @@ fn alignment_condition_is_negative(condition: &str, receiver: &str) -> bool {
             || condition.contains(".is_aligned()==false")
             || condition.contains(".is_aligned()!=true");
     }
-    same_receiver_method_call(condition, receiver, "align_offset") && condition.contains("!=0")
+    (same_receiver_method_call(condition, receiver, "align_offset")
+        || same_receiver_alignment_modulo(condition, receiver))
+        && condition.contains("!=0")
+}
+
+fn same_receiver_alignment_modulo(compact: &str, receiver: &str) -> bool {
+    contains_receiver_fragment(compact, &format!("{receiver}.addr()%"))
+        || contains_receiver_fragment(compact, &format!("{receiver}asusize)%"))
+        || contains_receiver_fragment(compact, &format!("{receiver}asusize%"))
+        || contains_receiver_fragment(compact, &format!("({receiver}asusize)%"))
+        || contains_receiver_fragment(compact, &format!("({receiver}asusize%"))
 }
 
 fn same_receiver_method_call(compact: &str, receiver: &str, method: &str) -> bool {
@@ -2451,6 +2458,36 @@ mod tests {
             "ptr.cast::<Header>().read()",
             vec![],
         );
+        let matching_modulo_assertion = site_with_context(
+            vec!["assert!((ptr as usize) % core::mem::align_of::<Header>() == 0);"],
+            "ptr.cast::<Header>().read()",
+            vec![],
+        );
+        let observed_modulo = site_with_context(
+            vec![
+                "let aligned = (ptr as usize) % core::mem::align_of::<Header>() == 0;",
+                "observe(aligned);",
+            ],
+            "ptr.cast::<Header>().read()",
+            vec![],
+        );
+        let closed_modulo_branch = site_with_context(
+            vec![
+                "if (ptr as usize) % core::mem::align_of::<Header>() == 0 {",
+                "    observe(ptr);",
+                "}",
+            ],
+            "ptr.cast::<Header>().read()",
+            vec![],
+        );
+        let reassigned_modulo_pointer = site_with_context(
+            vec![
+                "if (ptr as usize) % core::mem::align_of::<Header>() != 0 { return None; }",
+                "ptr = other_ptr;",
+            ],
+            "ptr.cast::<Header>().read()",
+            vec![],
+        );
         let matching_method_guard = site_with_context(
             vec!["if !ptr.cast::<Header>().is_aligned() { return None; }"],
             "ptr.cast::<Header>().read()",
@@ -2508,6 +2545,11 @@ mod tests {
                 .present
         );
         assert!(
+            obligation_evidence(&matching_modulo_assertion, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
             obligation_evidence(&matching_method_guard, &obligations, &contract, &reach)[0]
                 .discharge
                 .present
@@ -2523,6 +2565,9 @@ mod tests {
                 .present
         );
         for stale in [
+            observed_modulo,
+            closed_modulo_branch,
+            reassigned_modulo_pointer,
             observed_method,
             closed_positive_branch,
             reassigned_pointer,

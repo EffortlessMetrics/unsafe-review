@@ -592,6 +592,9 @@ mod tests {
             "raw_pointer_alignment_observed_not_guard",
             "raw_pointer_alignment_closed_branch_not_guard",
             "raw_pointer_alignment_reassigned_pointer_not_guard",
+            "raw_pointer_alignment_modulo_observed_not_guard",
+            "raw_pointer_alignment_modulo_closed_branch_not_guard",
+            "raw_pointer_alignment_modulo_reassigned_pointer_not_guard",
             "comment_alignment_not_guard",
         ] {
             let output = fixture_output(fixture)?;
@@ -612,15 +615,20 @@ mod tests {
 
     #[test]
     fn raw_pointer_alignment_evidence_accepts_enforced_same_pointer_guard() -> Result<(), String> {
-        let output = fixture_output("raw_pointer_alignment_is_aligned_guard")?;
-        let card = single_card("raw_pointer_alignment_is_aligned_guard", &output)?;
+        for fixture in [
+            "raw_pointer_alignment_is_aligned_guard",
+            "raw_pointer_alignment_modulo_guard",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
 
-        assert_eq!(card.operation.family, OperationFamily::RawPointerRead);
-        assert!(obligation_discharge_present(card, "bounds"));
-        assert!(obligation_discharge_present(card, "alignment"));
-        assert!(!obligation_discharge_present(card, "pointer-live"));
-        assert!(!obligation_discharge_present(card, "initialized"));
-        assert!(!obligation_discharge_present(card, "allocation"));
+            assert_eq!(card.operation.family, OperationFamily::RawPointerRead);
+            assert!(obligation_discharge_present(card, "bounds"));
+            assert!(obligation_discharge_present(card, "alignment"));
+            assert!(!obligation_discharge_present(card, "pointer-live"));
+            assert!(!obligation_discharge_present(card, "initialized"));
+            assert!(!obligation_discharge_present(card, "allocation"));
+        }
         Ok(())
     }
 
