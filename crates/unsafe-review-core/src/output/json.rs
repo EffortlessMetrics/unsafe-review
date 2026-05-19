@@ -271,6 +271,7 @@ mod tests {
         "vec_from_raw_parts_capacity_guard",
         "vec_from_raw_parts_capacity_observed_not_guard",
         "box_from_raw",
+        "box_from_raw_box_origin",
         "static_mut_global_state",
         "safe_reference_deref_no_cards",
         "imports_not_unsafe_operations",

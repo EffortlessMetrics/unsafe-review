@@ -147,6 +147,9 @@ These are not failures; they are the next unsupported or weakly verified areas:
   operation rather than a slice operation, but allocator compatibility, layout,
   capacity, initialization, and ownership evidence remain source-level and
   advisory.
+- `Box::from_raw` now has fixture coverage for the narrow same-pointer
+  `Box::into_raw` origin shape, but broader allocator and unique-ownership
+  evidence remains source-level and advisory.
 
 ## Current Gates
 

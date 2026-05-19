@@ -1,0 +1,64 @@
+[
+    {
+      "id": "UR-box-from-raw-box-origin-fixture-src-lib-rs-round-trip-box-operation-box_from_raw-from-raw-6a054e97d17a-pointer_validity-c1",
+      "class": "guarded_unwitnessed",
+      "priority": "medium",
+      "confidence": "medium",
+      "site": {
+        "file": "src/lib.rs",
+        "line": 4,
+        "column": 5,
+        "kind": "operation",
+        "owner": "round_trip_box",
+        "visibility": "private",
+        "public_api_surface": false,
+        "snippet": "unsafe { Box::from_raw(ptr) }"
+      },
+      "operation_family": "box_from_raw",
+      "hazards": [
+        "pointer_validity",
+        "drop_or_deallocation",
+        "leak_or_ownership_transfer"
+      ],
+      "obligations": [
+        "raw pointer was produced by compatible allocator and is uniquely owned"
+      ],
+      "obligation_evidence": [
+        {
+          "key": "ownership",
+          "description": "raw pointer was produced by compatible allocator and is uniquely owned",
+          "contract": {
+            "present": true,
+            "state": "present",
+            "summary": "Nearby `SAFETY:` comment was detected"
+          },
+          "discharge": {
+            "present": true,
+            "state": "present",
+            "summary": "Box::into_raw ownership evidence was detected"
+          },
+          "reach": {
+            "present": true,
+            "state": "present",
+            "summary": "1 related test file(s) mention owner `round_trip_box`"
+          },
+          "witness": {
+            "present": false,
+            "state": "missing",
+            "summary": "No imported witness receipt was found"
+          }
+        }
+      ],
+      "contract": "Nearby `SAFETY:` comment was detected",
+      "discharge": "All inferred safety obligations have visible local discharge evidence",
+      "reach": "1 related test file(s) mention owner `round_trip_box`",
+      "witness": "No imported witness receipt was found",
+      "missing": [
+        "No witness receipt imported for this card"
+      ],
+      "verify_commands": [
+        "cargo +nightly miri test round_trip_box",
+        "cargo +nightly careful test round_trip_box"
+      ]
+    }
+  ]
