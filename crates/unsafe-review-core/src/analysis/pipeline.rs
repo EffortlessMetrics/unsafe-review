@@ -989,6 +989,15 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
         );
         assert_eq!(other_guard_card.class, ReviewClass::GuardMissing);
         assert!(!obligation_discharge_present(other_guard_card, "bounds"));
+
+        let post_check = fixture_output("get_unchecked_mut_post_check_not_guard")?;
+        let post_check_card = single_card("get_unchecked_mut_post_check_not_guard", &post_check)?;
+        assert_eq!(
+            post_check_card.operation.family,
+            OperationFamily::GetUnchecked
+        );
+        assert_eq!(post_check_card.class, ReviewClass::GuardMissing);
+        assert!(!obligation_discharge_present(post_check_card, "bounds"));
         Ok(())
     }
 

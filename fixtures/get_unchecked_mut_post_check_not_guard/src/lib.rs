@@ -1,0 +1,19 @@
+pub fn pick_then_check(values: &mut [u8], index: usize) -> Option<&mut u8> {
+    // SAFETY: fixture deliberately checks the index only after the unchecked access.
+    let picked = unsafe { values.get_unchecked_mut(index) };
+    if index < values.len() {
+        Some(picked)
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pick_then_check;
+
+    #[test]
+    fn mentions_pick_then_check() {
+        let _ = stringify!(pick_then_check);
+    }
+}
