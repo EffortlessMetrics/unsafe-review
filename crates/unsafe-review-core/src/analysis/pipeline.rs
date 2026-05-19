@@ -1422,13 +1422,18 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
 
     #[test]
     fn unwrap_unchecked_if_let_as_ref_evidence_is_discharged() -> Result<(), String> {
-        let output = fixture_output("unwrap_unchecked_if_let_some_guard")?;
-        let card = single_card("unwrap_unchecked_if_let_some_guard", &output)?;
+        for fixture in [
+            "unwrap_unchecked_if_let_some_guard",
+            "unwrap_unchecked_if_let_ok_guard",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
 
-        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
-        assert_eq!(card.operation.family, OperationFamily::UnwrapUnchecked);
-        assert_eq!(card.class, ReviewClass::GuardedUnwitnessed);
-        assert!(obligation_discharge_present(card, "valid-value"));
+            assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+            assert_eq!(card.operation.family, OperationFamily::UnwrapUnchecked);
+            assert_eq!(card.class, ReviewClass::GuardedUnwitnessed);
+            assert!(obligation_discharge_present(card, "valid-value"));
+        }
         Ok(())
     }
 
