@@ -455,6 +455,11 @@ mod tests {
                 true,
             ),
             (
+                "raw_pointer_write_other_u8_not_guard",
+                OperationFamily::RawPointerWrite,
+                true,
+            ),
+            (
                 "raw_pointer_write_maybeuninit",
                 OperationFamily::RawPointerWrite,
                 true,
@@ -562,6 +567,18 @@ mod tests {
         assert_eq!(card.operation.family, OperationFamily::RawPointerWrite);
         assert_eq!(card.class, ReviewClass::GuardMissing);
         assert!(!obligation_discharge_present(card, "initialized"));
+        Ok(())
+    }
+
+    #[test]
+    fn raw_pointer_write_u8_evidence_requires_target_pointer() -> Result<(), String> {
+        let output = fixture_output("raw_pointer_write_other_u8_not_guard")?;
+        let card = single_card("raw_pointer_write_other_u8_not_guard", &output)?;
+
+        assert_eq!(card.operation.family, OperationFamily::RawPointerWrite);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(!obligation_discharge_present(card, "initialized"));
+        assert!(!obligation_discharge_present(card, "alignment"));
         Ok(())
     }
 
