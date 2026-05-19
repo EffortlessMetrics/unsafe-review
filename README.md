@@ -136,3 +136,18 @@ cargo xtask check-pr
 - [Support tiers](docs/status/SUPPORT_TIERS.md)
 - [Dogfood index](docs/dogfood/index.md)
 - [Policy ledgers](policy/)
+
+## Fuzzing
+
+The repository includes a `cargo-fuzz` harness for the core analyzer. The harness
+builds a temporary Rust fixture from fuzz bytes, feeds a synthesized unified diff
+to `unsafe-review-core`, and checks that any rendered analysis output remains valid
+JSON.
+
+```bash
+cargo install cargo-fuzz
+cargo fuzz run analyze
+```
+
+Inputs may optionally use `---DIFF---` on its own line to append arbitrary unified
+diff text after the generated `src/lib.rs` change.

@@ -11,6 +11,7 @@ default-members = [
   "crates/unsafe-review-core"
 ]
 resolver = "2"
+exclude = ["fuzz"]
 
 [workspace.package]
 edition = "2024"
