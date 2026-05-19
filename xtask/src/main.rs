@@ -369,6 +369,7 @@ fn check_calibration() -> Result<(), String> {
     let mut fixtures = BTreeSet::new();
     let mut kinds = BTreeSet::new();
     let mut operation_families = BTreeSet::new();
+    let mut operation_family_fixtures = BTreeMap::new();
     let support_capabilities = support_tier_capabilities()?;
     for (idx, case) in cases.iter().enumerate() {
         let Some(case) = case.as_table() else {
@@ -407,9 +408,13 @@ fn check_calibration() -> Result<(), String> {
             optional_case_string(case, "expected_operation_family", idx)?
         {
             operation_families.insert(operation_family.to_string());
+            operation_family_fixtures
+                .entry(operation_family.to_string())
+                .or_insert_with(BTreeSet::new)
+                .insert(fixture.to_string());
         }
     }
-    check_operation_family_registry_coverage(&operation_families)?;
+    check_operation_family_registry_coverage(&operation_families, &operation_family_fixtures)?;
 
     for kind in CALIBRATION_REQUIRED_KINDS {
         if !kinds.contains(*kind) {
@@ -968,10 +973,26 @@ fn check_calibration_kind_card_count(
 
 fn check_operation_family_registry_coverage(
     calibration_families: &BTreeSet<String>,
+    calibration_fixtures_by_family: &BTreeMap<String, BTreeSet<String>>,
 ) -> Result<(), String> {
     let registry_families = operation_family_registry_rows()?;
+    let registry_fixture_proofs = operation_family_registry_fixture_proofs()?;
+    check_operation_family_registry_coverage_with_registry(
+        calibration_families,
+        calibration_fixtures_by_family,
+        &registry_families,
+        &registry_fixture_proofs,
+    )
+}
+
+fn check_operation_family_registry_coverage_with_registry(
+    calibration_families: &BTreeSet<String>,
+    calibration_fixtures_by_family: &BTreeMap<String, BTreeSet<String>>,
+    registry_families: &BTreeSet<String>,
+    registry_fixture_proofs: &BTreeMap<String, BTreeSet<String>>,
+) -> Result<(), String> {
     let missing_registry_rows = calibration_families
-        .difference(&registry_families)
+        .difference(registry_families)
         .cloned()
         .collect::<Vec<_>>();
     if !missing_registry_rows.is_empty() {
@@ -990,6 +1011,24 @@ fn check_operation_family_registry_coverage(
             "{OPERATION_FAMILY_REGISTRY} contains operation_family row(s) without fixture-backed calibration family/families: {}",
             unbacked_registry_rows.join(", ")
         ));
+    }
+
+    for (family, fixtures) in registry_fixture_proofs {
+        let Some(calibration_fixtures) = calibration_fixtures_by_family.get(family) else {
+            return Err(format!(
+                "{OPERATION_FAMILY_REGISTRY} contains fixture proof for uncalibrated operation_family `{family}`"
+            ));
+        };
+        let unbacked_fixtures = fixtures
+            .difference(calibration_fixtures)
+            .cloned()
+            .collect::<Vec<_>>();
+        if !unbacked_fixtures.is_empty() {
+            return Err(format!(
+                "{OPERATION_FAMILY_REGISTRY} operation_family `{family}` cites fixture proof(s) not calibrated for that family: {}",
+                unbacked_fixtures.join(", ")
+            ));
+        }
     }
 
     Ok(())
@@ -1029,6 +1068,74 @@ fn operation_family_registry_rows_from_text(text: &str) -> Result<BTreeSet<Strin
         ));
     }
     Ok(rows)
+}
+
+fn operation_family_registry_fixture_proofs() -> Result<BTreeMap<String, BTreeSet<String>>, String>
+{
+    let text = read_to_string(&workspace_path(OPERATION_FAMILY_REGISTRY))?;
+    operation_family_registry_fixture_proofs_from_text(&text)
+}
+
+fn operation_family_registry_fixture_proofs_from_text(
+    text: &str,
+) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
+    let mut proofs = BTreeMap::new();
+    for line in text.lines() {
+        let columns = line
+            .split('|')
+            .map(str::trim)
+            .filter(|column| !column.is_empty())
+            .collect::<Vec<_>>();
+        let Some(first) = columns.first() else {
+            continue;
+        };
+        let Some(family) = first
+            .strip_prefix('`')
+            .and_then(|value| value.strip_suffix('`'))
+        else {
+            continue;
+        };
+        let Some(fixture_proof) = columns.get(6) else {
+            return Err(format!(
+                "{OPERATION_FAMILY_REGISTRY} operation_family `{family}` is missing fixture proof column"
+            ));
+        };
+        let fixture_names = backtick_tokens(fixture_proof);
+        if fixture_names.is_empty() {
+            return Err(format!(
+                "{OPERATION_FAMILY_REGISTRY} operation_family `{family}` fixture proof column has no fixture names"
+            ));
+        }
+        if proofs.insert(family.to_string(), fixture_names).is_some() {
+            return Err(format!(
+                "{OPERATION_FAMILY_REGISTRY} contains duplicate operation_family row `{family}`"
+            ));
+        }
+    }
+    if proofs.is_empty() {
+        return Err(format!(
+            "{OPERATION_FAMILY_REGISTRY} contains no operation_family registry rows"
+        ));
+    }
+    Ok(proofs)
+}
+
+fn backtick_tokens(text: &str) -> BTreeSet<String> {
+    let mut tokens = BTreeSet::new();
+    let mut rest = text;
+    while let Some(start) = rest.find('`') {
+        rest = &rest[start + 1..];
+        let Some(end) = rest.find('`') else {
+            break;
+        };
+        let token = &rest[..end];
+        let token = token.trim();
+        if !token.is_empty() {
+            tokens.insert(token.to_string());
+        }
+        rest = &rest[end + 1..];
+    }
+    tokens
 }
 
 fn check_zero_card_expectations(
@@ -1651,9 +1758,10 @@ mod tests {
     #[test]
     fn operation_registry_rejects_missing_fixture_backed_family() -> Result<(), String> {
         let mut families = operation_family_registry_rows()?;
+        let fixture_proofs = operation_family_registry_fixture_proofs()?;
         families.insert("new_unregistered_family".to_string());
 
-        let Err(err) = check_operation_family_registry_coverage(&families) else {
+        let Err(err) = check_operation_family_registry_coverage(&families, &fixture_proofs) else {
             return Err("unregistered calibration family should fail".to_string());
         };
 
@@ -1665,14 +1773,42 @@ mod tests {
     #[test]
     fn operation_registry_rejects_unbacked_registry_row() -> Result<(), String> {
         let mut families = operation_family_registry_rows()?;
+        let fixture_proofs = operation_family_registry_fixture_proofs()?;
         families.remove("unknown");
 
-        let Err(err) = check_operation_family_registry_coverage(&families) else {
+        let Err(err) = check_operation_family_registry_coverage(&families, &fixture_proofs) else {
             return Err("registry row without calibration family should fail".to_string());
         };
 
         assert!(err.contains("without fixture-backed calibration"));
         assert!(err.contains("unknown"));
+        Ok(())
+    }
+
+    #[test]
+    fn operation_registry_rejects_wrong_family_fixture_proof() -> Result<(), String> {
+        let calibration_families = BTreeSet::from(["raw_pointer_read".to_string()]);
+        let calibration_fixtures = BTreeMap::from([(
+            "raw_pointer_read".to_string(),
+            BTreeSet::from(["raw_pointer_alignment".to_string()]),
+        )]);
+        let registry_families = BTreeSet::from(["raw_pointer_read".to_string()]);
+        let registry_fixtures = BTreeMap::from([(
+            "raw_pointer_read".to_string(),
+            BTreeSet::from(["raw_pointer_write_assignment".to_string()]),
+        )]);
+
+        let Err(err) = check_operation_family_registry_coverage_with_registry(
+            &calibration_families,
+            &calibration_fixtures,
+            &registry_families,
+            &registry_fixtures,
+        ) else {
+            return Err("wrong-family fixture proof should fail".to_string());
+        };
+
+        assert!(err.contains("cites fixture proof"));
+        assert!(err.contains("raw_pointer_write_assignment"));
         Ok(())
     }
 
@@ -1685,6 +1821,34 @@ mod tests {
         };
 
         assert!(err.contains("duplicate operation_family row"));
+        assert!(err.contains("raw_pointer_read"));
+        Ok(())
+    }
+
+    #[test]
+    fn operation_registry_parser_extracts_fixture_proof_names() -> Result<(), String> {
+        let text = "| `raw_pointer_read` | shape | hazards | none | keys | route | `raw_pointer_alignment`, `split_raw_pointer_read_call` | controls | limits |\n";
+
+        let proofs = operation_family_registry_fixture_proofs_from_text(text)?;
+        let Some(fixtures) = proofs.get("raw_pointer_read") else {
+            return Err("raw_pointer_read proof row should be parsed".to_string());
+        };
+
+        assert!(fixtures.contains("raw_pointer_alignment"));
+        assert!(fixtures.contains("split_raw_pointer_read_call"));
+        assert_eq!(fixtures.len(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn operation_registry_parser_rejects_empty_fixture_proof() -> Result<(), String> {
+        let text = "| `raw_pointer_read` | shape | hazards | none | keys | route | none | controls | limits |\n";
+
+        let Err(err) = operation_family_registry_fixture_proofs_from_text(text) else {
+            return Err("empty fixture proof should fail".to_string());
+        };
+
+        assert!(err.contains("fixture proof column has no fixture names"));
         assert!(err.contains("raw_pointer_read"));
         Ok(())
     }
