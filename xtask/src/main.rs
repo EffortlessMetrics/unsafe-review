@@ -169,6 +169,10 @@ fn check_docs() -> Result<(), String> {
         Path::new("docs/proposals/README.md"),
         "UNSAFE-REVIEW-PROP-",
     )?;
+    check_handoff_index(
+        Path::new("docs/handoffs"),
+        Path::new("docs/handoffs/README.md"),
+    )?;
     check_no_windows_paths(&[
         Path::new("README.md"),
         Path::new("MANIFEST.md"),
@@ -1798,6 +1802,37 @@ fn check_index(dir: &Path, readme: &Path, prefix: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn check_handoff_index(dir: &Path, readme: &Path) -> Result<(), String> {
+    let index = read_to_string(readme)?;
+    let mut files = 0usize;
+    for path in markdown_files(dir)? {
+        if path == readme {
+            continue;
+        }
+        files += 1;
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            return Err(format!("non-UTF-8 file name in {}", dir.display()));
+        };
+        if !name.starts_with("20") {
+            return Err(format!(
+                "{} does not use dated handoff file naming",
+                path.display()
+            ));
+        }
+        if !index.contains(name) {
+            return Err(format!(
+                "{} is missing from {}",
+                path.display(),
+                readme.display()
+            ));
+        }
+    }
+    if files == 0 {
+        return Err(format!("{} has no handoff files", dir.display()));
+    }
+    Ok(())
+}
+
 fn check_no_windows_paths(paths: &[&Path]) -> Result<(), String> {
     for path in paths {
         visit_text(path, &mut |file| {
@@ -2891,6 +2926,14 @@ OperationFamily::RawPointerRead => vec![
         assert!(err.contains("registry header must be"));
         assert!(err.contains("detected syntax shapes"));
         Ok(())
+    }
+
+    #[test]
+    fn handoff_index_validates_current_closeout_docs() -> Result<(), String> {
+        check_handoff_index(
+            &repo_path("docs/handoffs"),
+            &repo_path("docs/handoffs/README.md"),
+        )
     }
 
     #[test]
