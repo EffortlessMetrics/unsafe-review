@@ -445,6 +445,11 @@ mod tests {
                 true,
             ),
             (
+                "raw_pointer_write_unaligned",
+                OperationFamily::RawPointerWriteUnaligned,
+                false,
+            ),
+            (
                 "raw_pointer_write_bytes",
                 OperationFamily::RawPointerWrite,
                 true,
@@ -504,6 +509,30 @@ mod tests {
         assert_eq!(
             card.operation.family,
             OperationFamily::RawPointerReadUnaligned
+        );
+        assert!(!card.hazards.contains(&HazardKind::Alignment));
+        assert!(
+            card.obligations
+                .iter()
+                .all(|obligation| obligation.key != "alignment")
+        );
+        assert!(card.contract.present);
+        assert!(
+            obligation_discharge_present(card, "bounds"),
+            "length evidence should still satisfy the bounds obligation"
+        );
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        Ok(())
+    }
+
+    #[test]
+    fn unaligned_raw_pointer_write_does_not_require_alignment_guard() -> Result<(), String> {
+        let output = fixture_output("raw_pointer_write_unaligned")?;
+        let card = single_card("raw_pointer_write_unaligned", &output)?;
+
+        assert_eq!(
+            card.operation.family,
+            OperationFamily::RawPointerWriteUnaligned
         );
         assert!(!card.hazards.contains(&HazardKind::Alignment));
         assert!(
