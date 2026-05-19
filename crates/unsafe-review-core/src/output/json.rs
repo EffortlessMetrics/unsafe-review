@@ -248,6 +248,7 @@ mod tests {
         "copy_nonoverlapping",
         "str_from_utf8_unchecked",
         "zeroed_invalid_value",
+        "inline_asm_human_review",
         "pointer_arithmetic_num_ctrl_bytes_guard",
         "pointer_arithmetic_slice_end",
         "slice_from_raw_parts_mut",

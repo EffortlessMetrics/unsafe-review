@@ -393,11 +393,11 @@ fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
             OperationFamily::PointerArithmetic,
         ));
     }
-    if unsafe_block_contains_call(line) {
-        return Some((UnsafeSiteKind::Operation, OperationFamily::UnsafeFnCall));
-    }
     if line.contains("asm!") {
         return Some((UnsafeSiteKind::Operation, OperationFamily::InlineAsm));
+    }
+    if unsafe_block_contains_call(line) {
+        return Some((UnsafeSiteKind::Operation, OperationFamily::UnsafeFnCall));
     }
     if is_target_feature_attribute(line) {
         return Some((UnsafeSiteKind::Operation, OperationFamily::TargetFeature));
@@ -1367,6 +1367,14 @@ mod tests {
         assert_eq!(
             detect_site("block = self.head.block.load(Ordering::Acquire);"),
             None
+        );
+    }
+
+    #[test]
+    fn text_detection_prefers_inline_asm_over_generic_unsafe_call_wrapper() {
+        assert_eq!(
+            detect_site("unsafe { core::arch::asm!(\"nop\") }"),
+            Some((UnsafeSiteKind::Operation, OperationFamily::InlineAsm))
         );
     }
 

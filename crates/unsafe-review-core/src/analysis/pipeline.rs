@@ -351,7 +351,9 @@ fn unsafe_call_path(expression: &str) -> String {
 mod tests {
     use super::*;
     use crate::api::{AnalysisMode, DiffSource, PolicyMode, Scope};
-    use crate::domain::{HazardKind, OperationFamily, ReviewCard, ReviewClass, UnsafeSiteKind};
+    use crate::domain::{
+        HazardKind, OperationFamily, ReviewCard, ReviewClass, UnsafeSiteKind, WitnessKind,
+    };
     use std::fs;
     use std::path::Path;
     use std::path::PathBuf;
@@ -809,6 +811,29 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
                 evidence.obligation.key == "valid-zero" && !evidence.discharge.present
             }),
             "valid-zero obligation should remain missing without target-type evidence"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn inline_asm_uses_inline_asm_operation_family() -> Result<(), String> {
+        let output = fixture_output("inline_asm_human_review")?;
+        let card = single_card("inline_asm_human_review", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::InlineAsm);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(card.hazards.contains(&HazardKind::InlineAsm));
+        assert!(card.hazards.contains(&HazardKind::TargetFeature));
+        assert!(
+            card.routes
+                .iter()
+                .any(|route| route.kind == WitnessKind::HumanDeepReview),
+            "inline asm should route to human deep review"
+        );
+        assert!(
+            card.next_action.verify_commands.is_empty(),
+            "human-review-only inline asm route should not invent a witness command"
         );
         Ok(())
     }
