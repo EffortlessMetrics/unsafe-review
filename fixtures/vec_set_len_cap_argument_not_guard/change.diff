@@ -1,0 +1,10 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,0 +1,6 @@
++pub fn set_named_cap(values: &mut Vec<u8>, requested: usize) {
++    let cap = requested;
++    // SAFETY: this fixture intentionally uses a local named cap without bounding capacity.
++    unsafe { values.set_len(cap) }
++}
++
