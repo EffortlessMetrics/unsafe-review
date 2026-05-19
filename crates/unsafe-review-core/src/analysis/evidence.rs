@@ -963,7 +963,10 @@ fn has_set_len_capacity_early_return(before_call: &str, predicate: &str, new_len
 
 fn has_set_len_const_cap_evidence(lower: &str) -> bool {
     let compact = compact_code(lower);
-    compact.contains(".set_len(cap)")
+    let Some((_, new_len)) = set_len_receiver_and_argument(&compact) else {
+        return false;
+    };
+    new_len == "cap" && (compact.contains("maybeuninit::uninit();cap") || compact.contains(";cap]"))
 }
 
 fn has_set_len_with_capacity_evidence(lower: &str) -> bool {
@@ -2930,7 +2933,10 @@ mod tests {
         };
         let set_len = site_with_family(
             OperationFamily::VecSetLen,
-            vec!["pub struct Buffer<const CAP: usize> {"],
+            vec![
+                "pub struct Buffer<const CAP: usize> {",
+                "    xs: [MaybeUninit<u8>; CAP],",
+            ],
             "out.set_len(CAP);",
             vec![],
         );
@@ -3457,6 +3463,42 @@ mod tests {
         let evidence = obligation_evidence(&set_len, &obligations, &contract, &reach);
 
         assert!(evidence.iter().all(|item| item.discharge.present));
+    }
+
+    #[test]
+    fn set_len_const_cap_evidence_requires_const_capacity_context() {
+        let obligations = vec![SafetyObligation::new(
+            "capacity",
+            "new length is at most capacity",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let const_capacity = site_with_family(
+            OperationFamily::VecSetLen,
+            vec![
+                "impl<const CAP: usize> Buffer<CAP> {",
+                "    xs: [MaybeUninit<u8>; CAP],",
+                "    let mut out = Self { xs: [MaybeUninit::uninit(); CAP], len: 0 };",
+            ],
+            "out.set_len(CAP);",
+            vec![],
+        );
+        let unrelated_local_named_cap = site_with_family(
+            OperationFamily::VecSetLen,
+            vec!["let cap = requested;"],
+            "values.set_len(cap);",
+            vec![],
+        );
+
+        let const_evidence = obligation_evidence(&const_capacity, &obligations, &contract, &reach);
+        let unrelated_evidence =
+            obligation_evidence(&unrelated_local_named_cap, &obligations, &contract, &reach);
+
+        assert!(const_evidence[0].discharge.present);
+        assert!(!unrelated_evidence[0].discharge.present);
     }
 
     #[test]

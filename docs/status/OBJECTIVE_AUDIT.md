@@ -18,7 +18,8 @@ Modulo alignment guards have the same fixture-backed observation, closed-branch,
 and stale-pointer controls.
 `Vec::from_raw_parts` len/cap capacity evidence now has fixture-backed controls
 for assertions, early returns, bare observations, closed branches, and stale
-checked cap arguments.
+checked cap arguments. `Vec::set_len` capacity evidence rejects unrelated local
+arguments merely named `cap` unless a const-capacity context is visible.
 Unchecked-constructor availability evidence now has fixture-backed controls for
 same-receiver assertions, enclosing positive branches, unavailable-path early
 returns, other receivers, bare observations, and closed branches.
@@ -83,7 +84,8 @@ These are not failures; they are the next unsupported or weakly verified areas:
   modeling; visible `MaybeUninit::new` initialization loops and const `CAP`
   capacity facts now have fixture coverage, same-vector
   `Vec::with_capacity(new_len)` capacity evidence has fixture coverage, and
-  unrelated capacity comparisons are pinned as non-evidence before `set_len`;
+  unrelated capacity comparisons plus local arguments merely named `cap` are
+  pinned as non-evidence before `set_len`;
   `arrayvec#288` has a rerun receipt;
   non-zero shrink and `set_len(0)` clear evidence also have fixture and
   dogfood-rerun coverage, start-bound shrink evidence has fixture and
