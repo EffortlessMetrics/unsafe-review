@@ -1,0 +1,11 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,0 +1,7 @@
++pub fn drop_owned_box(value: Box<String>) {
++    let ptr = Box::into_raw(value);
++    // SAFETY: this fixture ties the pointer to Box::into_raw and drops it once.
++    unsafe {
++        core::ptr::drop_in_place(ptr);
++    }
++}

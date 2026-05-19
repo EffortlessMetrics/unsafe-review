@@ -102,7 +102,7 @@ pub(crate) fn summarize_discharge(evidence: &[ObligationEvidence]) -> DischargeE
             return DischargeEvidence::present(&evidence[0].discharge.summary);
         }
         return DischargeEvidence::present(
-            "All inferred safety obligations have visible local guard evidence",
+            "All inferred safety obligations have visible local discharge evidence",
         );
     }
     if evidence
@@ -206,6 +206,10 @@ fn discharge_state_for(
                 && has_u8_write_bytes_context(lower)
             {
                 EvidenceState::present("u8 write_bytes target evidence was detected")
+            } else if family == &OperationFamily::DropInPlace
+                && has_drop_in_place_box_origin_evidence(&site.operation.expression, lower)
+            {
+                EvidenceState::present("Box::into_raw origin evidence was detected")
             } else if family == &OperationFamily::VecSetLen {
                 EvidenceState::missing("No initialization evidence was detected")
             } else {
@@ -213,10 +217,23 @@ fn discharge_state_for(
             }
         }
         "non-null" | "pointer-live" => {
-            if has_nullability_guard(site, lower) {
+            if family == &OperationFamily::DropInPlace
+                && has_drop_in_place_box_origin_evidence(&site.operation.expression, lower)
+            {
+                EvidenceState::present("Box::into_raw origin evidence was detected")
+            } else if has_nullability_guard(site, lower) {
                 EvidenceState::present("Nullability guard code was detected")
             } else {
                 EvidenceState::missing("No nullability guard code was detected")
+            }
+        }
+        "ownership" => {
+            if family == &OperationFamily::DropInPlace
+                && has_drop_in_place_box_origin_evidence(&site.operation.expression, lower)
+            {
+                EvidenceState::present("Box::into_raw ownership evidence was detected")
+            } else {
+                EvidenceState::missing("No obligation-specific guard code was detected")
             }
         }
         "callee-contract" => {
@@ -609,6 +626,48 @@ fn let_binding_name(left_side: &str) -> Option<&str> {
 
 fn with_capacity_argument(right_side: &str) -> Option<&str> {
     let marker = "with_capacity(";
+    let call_pos = right_side.find(marker)? + marker.len();
+    let argument_text = &right_side[call_pos..];
+    let argument_end = matching_call_argument_end(argument_text)?;
+    let argument = &argument_text[..argument_end];
+    (!argument.is_empty()).then_some(argument)
+}
+
+fn has_drop_in_place_box_origin_evidence(expression: &str, lower: &str) -> bool {
+    let compact = compact_code(lower);
+    let compact_expression = compact_code(&expression.to_ascii_lowercase());
+    let Some(pointer) = drop_in_place_argument(&compact_expression) else {
+        return false;
+    };
+    let call_pos = compact
+        .find(&compact_expression)
+        .or_else(|| compact.find(&format!("drop_in_place({pointer})")));
+    let Some(call_pos) = call_pos else {
+        return false;
+    };
+    let before_call = &compact[..call_pos];
+    before_call.split(';').any(|statement| {
+        let Some((left, right)) = statement.split_once('=') else {
+            return false;
+        };
+        let Some(binding) = let_binding_name(left) else {
+            return false;
+        };
+        binding == pointer && box_into_raw_argument(right).is_some()
+    })
+}
+
+fn drop_in_place_argument(compact_expression: &str) -> Option<&str> {
+    let marker = "drop_in_place(";
+    let call_pos = compact_expression.find(marker)? + marker.len();
+    let argument_text = &compact_expression[call_pos..];
+    let argument_end = matching_call_argument_end(argument_text)?;
+    let argument = &argument_text[..argument_end];
+    (!argument.is_empty()).then_some(argument)
+}
+
+fn box_into_raw_argument(right_side: &str) -> Option<&str> {
+    let marker = "box::into_raw(";
     let call_pos = right_side.find(marker)? + marker.len();
     let argument_text = &right_side[call_pos..];
     let argument_end = matching_call_argument_end(argument_text)?;
@@ -1889,6 +1948,40 @@ mod tests {
                 .discharge
                 .present
         );
+    }
+
+    #[test]
+    fn drop_in_place_box_origin_discharges_drop_obligations_for_same_pointer() {
+        let obligations = vec![
+            SafetyObligation::new("pointer-live", "pointer is valid for dropping one value"),
+            SafetyObligation::new("initialized", "pointed-to value is initialized"),
+            SafetyObligation::new(
+                "ownership",
+                "value will not be dropped again or observed after drop",
+            ),
+        ];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let matching = site_with_family(
+            OperationFamily::DropInPlace,
+            vec!["let ptr = Box::into_raw(value);"],
+            "core::ptr::drop_in_place(ptr);",
+            vec![],
+        );
+        let other_pointer = site_with_family(
+            OperationFamily::DropInPlace,
+            vec!["let other = Box::into_raw(value);"],
+            "core::ptr::drop_in_place(ptr);",
+            vec![],
+        );
+
+        let evidence = obligation_evidence(&matching, &obligations, &contract, &reach);
+        assert!(evidence.iter().all(|item| item.discharge.present));
+        let evidence = obligation_evidence(&other_pointer, &obligations, &contract, &reach);
+        assert!(evidence.iter().all(|item| !item.discharge.present));
     }
 
     #[test]

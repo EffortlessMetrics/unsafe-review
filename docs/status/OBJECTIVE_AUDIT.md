@@ -75,8 +75,9 @@ These are not failures; they are the next unsupported or weakly verified areas:
   has fixture and `rust-smallvec#64` dogfood-rerun coverage, while other
   `set_len` patterns remain weak.
 - Real PR-diff dogfood now recognizes `ptr::drop_in_place` as a
-  drop/deallocation operation family, but broader drop/deallocation evidence
-  modeling remains narrow.
+  drop/deallocation operation family, and fixture coverage recognizes the
+  narrow same-pointer `Box::into_raw` origin shape as drop evidence, but broader
+  drop/deallocation evidence modeling remains narrow.
 - `arrayvec#137` adds a raw pointer accessor soundness-fix measurement. It
   produced 15 contract-missing cards when run with a PR-head checkout and raw
   `diff --git` patch, which is useful dogfood but not calibration proof.
