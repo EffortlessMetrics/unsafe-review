@@ -209,6 +209,36 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
 }
 
 #[test]
+fn check_reports_missing_diff_file_as_cli_failure() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("safe_code_no_cards");
+    let missing_diff = fixture.join("missing.diff");
+
+    let output = run_failure([
+        os("check"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        missing_diff.as_os_str().to_os_string(),
+        os("--format"),
+        os("json"),
+    ])?;
+
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(stdout_text(&output)?.trim(), "");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unsafe-review: read diff"),
+        "stderr should identify diff read failure: {stderr}"
+    );
+    assert!(
+        stderr.contains("missing.diff"),
+        "stderr should include the missing diff path: {stderr}"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn doctor_reports_first_install_signals_without_running_witnesses() -> Result<(), Box<dyn Error>> {
     let fixture = fixture_root("raw_pointer_alignment");
 
