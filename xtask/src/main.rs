@@ -62,6 +62,11 @@ const OPERATION_FAMILY_REGISTRY_HEADER: &[&str] = &[
     "known false-positive controls",
     "known limits",
 ];
+const OPERATION_FAMILY_REGISTRY_REQUIRED_TEXT_COLUMNS: &[(usize, &str)] = &[
+    (1, "detected syntax shapes"),
+    (7, "known false-positive controls"),
+    (8, "known limits"),
+];
 const OPERATION_FAMILY_SOURCE: &str = "crates/unsafe-review-core/src/domain/operation.rs";
 const HAZARD_KIND_SOURCE: &str = "crates/unsafe-review-core/src/domain/hazard.rs";
 const WITNESS_KIND_SOURCE: &str = "crates/unsafe-review-core/src/domain/witness.rs";
@@ -1174,6 +1179,7 @@ fn operation_family_registry_rows_from_text(text: &str) -> Result<BTreeSet<Strin
                 columns.len()
             ));
         }
+        validate_operation_family_registry_required_text(family, &columns)?;
         if !rows.insert(family.to_string()) {
             return Err(format!(
                 "{OPERATION_FAMILY_REGISTRY} contains duplicate operation_family row `{family}`"
@@ -1186,6 +1192,32 @@ fn operation_family_registry_rows_from_text(text: &str) -> Result<BTreeSet<Strin
         ));
     }
     Ok(rows)
+}
+
+fn validate_operation_family_registry_required_text(
+    family: &str,
+    columns: &[&str],
+) -> Result<(), String> {
+    for (idx, name) in OPERATION_FAMILY_REGISTRY_REQUIRED_TEXT_COLUMNS {
+        let Some(value) = columns.get(*idx) else {
+            return Err(format!(
+                "{OPERATION_FAMILY_REGISTRY} operation_family `{family}` is missing {name} column"
+            ));
+        };
+        if is_placeholder_registry_text(value) {
+            return Err(format!(
+                "{OPERATION_FAMILY_REGISTRY} operation_family `{family}` {name} column must describe current review behavior, not `{value}`"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn is_placeholder_registry_text(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "" | "none" | "n/a" | "na" | "todo" | "tbd" | "unknown"
+    )
 }
 
 fn operation_family_labels() -> Result<BTreeSet<String>, String> {
@@ -2292,6 +2324,20 @@ mod tests {
 
         assert!(err.contains("must have 9 columns"));
         assert!(err.contains("raw_pointer_read"));
+        Ok(())
+    }
+
+    #[test]
+    fn operation_registry_parser_rejects_placeholder_required_text() -> Result<(), String> {
+        let text = "| `raw_pointer_read` | todo | hazards | none | keys | miri | `raw_pointer_alignment` | controls | limits |\n";
+
+        let Err(err) = operation_family_registry_rows_from_text(text) else {
+            return Err("placeholder registry text should fail".to_string());
+        };
+
+        assert!(err.contains("detected syntax shapes"));
+        assert!(err.contains("raw_pointer_read"));
+        assert!(err.contains("todo"));
         Ok(())
     }
 
