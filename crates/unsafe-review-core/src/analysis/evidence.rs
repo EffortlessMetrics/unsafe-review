@@ -3867,6 +3867,12 @@ mod tests {
             "unsafe { core::mem::transmute::<u8, bool>(value) }",
             vec![],
         );
+        let observed_referenced_predicate = site_with_family(
+            OperationFamily::Transmute,
+            vec!["let _valid_bool_byte = value <= 1;"],
+            "unsafe { core::mem::transmute_copy::<u8, bool>(&value) }",
+            vec![],
+        );
 
         let other_arg_evidence = obligation_evidence(&other_arg, &obligations, &contract, &reach);
         let post_call_evidence =
@@ -3875,11 +3881,18 @@ mod tests {
             obligation_evidence(&unsupported_pair, &obligations, &contract, &reach);
         let observed_predicate_evidence =
             obligation_evidence(&observed_predicate, &obligations, &contract, &reach);
+        let observed_referenced_predicate_evidence = obligation_evidence(
+            &observed_referenced_predicate,
+            &obligations,
+            &contract,
+            &reach,
+        );
 
         assert!(!other_arg_evidence[0].discharge.present);
         assert!(!post_call_evidence[0].discharge.present);
         assert!(!unsupported_pair_evidence[0].discharge.present);
         assert!(!observed_predicate_evidence[0].discharge.present);
+        assert!(!observed_referenced_predicate_evidence[0].discharge.present);
     }
 
     #[test]
