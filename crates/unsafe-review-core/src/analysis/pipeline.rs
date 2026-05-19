@@ -324,6 +324,9 @@ fn operation_path(scanned: &scanner::ScannedSite) -> String {
 
 fn unsafe_call_path(expression: &str) -> String {
     let normalized = normalize_snippet(expression);
+    if contains_call_name(&normalized, "new_unchecked") {
+        return "new_unchecked".to_string();
+    }
     let call = normalized
         .split_once("unsafe")
         .and_then(|(_prefix, after_unsafe)| {
@@ -345,6 +348,36 @@ fn unsafe_call_path(expression: &str) -> String {
     } else {
         call.trim_matches(':').to_string()
     }
+}
+
+fn contains_call_name(line: &str, name: &str) -> bool {
+    let mut cursor = line;
+    while let Some(pos) = cursor.find(name) {
+        let before = cursor[..pos].chars().next_back();
+        let after = &cursor[pos + name.len()..];
+        let starts_on_boundary = before.is_none_or(|ch| !is_ident_continue(ch));
+        if starts_on_boundary && call_suffix(after) {
+            return true;
+        }
+        cursor = &after[after
+            .char_indices()
+            .next()
+            .map_or(after.len(), |(idx, ch)| idx + ch.len_utf8())..];
+    }
+    false
+}
+
+fn call_suffix(after_name: &str) -> bool {
+    let rest = after_name.trim_start();
+    if rest.starts_with('(') {
+        return true;
+    }
+    rest.strip_prefix("::")
+        .is_some_and(|after_colons| after_colons.trim_start().starts_with('<'))
+}
+
+fn is_ident_continue(ch: char) -> bool {
+    ch == '_' || ch.is_ascii_alphanumeric()
 }
 
 #[cfg(test)]
@@ -692,6 +725,22 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn unsafe_call_path_prefers_inner_unchecked_constructor_callee() {
+        assert_eq!(
+            unsafe_call_path("unsafe { Some(One::new_unchecked(needle)) }"),
+            "new_unchecked"
+        );
+        assert_eq!(
+            unsafe_call_path("unsafe { Some(One::new_unchecked::<Needle>(needle)) }"),
+            "new_unchecked"
+        );
+        assert_eq!(
+            unsafe_call_path("unsafe { self.reserve_rehash(hasher) }"),
+            "reserve_rehash"
+        );
+    }
+
+    #[test]
     fn unchecked_constructor_availability_guard_is_unsafe_call_evidence() -> Result<(), String> {
         let output = fixture_output("unchecked_constructor_availability_guard")?;
         let card = single_card("unchecked_constructor_availability_guard", &output)?;
@@ -702,6 +751,8 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
         assert!(card.discharge.present);
         assert!(obligation_discharge_present(card, "callee-contract"));
         assert!(card.site.snippet.contains("new_unchecked"));
+        assert!(card.id.0.contains("new-unchecked"));
+        assert!(!card.id.0.contains("-some-"));
         Ok(())
     }
 

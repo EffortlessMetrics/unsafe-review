@@ -1,6 +1,6 @@
 [
   {
-    "id": "UR-unchecked-constructor-availability-guard-fixture-src-lib-rs-new-operation-unsafe_fn_call-some-3ac53e496ec2-unknown-c1",
+    "id": "UR-unchecked-constructor-availability-guard-fixture-src-lib-rs-new-operation-unsafe_fn_call-new-unchecked-3ac53e496ec2-unknown-c1",
     "class": "guarded_unwitnessed",
     "priority": "medium",
     "confidence": "medium",
