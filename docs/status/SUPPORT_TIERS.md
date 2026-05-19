@@ -26,6 +26,9 @@ alignment checks through `raw_pointer_alignment_modulo_guard`,
 `Vec::from_raw_parts` capacity evidence is pinned for same-call len/cap
 assertions and invalid-path early returns, and rejects bare relation
 observations, closed positive branches, and reassigned checked cap arguments.
+Unchecked-constructor availability evidence is pinned for same-receiver
+assertions, enclosing positive branches, and unavailable-path early returns, and
+rejects other receivers, bare observations, and closed positive branches.
 
 | Capability | Tier | Surface | Proof | Known limits |
 |---|---|---|---|---|

@@ -145,7 +145,11 @@ required_core_fixtures = [
   "multiline_unsafe_fn_call_wrapper",
   "unsafe_fn_call_encode_utf8_remaining_cap",
   "unchecked_constructor_availability_guard",
+  "unchecked_constructor_availability_assert_guard",
+  "unchecked_constructor_unavailable_return_guard",
   "unchecked_constructor_other_availability_not_guard",
+  "unchecked_constructor_availability_observed_not_guard",
+  "unchecked_constructor_availability_closed_branch_not_guard",
   "nonnull_new_guard",
   "nonnull_other_guard_not_evidence",
   "nonnull_is_null_nonreturning_not_guard",
@@ -1567,9 +1571,49 @@ expected_operation_family = "unsafe_fn_call"
 expected_hazard = "unknown"
 
 [[cases]]
+fixture = "unchecked_constructor_availability_assert_guard"
+kind = "positive"
+claim = "non-NonNull new_unchecked constructors recognize same-receiver is_available assertions"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "unsafe_fn_call"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "unchecked_constructor_unavailable_return_guard"
+kind = "positive"
+claim = "non-NonNull new_unchecked constructors recognize unavailable-path early returns"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "unsafe_fn_call"
+expected_hazard = "unknown"
+
+[[cases]]
 fixture = "unchecked_constructor_other_availability_not_guard"
 kind = "false_positive_control"
 claim = "new_unchecked constructor availability evidence must come from the same receiver before the call"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unsafe_fn_call"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "unchecked_constructor_availability_observed_not_guard"
+kind = "false_positive_control"
+claim = "new_unchecked constructor availability observations do not discharge callee-contract evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unsafe_fn_call"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "unchecked_constructor_availability_closed_branch_not_guard"
+kind = "false_positive_control"
+claim = "new_unchecked constructor closed availability branches do not discharge callee-contract evidence"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"

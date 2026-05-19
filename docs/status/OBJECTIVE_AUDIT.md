@@ -19,6 +19,9 @@ and stale-pointer controls.
 `Vec::from_raw_parts` len/cap capacity evidence now has fixture-backed controls
 for assertions, early returns, bare observations, closed branches, and stale
 checked cap arguments.
+Unchecked-constructor availability evidence now has fixture-backed controls for
+same-receiver assertions, enclosing positive branches, unavailable-path early
+returns, other receivers, bare observations, and closed branches.
 
 The latest closed execution lane is recorded in
 `docs/status/DOGFOOD_CALIBRATED_EVIDENCE_LANE.md` and

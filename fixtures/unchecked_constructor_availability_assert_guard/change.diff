@@ -1,0 +1,17 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -12,6 +12,13 @@ impl One {
+     pub unsafe fn new_unchecked(needle: u8) -> One {
+         One { needle }
+     }
+ 
++    pub fn new(needle: u8) -> One {
++        assert!(One::is_available());
++        // SAFETY: availability is asserted before constructing this searcher.
++        unsafe { One::new_unchecked(needle) }
++    }
++
+     pub fn needle(&self) -> u8 {
+         self.needle
+     }

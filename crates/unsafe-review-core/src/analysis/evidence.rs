@@ -1222,7 +1222,56 @@ fn has_unchecked_constructor_availability_evidence(expression: &str, lower: &str
     let before_call = compact
         .find(&compact_expression)
         .map_or(compact.as_str(), |call_pos| &compact[..call_pos]);
-    before_call.contains(&format!("{receiver}::is_available()"))
+    has_unchecked_constructor_availability_guard(before_call, receiver)
+}
+
+fn has_unchecked_constructor_availability_guard(before_call: &str, receiver: &str) -> bool {
+    let predicate = format!("{receiver}::is_available()");
+    has_unchecked_constructor_availability_assertion(before_call, &predicate)
+        || has_open_unchecked_constructor_availability_branch(before_call, &predicate)
+        || has_unchecked_constructor_unavailable_early_return(before_call, &predicate)
+}
+
+fn has_unchecked_constructor_availability_assertion(before_call: &str, predicate: &str) -> bool {
+    [
+        format!("assert!({predicate})"),
+        format!("assert!({predicate},"),
+        format!("debug_assert!({predicate})"),
+        format!("debug_assert!({predicate},"),
+    ]
+    .iter()
+    .any(|pattern| before_call.contains(pattern))
+}
+
+fn has_open_unchecked_constructor_availability_branch(before_call: &str, predicate: &str) -> bool {
+    let guard = format!("if{predicate}{{");
+    let mut search_from = 0;
+    while let Some(offset) = before_call[search_from..].find(&guard) {
+        let guard_start = search_from + offset;
+        let after_guard = &before_call[guard_start + guard.len()..];
+        if branch_still_open_at_operation(after_guard) {
+            return true;
+        }
+        search_from = guard_start + guard.len();
+    }
+    false
+}
+
+fn has_unchecked_constructor_unavailable_early_return(before_call: &str, predicate: &str) -> bool {
+    let guard = format!("if!{predicate}{{");
+    let mut search_from = 0;
+    while let Some(offset) = before_call[search_from..].find(&guard) {
+        let guard_start = search_from + offset;
+        let after_guard = &before_call[guard_start + guard.len()..];
+        let guard_body = after_guard
+            .split_once('}')
+            .map_or(after_guard, |(guard_body, _after)| guard_body);
+        if guard_body.contains("return") {
+            return true;
+        }
+        search_from = guard_start + guard.len();
+    }
+    false
 }
 
 fn unchecked_constructor_receiver(compact_expression: &str) -> Option<&str> {
@@ -3427,6 +3476,18 @@ mod tests {
             "unsafe { Some(One::new_unchecked(needle)) }",
             vec!["}"],
         );
+        let assert_guarded = site_with_family(
+            OperationFamily::UnsafeFnCall,
+            vec!["assert!(One::is_available());"],
+            "unsafe { Some(One::new_unchecked(needle)) }",
+            vec![],
+        );
+        let unavailable_return_guard = site_with_family(
+            OperationFamily::UnsafeFnCall,
+            vec!["if !One::is_available() { return None; }"],
+            "unsafe { Some(One::new_unchecked(needle)) }",
+            vec![],
+        );
         let unguarded = site_with_family(
             OperationFamily::UnsafeFnCall,
             vec![],
@@ -3435,9 +3496,15 @@ mod tests {
         );
 
         let guarded_evidence = obligation_evidence(&guarded, &obligations, &contract, &reach);
+        let assert_guarded_evidence =
+            obligation_evidence(&assert_guarded, &obligations, &contract, &reach);
+        let unavailable_return_evidence =
+            obligation_evidence(&unavailable_return_guard, &obligations, &contract, &reach);
         let unguarded_evidence = obligation_evidence(&unguarded, &obligations, &contract, &reach);
 
         assert!(guarded_evidence[0].discharge.present);
+        assert!(assert_guarded_evidence[0].discharge.present);
+        assert!(unavailable_return_evidence[0].discharge.present);
         assert!(!unguarded_evidence[0].discharge.present);
     }
 
@@ -3464,6 +3531,25 @@ mod tests {
             "unsafe { Some(One::new_unchecked(needle)) }",
             vec!["if One::is_available() { record_available(); }"],
         );
+        let observed_availability = site_with_family(
+            OperationFamily::UnsafeFnCall,
+            vec![
+                "let available = One::is_available();",
+                "record_available(available);",
+            ],
+            "unsafe { Some(One::new_unchecked(needle)) }",
+            vec![],
+        );
+        let closed_availability_branch = site_with_family(
+            OperationFamily::UnsafeFnCall,
+            vec![
+                "if One::is_available() {",
+                "    record_available(true);",
+                "}",
+            ],
+            "unsafe { Some(One::new_unchecked(needle)) }",
+            vec![],
+        );
         let generic_call = site_with_family(
             OperationFamily::UnsafeFnCall,
             vec!["if One::is_available() {"],
@@ -3474,11 +3560,17 @@ mod tests {
         let other_receiver_evidence =
             obligation_evidence(&other_receiver, &obligations, &contract, &reach);
         let post_call_evidence = obligation_evidence(&post_call, &obligations, &contract, &reach);
+        let observed_availability_evidence =
+            obligation_evidence(&observed_availability, &obligations, &contract, &reach);
+        let closed_availability_branch_evidence =
+            obligation_evidence(&closed_availability_branch, &obligations, &contract, &reach);
         let generic_call_evidence =
             obligation_evidence(&generic_call, &obligations, &contract, &reach);
 
         assert!(!other_receiver_evidence[0].discharge.present);
         assert!(!post_call_evidence[0].discharge.present);
+        assert!(!observed_availability_evidence[0].discharge.present);
+        assert!(!closed_availability_branch_evidence[0].discharge.present);
         assert!(generic_call_evidence[0].discharge.present);
     }
 
