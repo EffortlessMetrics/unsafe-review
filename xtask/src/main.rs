@@ -154,6 +154,7 @@ fn check_docs() -> Result<(), String> {
     for path in REQUIRED_DOCS {
         require_file(path)?;
     }
+    check_docs_map_paths("docs/README.md")?;
     check_index(
         Path::new("docs/specs"),
         Path::new("docs/specs/README.md"),
@@ -1833,6 +1834,47 @@ fn check_handoff_index(dir: &Path, readme: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn check_docs_map_paths(path: &str) -> Result<(), String> {
+    let text = read_to_string(Path::new(path))?;
+    let mut checked = 0usize;
+    for span in markdown_code_spans(&text) {
+        let candidate = span.trim();
+        if !looks_like_repo_path(candidate) {
+            continue;
+        }
+        checked += 1;
+        if !Path::new(candidate).exists() && !repo_path(candidate).exists() {
+            return Err(format!("{path} references missing path `{candidate}`"));
+        }
+    }
+    if checked == 0 {
+        return Err(format!("{path} has no repository path code spans"));
+    }
+    Ok(())
+}
+
+fn markdown_code_spans(text: &str) -> Vec<String> {
+    let mut spans = Vec::new();
+    let mut current = String::new();
+    let mut in_code = false;
+    for ch in text.chars() {
+        if ch == '`' {
+            if in_code {
+                spans.push(current.clone());
+                current.clear();
+            }
+            in_code = !in_code;
+        } else if in_code {
+            current.push(ch);
+        }
+    }
+    spans
+}
+
+fn looks_like_repo_path(value: &str) -> bool {
+    value.contains('/') || value.ends_with(".md")
+}
+
 fn check_no_windows_paths(paths: &[&Path]) -> Result<(), String> {
     for path in paths {
         visit_text(path, &mut |file| {
@@ -2934,6 +2976,21 @@ OperationFamily::RawPointerRead => vec![
             &repo_path("docs/handoffs"),
             &repo_path("docs/handoffs/README.md"),
         )
+    }
+
+    #[test]
+    fn docs_map_paths_point_at_existing_repository_files() -> Result<(), String> {
+        check_docs_map_paths("../docs/README.md")
+    }
+
+    #[test]
+    fn markdown_code_span_parser_extracts_backticked_paths() {
+        let spans = markdown_code_spans(
+            "| Layer | Path |\n|---|---|\n| Docs | `docs/README.md`, `policy/` |\n",
+        );
+
+        assert!(spans.contains(&"docs/README.md".to_string()));
+        assert!(spans.contains(&"policy/".to_string()));
     }
 
     #[test]
