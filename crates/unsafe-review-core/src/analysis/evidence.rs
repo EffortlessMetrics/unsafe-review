@@ -272,6 +272,15 @@ fn discharge_state_for(
                 EvidenceState::missing("No obligation-specific guard code was detected")
             }
         }
+        "valid-zero" => {
+            if family == &OperationFamily::Zeroed && has_zeroed_known_valid_zero_type(lower) {
+                EvidenceState::present(
+                    "Known valid-zero target type evidence was detected before zeroed",
+                )
+            } else {
+                EvidenceState::missing("No obligation-specific guard code was detected")
+            }
+        }
         _ => EvidenceState::missing("No obligation-specific guard code was detected"),
     }
 }
@@ -464,6 +473,54 @@ fn has_validation_early_return_guard(before_call: &str, validation: &str, predic
         .split_once('}')
         .map_or(after_guard, |(guard_body, _after)| guard_body)
         .contains("return")
+}
+
+fn has_zeroed_known_valid_zero_type(lower: &str) -> bool {
+    let compact = compact_code(lower);
+    let Some(target_type) = zeroed_target_type(&compact) else {
+        return false;
+    };
+    matches!(
+        target_type,
+        "()" | "bool"
+            | "char"
+            | "f32"
+            | "f64"
+            | "i8"
+            | "i16"
+            | "i32"
+            | "i64"
+            | "i128"
+            | "isize"
+            | "u8"
+            | "u16"
+            | "u32"
+            | "u64"
+            | "u128"
+            | "usize"
+    )
+}
+
+fn zeroed_target_type(compact: &str) -> Option<&str> {
+    let marker = "zeroed::<";
+    let start = compact.find(marker)? + marker.len();
+    let after_marker = &compact[start..];
+    let end = matching_generic_argument_end(after_marker)?;
+    let target_type = &after_marker[..end];
+    (!target_type.is_empty()).then_some(target_type)
+}
+
+fn matching_generic_argument_end(text: &str) -> Option<usize> {
+    let mut depth = 0usize;
+    for (idx, ch) in text.char_indices() {
+        match ch {
+            '<' => depth += 1,
+            '>' if depth == 0 => return Some(idx),
+            '>' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    None
 }
 
 fn has_maybeuninit_slice_context(lower: &str) -> bool {
@@ -1562,6 +1619,62 @@ mod tests {
 
         assert!(!wrong_buffer_evidence[0].discharge.present);
         assert!(!non_returning_evidence[0].discharge.present);
+    }
+
+    #[test]
+    fn zeroed_known_valid_zero_types_discharge_valid_zero_obligation() {
+        let obligations = vec![SafetyObligation::new(
+            "valid-zero",
+            "all-zero bit pattern is a valid value for the target type",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+
+        for target_type in [
+            "()", "bool", "char", "f32", "f64", "i8", "i16", "i32", "i64", "i128", "isize", "u8",
+            "u16", "u32", "u64", "u128", "usize",
+        ] {
+            let expression = format!("unsafe {{ core::mem::zeroed::<{target_type}>() }}");
+            let zeroed = site_with_family(
+                OperationFamily::Zeroed,
+                vec!["pub fn zero_value() {"],
+                &expression,
+                vec![],
+            );
+
+            let evidence = obligation_evidence(&zeroed, &obligations, &contract, &reach);
+
+            assert!(
+                evidence[0].discharge.present,
+                "{target_type} should be recognized as a known valid-zero target"
+            );
+        }
+    }
+
+    #[test]
+    fn zeroed_nonnull_target_keeps_valid_zero_obligation_missing() {
+        let obligations = vec![SafetyObligation::new(
+            "valid-zero",
+            "all-zero bit pattern is a valid value for the target type",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let zeroed = site_with_family(
+            OperationFamily::Zeroed,
+            vec!["pub fn invalid_zeroed_nonnull() -> core::ptr::NonNull<u8> {"],
+            "unsafe { core::mem::zeroed::<core::ptr::NonNull<u8>>() }",
+            vec![],
+        );
+
+        let evidence = obligation_evidence(&zeroed, &obligations, &contract, &reach);
+
+        assert!(!evidence[0].discharge.present);
     }
 
     #[test]

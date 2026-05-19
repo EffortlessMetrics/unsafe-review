@@ -52,6 +52,7 @@ required_core_fixtures = [
   "str_from_utf8_unchecked_is_ok_guard",
   "str_from_utf8_unchecked_is_err_return_guard",
   "zeroed_invalid_value",
+  "zeroed_valid_u32",
   "inline_asm_human_review",
   "raw_pointer_read_volatile",
   "raw_pointer_read_len_capacity_assert",
@@ -581,6 +582,16 @@ claim = "mem::zeroed reports valid-zero obligations instead of a generic unsafe 
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"
+expected_operation_family = "zeroed"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "zeroed_valid_u32"
+kind = "positive"
+claim = "mem::zeroed recognizes a known valid-zero primitive target type"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
 expected_operation_family = "zeroed"
 expected_hazard = "invalid_value"
 
