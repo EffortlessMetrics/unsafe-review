@@ -560,7 +560,19 @@ fn has_receiver_early_return_guard(before_call: &str, receiver: &str, predicate:
 
 fn has_unreachable_unchecked_infallible_path_evidence(lower: &str) -> bool {
     let compact = compact_code(lower);
-    compact.contains("fallibility::infallible") && compact.contains("unreachable_unchecked(")
+    let Some(call_pos) = compact.find("unreachable_unchecked(") else {
+        return false;
+    };
+    let before_call = &compact[..call_pos];
+    let Some(match_pos) = before_call.rfind("match") else {
+        return false;
+    };
+    let match_context = &before_call[match_pos..];
+    let Some((match_head, _arms)) = match_context.split_once('{') else {
+        return false;
+    };
+
+    match_head.contains("fallibility::infallible")
 }
 
 fn has_from_utf8_unchecked_validation_evidence(lower: &str) -> bool {
@@ -2690,6 +2702,34 @@ mod tests {
         let unreachable = site_with_family(
             OperationFamily::UnreachableUnchecked,
             vec!["match fallible_with_capacity(Fallibility::Fallible) {"],
+            "Err(_) => unsafe { hint::unreachable_unchecked() },",
+            vec![],
+        );
+
+        let evidence = obligation_evidence(&unreachable, &obligations, &contract, &reach);
+
+        assert!(!evidence[0].discharge.present);
+    }
+
+    #[test]
+    fn unreachable_unchecked_infallible_path_must_match_arm_context() {
+        let obligations = vec![SafetyObligation::new(
+            "unreachable",
+            "control flow cannot reach this path before `unreachable_unchecked`",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let unreachable = site_with_family(
+            OperationFamily::UnreachableUnchecked,
+            vec![
+                "let _other = allocate(Fallibility::Infallible);",
+                "match allocate(Fallibility::Fallible) {",
+                "    Ok(value) => value,",
+                "    // SAFETY: this fixture intentionally makes a different call infallible.",
+            ],
             "Err(_) => unsafe { hint::unreachable_unchecked() },",
             vec![],
         );

@@ -45,6 +45,7 @@ required_core_fixtures = [
   "unwrap_unchecked_is_err_return_guard",
   "unreachable_unchecked_path",
   "unreachable_unchecked_infallible_path",
+  "unreachable_unchecked_other_infallible_not_guard",
   "get_unchecked_mut_bounds",
   "get_unchecked_mut_len_guard",
   "get_unchecked_mut_other_len_not_guard",
@@ -529,6 +530,16 @@ claim = "unreachable_unchecked recognizes local Fallibility::Infallible error-pa
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guarded_unwitnessed"
+expected_operation_family = "unreachable_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unreachable_unchecked_other_infallible_not_guard"
+kind = "false_positive_control"
+claim = "unreachable_unchecked does not accept Fallibility::Infallible evidence from another match context"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
 expected_operation_family = "unreachable_unchecked"
 expected_hazard = "invalid_value"
 
