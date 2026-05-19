@@ -1783,6 +1783,33 @@ mod tests {
     }
 
     #[test]
+    fn transmute_copy_size_equality_discharges_layout_obligation_only() {
+        let obligations = vec![
+            SafetyObligation::new("layout", "source and destination layouts are compatible"),
+            SafetyObligation::new(
+                "valid-value",
+                "destination value satisfies Rust validity rules",
+            ),
+        ];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let transmute = site_with_family(
+            OperationFamily::Transmute,
+            vec!["debug_assert_eq!(core::mem::size_of::<u8>(), core::mem::size_of::<bool>());"],
+            "unsafe { core::mem::transmute_copy::<u8, bool>(&value) }",
+            vec![],
+        );
+
+        let evidence = obligation_evidence(&transmute, &obligations, &contract, &reach);
+
+        assert!(evidence[0].discharge.present);
+        assert!(!evidence[1].discharge.present);
+    }
+
+    #[test]
     fn transmute_size_equality_requires_matching_type_pair() {
         let obligations = vec![SafetyObligation::new(
             "layout",
