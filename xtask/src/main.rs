@@ -50,6 +50,20 @@ const CALIBRATION_CASE_FIELDS: &[&str] = &[
 ];
 const OPERATION_FAMILY_REGISTRY: &str =
     "docs/specs/appendices/UNSAFE-REVIEW-SPEC-0005-appendix-operation-family-registry.md";
+const OPERATION_FAMILY_REGISTRY_WITNESS_ROUTES: &[&str] = &[
+    "miri",
+    "cargo-careful",
+    "asan",
+    "msan",
+    "tsan",
+    "lsan",
+    "loom",
+    "shuttle",
+    "kani",
+    "crux",
+    "human-deep-review",
+    "unsupported",
+];
 const ZERO_CARD_EXPECTATION_FIELDS: &[&str] = &[
     "expected_class",
     "expected_operation_family",
@@ -977,11 +991,13 @@ fn check_operation_family_registry_coverage(
 ) -> Result<(), String> {
     let registry_families = operation_family_registry_rows()?;
     let registry_fixture_proofs = operation_family_registry_fixture_proofs()?;
+    let registry_witness_routes = operation_family_registry_witness_routes()?;
     check_operation_family_registry_coverage_with_registry(
         calibration_families,
         calibration_fixtures_by_family,
         &registry_families,
         &registry_fixture_proofs,
+        &registry_witness_routes,
     )
 }
 
@@ -990,6 +1006,7 @@ fn check_operation_family_registry_coverage_with_registry(
     calibration_fixtures_by_family: &BTreeMap<String, BTreeSet<String>>,
     registry_families: &BTreeSet<String>,
     registry_fixture_proofs: &BTreeMap<String, BTreeSet<String>>,
+    registry_witness_routes: &BTreeMap<String, BTreeSet<String>>,
 ) -> Result<(), String> {
     let missing_registry_rows = calibration_families
         .difference(registry_families)
@@ -1027,6 +1044,25 @@ fn check_operation_family_registry_coverage_with_registry(
             return Err(format!(
                 "{OPERATION_FAMILY_REGISTRY} operation_family `{family}` cites fixture proof(s) not calibrated for that family: {}",
                 unbacked_fixtures.join(", ")
+            ));
+        }
+    }
+
+    for family in registry_families {
+        let Some(routes) = registry_witness_routes.get(family) else {
+            return Err(format!(
+                "{OPERATION_FAMILY_REGISTRY} operation_family `{family}` is missing witness route metadata"
+            ));
+        };
+        let unknown_routes = routes
+            .iter()
+            .filter(|route| !OPERATION_FAMILY_REGISTRY_WITNESS_ROUTES.contains(&route.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        if !unknown_routes.is_empty() {
+            return Err(format!(
+                "{OPERATION_FAMILY_REGISTRY} operation_family `{family}` cites unknown witness route(s): {}",
+                unknown_routes.join(", ")
             ));
         }
     }
@@ -1118,6 +1154,67 @@ fn operation_family_registry_fixture_proofs_from_text(
         ));
     }
     Ok(proofs)
+}
+
+fn operation_family_registry_witness_routes() -> Result<BTreeMap<String, BTreeSet<String>>, String>
+{
+    let text = read_to_string(&workspace_path(OPERATION_FAMILY_REGISTRY))?;
+    operation_family_registry_witness_routes_from_text(&text)
+}
+
+fn operation_family_registry_witness_routes_from_text(
+    text: &str,
+) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
+    let mut routes_by_family = BTreeMap::new();
+    for line in text.lines() {
+        let columns = line
+            .split('|')
+            .map(str::trim)
+            .filter(|column| !column.is_empty())
+            .collect::<Vec<_>>();
+        let Some(first) = columns.first() else {
+            continue;
+        };
+        let Some(family) = first
+            .strip_prefix('`')
+            .and_then(|value| value.strip_suffix('`'))
+        else {
+            continue;
+        };
+        let Some(route_column) = columns.get(5) else {
+            return Err(format!(
+                "{OPERATION_FAMILY_REGISTRY} operation_family `{family}` is missing witness route column"
+            ));
+        };
+        let routes = witness_route_tokens(route_column);
+        if routes.is_empty() {
+            return Err(format!(
+                "{OPERATION_FAMILY_REGISTRY} operation_family `{family}` witness route column has no route names"
+            ));
+        }
+        if routes_by_family
+            .insert(family.to_string(), routes)
+            .is_some()
+        {
+            return Err(format!(
+                "{OPERATION_FAMILY_REGISTRY} contains duplicate operation_family row `{family}`"
+            ));
+        }
+    }
+    if routes_by_family.is_empty() {
+        return Err(format!(
+            "{OPERATION_FAMILY_REGISTRY} contains no operation_family registry rows"
+        ));
+    }
+    Ok(routes_by_family)
+}
+
+fn witness_route_tokens(text: &str) -> BTreeSet<String> {
+    text.split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '-'))
+        .map(str::trim)
+        .filter(|token| token.chars().any(|ch| ch.is_ascii_alphanumeric()))
+        .map(ToString::to_string)
+        .collect()
 }
 
 fn backtick_tokens(text: &str) -> BTreeSet<String> {
@@ -1797,18 +1894,55 @@ mod tests {
             "raw_pointer_read".to_string(),
             BTreeSet::from(["raw_pointer_write_assignment".to_string()]),
         )]);
+        let registry_routes = BTreeMap::from([(
+            "raw_pointer_read".to_string(),
+            BTreeSet::from(["miri".to_string()]),
+        )]);
 
         let Err(err) = check_operation_family_registry_coverage_with_registry(
             &calibration_families,
             &calibration_fixtures,
             &registry_families,
             &registry_fixtures,
+            &registry_routes,
         ) else {
             return Err("wrong-family fixture proof should fail".to_string());
         };
 
         assert!(err.contains("cites fixture proof"));
         assert!(err.contains("raw_pointer_write_assignment"));
+        Ok(())
+    }
+
+    #[test]
+    fn operation_registry_rejects_unknown_witness_route() -> Result<(), String> {
+        let calibration_families = BTreeSet::from(["raw_pointer_read".to_string()]);
+        let calibration_fixtures = BTreeMap::from([(
+            "raw_pointer_read".to_string(),
+            BTreeSet::from(["raw_pointer_alignment".to_string()]),
+        )]);
+        let registry_families = BTreeSet::from(["raw_pointer_read".to_string()]);
+        let registry_fixtures = BTreeMap::from([(
+            "raw_pointer_read".to_string(),
+            BTreeSet::from(["raw_pointer_alignment".to_string()]),
+        )]);
+        let registry_routes = BTreeMap::from([(
+            "raw_pointer_read".to_string(),
+            BTreeSet::from(["vibes".to_string()]),
+        )]);
+
+        let Err(err) = check_operation_family_registry_coverage_with_registry(
+            &calibration_families,
+            &calibration_fixtures,
+            &registry_families,
+            &registry_fixtures,
+            &registry_routes,
+        ) else {
+            return Err("unknown witness route should fail".to_string());
+        };
+
+        assert!(err.contains("unknown witness route"));
+        assert!(err.contains("vibes"));
         Ok(())
     }
 
@@ -1837,6 +1971,36 @@ mod tests {
         assert!(fixtures.contains("raw_pointer_alignment"));
         assert!(fixtures.contains("split_raw_pointer_read_call"));
         assert_eq!(fixtures.len(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn operation_registry_parser_extracts_witness_route_names() -> Result<(), String> {
+        let text = "| `transmute` | shape | hazards | none | keys | miri -> kani/crux -> human-deep-review | `transmute_invalid_value` | controls | limits |\n";
+
+        let routes = operation_family_registry_witness_routes_from_text(text)?;
+        let Some(routes) = routes.get("transmute") else {
+            return Err("transmute route row should be parsed".to_string());
+        };
+
+        assert!(routes.contains("miri"));
+        assert!(routes.contains("kani"));
+        assert!(routes.contains("crux"));
+        assert!(routes.contains("human-deep-review"));
+        assert_eq!(routes.len(), 4);
+        Ok(())
+    }
+
+    #[test]
+    fn operation_registry_parser_rejects_empty_witness_route() -> Result<(), String> {
+        let text = "| `raw_pointer_read` | shape | hazards | none | keys | ??? | `raw_pointer_alignment` | controls | limits |\n";
+
+        let Err(err) = operation_family_registry_witness_routes_from_text(text) else {
+            return Err("empty witness route should fail".to_string());
+        };
+
+        assert!(err.contains("witness route column has no route names"));
+        assert!(err.contains("raw_pointer_read"));
         Ok(())
     }
 
