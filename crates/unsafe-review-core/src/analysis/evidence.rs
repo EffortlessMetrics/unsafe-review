@@ -212,6 +212,15 @@ fn discharge_state_for(
                 && has_u8_write_bytes_context(lower)
             {
                 EvidenceState::present("u8 write_bytes target evidence was detected")
+            } else if family == &OperationFamily::VecFromRawParts
+                && has_vec_from_raw_parts_origin_initialized_evidence(
+                    &site.operation.expression,
+                    lower,
+                )
+            {
+                EvidenceState::present(
+                    "Vec::from_raw_parts same-origin initialized range evidence was detected",
+                )
             } else if family == &OperationFamily::DropInPlace
                 && has_drop_in_place_box_origin_evidence(&site.operation.expression, lower)
             {
@@ -503,6 +512,26 @@ fn has_vec_from_raw_parts_origin_len_cap_evidence(expression: &str, lower: &str)
     has_vec_from_raw_parts_same_origin_len_cap(&compact[..call_pos], len, cap)
 }
 
+fn has_vec_from_raw_parts_origin_initialized_evidence(expression: &str, lower: &str) -> bool {
+    let compact = compact_code(lower);
+    let compact_expression = compact_code(&expression.to_ascii_lowercase());
+    let Some((ptr, len, _cap)) = vec_from_raw_parts_arguments(&compact_expression) else {
+        return false;
+    };
+    let call_pos = compact
+        .find(&compact_expression)
+        .or_else(|| compact.find("vec::from_raw_parts("));
+    let Some(call_pos) = call_pos else {
+        return false;
+    };
+    let before_call = &compact[..call_pos];
+    let Some(ptr_receiver) = vec_raw_parts_pointer_origin_receiver_before(before_call, ptr) else {
+        return false;
+    };
+    vec_raw_parts_len_origin_receiver(before_call, len)
+        .is_some_and(|receiver| receiver == ptr_receiver)
+}
+
 fn has_vec_from_raw_parts_origin_evidence(expression: &str, lower: &str) -> bool {
     let compact = compact_code(lower);
     let compact_expression = compact_code(&expression.to_ascii_lowercase());
@@ -777,6 +806,13 @@ fn has_same_pointer_box_into_raw_before(before_call: &str, pointer: &str) -> boo
 }
 
 fn has_same_pointer_vec_raw_parts_origin_before(before_call: &str, pointer: &str) -> bool {
+    vec_raw_parts_pointer_origin_receiver_before(before_call, pointer).is_some()
+}
+
+fn vec_raw_parts_pointer_origin_receiver_before(
+    before_call: &str,
+    pointer: &str,
+) -> Option<String> {
     let mut prior_statements = String::new();
     for statement in before_call.split(';') {
         let Some((left, right)) = statement.split_once('=') else {
@@ -793,12 +829,12 @@ fn has_same_pointer_vec_raw_parts_origin_before(before_call: &str, pointer: &str
             && let Some(receiver) = vec_raw_pointer_receiver(right)
             && vec_raw_pointer_receiver_has_manually_drop_origin(&prior_statements, receiver)
         {
-            return true;
+            return Some(receiver.to_string());
         }
         prior_statements.push_str(statement);
         prior_statements.push(';');
     }
-    false
+    None
 }
 
 fn vec_raw_pointer_receiver(right_side: &str) -> Option<&str> {
@@ -816,6 +852,33 @@ fn vec_raw_pointer_receiver_has_manually_drop_origin(before_call: &str, receiver
         };
         binding == receiver && right.contains("manuallydrop::new(")
     })
+}
+
+fn vec_raw_parts_len_origin_receiver(before_call: &str, len: &str) -> Option<String> {
+    let len = compact_code(len);
+    if len.is_empty() {
+        return None;
+    }
+
+    let mut origin_receivers = Vec::new();
+    for statement in before_call.split(';') {
+        let Some((left, right)) = statement.split_once('=') else {
+            continue;
+        };
+        let Some(binding) = let_binding_name(left) else {
+            continue;
+        };
+        if right.contains("manuallydrop::new(") {
+            origin_receivers.push(binding.to_string());
+        }
+        if binding == len
+            && let Some(receiver) = receiver_before_marker(right, ".len(")
+            && origin_receivers.iter().any(|origin| origin == receiver)
+        {
+            return Some(receiver.to_string());
+        }
+    }
+    None
 }
 
 fn box_from_raw_argument(compact_expression: &str) -> Option<&str> {
@@ -2337,6 +2400,62 @@ mod tests {
         );
         assert!(
             !obligation_evidence(&out_of_order_origin, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+    }
+
+    #[test]
+    fn vec_from_raw_parts_origin_discharges_initialized_for_same_pointer_and_len() {
+        let obligations = vec![SafetyObligation::new(
+            "initialized",
+            "first `len` elements are initialized",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let matching = site_with_family(
+            OperationFamily::VecFromRawParts,
+            vec![
+                "let mut raw = core::mem::ManuallyDrop::new(input);",
+                "let ptr = raw.as_mut_ptr();",
+                "let len = raw.len();",
+            ],
+            "unsafe { Vec::from_raw_parts(ptr, len, cap) }",
+            vec![],
+        );
+        let mismatched_len_origin = site_with_family(
+            OperationFamily::VecFromRawParts,
+            vec![
+                "let mut raw = core::mem::ManuallyDrop::new(input);",
+                "let other = core::mem::ManuallyDrop::new(spare);",
+                "let ptr = raw.as_mut_ptr();",
+                "let len = other.len();",
+            ],
+            "unsafe { Vec::from_raw_parts(ptr, len, cap) }",
+            vec![],
+        );
+        let observed_without_origin = site_with_family(
+            OperationFamily::VecFromRawParts,
+            vec!["let ptr = input.as_mut_ptr();", "let len = input.len();"],
+            "unsafe { Vec::from_raw_parts(ptr, len, cap) }",
+            vec![],
+        );
+
+        assert!(
+            obligation_evidence(&matching, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
+            !obligation_evidence(&mismatched_len_origin, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
+            !obligation_evidence(&observed_without_origin, &obligations, &contract, &reach)[0]
                 .discharge
                 .present
         );
