@@ -1321,7 +1321,34 @@ fn has_u8_bool_value_predicate_guard(before_call: &str, predicate: &str) -> bool
         || before_call.contains(&format!("assert!({predicate},"))
         || before_call.contains(&format!("debug_assert!({predicate})"))
         || before_call.contains(&format!("debug_assert!({predicate},"))
-        || before_call.contains(&format!("if{predicate}{{"))
+        || has_open_positive_branch_guard(before_call, predicate)
+}
+
+fn has_open_positive_branch_guard(before_call: &str, predicate: &str) -> bool {
+    let guard = format!("if{predicate}{{");
+    let mut search_from = 0;
+    while let Some(offset) = before_call[search_from..].find(&guard) {
+        let guard_start = search_from + offset;
+        let after_guard = &before_call[guard_start + guard.len()..];
+        let mut depth = 1usize;
+        for ch in after_guard.chars() {
+            match ch {
+                '{' => depth += 1,
+                '}' => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if depth > 0 {
+            return true;
+        }
+        search_from = guard_start + guard.len();
+    }
+    false
 }
 
 fn has_u8_bool_invalid_early_return_guard(before_call: &str, argument: &str) -> bool {
@@ -3802,11 +3829,20 @@ mod tests {
             "unsafe { core::mem::transmute::<u8, bool>(value) }",
             vec![],
         );
+        let branch_scoped_transmute = site_with_family(
+            OperationFamily::Transmute,
+            vec!["if value <= 1 {"],
+            "unsafe { core::mem::transmute::<u8, bool>(value) }",
+            vec!["}"],
+        );
 
         let evidence = obligation_evidence(&transmute, &obligations, &contract, &reach);
+        let branch_scoped_evidence =
+            obligation_evidence(&branch_scoped_transmute, &obligations, &contract, &reach);
 
         assert!(!evidence[0].discharge.present);
         assert!(evidence[1].discharge.present);
+        assert!(branch_scoped_evidence[1].discharge.present);
     }
 
     #[test]
@@ -3873,6 +3909,18 @@ mod tests {
             "unsafe { core::mem::transmute_copy::<u8, bool>(&value) }",
             vec![],
         );
+        let closed_positive_branch = site_with_family(
+            OperationFamily::Transmute,
+            vec!["if value <= 1 {", "let _observed = value;", "}"],
+            "unsafe { core::mem::transmute::<u8, bool>(value) }",
+            vec![],
+        );
+        let closed_referenced_positive_branch = site_with_family(
+            OperationFamily::Transmute,
+            vec!["if value <= 1 {", "let _observed = value;", "}"],
+            "unsafe { core::mem::transmute_copy::<u8, bool>(&value) }",
+            vec![],
+        );
 
         let other_arg_evidence = obligation_evidence(&other_arg, &obligations, &contract, &reach);
         let post_call_evidence =
@@ -3887,12 +3935,26 @@ mod tests {
             &contract,
             &reach,
         );
+        let closed_positive_branch_evidence =
+            obligation_evidence(&closed_positive_branch, &obligations, &contract, &reach);
+        let closed_referenced_positive_branch_evidence = obligation_evidence(
+            &closed_referenced_positive_branch,
+            &obligations,
+            &contract,
+            &reach,
+        );
 
         assert!(!other_arg_evidence[0].discharge.present);
         assert!(!post_call_evidence[0].discharge.present);
         assert!(!unsupported_pair_evidence[0].discharge.present);
         assert!(!observed_predicate_evidence[0].discharge.present);
         assert!(!observed_referenced_predicate_evidence[0].discharge.present);
+        assert!(!closed_positive_branch_evidence[0].discharge.present);
+        assert!(
+            !closed_referenced_positive_branch_evidence[0]
+                .discharge
+                .present
+        );
     }
 
     #[test]
