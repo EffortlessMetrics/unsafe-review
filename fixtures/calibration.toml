@@ -34,6 +34,7 @@ required_core_fixtures = [
   "atomic_pointer_state_swap",
   "unwrap_unchecked_result",
   "unwrap_unchecked_infallible_result",
+  "unwrap_unchecked_is_some_guard",
   "unreachable_unchecked_path",
   "unreachable_unchecked_infallible_path",
   "get_unchecked_mut_bounds",
@@ -392,6 +393,16 @@ expected_hazard = "invalid_value"
 fixture = "unwrap_unchecked_infallible_result"
 kind = "positive"
 claim = "unwrap_unchecked recognizes local Fallibility::Infallible result evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_is_some_guard"
+kind = "positive"
+claim = "unwrap_unchecked recognizes same-receiver is_some guard evidence"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guarded_unwitnessed"
