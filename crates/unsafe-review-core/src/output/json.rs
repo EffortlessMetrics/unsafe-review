@@ -268,6 +268,7 @@ mod tests {
         "maybeuninit_assume_init",
         "maybeuninit_assume_init_read",
         "maybeuninit_assume_init_ref",
+        "maybeuninit_assume_init_mut",
         "vec_set_len",
         "vec_set_len_initialized_loop",
         "vec_set_len_call_result_init",
