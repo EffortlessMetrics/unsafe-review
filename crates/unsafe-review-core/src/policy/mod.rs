@@ -55,7 +55,8 @@ fn load_ledger_ids(path: &Path, kind: LedgerKind) -> Result<BTreeSet<String>, St
     let text =
         fs::read_to_string(path).map_err(|err| format!("read {} failed: {err}", path.display()))?;
     let value = text
-        .parse::<toml::Value>()
+        .parse::<toml::Table>()
+        .map(toml::Value::Table)
         .map_err(|err| format!("{} is not valid TOML: {err}", path.display()))?;
     let status = value
         .get("status")
