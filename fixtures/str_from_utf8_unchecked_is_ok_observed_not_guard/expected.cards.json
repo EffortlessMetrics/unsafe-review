@@ -1,0 +1,63 @@
+[
+  {
+    "id": "UR-str-from-utf8-unchecked-is-ok-observed-not-guard-fixture-src-lib-rs-decode-observed-operation-str_from_utf8_unchecked-from-utf8-unchecked-44aff54b8f45-invalid_value-c1",
+    "class": "guard_missing",
+    "priority": "high",
+    "confidence": "medium",
+    "site": {
+      "file": "src/lib.rs",
+      "line": 4,
+      "column": 5,
+      "kind": "operation",
+      "owner": "decode_observed",
+      "visibility": "private",
+      "public_api_surface": false,
+      "snippet": "unsafe { core::str::from_utf8_unchecked(bytes) }"
+    },
+    "operation_family": "str_from_utf8_unchecked",
+    "hazards": [
+      "invalid_value"
+    ],
+    "obligations": [
+      "bytes are valid UTF-8"
+    ],
+    "obligation_evidence": [
+      {
+        "key": "utf8",
+        "description": "bytes are valid UTF-8",
+        "contract": {
+          "present": true,
+          "state": "present",
+          "summary": "Nearby `SAFETY:` comment was detected"
+        },
+        "discharge": {
+          "present": false,
+          "state": "missing",
+          "summary": "No obligation-specific guard code was detected"
+        },
+        "reach": {
+          "present": true,
+          "state": "present",
+          "summary": "1 related test file(s) mention owner `decode_observed`"
+        },
+        "witness": {
+          "present": false,
+          "state": "missing",
+          "summary": "No imported witness receipt was found"
+        }
+      }
+    ],
+    "contract": "Nearby `SAFETY:` comment was detected",
+    "discharge": "No visible local guard detected",
+    "reach": "1 related test file(s) mention owner `decode_observed`",
+    "witness": "No imported witness receipt was found",
+    "missing": [
+      "Missing visible local guard for inferred safety obligations",
+      "No witness receipt imported for this card"
+    ],
+    "verify_commands": [
+      "cargo +nightly miri test decode_observed",
+      "cargo +nightly careful test decode_observed"
+    ]
+  }
+]

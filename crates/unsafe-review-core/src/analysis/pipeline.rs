@@ -1349,6 +1349,8 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
             "str_from_utf8_unchecked",
             "str_from_utf8_unchecked_post_validation_not_guard",
             "str_from_utf8_unchecked_other_buffer_not_guard",
+            "str_from_utf8_unchecked_is_ok_observed_not_guard",
+            "str_from_utf8_unchecked_guard_then_reassigned_not_guard",
         ] {
             let output = fixture_output(fixture)?;
             let card = single_card(fixture, &output)?;
