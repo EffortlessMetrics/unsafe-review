@@ -1,0 +1,16 @@
+pub fn decode(bytes: &[u8]) -> Result<&str, core::str::Utf8Error> {
+    core::str::from_utf8(bytes)?;
+
+    // SAFETY: the question-mark propagation above validates this byte slice as UTF-8.
+    Ok(unsafe { core::str::from_utf8_unchecked(bytes) })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decode;
+
+    #[test]
+    fn decodes_ascii() {
+        assert_eq!(decode(b"ok").unwrap(), "ok");
+    }
+}
