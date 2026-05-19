@@ -26,6 +26,7 @@ required_core_fixtures = [
   "raw_pointer_write_maybeuninit",
   "copy_nonoverlapping",
   "str_from_utf8_unchecked",
+  "zeroed_invalid_value",
   "raw_pointer_read_len_capacity_assert",
   "pointer_arithmetic_num_ctrl_bytes_guard",
   "pointer_arithmetic_slice_end",
@@ -291,6 +292,16 @@ support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"
 expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "zeroed_invalid_value"
+kind = "positive"
+claim = "mem::zeroed reports valid-zero obligations instead of a generic unsafe function call"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "zeroed"
 expected_hazard = "invalid_value"
 
 [[cases]]
