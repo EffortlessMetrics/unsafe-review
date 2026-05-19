@@ -15,6 +15,9 @@ readme = "README.md"
 [dependencies]
 unsafe-review-core = { path = "../unsafe-review-core", version = "0.1.0" }
 
+[dev-dependencies]
+serde_json = "1"
+
 [lib]
 name = "unsafe_review_cli"
 path = "src/lib.rs"
