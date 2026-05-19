@@ -73,6 +73,9 @@ Already landed in this lane:
   fuzz workflow
 - Dependabot Cargo and GitHub Actions update inbox without workflow behavior,
   policy authority, or default blocking changes
+- same-receiver `if let ... as_ref()` evidence for `unwrap_unchecked`, with a
+  false-positive-control fixture proving another receiver does not discharge the
+  valid-value obligation
 
 Do not use candidate intake as permission to jump to release work, default
 blocking, automatic comments, witness execution by default, broad workflow
