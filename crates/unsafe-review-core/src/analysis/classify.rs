@@ -115,6 +115,26 @@ mod tests {
     }
 
     #[test]
+    fn concurrency_hazards_are_routed_before_contract_gaps() {
+        for hazard in [
+            HazardKind::SendSyncInvariant,
+            HazardKind::AtomicOrdering,
+            HazardKind::StaticMutGlobalState,
+        ] {
+            let (class, priority, confidence) = classify(
+                &[hazard],
+                &contract(false),
+                &discharge(false),
+                &reach("unreached"),
+            );
+
+            assert_eq!(class, ReviewClass::RequiresLoom);
+            assert_eq!(priority, Priority::High);
+            assert_eq!(confidence, Confidence::Medium);
+        }
+    }
+
+    #[test]
     fn ordinary_unsafe_sites_progress_through_evidence_states() {
         let hazards = [HazardKind::PointerValidity];
 
