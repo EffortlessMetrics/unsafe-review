@@ -73,6 +73,7 @@ required_core_fixtures = [
   "str_from_utf8_unchecked_is_ok_guard",
   "str_from_utf8_unchecked_is_err_return_guard",
   "str_from_utf8_unchecked_question_mark_guard",
+  "str_from_utf8_unchecked_match_return_guard",
   "str_from_utf8_unchecked_post_validation_not_guard",
   "str_from_utf8_unchecked_other_buffer_not_guard",
   "zeroed_invalid_value",
@@ -829,6 +830,16 @@ expected_hazard = "invalid_value"
 fixture = "str_from_utf8_unchecked_question_mark_guard"
 kind = "positive"
 claim = "str::from_utf8_unchecked recognizes same-buffer from_utf8 question-mark propagation evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_match_return_guard"
+kind = "positive"
+claim = "str::from_utf8_unchecked recognizes same-buffer from_utf8 match-return evidence"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guarded_unwitnessed"
