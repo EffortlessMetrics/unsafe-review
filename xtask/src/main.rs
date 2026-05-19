@@ -997,6 +997,10 @@ fn check_operation_family_registry_coverage(
 
 fn operation_family_registry_rows() -> Result<BTreeSet<String>, String> {
     let text = read_to_string(&workspace_path(OPERATION_FAMILY_REGISTRY))?;
+    operation_family_registry_rows_from_text(&text)
+}
+
+fn operation_family_registry_rows_from_text(text: &str) -> Result<BTreeSet<String>, String> {
     let mut rows = BTreeSet::new();
     for line in text.lines() {
         let columns = line
@@ -1642,6 +1646,59 @@ mod tests {
     #[test]
     fn calibration_manifest_validates_current_fixture_contract() -> Result<(), String> {
         check_calibration()
+    }
+
+    #[test]
+    fn operation_registry_rejects_missing_fixture_backed_family() -> Result<(), String> {
+        let mut families = operation_family_registry_rows()?;
+        families.insert("new_unregistered_family".to_string());
+
+        let Err(err) = check_operation_family_registry_coverage(&families) else {
+            return Err("unregistered calibration family should fail".to_string());
+        };
+
+        assert!(err.contains("missing operation_family row"));
+        assert!(err.contains("new_unregistered_family"));
+        Ok(())
+    }
+
+    #[test]
+    fn operation_registry_rejects_unbacked_registry_row() -> Result<(), String> {
+        let mut families = operation_family_registry_rows()?;
+        families.remove("unknown");
+
+        let Err(err) = check_operation_family_registry_coverage(&families) else {
+            return Err("registry row without calibration family should fail".to_string());
+        };
+
+        assert!(err.contains("without fixture-backed calibration"));
+        assert!(err.contains("unknown"));
+        Ok(())
+    }
+
+    #[test]
+    fn operation_registry_parser_rejects_duplicate_rows() -> Result<(), String> {
+        let text = "| `raw_pointer_read` | a |\n| `raw_pointer_read` | b |\n";
+
+        let Err(err) = operation_family_registry_rows_from_text(text) else {
+            return Err("duplicate registry row should fail".to_string());
+        };
+
+        assert!(err.contains("duplicate operation_family row"));
+        assert!(err.contains("raw_pointer_read"));
+        Ok(())
+    }
+
+    #[test]
+    fn operation_registry_parser_rejects_empty_registry() -> Result<(), String> {
+        let text = "| operation_family | hazards |\n|---|---|\n";
+
+        let Err(err) = operation_family_registry_rows_from_text(text) else {
+            return Err("empty registry should fail".to_string());
+        };
+
+        assert!(err.contains("contains no operation_family registry rows"));
+        Ok(())
     }
 
     #[test]
