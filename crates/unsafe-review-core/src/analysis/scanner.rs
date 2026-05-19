@@ -333,7 +333,7 @@ fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
             OperationFamily::StrFromUtf8Unchecked,
         ));
     }
-    if contains_call_name(line, "assume_init") {
+    if is_maybeuninit_assume_init_call(line) {
         return Some((
             UnsafeSiteKind::Operation,
             OperationFamily::MaybeUninitAssumeInit,
@@ -499,6 +499,14 @@ fn is_nonnull_new_unchecked_call(line: &str) -> bool {
 fn is_vec_from_raw_parts_call(line: &str) -> bool {
     let compact = compact_whitespace(line);
     compact.contains("Vec::from_raw_parts") || compact.contains("vec::Vec::from_raw_parts")
+}
+
+fn is_maybeuninit_assume_init_call(line: &str) -> bool {
+    contains_call_name(line, "assume_init")
+        || contains_call_name(line, "assume_init_read")
+        || contains_call_name(line, "assume_init_ref")
+        || contains_call_name(line, "assume_init_mut")
+        || contains_call_name(line, "assume_init_drop")
 }
 
 fn is_ptr_copy_call(line: &str) -> bool {
@@ -1254,6 +1262,13 @@ mod tests {
         assert_eq!(
             detect_site("core::mem::transmute_copy::<u8, bool>(&value);"),
             Some((UnsafeSiteKind::Operation, OperationFamily::Transmute))
+        );
+        assert_eq!(
+            detect_site("unsafe { slot.assume_init_read() }"),
+            Some((
+                UnsafeSiteKind::Operation,
+                OperationFamily::MaybeUninitAssumeInit
+            ))
         );
     }
 
