@@ -264,6 +264,7 @@ mod tests {
         "pointer_arithmetic_slice_end",
         "slice_from_raw_parts_mut",
         "slice_from_raw_parts_mut_maybeuninit",
+        "slice_from_raw_parts_mut_other_maybeuninit_not_guard",
         "vec_from_raw_parts",
         "box_from_raw",
         "static_mut_global_state",

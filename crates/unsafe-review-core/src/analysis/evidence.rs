@@ -809,7 +809,31 @@ fn matching_generic_argument_end(text: &str) -> Option<usize> {
 
 fn has_maybeuninit_slice_context(lower: &str) -> bool {
     let compact = compact_code(lower);
-    compact.contains("from_raw_parts_mut(") && compact.contains("maybeuninit")
+    let Some(call_pos) = compact.find("from_raw_parts_mut(") else {
+        return false;
+    };
+    let before_call = &compact[..call_pos];
+    let after_marker = &compact[call_pos + "from_raw_parts_mut(".len()..];
+    let argument_end = matching_call_argument_end(after_marker).unwrap_or(after_marker.len());
+    let arguments = &after_marker[..argument_end];
+
+    arguments.contains("maybeuninit") || maybeuninit_slice_return_type(before_call)
+}
+
+fn maybeuninit_slice_return_type(before_call: &str) -> bool {
+    let Some(fn_pos) = before_call.rfind("fn") else {
+        return false;
+    };
+    let fn_context = &before_call[fn_pos..];
+    let signature = fn_context
+        .split_once('{')
+        .map_or(fn_context, |(signature, _body)| signature);
+
+    signature
+        .split_once("->")
+        .is_some_and(|(_before, return_type)| {
+            return_type.contains("maybeuninit") && return_type.contains('[')
+        })
 }
 
 fn has_maybeuninit_raw_write_context(lower: &str) -> bool {
@@ -2021,6 +2045,32 @@ mod tests {
 
         assert!(evidence[0].discharge.present);
         assert!(!evidence[1].discharge.present);
+    }
+
+    #[test]
+    fn maybeuninit_slice_evidence_must_belong_to_slice_type_or_arguments() {
+        let obligations = vec![SafetyObligation::new(
+            "initialized",
+            "memory range is initialized",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let unrelated = site_with_family(
+            OperationFamily::SliceFromRawParts,
+            vec![
+                "fn expose_mut(ptr: *mut u8, len: usize) -> &mut [u8] {",
+                "    let _scratch: core::mem::MaybeUninit<u8> = core::mem::MaybeUninit::uninit();",
+            ],
+            "unsafe { core::slice::from_raw_parts_mut(ptr, len) }",
+            vec!["}"],
+        );
+
+        let evidence = obligation_evidence(&unrelated, &obligations, &contract, &reach);
+
+        assert!(!evidence[0].discharge.present);
     }
 
     #[test]

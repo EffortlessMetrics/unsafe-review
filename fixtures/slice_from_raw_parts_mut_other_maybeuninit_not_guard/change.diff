@@ -1,0 +1,12 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,0 +1,8 @@
++use core::mem::MaybeUninit;
++
++pub fn expose_mut(ptr: *mut u8, len: usize) -> &'static mut [u8] {
++    let _scratch: MaybeUninit<u8> = MaybeUninit::uninit();
++
++    // SAFETY: this fixture intentionally mentions unrelated MaybeUninit.
++    unsafe { core::slice::from_raw_parts_mut(ptr, len) }
++}
