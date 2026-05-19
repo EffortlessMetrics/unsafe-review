@@ -1,20 +1,25 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/EffortlessMetrics/unsafe-review/main/unsafe-review-logo.svg" alt="unsafe-review warning mark" width="120">
+  <img src="https://raw.githubusercontent.com/EffortlessMetrics/unsafe-review/main/unsafe-review-logo.svg" alt="unsafe-review warning mark" width="120" />
 </p>
 
-# unsafe-review
+<h1 align="center">unsafe-review</h1>
 
-Install handle and product façade for `unsafe-review`.
+<p align="center">
+  <em>Install handle and product façade for advisory unsafe-contract review.</em>
+</p>
+
+Install this crate to use the `unsafe-review` CLI.
 
 ```bash
-cargo install unsafe-review
+cargo install unsafe-review --locked
+unsafe-review --version
 unsafe-review check --base origin/main
 ```
 
-For embedding, use `unsafe-review-core`.
+For programmatic embedding, depend on `unsafe-review-core`.
 
-For command examples and artifact guidance, see the repository:
-https://github.com/EffortlessMetrics/unsafe-review
+For command paths, trust boundary, and support posture:
 
-Start with the first-use guide:
-https://github.com/EffortlessMetrics/unsafe-review/blob/main/docs/FIRST_USE.md
+- Root README: https://github.com/EffortlessMetrics/unsafe-review
+- docs.rs: https://docs.rs/unsafe-review
+- Support summary: https://github.com/EffortlessMetrics/unsafe-review/blob/main/docs/status/SUPPORT_SUMMARY.md
