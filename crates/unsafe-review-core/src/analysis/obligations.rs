@@ -287,47 +287,62 @@ mod tests {
     }
 
     #[test]
-    fn raw_pointer_read_keeps_distinct_hazards_and_obligation_keys() {
-        assert_eq!(
-            hazards_for(&OperationFamily::RawPointerRead),
-            vec![
-                HazardKind::PointerValidity,
-                HazardKind::Alignment,
-                HazardKind::InitializedMemory,
-                HazardKind::SameAllocation,
-            ]
-        );
-        assert_eq!(
-            obligation_keys(&OperationFamily::RawPointerRead),
-            vec![
-                "pointer-live".to_string(),
-                "bounds".to_string(),
-                "alignment".to_string(),
-                "initialized".to_string(),
-                "allocation".to_string(),
-            ]
-        );
+    fn raw_pointer_operations_keep_distinct_hazards_and_obligation_keys() {
+        for family in [
+            OperationFamily::RawPointerDeref,
+            OperationFamily::RawPointerRead,
+            OperationFamily::RawPointerWrite,
+        ] {
+            assert_eq!(
+                hazards_for(&family),
+                vec![
+                    HazardKind::PointerValidity,
+                    HazardKind::Alignment,
+                    HazardKind::InitializedMemory,
+                    HazardKind::SameAllocation,
+                ],
+                "{family:?}"
+            );
+            assert_eq!(
+                obligation_keys(&family),
+                vec![
+                    "pointer-live".to_string(),
+                    "bounds".to_string(),
+                    "alignment".to_string(),
+                    "initialized".to_string(),
+                    "allocation".to_string(),
+                ],
+                "{family:?}"
+            );
+        }
     }
 
     #[test]
-    fn unaligned_reads_do_not_require_alignment_obligation() {
-        assert_eq!(
-            hazards_for(&OperationFamily::RawPointerReadUnaligned),
-            vec![
-                HazardKind::PointerValidity,
-                HazardKind::InitializedMemory,
-                HazardKind::SameAllocation,
-            ]
-        );
-        assert_eq!(
-            obligation_keys(&OperationFamily::RawPointerReadUnaligned),
-            vec![
-                "pointer-live".to_string(),
-                "bounds".to_string(),
-                "initialized".to_string(),
-                "allocation".to_string(),
-            ]
-        );
+    fn unaligned_raw_pointer_operations_do_not_require_alignment_obligation() {
+        for family in [
+            OperationFamily::RawPointerReadUnaligned,
+            OperationFamily::RawPointerWriteUnaligned,
+        ] {
+            assert_eq!(
+                hazards_for(&family),
+                vec![
+                    HazardKind::PointerValidity,
+                    HazardKind::InitializedMemory,
+                    HazardKind::SameAllocation,
+                ],
+                "{family:?}"
+            );
+            assert_eq!(
+                obligation_keys(&family),
+                vec![
+                    "pointer-live".to_string(),
+                    "bounds".to_string(),
+                    "initialized".to_string(),
+                    "allocation".to_string(),
+                ],
+                "{family:?}"
+            );
+        }
     }
 
     #[test]
@@ -387,6 +402,27 @@ mod tests {
         assert_eq!(
             obligation_keys(&OperationFamily::UnreachableUnchecked),
             vec!["unreachable".to_string()]
+        );
+    }
+
+    #[test]
+    fn ffi_and_unknown_families_keep_explicit_review_models() {
+        assert_eq!(
+            hazards_for(&OperationFamily::Ffi),
+            vec![HazardKind::FfiAbi, HazardKind::FfiOwnership]
+        );
+        assert_eq!(
+            obligation_keys(&OperationFamily::Ffi),
+            vec!["abi".to_string(), "ownership".to_string()]
+        );
+
+        assert_eq!(
+            hazards_for(&OperationFamily::Unknown),
+            vec![HazardKind::Unknown]
+        );
+        assert_eq!(
+            obligation_keys(&OperationFamily::Unknown),
+            vec!["unknown".to_string()]
         );
     }
 }
