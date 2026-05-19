@@ -10,6 +10,7 @@ required_core_fixtures = [
   "local_safety_colon_comment",
   "maybeuninit_assume_init",
   "maybeuninit_assume_init_read",
+  "maybeuninit_assume_init_ref",
   "vec_set_len",
   "vec_set_len_initialized_loop",
   "vec_set_len_call_result_init",
@@ -136,6 +137,16 @@ expected_hazard = "initialized_memory"
 fixture = "maybeuninit_assume_init_read"
 kind = "positive"
 claim = "MaybeUninit::assume_init_read reports missing initialization evidence instead of a generic unsafe function call"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_ref"
+kind = "positive"
+claim = "MaybeUninit::assume_init_ref reports missing initialization evidence instead of a generic unsafe function call"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"
