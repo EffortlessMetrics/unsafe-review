@@ -1401,6 +1401,23 @@ mod tests {
     }
 
     #[test]
+    fn text_detection_classifies_raw_pointer_write_method_forms() {
+        for line in [
+            "unsafe { ptr.write(value) }",
+            "unsafe { buf.as_mut_ptr().write(value) }",
+            "unsafe { ptr.cast_mut().write(value) }",
+            "unsafe { ptr.cast::<u8>().write(value) }",
+        ] {
+            assert_eq!(
+                detect_site(line),
+                Some((UnsafeSiteKind::Operation, OperationFamily::RawPointerWrite)),
+                "{line} should be classified as a raw pointer write"
+            );
+        }
+        assert_eq!(detect_site("writer.write_all(bytes)"), None);
+    }
+
+    #[test]
     fn text_detection_classifies_volatile_pointer_write_as_raw_write() {
         for line in [
             "unsafe { register.write_volatile(value) }",
