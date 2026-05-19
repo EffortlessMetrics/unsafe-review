@@ -992,6 +992,8 @@ fn has_unwrap_unchecked_receiver_state_evidence(lower: &str) -> bool {
 
     before_call.contains(&format!("{receiver}.is_some()"))
         || before_call.contains(&format!("{receiver}.is_ok()"))
+        || has_receiver_if_let_as_ref_guard(before_call, receiver, "some")
+        || has_receiver_if_let_as_ref_guard(before_call, receiver, "ok")
         || has_receiver_early_return_guard(before_call, receiver, "is_none")
         || has_receiver_early_return_guard(before_call, receiver, "is_err")
 }
@@ -1017,6 +1019,11 @@ fn has_receiver_early_return_guard(before_call: &str, receiver: &str, predicate:
         .split_once('}')
         .map_or(after_guard, |(guard_body, _after)| guard_body)
         .contains("return")
+}
+
+fn has_receiver_if_let_as_ref_guard(before_call: &str, receiver: &str, constructor: &str) -> bool {
+    let guard = format!("iflet{constructor}(_)={receiver}.as_ref(){{");
+    before_call.contains(&guard)
 }
 
 fn has_unreachable_unchecked_infallible_path_evidence(lower: &str) -> bool {
@@ -3185,18 +3192,36 @@ mod tests {
             "unsafe { option.unwrap_unchecked() }",
             vec!["}"],
         );
+        let option_if_let = site_with_family(
+            OperationFamily::UnwrapUnchecked,
+            vec!["if let Some(_) = option.as_ref() {"],
+            "unsafe { option.unwrap_unchecked() }",
+            vec!["}"],
+        );
         let result = site_with_family(
             OperationFamily::UnwrapUnchecked,
             vec!["if result.is_ok() {"],
             "unsafe { result.unwrap_unchecked() }",
             vec!["}"],
         );
+        let result_if_let = site_with_family(
+            OperationFamily::UnwrapUnchecked,
+            vec!["if let Ok(_) = result.as_ref() {"],
+            "unsafe { result.unwrap_unchecked() }",
+            vec!["}"],
+        );
 
         let option_evidence = obligation_evidence(&option, &obligations, &contract, &reach);
+        let option_if_let_evidence =
+            obligation_evidence(&option_if_let, &obligations, &contract, &reach);
         let result_evidence = obligation_evidence(&result, &obligations, &contract, &reach);
+        let result_if_let_evidence =
+            obligation_evidence(&result_if_let, &obligations, &contract, &reach);
 
         assert!(option_evidence[0].discharge.present);
+        assert!(option_if_let_evidence[0].discharge.present);
         assert!(result_evidence[0].discharge.present);
+        assert!(result_if_let_evidence[0].discharge.present);
     }
 
     #[test]
@@ -3216,10 +3241,18 @@ mod tests {
             "unsafe { option.unwrap_unchecked() }",
             vec!["}"],
         );
+        let other_if_let = site_with_family(
+            OperationFamily::UnwrapUnchecked,
+            vec!["if let Some(_) = other.as_ref() {"],
+            "unsafe { option.unwrap_unchecked() }",
+            vec!["}"],
+        );
 
         let evidence = obligation_evidence(&unchecked, &obligations, &contract, &reach);
+        let if_let_evidence = obligation_evidence(&other_if_let, &obligations, &contract, &reach);
 
         assert!(!evidence[0].discharge.present);
+        assert!(!if_let_evidence[0].discharge.present);
     }
 
     #[test]
