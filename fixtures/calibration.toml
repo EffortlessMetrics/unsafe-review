@@ -44,6 +44,7 @@ required_core_fixtures = [
   "unwrap_unchecked_is_some_guard",
   "unwrap_unchecked_is_ok_guard",
   "unwrap_unchecked_if_let_some_guard",
+  "unwrap_unchecked_if_let_ok_guard",
   "unwrap_unchecked_other_if_let_not_guard",
   "unwrap_unchecked_is_none_return_guard",
   "unwrap_unchecked_is_err_return_guard",
@@ -528,6 +529,16 @@ expected_hazard = "invalid_value"
 fixture = "unwrap_unchecked_if_let_some_guard"
 kind = "positive"
 claim = "unwrap_unchecked recognizes same-receiver if-let Some as_ref guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_if_let_ok_guard"
+kind = "positive"
+claim = "unwrap_unchecked recognizes same-receiver if-let Ok as_ref guard evidence"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guarded_unwitnessed"

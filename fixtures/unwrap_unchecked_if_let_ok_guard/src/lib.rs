@@ -1,0 +1,18 @@
+pub fn extract(result: Result<u8, ()>) -> u8 {
+    if let Ok(_) = result.as_ref() {
+        // SAFETY: the branch above checked that this result is Ok.
+        unsafe { result.unwrap_unchecked() }
+    } else {
+        0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract;
+
+    #[test]
+    fn extracts_ok_value() {
+        assert_eq!(extract(Ok(7)), 7);
+    }
+}
