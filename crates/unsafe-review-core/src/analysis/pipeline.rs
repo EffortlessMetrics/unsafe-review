@@ -554,6 +554,7 @@ mod tests {
         for fixture in [
             "raw_pointer_alignment",
             "align_of_only_not_guard",
+            "alignment_other_pointer_not_guard",
             "comment_alignment_not_guard",
         ] {
             let output = fixture_output(fixture)?;

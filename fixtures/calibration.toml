@@ -5,6 +5,7 @@ required_core_fixtures = [
   "raw_pointer_alignment",
   "raw_pointer_alignment_receipted",
   "align_of_only_not_guard",
+  "alignment_other_pointer_not_guard",
   "raw_pointer_deref",
   "raw_pointer_read_unaligned",
   "raw_pointer_write_assignment",
@@ -124,6 +125,16 @@ expected_hazard = "alignment"
 fixture = "align_of_only_not_guard"
 kind = "false_positive_control"
 claim = "bare align_of calculations do not count as pointer alignment guard evidence"
+support_tier = "Guard evidence mining"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_read"
+expected_hazard = "alignment"
+
+[[cases]]
+fixture = "alignment_other_pointer_not_guard"
+kind = "false_positive_control"
+claim = "alignment guards for another pointer do not discharge raw pointer read alignment evidence"
 support_tier = "Guard evidence mining"
 expected_cards = 1
 expected_class = "guard_missing"
