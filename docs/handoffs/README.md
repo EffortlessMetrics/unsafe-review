@@ -5,6 +5,7 @@ what not to do next. Do not put active specs here.
 
 | Handoff | Date | Scope |
 |---|---|---|
+| [Release 0.1.1 preparation](2026-05-19-release-0.1.1-preparation.md) | 2026-05-19 | version bumps for the three crates, advisory release framing, validation checklist, and publish order |
 | [Crates.io initial publication receipt](2026-05-18-crates-io-initial-publication.md) | 2026-05-18 | published 0.1.0 crates, publish commands, install smoke, tag, trust boundary, and next lane |
 | [Dogfood-calibrated evidence loop v0.6](2026-05-18-dogfood-calibrated-evidence-v0.6.md) | 2026-05-18 | experimental repeatable evidence loop across dogfood, outcomes, receipts, repo posture, policy reports, and support posture |
 | [Crates.io initial publication readiness](2026-05-18-crates-io-initial-publication-readiness.md) | 2026-05-18 | package metadata, license hygiene, publish order, and pre-publish proof commands |
