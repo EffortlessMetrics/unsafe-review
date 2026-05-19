@@ -261,6 +261,17 @@ fn discharge_state_for(
                 EvidenceState::missing("No obligation-specific guard code was detected")
             }
         }
+        "utf8" => {
+            if family == &OperationFamily::StrFromUtf8Unchecked
+                && has_from_utf8_unchecked_validation_evidence(lower)
+            {
+                EvidenceState::present(
+                    "Same-buffer UTF-8 validation evidence was detected before from_utf8_unchecked",
+                )
+            } else {
+                EvidenceState::missing("No obligation-specific guard code was detected")
+            }
+        }
         _ => EvidenceState::missing("No obligation-specific guard code was detected"),
     }
 }
@@ -408,6 +419,51 @@ fn has_receiver_early_return_guard(before_call: &str, receiver: &str, predicate:
 fn has_unreachable_unchecked_infallible_path_evidence(lower: &str) -> bool {
     let compact = compact_code(lower);
     compact.contains("fallibility::infallible") && compact.contains("unreachable_unchecked(")
+}
+
+fn has_from_utf8_unchecked_validation_evidence(lower: &str) -> bool {
+    let compact = compact_code(lower);
+    let Some((before_call, argument)) = from_utf8_unchecked_argument_context(&compact) else {
+        return false;
+    };
+    let validation = format!("from_utf8({argument})");
+
+    before_call.contains(&format!("{validation}.is_ok()"))
+        || has_validation_early_return_guard(before_call, &validation, "is_err")
+}
+
+fn from_utf8_unchecked_argument_context(compact: &str) -> Option<(&str, &str)> {
+    let marker = "from_utf8_unchecked(";
+    let call_pos = compact.find(marker)?;
+    let before_call = &compact[..call_pos];
+    let after_marker = &compact[call_pos + marker.len()..];
+    let argument_end = matching_call_argument_end(after_marker)?;
+    let argument = &after_marker[..argument_end];
+    (!argument.is_empty()).then_some((before_call, argument))
+}
+
+fn matching_call_argument_end(text: &str) -> Option<usize> {
+    let mut depth = 0usize;
+    for (idx, ch) in text.char_indices() {
+        match ch {
+            '(' | '[' | '{' => depth += 1,
+            ')' if depth == 0 => return Some(idx),
+            ')' | ']' | '}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    None
+}
+
+fn has_validation_early_return_guard(before_call: &str, validation: &str, predicate: &str) -> bool {
+    let guard = format!("{validation}.{predicate}(){{");
+    let Some((_prefix, after_guard)) = before_call.split_once(&guard) else {
+        return false;
+    };
+    after_guard
+        .split_once('}')
+        .map_or(after_guard, |(guard_body, _after)| guard_body)
+        .contains("return")
 }
 
 fn has_maybeuninit_slice_context(lower: &str) -> bool {
@@ -1440,6 +1496,72 @@ mod tests {
         let evidence = obligation_evidence(&unchecked, &obligations, &contract, &reach);
 
         assert!(!evidence[0].discharge.present);
+    }
+
+    #[test]
+    fn from_utf8_validation_discharges_utf8_obligation() {
+        let obligations = vec![SafetyObligation::new("utf8", "bytes are valid UTF-8")];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let checked = site_with_family(
+            OperationFamily::StrFromUtf8Unchecked,
+            vec!["if core::str::from_utf8(bytes).is_ok() {"],
+            "unsafe { core::str::from_utf8_unchecked(bytes) }",
+            vec!["}"],
+        );
+        let early_return = site_with_family(
+            OperationFamily::StrFromUtf8Unchecked,
+            vec![
+                "if core::str::from_utf8(bytes).is_err() {",
+                "    return \"\";",
+                "}",
+            ],
+            "unsafe { core::str::from_utf8_unchecked(bytes) }",
+            vec![],
+        );
+
+        let checked_evidence = obligation_evidence(&checked, &obligations, &contract, &reach);
+        let return_evidence = obligation_evidence(&early_return, &obligations, &contract, &reach);
+
+        assert!(checked_evidence[0].discharge.present);
+        assert!(return_evidence[0].discharge.present);
+    }
+
+    #[test]
+    fn from_utf8_validation_requires_same_buffer_and_returning_branch() {
+        let obligations = vec![SafetyObligation::new("utf8", "bytes are valid UTF-8")];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let wrong_buffer = site_with_family(
+            OperationFamily::StrFromUtf8Unchecked,
+            vec!["if core::str::from_utf8(other).is_ok() {"],
+            "unsafe { core::str::from_utf8_unchecked(bytes) }",
+            vec!["}"],
+        );
+        let non_returning_branch = site_with_family(
+            OperationFamily::StrFromUtf8Unchecked,
+            vec![
+                "if core::str::from_utf8(bytes).is_err() {",
+                "    log_invalid();",
+                "}",
+            ],
+            "unsafe { core::str::from_utf8_unchecked(bytes) }",
+            vec![],
+        );
+
+        let wrong_buffer_evidence =
+            obligation_evidence(&wrong_buffer, &obligations, &contract, &reach);
+        let non_returning_evidence =
+            obligation_evidence(&non_returning_branch, &obligations, &contract, &reach);
+
+        assert!(!wrong_buffer_evidence[0].discharge.present);
+        assert!(!non_returning_evidence[0].discharge.present);
     }
 
     #[test]

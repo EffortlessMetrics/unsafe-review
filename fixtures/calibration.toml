@@ -49,6 +49,8 @@ required_core_fixtures = [
   "ptr_replace_value",
   "copy_nonoverlapping",
   "str_from_utf8_unchecked",
+  "str_from_utf8_unchecked_is_ok_guard",
+  "str_from_utf8_unchecked_is_err_return_guard",
   "zeroed_invalid_value",
   "inline_asm_human_review",
   "raw_pointer_read_volatile",
@@ -549,6 +551,26 @@ claim = "str::from_utf8_unchecked reports UTF-8 validity obligations instead of 
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_is_ok_guard"
+kind = "positive"
+claim = "str::from_utf8_unchecked recognizes same-buffer from_utf8 is_ok guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_is_err_return_guard"
+kind = "positive"
+claim = "str::from_utf8_unchecked recognizes same-buffer from_utf8 is_err early-return evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
 expected_operation_family = "str_from_utf8_unchecked"
 expected_hazard = "invalid_value"
 
