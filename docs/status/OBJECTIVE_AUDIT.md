@@ -11,6 +11,9 @@ remains the authority for public claim wording.
 Latest evidence-hardening notes include `get_unchecked` bounds false-positive
 controls for bare predicate observations, closed positive branches, and checked
 indexes reassigned before the unchecked access.
+Raw pointer alignment evidence now also has fixture-backed controls for
+same-pointer `is_aligned` guards, observations, closed branches, and stale
+checked pointers.
 
 The latest closed execution lane is recorded in
 `docs/status/DOGFOOD_CALIBRATED_EVIDENCE_LANE.md` and
