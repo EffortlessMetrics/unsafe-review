@@ -1,0 +1,13 @@
+pub fn reclaim_box(ptr: *mut u8) -> Box<u8> {
+    // SAFETY: fixture keeps the ownership transfer visible but omits allocator proof.
+    unsafe { Box::from_raw(ptr) }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn mentions_reclaim_box() {
+        // Mention the owner for static reach without consuming an owned pointer.
+        let _ = stringify!(reclaim_box);
+    }
+}

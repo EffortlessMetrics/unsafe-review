@@ -253,6 +253,7 @@ mod tests {
         "slice_from_raw_parts_mut",
         "slice_from_raw_parts_mut_maybeuninit",
         "vec_from_raw_parts",
+        "box_from_raw",
         "safe_reference_deref_no_cards",
         "imports_not_unsafe_operations",
         "cfg_target_feature_not_operation",
