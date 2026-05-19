@@ -253,6 +253,7 @@ mod tests {
         "raw_pointer_write_unaligned",
         "raw_pointer_write_bytes",
         "raw_pointer_write_maybeuninit",
+        "raw_pointer_write_other_maybeuninit_not_guard",
         "raw_pointer_write_volatile",
         "ptr_copy_overlapping",
         "ptr_replace_value",

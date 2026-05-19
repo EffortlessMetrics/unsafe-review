@@ -460,6 +460,11 @@ mod tests {
                 true,
             ),
             (
+                "raw_pointer_write_other_maybeuninit_not_guard",
+                OperationFamily::RawPointerWrite,
+                true,
+            ),
+            (
                 "raw_pointer_write_volatile",
                 OperationFamily::RawPointerWrite,
                 true,
@@ -546,6 +551,17 @@ mod tests {
             "length evidence should still satisfy the bounds obligation"
         );
         assert_eq!(card.class, ReviewClass::GuardMissing);
+        Ok(())
+    }
+
+    #[test]
+    fn raw_pointer_write_maybeuninit_evidence_requires_target_context() -> Result<(), String> {
+        let output = fixture_output("raw_pointer_write_other_maybeuninit_not_guard")?;
+        let card = single_card("raw_pointer_write_other_maybeuninit_not_guard", &output)?;
+
+        assert_eq!(card.operation.family, OperationFamily::RawPointerWrite);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(!obligation_discharge_present(card, "initialized"));
         Ok(())
     }
 

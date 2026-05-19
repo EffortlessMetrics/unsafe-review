@@ -52,6 +52,7 @@ required_core_fixtures = [
   "pin_new_unchecked",
   "raw_pointer_write_bytes",
   "raw_pointer_write_maybeuninit",
+  "raw_pointer_write_other_maybeuninit_not_guard",
   "raw_pointer_write_volatile",
   "ptr_copy_overlapping",
   "ptr_replace_value",
@@ -598,6 +599,16 @@ expected_hazard = "pointer_validity"
 fixture = "raw_pointer_write_maybeuninit"
 kind = "positive"
 claim = "raw pointer write_bytes recognizes MaybeUninit destination evidence for initialized-memory only"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_write"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "raw_pointer_write_other_maybeuninit_not_guard"
+kind = "false_positive_control"
+claim = "raw pointer write_bytes does not treat unrelated MaybeUninit mentions as initialized-memory evidence"
 support_tier = "Raw pointer card slice"
 expected_cards = 1
 expected_class = "guard_missing"
