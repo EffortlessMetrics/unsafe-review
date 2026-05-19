@@ -165,6 +165,45 @@ index 1111111..2222222 100644
         assert!(index.changed_lines[&PathBuf::from("src/main.rs")].contains(&42));
     }
 
+    #[test]
+    fn parse_unified_diff_tracks_added_lines_across_multiple_hunks() {
+        let diff = r#"diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,3 +1,4 @@
+ fn before() {}
++fn added() {}
+ fn after() {}
+@@ -20,2 +21,3 @@
+ context();
++changed();
+"#;
+        let path = PathBuf::from("src/lib.rs");
+        let index = parse_unified_diff(diff);
+
+        assert!(index.contains_file(&path));
+        assert!(index.contains_near(&path, 2));
+        assert!(index.contains_near(&path, 22));
+        assert!(!index.contains_near(&path, 40));
+        assert_eq!(index.changed_lines[&path], BTreeSet::from([2, 22]));
+    }
+
+    #[test]
+    fn parse_unified_diff_tracks_new_file_added_lines() {
+        let diff = r#"diff --git a/src/new.rs b/src/new.rs
+--- /dev/null
++++ b/src/new.rs
+@@ -0,0 +1,2 @@
++pub fn one() {}
++pub fn two() {}
+"#;
+        let path = PathBuf::from("src/new.rs");
+        let index = parse_unified_diff(diff);
+
+        assert!(index.contains_file(&path));
+        assert_eq!(index.changed_lines[&path], BTreeSet::from([1, 2]));
+    }
+
     fn diff_line_strategy() -> impl Strategy<Value = DiffLine> {
         prop_oneof![
             any_line().prop_map(DiffLine::Context),
