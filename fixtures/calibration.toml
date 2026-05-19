@@ -24,6 +24,7 @@ required_core_fixtures = [
   "unreachable_unchecked_infallible_path",
   "raw_pointer_write_bytes",
   "raw_pointer_write_maybeuninit",
+  "raw_pointer_write_volatile",
   "copy_nonoverlapping",
   "str_from_utf8_unchecked",
   "zeroed_invalid_value",
@@ -277,6 +278,16 @@ expected_cards = 1
 expected_class = "guard_missing"
 expected_operation_family = "raw_pointer_write"
 expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "raw_pointer_write_volatile"
+kind = "positive"
+claim = "method-form write_volatile reports raw pointer write obligations instead of a generic unsafe function call"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_write"
+expected_hazard = "pointer_validity"
 
 [[cases]]
 fixture = "copy_nonoverlapping"
