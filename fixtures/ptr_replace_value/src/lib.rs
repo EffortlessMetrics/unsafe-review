@@ -1,0 +1,18 @@
+pub fn replace_slot(slot: *mut u32, value: u32) -> u32 {
+    // SAFETY: caller provides a valid initialized slot pointer; this fixture
+    // intentionally omits local alignment and ownership/drop evidence.
+    unsafe { core::ptr::replace(slot, value) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::replace_slot;
+
+    #[test]
+    fn replaces_slot() {
+        let mut value = 1_u32;
+        let old = replace_slot(&mut value, 2);
+        assert_eq!(old, 1);
+        assert_eq!(value, 2);
+    }
+}

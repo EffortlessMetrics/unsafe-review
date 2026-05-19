@@ -26,6 +26,7 @@ required_core_fixtures = [
   "raw_pointer_write_maybeuninit",
   "raw_pointer_write_volatile",
   "ptr_copy_overlapping",
+  "ptr_replace_value",
   "copy_nonoverlapping",
   "str_from_utf8_unchecked",
   "zeroed_invalid_value",
@@ -309,6 +310,16 @@ expected_cards = 1
 expected_class = "guard_missing"
 expected_operation_family = "ptr_copy"
 expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "ptr_replace_value"
+kind = "positive"
+claim = "ptr::replace reports read-write pointer and drop-ownership obligations instead of a generic unsafe function call"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "ptr_replace"
+expected_hazard = "drop_or_deallocation"
 
 [[cases]]
 fixture = "str_from_utf8_unchecked"
