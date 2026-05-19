@@ -351,6 +351,7 @@ fn check_calibration() -> Result<(), String> {
 
     let mut fixtures = BTreeSet::new();
     let mut kinds = BTreeSet::new();
+    let support_capabilities = support_tier_capabilities()?;
     for (idx, case) in cases.iter().enumerate() {
         let Some(case) = case.as_table() else {
             return Err(format!(
@@ -360,7 +361,12 @@ fn check_calibration() -> Result<(), String> {
         let fixture = required_case_string(case, "fixture", idx)?;
         let kind = required_case_string(case, "kind", idx)?;
         let claim = required_case_string(case, "claim", idx)?;
-        required_case_string(case, "support_tier", idx)?;
+        let support_tier = required_case_string(case, "support_tier", idx)?;
+        if !support_capabilities.contains(support_tier) {
+            return Err(format!(
+                "fixtures/calibration.toml cases[{idx}] support_tier `{support_tier}` is not a capability in docs/status/SUPPORT_TIERS.md"
+            ));
+        }
         if !CALIBRATION_REQUIRED_KINDS.contains(&kind) {
             return Err(format!(
                 "fixtures/calibration.toml cases[{idx}] uses unknown kind `{kind}`"
@@ -1286,6 +1292,33 @@ fn support_tier_from_row(line: &str) -> Option<&str> {
     columns.get(1).copied()
 }
 
+fn support_capability_from_row(line: &str) -> Option<&str> {
+    if !line.starts_with('|') || line.contains("---") || line.contains("Capability") {
+        return None;
+    }
+    let columns = line
+        .split('|')
+        .map(str::trim)
+        .filter(|column| !column.is_empty())
+        .collect::<Vec<_>>();
+    columns.first().copied()
+}
+
+fn support_tier_capabilities() -> Result<BTreeSet<String>, String> {
+    let path = workspace_path("docs/status/SUPPORT_TIERS.md");
+    let text = read_to_string(&path)?;
+    let mut capabilities = BTreeSet::new();
+    for line in text.lines() {
+        if let Some(capability) = support_capability_from_row(line) {
+            capabilities.insert(capability.to_string());
+        }
+    }
+    if capabilities.is_empty() {
+        return Err(format!("{} has no support-tier rows", path.display()));
+    }
+    Ok(capabilities)
+}
+
 fn fixture_dir_name(path: &Path) -> Result<&str, String> {
     path.file_name()
         .and_then(std::ffi::OsStr::to_str)
@@ -1346,6 +1379,15 @@ mod tests {
             Some("scaffold")
         );
         assert_eq!(support_tier_from_row("|---|---|"), None);
+    }
+
+    #[test]
+    fn support_capability_parser_reads_capability_column() {
+        assert_eq!(
+            support_capability_from_row("| Review cards | scaffold | CLI | proof | limit |"),
+            Some("Review cards")
+        );
+        assert_eq!(support_capability_from_row("|---|---|"), None);
     }
 
     #[test]
