@@ -1,0 +1,22 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,0 +1,17 @@
++pub fn extract(result: Result<u8, ()>, other: Result<u8, ()>) -> u8 {
++    if let Ok(_) = other.as_ref() {
++        // SAFETY: fixture deliberately checks another result.
++        unsafe { result.unwrap_unchecked() }
++    } else {
++        0
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::extract;
++
++    #[test]
++    fn extracts_when_other_is_ok() {
++        assert_eq!(extract(Ok(7), Ok(1)), 7);
++    }
++}

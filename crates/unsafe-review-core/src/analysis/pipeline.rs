@@ -1282,20 +1282,25 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
 
     #[test]
     fn str_from_utf8_unchecked_uses_utf8_operation_family() -> Result<(), String> {
-        let output = fixture_output("str_from_utf8_unchecked")?;
-        let card = single_card("str_from_utf8_unchecked", &output)?;
+        for fixture in [
+            "str_from_utf8_unchecked",
+            "str_from_utf8_unchecked_other_buffer_not_guard",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
 
-        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
-        assert_eq!(card.operation.family, OperationFamily::StrFromUtf8Unchecked);
-        assert_eq!(card.class, ReviewClass::GuardMissing);
-        assert!(card.hazards.contains(&HazardKind::InvalidValue));
-        assert!(card.id.0.contains("from-utf8-unchecked"));
-        assert!(
-            card.obligation_evidence
-                .iter()
-                .any(|evidence| evidence.obligation.key == "utf8" && !evidence.discharge.present),
-            "UTF-8 validation obligation should remain missing without a visible guard"
-        );
+            assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+            assert_eq!(card.operation.family, OperationFamily::StrFromUtf8Unchecked);
+            assert_eq!(card.class, ReviewClass::GuardMissing);
+            assert!(card.hazards.contains(&HazardKind::InvalidValue));
+            assert!(card.id.0.contains("from-utf8-unchecked"));
+            assert!(
+                card.obligation_evidence.iter().any(
+                    |evidence| evidence.obligation.key == "utf8" && !evidence.discharge.present
+                ),
+                "UTF-8 validation obligation should remain missing without a visible guard"
+            );
+        }
         Ok(())
     }
 
@@ -1417,6 +1422,42 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
         assert_eq!(card.operation.family, OperationFamily::UnwrapUnchecked);
         assert_eq!(card.class, ReviewClass::GuardMissing);
         assert!(!obligation_discharge_present(card, "valid-value"));
+        Ok(())
+    }
+
+    #[test]
+    fn unwrap_unchecked_if_let_as_ref_evidence_is_discharged() -> Result<(), String> {
+        for fixture in [
+            "unwrap_unchecked_if_let_some_guard",
+            "unwrap_unchecked_if_let_ok_guard",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
+
+            assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+            assert_eq!(card.operation.family, OperationFamily::UnwrapUnchecked);
+            assert_eq!(card.class, ReviewClass::GuardedUnwitnessed);
+            assert!(obligation_discharge_present(card, "valid-value"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn unwrap_unchecked_state_evidence_rejects_wrong_receiver_or_post_check() -> Result<(), String>
+    {
+        for fixture in [
+            "unwrap_unchecked_other_if_let_not_guard",
+            "unwrap_unchecked_other_if_let_ok_not_guard",
+            "unwrap_unchecked_post_check_not_guard",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
+
+            assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+            assert_eq!(card.operation.family, OperationFamily::UnwrapUnchecked);
+            assert_eq!(card.class, ReviewClass::GuardMissing);
+            assert!(!obligation_discharge_present(card, "valid-value"));
+        }
         Ok(())
     }
 

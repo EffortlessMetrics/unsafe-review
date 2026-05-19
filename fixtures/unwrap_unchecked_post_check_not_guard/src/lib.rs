@@ -1,0 +1,15 @@
+pub fn extract(option: Option<u8>) -> u8 {
+    // SAFETY: fixture deliberately checks the option after the unchecked unwrap.
+    let value = unsafe { option.unwrap_unchecked() };
+    if option.is_some() { value } else { 0 }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract;
+
+    #[test]
+    fn extracts_some_value() {
+        assert_eq!(extract(Some(7)), 7);
+    }
+}

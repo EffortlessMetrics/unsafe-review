@@ -43,6 +43,11 @@ required_core_fixtures = [
   "unwrap_unchecked_other_infallible_not_guard",
   "unwrap_unchecked_is_some_guard",
   "unwrap_unchecked_is_ok_guard",
+  "unwrap_unchecked_if_let_some_guard",
+  "unwrap_unchecked_if_let_ok_guard",
+  "unwrap_unchecked_other_if_let_not_guard",
+  "unwrap_unchecked_other_if_let_ok_not_guard",
+  "unwrap_unchecked_post_check_not_guard",
   "unwrap_unchecked_is_none_return_guard",
   "unwrap_unchecked_is_err_return_guard",
   "unreachable_unchecked_path",
@@ -63,6 +68,7 @@ required_core_fixtures = [
   "str_from_utf8_unchecked",
   "str_from_utf8_unchecked_is_ok_guard",
   "str_from_utf8_unchecked_is_err_return_guard",
+  "str_from_utf8_unchecked_other_buffer_not_guard",
   "zeroed_invalid_value",
   "zeroed_valid_u32",
   "inline_asm_human_review",
@@ -523,6 +529,56 @@ expected_operation_family = "unwrap_unchecked"
 expected_hazard = "invalid_value"
 
 [[cases]]
+fixture = "unwrap_unchecked_if_let_some_guard"
+kind = "positive"
+claim = "unwrap_unchecked recognizes same-receiver if-let Some as_ref guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_if_let_ok_guard"
+kind = "positive"
+claim = "unwrap_unchecked recognizes same-receiver if-let Ok as_ref guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_other_if_let_not_guard"
+kind = "false_positive_control"
+claim = "unwrap_unchecked does not accept if-let Some as_ref evidence for another receiver"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_other_if_let_ok_not_guard"
+kind = "false_positive_control"
+claim = "unwrap_unchecked does not accept if-let Ok as_ref evidence for another receiver"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_post_check_not_guard"
+kind = "false_positive_control"
+claim = "unwrap_unchecked does not accept post-call is_some checks as guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
 fixture = "unwrap_unchecked_is_none_return_guard"
 kind = "positive"
 claim = "unwrap_unchecked recognizes same-receiver is_none early-return guard evidence"
@@ -719,6 +775,16 @@ claim = "str::from_utf8_unchecked recognizes same-buffer from_utf8 is_err early-
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guarded_unwitnessed"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_other_buffer_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not accept validation of another byte slice as UTF-8 evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
 expected_operation_family = "str_from_utf8_unchecked"
 expected_hazard = "invalid_value"
 

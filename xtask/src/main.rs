@@ -144,6 +144,10 @@ fn main() {
 }
 
 fn run(args: Vec<String>) -> Result<(), String> {
+    let root = workspace_root()?;
+    std::env::set_current_dir(&root)
+        .map_err(|err| format!("failed to enter workspace root {}: {err}", root.display()))?;
+
     match args.get(1).map(|arg| arg.as_str()) {
         None | Some("help") | Some("--help") => {
             println!(
@@ -152,6 +156,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
             Ok(())
         }
         Some("check-pr") => {
+            require_no_extra_args(&args, "check-pr")?;
             check_docs()?;
             check_policy()?;
             check_support_tiers()?;
@@ -163,21 +168,64 @@ fn run(args: Vec<String>) -> Result<(), String> {
             println!("check-pr: ok");
             Ok(())
         }
-        Some("check-docs") => check_docs(),
-        Some("check-policy") => check_policy(),
-        Some("check-support-tiers") => check_support_tiers(),
-        Some("check-fixtures") => check_fixtures(),
-        Some("check-calibration") => check_calibration(),
-        Some("check-dogfood") => check_dogfood(),
-        Some("check-fuzz") => check_manual_fuzz_harness(),
+        Some("check-docs") => {
+            require_no_extra_args(&args, "check-docs")?;
+            check_docs()
+        }
+        Some("check-policy") => {
+            require_no_extra_args(&args, "check-policy")?;
+            check_policy()
+        }
+        Some("check-support-tiers") => {
+            require_no_extra_args(&args, "check-support-tiers")?;
+            check_support_tiers()
+        }
+        Some("check-fixtures") => {
+            require_no_extra_args(&args, "check-fixtures")?;
+            check_fixtures()
+        }
+        Some("check-calibration") => {
+            require_no_extra_args(&args, "check-calibration")?;
+            check_calibration()
+        }
+        Some("check-dogfood") => {
+            require_no_extra_args(&args, "check-dogfood")?;
+            check_dogfood()
+        }
+        Some("check-fuzz") => {
+            require_no_extra_args(&args, "check-fuzz")?;
+            check_manual_fuzz_harness()
+        }
         Some("check-advisory-artifacts") => {
             let Some(dir) = args.get(2) else {
                 return Err("usage: cargo xtask check-advisory-artifacts <dir>".to_string());
             };
+            require_max_args(&args, "check-advisory-artifacts", 3)?;
             check_advisory_artifacts(Path::new(dir))
         }
         Some(other) => Err(format!("unknown xtask command `{other}`")),
     }
+}
+
+fn workspace_root() -> Result<PathBuf, String> {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| "failed to resolve workspace root from xtask manifest path".to_string())
+}
+
+fn require_no_extra_args(args: &[String], command: &str) -> Result<(), String> {
+    require_max_args(args, command, 2)
+}
+
+fn require_max_args(args: &[String], command: &str, max_len: usize) -> Result<(), String> {
+    if args.len() <= max_len {
+        return Ok(());
+    }
+    Err(format!(
+        "`{command}` does not accept extra arguments: {}",
+        args[max_len..].join(" ")
+    ))
 }
 
 fn check_docs() -> Result<(), String> {
@@ -2766,6 +2814,41 @@ mod tests {
             permissions: "contents: read".to_string(),
             actions: actions.iter().map(|action| (*action).to_string()).collect(),
         }
+    }
+
+    #[test]
+    fn xtask_rejects_unexpected_trailing_args() -> Result<(), String> {
+        let args = vec![
+            "xtask".to_string(),
+            "check-pr".to_string(),
+            "unexpected".to_string(),
+        ];
+        let Err(err) = require_no_extra_args(&args, "check-pr") else {
+            return Err("extra argument should be rejected".to_string());
+        };
+
+        assert!(err.contains("check-pr"));
+        assert!(err.contains("unexpected"));
+        require_no_extra_args(&args[..2], "check-pr")?;
+        Ok(())
+    }
+
+    #[test]
+    fn xtask_single_path_commands_reject_second_path() -> Result<(), String> {
+        let args = vec![
+            "xtask".to_string(),
+            "check-advisory-artifacts".to_string(),
+            "target/unsafe-review".to_string(),
+            "extra".to_string(),
+        ];
+        let Err(err) = require_max_args(&args, "check-advisory-artifacts", 3) else {
+            return Err("second artifact directory should be rejected".to_string());
+        };
+
+        assert!(err.contains("check-advisory-artifacts"));
+        assert!(err.contains("extra"));
+        require_max_args(&args[..3], "check-advisory-artifacts", 3)?;
+        Ok(())
     }
 
     #[test]
