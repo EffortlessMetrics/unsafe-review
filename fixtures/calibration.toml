@@ -49,6 +49,7 @@ required_core_fixtures = [
   "vec_set_len_post_init_not_guard",
   "drop_in_place_deallocation",
   "drop_in_place_box_origin",
+  "drop_in_place_reassigned_origin_not_guard",
   "atomic_pointer_state_swap",
   "unwrap_unchecked_result",
   "unwrap_unchecked_infallible_result",
@@ -115,6 +116,7 @@ required_core_fixtures = [
   "vec_from_raw_parts_manuallydrop_origin",
   "box_from_raw",
   "box_from_raw_box_origin",
+  "box_from_raw_reassigned_origin_not_guard",
   "static_mut_global_state",
   "transmute_invalid_value",
   "transmute_layout_size_guard",
@@ -627,6 +629,16 @@ claim = "ptr::drop_in_place recognizes same-pointer Box::into_raw origin evidenc
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guarded_unwitnessed"
+expected_operation_family = "drop_in_place"
+expected_hazard = "drop_or_deallocation"
+
+[[cases]]
+fixture = "drop_in_place_reassigned_origin_not_guard"
+kind = "false_positive_control"
+claim = "ptr::drop_in_place does not accept Box::into_raw origin evidence after the raw pointer is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
 expected_operation_family = "drop_in_place"
 expected_hazard = "drop_or_deallocation"
 
@@ -1287,6 +1299,16 @@ claim = "Box::from_raw recognizes same-pointer Box::into_raw origin evidence wit
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guarded_unwitnessed"
+expected_operation_family = "box_from_raw"
+expected_hazard = "drop_or_deallocation"
+
+[[cases]]
+fixture = "box_from_raw_reassigned_origin_not_guard"
+kind = "false_positive_control"
+claim = "Box::from_raw does not accept Box::into_raw origin evidence after the raw pointer is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
 expected_operation_family = "box_from_raw"
 expected_hazard = "drop_or_deallocation"
 

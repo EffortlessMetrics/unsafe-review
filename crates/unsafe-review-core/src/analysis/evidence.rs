@@ -1070,15 +1070,23 @@ fn has_box_from_raw_origin_evidence(expression: &str, lower: &str) -> bool {
 }
 
 fn has_same_pointer_box_into_raw_before(before_call: &str, pointer: &str) -> bool {
-    before_call.split(';').any(|statement| {
+    let mut offset = 0usize;
+    for statement in before_call.split(';') {
         let Some((left, right)) = statement.split_once('=') else {
-            return false;
+            offset += statement.len() + 1;
+            continue;
         };
         let Some(binding) = let_binding_name(left) else {
-            return false;
+            offset += statement.len() + 1;
+            continue;
         };
-        binding == pointer && box_into_raw_argument(right).is_some()
-    })
+        if binding == pointer && box_into_raw_argument(right).is_some() {
+            let after_origin = &before_call[(offset + statement.len()).min(before_call.len())..];
+            return !contains_simple_assignment_to(after_origin, pointer);
+        }
+        offset += statement.len() + 1;
+    }
+    false
 }
 
 fn has_same_pointer_vec_raw_parts_origin_before(before_call: &str, pointer: &str) -> bool {
@@ -3056,10 +3064,18 @@ mod tests {
             "core::ptr::drop_in_place(ptr);",
             vec![],
         );
+        let reassigned_pointer = site_with_family(
+            OperationFamily::DropInPlace,
+            vec!["let mut ptr = Box::into_raw(value);", "ptr = foreign_ptr;"],
+            "core::ptr::drop_in_place(ptr);",
+            vec![],
+        );
 
         let evidence = obligation_evidence(&matching, &obligations, &contract, &reach);
         assert!(evidence.iter().all(|item| item.discharge.present));
         let evidence = obligation_evidence(&other_pointer, &obligations, &contract, &reach);
+        assert!(evidence.iter().all(|item| !item.discharge.present));
+        let evidence = obligation_evidence(&reassigned_pointer, &obligations, &contract, &reach);
         assert!(evidence.iter().all(|item| !item.discharge.present));
     }
 
@@ -3086,6 +3102,12 @@ mod tests {
             "unsafe { Box::from_raw(ptr) }",
             vec![],
         );
+        let reassigned_pointer = site_with_family(
+            OperationFamily::BoxFromRaw,
+            vec!["let mut ptr = Box::into_raw(value);", "ptr = foreign_ptr;"],
+            "unsafe { Box::from_raw(ptr) }",
+            vec![],
+        );
 
         assert!(
             obligation_evidence(&matching, &obligations, &contract, &reach)[0]
@@ -3094,6 +3116,11 @@ mod tests {
         );
         assert!(
             !obligation_evidence(&other_pointer, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
+            !obligation_evidence(&reassigned_pointer, &obligations, &contract, &reach)[0]
                 .discharge
                 .present
         );
