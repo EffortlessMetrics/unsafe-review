@@ -1708,6 +1708,94 @@ mod tests {
     }
 
     #[test]
+    fn scan_file_keeps_public_surface_on_unsafe_api_not_operations() -> Result<(), String> {
+        let root = unique_temp_dir()?;
+        fs::create_dir_all(root.join("src"))
+            .map_err(|err| format!("create temp src failed: {err}"))?;
+        fs::write(
+            root.join("src/lib.rs"),
+            "pub(crate) unsafe fn expose(ptr: *const u8) -> u8 {\n    unsafe { *ptr }\n}\n\nunsafe impl Send for LocalType {}\n\nstruct LocalType;\n",
+        )
+        .map_err(|err| format!("write temp source failed: {err}"))?;
+
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        let public_fn = sites
+            .iter()
+            .find(|site| site.site.kind == UnsafeSiteKind::UnsafeFn)
+            .ok_or_else(|| format!("expected unsafe function site: {sites:#?}"))?;
+        assert_eq!(public_fn.site.owner.as_deref(), Some("expose"));
+        assert_eq!(public_fn.site.visibility, "public");
+        assert!(public_fn.site.public_api_surface);
+
+        let deref = sites
+            .iter()
+            .find(|site| site.operation.family == OperationFamily::RawPointerDeref)
+            .ok_or_else(|| format!("expected raw pointer deref site: {sites:#?}"))?;
+        assert_eq!(deref.site.owner.as_deref(), Some("expose"));
+        assert!(!deref.site.public_api_surface);
+
+        let unsafe_impl = sites
+            .iter()
+            .find(|site| site.site.kind == UnsafeSiteKind::UnsafeImplSend)
+            .ok_or_else(|| format!("expected unsafe impl Send site: {sites:#?}"))?;
+        assert_eq!(
+            unsafe_impl.operation.family,
+            OperationFamily::UnsafeImplSendSync
+        );
+        assert_eq!(unsafe_impl.site.visibility, "private");
+        assert!(!unsafe_impl.site.public_api_surface);
+        Ok(())
+    }
+
+    #[test]
+    fn scan_file_keeps_declaration_and_concrete_operations_without_comment_noise()
+    -> Result<(), String> {
+        let root = unique_temp_dir()?;
+        fs::create_dir_all(root.join("src"))
+            .map_err(|err| format!("create temp src failed: {err}"))?;
+        fs::write(
+            root.join("src/lib.rs"),
+            "pub unsafe fn expose(ptr: *const u8) -> u8 {\n    // core::mem::transmute in a comment must not be reported.\n    unsafe {\n        *ptr\n    }\n}\n\npub fn read_byte(ptr: *const u8) -> u8 {\n    unsafe { core::ptr::read(ptr) }\n}\n",
+        )
+        .map_err(|err| format!("write temp source failed: {err}"))?;
+
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        let families = sites
+            .iter()
+            .map(|site| site.operation.family.clone())
+            .collect::<Vec<_>>();
+        assert!(
+            families.contains(&OperationFamily::Unknown),
+            "unsafe function declaration should remain visible: {sites:#?}"
+        );
+        assert!(
+            families.contains(&OperationFamily::RawPointerDeref),
+            "raw pointer deref operation should remain visible: {sites:#?}"
+        );
+        assert!(
+            families.contains(&OperationFamily::RawPointerRead),
+            "raw pointer read operation should remain visible: {sites:#?}"
+        );
+        assert!(
+            sites
+                .iter()
+                .all(|site| site.site.kind != UnsafeSiteKind::UnsafeBlock),
+            "concrete operations should suppress wrapper unsafe-block cards: {sites:#?}"
+        );
+        assert!(
+            sites
+                .iter()
+                .all(|site| !site.operation.expression.contains("comment")),
+            "comment text should not be reported as an operation: {sites:#?}"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn scan_file_filters_to_diff_neighborhood_unless_repo_mode() -> Result<(), String> {
         let root = unique_temp_dir()?;
         fs::create_dir_all(root.join("src"))
