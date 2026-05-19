@@ -1,7 +1,7 @@
 # Codex web candidate PR intake
 
 Date: 2026-05-18
-Status: active candidate queue parked for dogfood-calibrated evidence lane
+Status: candidate queue drained; no open Codex-web candidate PRs remain
 Base snapshot: `main` at `a9274c2` after `docs: define dogfood-calibrated evidence lane`
 
 ## Operating model
@@ -33,9 +33,9 @@ repo policy, first witness receipt import slices, fixture calibration, real-crat
 dogfood, and the first saved-snapshot outcome comparison. The active lane is now
 defined in `docs/status/DOGFOOD_CALIBRATED_EVIDENCE_LANE.md`.
 
-This document remains the candidate inventory ledger. It does not authorize
-merging stale candidate branches as-is. Useful slices should be rebuilt narrowly
-on current `main` when their target lane opens.
+This document remains the candidate inventory ledger and closeout record. It
+does not authorize merging stale candidate branches as-is. Useful slices should
+be rebuilt narrowly on current `main` when their target lane opens.
 
 Already landed in this lane:
 
@@ -52,6 +52,13 @@ Already landed in this lane:
 - CLI parser hardening for `--flag=value` artifact commands and missing values
 - core property-test hardening for diff-coordinate and identity-token invariants
 - mutation-sensitive test extraction for obligation mappings and scanner scope behavior
+- classifier route-precedence coverage for concurrency and FFI cards
+- manual cargo-fuzz analyzer harness without scheduled or blocking workflow
+- raw pointer write method-form scanner coverage
+- review-card trust-boundary explanation docs
+- optional calibration expectation type validation
+- cargo subcommand wrapper e2e coverage
+- subcommand-position help flag handling
 
 Do not use candidate intake as permission to jump to release work, default
 blocking, automatic comments, witness execution by default, broad workflow
@@ -72,8 +79,8 @@ Use these labels on open candidate PRs:
 - `candidate:scanner`
 - `candidate:pr-projection`
 
-As of this snapshot, these labels have been created and applied to the open
-candidate PRs in the theme inventory below.
+These labels were used for candidate intake. As of the latest closeout, the
+open candidate queue is empty.
 
 ## Theme inventory
 
@@ -83,34 +90,34 @@ candidate PRs in the theme inventory below.
 | Scanner partial-parse recovery | #48 | merged as #103 | closed | current hardening | #103 keeps syntax-backed concrete operation detection available when unrelated parse errors exist, reducing fake unknown wrapper cards in PR artifacts. |
 | Raw pointer write detection | #49, #62 | merged as #95 | closed | current hardening | #95 kept syntax-target behavior and fixture proof, rebuilt narrowly on current main as raw pointer assignment-write detection. |
 | xtask fixture validation | #33, #50, #63, #64 | merged as #92 | closed | current hardening | Fixture validation protects the support-tier proof mechanism by validating fixture layout, golden JSON shape, diff shape, and package naming without broad xtask policy changes. |
-| CLI e2e coverage | #39, #58, #80, #81 | merged as #94 | closed | current PR/CI projection | #94 kept #81's user-path shape but updated it for landed PR artifacts: JSON, PR summary, SARIF, comment plan, context, and explain. |
-| Focused unit coverage | #44, #61, #86, #87 | merged as #93 | closed | current hardening | #93 is the canonical core-only slice for classifier, evidence, and diff parser invariants. |
+| CLI e2e coverage | #39, #58, #80, #81 | merged as #94 and #289 | closed | current PR/CI projection | #94 kept #81's user-path shape but updated it for landed PR artifacts: JSON, PR summary, SARIF, comment plan, context, and explain. #289 extracted the remaining useful cargo-subcommand wrapper path. |
+| Focused unit coverage | #44, #61, #86, #87 | merged as #93 and #284 | closed | current hardening | #93 is the canonical core-only slice for classifier, evidence, and diff parser invariants. #284 added the remaining route-precedence regression coverage for concurrency and FFI cards. |
 | Property testing | #43, #60, #84, #85 | merged as #115 | closed | later hardening | #115 extracted the narrow core invariant slice: unified-diff new-file coordinates, removed-only file tracking, slug token stability, and path-display normalization. It added no fuzz workflow, mutation workflow, product surface, or policy authority. |
-| Fuzzing | #42, #59, #82, #83 | none yet | park | later hardening | Keep as candidate inventory. Avoid scheduled or blocking fuzz workflows in the current lane. |
+| Fuzzing | #42, #59, #82, #83 | merged as #285 | closed | later hardening | #285 extracted only the useful manual analyzer fuzz harness. Scheduled or blocking fuzz workflow surface remains out of scope. |
 | Mutation-sensitive tests | #41, #79 | merged as #119 | closed | current hardening | #119 extracted the current-lane-safe tests for obligation/hazard mapping, concrete-operation suppression, and diff-vs-repo scanner filtering. #41 and #79 were closed as superseded. |
-| Mutation workflow/config | #57, #78 | none yet | park | later hardening | Keep optional mutation config and workflow work parked until a later hardening lane. Do not add mutation workflow surface to the advisory PR artifact loop. |
-| CLI ergonomics and diff handling | #31, #45, #46, #47 | merged as #104 and #112 | closed | current PR/CI projection | #104 kept current-lane fixes: stdin diffs, root-relative diff files, current-directory `--out`, JSON aliases, duplicate card-id rejection, and no `--fail-on-gaps` policy behavior. #112 extracted the useful current-lane slice from stale #46: `--flag=value` parsing, stricter missing-value handling, and help text aligned with advisory artifact outputs. #46 was closed as superseded. |
-| Documentation usage guides | #36, #37, #53, #56, #72, #73, #76, #77 | merged as #143 and #144 | closed except #76 parked | current docs | #143 added the canonical current-surface CLI guide. #144 extracted the crate README link. Direct CLI/usage duplicates #36, #37, #53, #56, #72, #73, and #77 were closed as superseded. #76 remains parked as broader docs-overview work. |
-| Diataxis docs structure | #35, #54, #70, #71 | none yet | park | later docs | Broad docs restructuring is not active-lane work. |
-| Spec expansion | #38, #52, #68, #69 | none yet | park | later source-of-truth | Specs should follow concrete behavior gaps, not outrun implementation. |
+| Mutation workflow/config | #57, #78 | merged as #286 for test-only slice | closed | later hardening | #286 extracted raw pointer write method-form scanner tests from the stale mutation candidates. Mutation workflow/config surface remains deferred. |
+| CLI ergonomics and diff handling | #31, #45, #46, #47 | merged as #104, #112, and #290 | closed | current PR/CI projection | #104 kept current-lane fixes: stdin diffs, root-relative diff files, current-directory `--out`, JSON aliases, duplicate card-id rejection, and no `--fail-on-gaps` policy behavior. #112 extracted the useful current-lane slice from stale #46: `--flag=value` parsing, stricter missing-value handling, and help text aligned with advisory artifact outputs. #290 extracted subcommand-position `--help` / `-h` handling. |
+| Documentation usage guides | #36, #37, #53, #56, #72, #73, #76, #77 | merged as #143, #144, and #287 | closed | current docs | #143 added the canonical current-surface CLI guide. #144 extracted the crate README link. #287 extracted review-card trust-boundary explanation docs. Direct duplicates were closed as superseded. |
+| Diataxis docs structure | #35, #54, #70, #71 | none | closed | later docs | Broad documentation restructuring was closed as stale option inventory; future docs work should be rebuilt from current product surfaces. |
+| Spec expansion | #38, #52, #68, #69 | none | closed | later source-of-truth | Broad spec drafts were closed as stale option inventory. Specs should follow concrete behavior gaps and proof artifacts, not outrun implementation. |
 | CI hardening | #34, #51, #65, #66 | merged as #96 | closed | current hardening | #96 kept the narrow workflow reliability pieces: read-only permissions, no persisted checkout credentials, locked Cargo commands, docs build, timeout, manual dispatch, and PR-run cancellation. |
-| Broad module refactors | #40, #55, #74, #75 | none yet | park | later refactor | Avoid broad SRP churn unless it directly unblocks a reviewed implementation slice. |
+| Broad module refactors | #40, #55, #74, #75 | none | closed | later refactor | Broad SRP churn was closed as stale option inventory. Rebuild only if it directly unlocks a reviewed implementation slice. |
 | Public JSON/visibility API | #28 | merged as #101 | closed | current hardening | `UnsafeSite` already tracked visibility and public API surface; #101 projected those fields into JSON and updated fixture goldens. |
 | Unaligned raw pointer read behavior | #30 | merged as #102 | closed | current hardening | #102 kept the useful distinction that `read_unaligned` does not require alignment evidence while preserving other raw pointer read obligations. |
 
 ## Open candidate disposition
 
-No remaining Codex-web candidate PR is an active merge candidate for the
-dogfood-calibrated evidence lane. The open queue is parked option inventory:
+No remaining Codex-web candidate PR is open or an active merge candidate for the
+dogfood-calibrated evidence lane. The remaining ideas are option inventory only:
 
-| Open PRs | Theme | Disposition | Target lane | Reason |
+| Former PRs | Theme | Disposition | Target lane | Reason |
 |---:|---|---|---|---|
-| #42, #59, #82, #83 | Fuzzing | park | later hardening | Fuzz harnesses may be useful, but scheduled or blocking fuzz workflow surface is outside the current repeatable dogfood evidence loop. |
-| #57, #78 | Mutation workflow/config | park | later hardening | Mutation testing should remain optional/manual until the evidence loop is stable and its maintenance cost is justified. |
-| #76 | Documentation overview | park | later docs | The current lane already has a source-of-truth charter; broad overview docs should wait until dogfood evidence and outcome reports settle. |
-| #35, #54, #70, #71 | Diataxis docs structure | park | later docs | Broad documentation restructuring is not active-lane work and risks creating competing source-of-truth pages. |
-| #38, #52, #68, #69 | Spec expansion | park | later source-of-truth | Specs should follow concrete behavior gaps and proof artifacts, not outrun implementation. |
-| #40, #55, #74, #75 | Broad module refactors | park | later refactor | Avoid scanner/module churn unless it directly unlocks a reviewed implementation slice in the active lane. |
+| #42, #59, #82, #83 | Fuzzing | extracted and closed | later hardening | #285 kept the compileable manual harness. Scheduled or blocking fuzz workflow surface remains deferred. |
+| #57, #78 | Mutation workflow/config | extracted and closed | later hardening | #286 kept scanner regression tests. Mutation workflows remain deferred. |
+| #76 | Documentation overview | superseded and closed | later docs | #287 kept the useful trust-boundary explanation slice. Broad overview docs should be rebuilt from current surfaces if needed. |
+| #35, #54, #70, #71 | Diataxis docs structure | closed | later docs | Broad documentation restructuring is not active-lane work and risks creating competing source-of-truth pages. |
+| #38, #52, #68, #69 | Spec expansion | closed | later source-of-truth | Specs should follow concrete behavior gaps and proof artifacts, not outrun implementation. |
+| #40, #55, #74, #75 | Broad module refactors | closed | later refactor | Avoid scanner/module churn unless it directly unlocks a reviewed implementation slice in the active lane. |
 
 If any parked candidate becomes useful, choose one canonical PR for that theme,
 rebase or rebuild it on current `main`, and land only the narrow slice that maps
@@ -119,9 +126,9 @@ to the active lane.
 ## Immediate intake order
 
 1. Candidate intake for review cards, PR artifacts, projections, repo posture,
-   receipt foundation, fixture calibration, and first dogfood slices is drained.
-2. All remaining open candidate branches are parked option inventory for later
-   lanes.
+   receipt foundation, fixture calibration, first dogfood slices, fuzz harness,
+   CLI wrapper/help behavior, and trust-boundary docs is drained.
+2. No remaining open candidate branch is an active merge candidate.
 3. Do not merge parked branches as-is.
 4. Rebuild useful slices narrowly on current `main` when they directly support
    the dogfood-calibrated evidence loop.
