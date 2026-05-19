@@ -1071,7 +1071,7 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
         assert_eq!(card.class, ReviewClass::GuardMissing);
         assert!(obligation_discharge_present(card, "ownership"));
         assert!(!obligation_discharge_present(card, "alignment"));
-        assert!(!obligation_discharge_present(card, "capacity"));
+        assert!(obligation_discharge_present(card, "capacity"));
         Ok(())
     }
 
