@@ -1,0 +1,16 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,0 +1,13 @@
++pub fn pause_once() {
++    // SAFETY: fixture keeps inline assembly visible but omits register and memory invariants.
++    unsafe { core::arch::asm!("nop") }
++}
++
++#[cfg(test)]
++mod tests {
++    #[test]
++    fn mentions_pause_once() {
++        let _ = stringify!(pause_once);
++    }
++}

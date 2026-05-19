@@ -842,6 +842,29 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn inline_asm_uses_inline_asm_operation_family() -> Result<(), String> {
+        let output = fixture_output("inline_asm_human_review")?;
+        let card = single_card("inline_asm_human_review", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::InlineAsm);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(card.hazards.contains(&HazardKind::InlineAsm));
+        assert!(card.hazards.contains(&HazardKind::TargetFeature));
+        assert!(
+            card.routes
+                .iter()
+                .any(|route| route.kind == WitnessKind::HumanDeepReview),
+            "inline asm should route to human deep review"
+        );
+        assert!(
+            card.next_action.verify_commands.is_empty(),
+            "human-review-only inline asm route should not invent a witness command"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn pointer_arithmetic_num_ctrl_bytes_guard_is_discharged() -> Result<(), String> {
         let output = fixture_output("pointer_arithmetic_num_ctrl_bytes_guard")?;
         let card = single_card("pointer_arithmetic_num_ctrl_bytes_guard", &output)?;
