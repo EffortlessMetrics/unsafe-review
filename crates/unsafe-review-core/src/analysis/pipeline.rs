@@ -1035,6 +1035,46 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
         );
         assert_eq!(post_check_card.class, ReviewClass::GuardMissing);
         assert!(!obligation_discharge_present(post_check_card, "bounds"));
+
+        let observed_bounds = fixture_output("get_unchecked_mut_bounds_observed_not_guard")?;
+        let observed_bounds_card = single_card(
+            "get_unchecked_mut_bounds_observed_not_guard",
+            &observed_bounds,
+        )?;
+        assert_eq!(
+            observed_bounds_card.operation.family,
+            OperationFamily::GetUnchecked
+        );
+        assert_eq!(observed_bounds_card.class, ReviewClass::GuardMissing);
+        assert!(!obligation_discharge_present(
+            observed_bounds_card,
+            "bounds"
+        ));
+
+        let closed_bounds = fixture_output("get_unchecked_mut_closed_bounds_not_guard")?;
+        let closed_bounds_card =
+            single_card("get_unchecked_mut_closed_bounds_not_guard", &closed_bounds)?;
+        assert_eq!(
+            closed_bounds_card.operation.family,
+            OperationFamily::GetUnchecked
+        );
+        assert_eq!(closed_bounds_card.class, ReviewClass::GuardMissing);
+        assert!(!obligation_discharge_present(closed_bounds_card, "bounds"));
+
+        let reassigned_index = fixture_output("get_unchecked_mut_reassigned_index_not_guard")?;
+        let reassigned_index_card = single_card(
+            "get_unchecked_mut_reassigned_index_not_guard",
+            &reassigned_index,
+        )?;
+        assert_eq!(
+            reassigned_index_card.operation.family,
+            OperationFamily::GetUnchecked
+        );
+        assert_eq!(reassigned_index_card.class, ReviewClass::GuardMissing);
+        assert!(!obligation_discharge_present(
+            reassigned_index_card,
+            "bounds"
+        ));
         Ok(())
     }
 

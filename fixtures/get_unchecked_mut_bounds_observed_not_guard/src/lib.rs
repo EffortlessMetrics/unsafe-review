@@ -1,0 +1,18 @@
+pub fn pick_after_bounds_observation(values: &mut [u8], index: usize) -> Option<&mut u8> {
+    let in_bounds = index < values.len();
+    observe(in_bounds);
+    // SAFETY: this fixture intentionally observes the predicate without enforcing it.
+    Some(unsafe { values.get_unchecked_mut(index) })
+}
+
+fn observe(_in_bounds: bool) {}
+
+#[cfg(test)]
+mod tests {
+    use super::pick_after_bounds_observation;
+
+    #[test]
+    fn mentions_pick_after_bounds_observation() {
+        let _ = stringify!(pick_after_bounds_observation);
+    }
+}

@@ -464,28 +464,156 @@ fn has_get_unchecked_bounds_guard(lower: &str, receiver: &str, index: &str) -> b
         return false;
     }
     let len = format!("{receiver}.len()");
-    has_get_unchecked_bounds_predicate(&compact, &format!("{index}<{len}"))
-        || has_get_unchecked_bounds_predicate(&compact, &format!("{len}>{index}"))
-        || has_get_unchecked_bounds_early_return(&compact, &format!("{index}>={len}"))
-        || has_get_unchecked_bounds_early_return(&compact, &format!("{len}<={index}"))
+    has_get_unchecked_bounds_predicate(&compact, &format!("{index}<{len}"), &receiver, &index)
+        || has_get_unchecked_bounds_predicate(
+            &compact,
+            &format!("{len}>{index}"),
+            &receiver,
+            &index,
+        )
+        || has_get_unchecked_bounds_early_return(
+            &compact,
+            &format!("{index}>={len}"),
+            &receiver,
+            &index,
+        )
+        || has_get_unchecked_bounds_early_return(
+            &compact,
+            &format!("{len}<={index}"),
+            &receiver,
+            &index,
+        )
 }
 
-fn has_get_unchecked_bounds_predicate(compact: &str, predicate: &str) -> bool {
-    contains_receiver_fragment(compact, predicate)
-        || compact.contains(&format!("if{predicate}"))
-        || compact.contains(&format!("assert!({predicate}"))
-        || compact.contains(&format!("debug_assert!({predicate}"))
+fn has_get_unchecked_bounds_predicate(
+    compact: &str,
+    predicate: &str,
+    receiver: &str,
+    index: &str,
+) -> bool {
+    has_get_unchecked_open_bounds_branch(compact, predicate, receiver, index)
+        || has_get_unchecked_bounds_assertion(compact, predicate, receiver, index)
 }
 
-fn has_get_unchecked_bounds_early_return(compact: &str, predicate: &str) -> bool {
+fn has_get_unchecked_open_bounds_branch(
+    compact: &str,
+    predicate: &str,
+    receiver: &str,
+    index: &str,
+) -> bool {
+    let marker = format!("if{predicate}{{");
+    let mut cursor = compact;
+    let mut offset = 0usize;
+    while let Some(pos) = cursor.find(&marker) {
+        let proof_end = offset + pos + marker.len();
+        let after_guard = &compact[proof_end..];
+        if branch_still_open_at_operation(after_guard)
+            && !has_get_unchecked_stale_assignment(after_guard, receiver, index)
+        {
+            return true;
+        }
+        let next = pos + marker.len();
+        offset += next;
+        cursor = &cursor[next..];
+    }
+    false
+}
+
+fn has_get_unchecked_bounds_assertion(
+    compact: &str,
+    predicate: &str,
+    receiver: &str,
+    index: &str,
+) -> bool {
+    ["assert!(", "debug_assert!("].into_iter().any(|prefix| {
+        let marker = format!("{prefix}{predicate}");
+        let mut cursor = compact;
+        let mut offset = 0usize;
+        while let Some(pos) = cursor.find(&marker) {
+            let proof_end = offset + pos + marker.len();
+            let after_assertion = &compact[proof_end..];
+            if !has_get_unchecked_stale_assignment(after_assertion, receiver, index) {
+                return true;
+            }
+            let next = pos + marker.len();
+            offset += next;
+            cursor = &cursor[next..];
+        }
+        false
+    })
+}
+
+fn has_get_unchecked_bounds_early_return(
+    compact: &str,
+    predicate: &str,
+    receiver: &str,
+    index: &str,
+) -> bool {
     let guard = format!("if{predicate}{{");
-    let Some((_prefix, after_guard)) = compact.split_once(&guard) else {
+    let mut cursor = compact;
+    let mut offset = 0usize;
+    while let Some(pos) = cursor.find(&guard) {
+        let proof_start = offset + pos + guard.len();
+        let after_guard = &compact[proof_start..];
+        let (guard_body, after_guard_body) = after_guard
+            .split_once('}')
+            .map_or((after_guard, ""), |(guard_body, after)| (guard_body, after));
+        if guard_body.contains("return")
+            && !has_get_unchecked_stale_assignment(after_guard_body, receiver, index)
+        {
+            return true;
+        }
+        let next = pos + guard.len();
+        offset += next;
+        cursor = &cursor[next..];
+    }
+    false
+}
+
+fn branch_still_open_at_operation(after_guard: &str) -> bool {
+    let mut depth = 1usize;
+    for ch in after_guard.chars() {
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+    }
+    true
+}
+
+fn has_get_unchecked_stale_assignment(compact: &str, receiver: &str, index: &str) -> bool {
+    contains_simple_assignment_to(compact, receiver)
+        || contains_simple_assignment_to(compact, index)
+}
+
+fn contains_simple_assignment_to(compact: &str, name: &str) -> bool {
+    if !is_simple_identifier(name) {
         return false;
-    };
-    after_guard
-        .split_once('}')
-        .map_or(after_guard, |(guard_body, _after)| guard_body)
-        .contains("return")
+    }
+    if compact.contains(&format!("let{name}=")) || compact.contains(&format!("letmut{name}=")) {
+        return true;
+    }
+    let marker = format!("{name}=");
+    let mut cursor = compact;
+    let mut offset = 0usize;
+    while let Some(pos) = cursor.find(&marker) {
+        let start = offset + pos;
+        let before = compact[..start].chars().next_back();
+        let after_equals = compact[start + marker.len()..].chars().next();
+        if before.is_none_or(|ch| !is_receiver_path_char(ch)) && after_equals != Some('=') {
+            return true;
+        }
+        let next = pos + marker.len();
+        offset += next;
+        cursor = &cursor[next..];
+    }
+    false
 }
 
 fn has_len_capacity_equality_guard(lower: &str) -> bool {
@@ -3307,11 +3435,38 @@ mod tests {
             "unsafe { values.get_unchecked_mut(index) }",
             vec![],
         );
+        let matching_assertion = site_with_family(
+            OperationFamily::GetUnchecked,
+            vec!["assert!(index < values.len());"],
+            "unsafe { values.get_unchecked_mut(index) }",
+            vec![],
+        );
         let post_guard = site_with_family(
             OperationFamily::GetUnchecked,
             vec![],
             "unsafe { values.get_unchecked_mut(index) }",
             vec!["if index < values.len() {", "    return Some(());", "}"],
+        );
+        let closed_positive_branch = site_with_family(
+            OperationFamily::GetUnchecked,
+            vec!["if index < values.len() {", "    observe(index);", "}"],
+            "unsafe { values.get_unchecked_mut(index) }",
+            vec![],
+        );
+        let reassigned_index = site_with_family(
+            OperationFamily::GetUnchecked,
+            vec![
+                "if index >= values.len() { return None; }",
+                "index = values.len();",
+            ],
+            "unsafe { values.get_unchecked_mut(index) }",
+            vec![],
+        );
+        let assertion_then_reassigned_index = site_with_family(
+            OperationFamily::GetUnchecked,
+            vec!["assert!(index < values.len());", "index = values.len();"],
+            "unsafe { values.get_unchecked_mut(index) }",
+            vec![],
         );
 
         assert!(
@@ -3330,9 +3485,34 @@ mod tests {
                 .present
         );
         assert!(
+            obligation_evidence(&matching_assertion, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
             !obligation_evidence(&post_guard, &obligations, &contract, &reach)[0]
                 .discharge
                 .present
+        );
+        assert!(
+            !obligation_evidence(&closed_positive_branch, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
+            !obligation_evidence(&reassigned_index, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
+            !obligation_evidence(
+                &assertion_then_reassigned_index,
+                &obligations,
+                &contract,
+                &reach
+            )[0]
+            .discharge
+            .present
         );
     }
 
