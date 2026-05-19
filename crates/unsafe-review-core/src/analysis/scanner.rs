@@ -314,6 +314,9 @@ fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
     if is_ptr_copy_call(line) {
         return Some((UnsafeSiteKind::Operation, OperationFamily::PtrCopy));
     }
+    if is_ptr_replace_call(line) {
+        return Some((UnsafeSiteKind::Operation, OperationFamily::PtrReplace));
+    }
     if is_vec_from_raw_parts_call(line) {
         return Some((UnsafeSiteKind::Operation, OperationFamily::VecFromRawParts));
     }
@@ -504,6 +507,13 @@ fn is_ptr_copy_call(line: &str) -> bool {
         && (compact.contains("ptr::copy(")
             || compact.contains("core::ptr::copy(")
             || compact.contains("std::ptr::copy("))
+}
+
+fn is_ptr_replace_call(line: &str) -> bool {
+    let compact = compact_whitespace(line);
+    compact.contains("ptr::replace(")
+        || compact.contains("core::ptr::replace(")
+        || compact.contains("std::ptr::replace(")
 }
 
 fn is_atomic_pointer_state_transition(line: &str) -> bool {
@@ -1236,6 +1246,10 @@ mod tests {
         assert_eq!(
             detect_site("core::ptr::copy(src, dst, len);"),
             Some((UnsafeSiteKind::Operation, OperationFamily::PtrCopy))
+        );
+        assert_eq!(
+            detect_site("core::ptr::replace(dst, value);"),
+            Some((UnsafeSiteKind::Operation, OperationFamily::PtrReplace))
         );
         assert_eq!(
             detect_site("core::mem::transmute_copy::<u8, bool>(&value);"),

@@ -834,6 +834,26 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn ptr_replace_uses_replacement_operation_family() -> Result<(), String> {
+        let output = fixture_output("ptr_replace_value")?;
+        let card = single_card("ptr_replace_value", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::PtrReplace);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(card.hazards.contains(&HazardKind::PointerValidity));
+        assert!(card.hazards.contains(&HazardKind::DropOrDeallocation));
+        assert!(
+            card.obligations
+                .iter()
+                .any(|obligation| obligation.key == "ownership"),
+            "ptr::replace should preserve drop/ownership review evidence"
+        );
+        assert!(card.id.0.contains("ptr-replace"));
+        Ok(())
+    }
+
+    #[test]
     fn str_from_utf8_unchecked_uses_utf8_operation_family() -> Result<(), String> {
         let output = fixture_output("str_from_utf8_unchecked")?;
         let card = single_card("str_from_utf8_unchecked", &output)?;

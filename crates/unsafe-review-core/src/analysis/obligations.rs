@@ -25,6 +25,12 @@ pub(crate) fn hazards_for(family: &OperationFamily) -> Vec<HazardKind> {
             HazardKind::Bounds,
             HazardKind::InitializedMemory,
         ],
+        OperationFamily::PtrReplace => vec![
+            HazardKind::PointerValidity,
+            HazardKind::Alignment,
+            HazardKind::InitializedMemory,
+            HazardKind::DropOrDeallocation,
+        ],
         OperationFamily::CopyNonOverlapping => vec![
             HazardKind::PointerValidity,
             HazardKind::Bounds,
@@ -189,6 +195,24 @@ pub(crate) fn obligations_for(family: &OperationFamily) -> Vec<SafetyObligation>
             SafetyObligation::new(
                 "initialized",
                 "source range is initialized for count elements",
+            ),
+        ],
+        OperationFamily::PtrReplace => vec![
+            SafetyObligation::new(
+                "pointer-live",
+                "destination pointer is valid for read and write",
+            ),
+            SafetyObligation::new(
+                "alignment",
+                "destination pointer is aligned for the value type",
+            ),
+            SafetyObligation::new(
+                "initialized",
+                "destination value is initialized before replace",
+            ),
+            SafetyObligation::new(
+                "ownership",
+                "returned old value and replacement value preserve drop ownership",
             ),
         ],
         OperationFamily::UnsafeImplSendSync => vec![SafetyObligation::new(
