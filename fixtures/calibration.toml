@@ -3,6 +3,11 @@ status = "experimental"
 
 required_core_fixtures = [
   "raw_pointer_alignment",
+  "raw_pointer_deref",
+  "raw_pointer_read_unaligned",
+  "raw_pointer_write_assignment",
+  "split_raw_pointer_read_call",
+  "split_unsafe_block",
   "public_unsafe_fn_missing_safety",
   "public_unsafe_fn_with_safety_docs",
   "public_unsafe_fn_safety_colon_docs",
@@ -78,6 +83,56 @@ expected_cards = 1
 expected_class = "guard_missing"
 expected_operation_family = "raw_pointer_read"
 expected_hazard = "alignment"
+
+[[cases]]
+fixture = "raw_pointer_deref"
+kind = "positive"
+claim = "raw pointer dereference reports pointer, alignment, initialization, and allocation obligations"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_deref"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "raw_pointer_read_unaligned"
+kind = "positive"
+claim = "read_unaligned reports raw pointer read obligations without requiring an alignment hazard"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_read_unaligned"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "raw_pointer_write_assignment"
+kind = "positive"
+claim = "raw pointer assignment reports raw pointer write obligations instead of an unknown unsafe block"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_write"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "split_raw_pointer_read_call"
+kind = "positive"
+claim = "split raw pointer read call syntax normalizes to a concrete raw pointer read card"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_read"
+expected_hazard = "alignment"
+
+[[cases]]
+fixture = "split_unsafe_block"
+kind = "positive"
+claim = "split unsafe block syntax emits a single unknown unsafe-block card when no concrete operation is found"
+support_tier = "Diff unsafe site inventory"
+expected_cards = 1
+expected_class = "contract_missing"
+expected_operation_family = "unknown"
+expected_hazard = "unknown"
 
 [[cases]]
 fixture = "public_unsafe_fn_missing_safety"
