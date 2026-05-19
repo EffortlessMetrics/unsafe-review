@@ -24,6 +24,8 @@ unsafe-review check --base origin/main \
 The CI workflow keeps repository permissions read-only, avoids persisted checkout
 credentials, cancels superseded pull request runs, supports manual dispatch for
 ad hoc verification, and bounds the Rust job with a timeout.
+Dependabot opens weekly Cargo and GitHub Actions update PRs as maintenance
+signals; those PRs still pass through the same advisory CI and review process.
 
 The PR summary artifact is Markdown for GitHub job summaries or uploaded
 artifacts. It projects existing review cards only: counts, top card, card table,
