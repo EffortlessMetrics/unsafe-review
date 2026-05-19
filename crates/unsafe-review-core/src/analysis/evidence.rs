@@ -228,8 +228,10 @@ fn discharge_state_for(
             }
         }
         "ownership" => {
-            if family == &OperationFamily::DropInPlace
-                && has_drop_in_place_box_origin_evidence(&site.operation.expression, lower)
+            if (family == &OperationFamily::DropInPlace
+                && has_drop_in_place_box_origin_evidence(&site.operation.expression, lower))
+                || (family == &OperationFamily::BoxFromRaw
+                    && has_box_from_raw_origin_evidence(&site.operation.expression, lower))
             {
                 EvidenceState::present("Box::into_raw ownership evidence was detected")
             } else {
@@ -645,16 +647,7 @@ fn has_drop_in_place_box_origin_evidence(expression: &str, lower: &str) -> bool 
     let Some(call_pos) = call_pos else {
         return false;
     };
-    let before_call = &compact[..call_pos];
-    before_call.split(';').any(|statement| {
-        let Some((left, right)) = statement.split_once('=') else {
-            return false;
-        };
-        let Some(binding) = let_binding_name(left) else {
-            return false;
-        };
-        binding == pointer && box_into_raw_argument(right).is_some()
-    })
+    has_same_pointer_box_into_raw_before(&compact[..call_pos], pointer)
 }
 
 fn drop_in_place_argument(compact_expression: &str) -> Option<&str> {
@@ -670,6 +663,42 @@ fn box_into_raw_argument(right_side: &str) -> Option<&str> {
     let marker = "box::into_raw(";
     let call_pos = right_side.find(marker)? + marker.len();
     let argument_text = &right_side[call_pos..];
+    let argument_end = matching_call_argument_end(argument_text)?;
+    let argument = &argument_text[..argument_end];
+    (!argument.is_empty()).then_some(argument)
+}
+
+fn has_box_from_raw_origin_evidence(expression: &str, lower: &str) -> bool {
+    let compact = compact_code(lower);
+    let compact_expression = compact_code(&expression.to_ascii_lowercase());
+    let Some(pointer) = box_from_raw_argument(&compact_expression) else {
+        return false;
+    };
+    let call_pos = compact
+        .find(&compact_expression)
+        .or_else(|| compact.find(&format!("box::from_raw({pointer})")));
+    let Some(call_pos) = call_pos else {
+        return false;
+    };
+    has_same_pointer_box_into_raw_before(&compact[..call_pos], pointer)
+}
+
+fn has_same_pointer_box_into_raw_before(before_call: &str, pointer: &str) -> bool {
+    before_call.split(';').any(|statement| {
+        let Some((left, right)) = statement.split_once('=') else {
+            return false;
+        };
+        let Some(binding) = let_binding_name(left) else {
+            return false;
+        };
+        binding == pointer && box_into_raw_argument(right).is_some()
+    })
+}
+
+fn box_from_raw_argument(compact_expression: &str) -> Option<&str> {
+    let marker = "box::from_raw(";
+    let call_pos = compact_expression.find(marker)? + marker.len();
+    let argument_text = &compact_expression[call_pos..];
     let argument_end = matching_call_argument_end(argument_text)?;
     let argument = &argument_text[..argument_end];
     (!argument.is_empty()).then_some(argument)
@@ -1982,6 +2011,42 @@ mod tests {
         assert!(evidence.iter().all(|item| item.discharge.present));
         let evidence = obligation_evidence(&other_pointer, &obligations, &contract, &reach);
         assert!(evidence.iter().all(|item| !item.discharge.present));
+    }
+
+    #[test]
+    fn box_from_raw_origin_discharges_ownership_for_same_pointer() {
+        let obligations = vec![SafetyObligation::new(
+            "ownership",
+            "raw pointer was produced by compatible allocator and is uniquely owned",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let matching = site_with_family(
+            OperationFamily::BoxFromRaw,
+            vec!["let ptr = Box::into_raw(value);"],
+            "unsafe { Box::from_raw(ptr) }",
+            vec![],
+        );
+        let other_pointer = site_with_family(
+            OperationFamily::BoxFromRaw,
+            vec!["let other = Box::into_raw(value);"],
+            "unsafe { Box::from_raw(ptr) }",
+            vec![],
+        );
+
+        assert!(
+            obligation_evidence(&matching, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
+            !obligation_evidence(&other_pointer, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
     }
 
     #[test]

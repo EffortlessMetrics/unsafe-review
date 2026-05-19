@@ -77,6 +77,7 @@ required_core_fixtures = [
   "vec_from_raw_parts_capacity_guard",
   "vec_from_raw_parts_capacity_observed_not_guard",
   "box_from_raw",
+  "box_from_raw_box_origin",
   "static_mut_global_state",
   "transmute_invalid_value",
   "transmute_layout_size_guard",
@@ -857,6 +858,16 @@ claim = "Box::from_raw reports ownership and deallocation obligations instead of
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"
+expected_operation_family = "box_from_raw"
+expected_hazard = "drop_or_deallocation"
+
+[[cases]]
+fixture = "box_from_raw_box_origin"
+kind = "positive"
+claim = "Box::from_raw recognizes same-pointer Box::into_raw origin evidence without importing a witness"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
 expected_operation_family = "box_from_raw"
 expected_hazard = "drop_or_deallocation"
 
