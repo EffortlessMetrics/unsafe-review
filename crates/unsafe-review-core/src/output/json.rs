@@ -267,6 +267,7 @@ mod tests {
         "split_raw_pointer_read_call",
         "maybeuninit_assume_init",
         "maybeuninit_assume_init_read",
+        "maybeuninit_assume_init_ref",
         "vec_set_len",
         "vec_set_len_initialized_loop",
         "vec_set_len_call_result_init",

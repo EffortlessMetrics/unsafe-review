@@ -1,0 +1,18 @@
+use core::mem::MaybeUninit;
+
+pub fn borrow_slot(slot: &MaybeUninit<u32>) -> &u32 {
+    // SAFETY: fixture documents the expected initialization contract but omits proof.
+    unsafe { slot.assume_init_ref() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::borrow_slot;
+
+    #[test]
+    fn borrows_slot() {
+        let slot = MaybeUninit::new(7);
+        let _value = borrow_slot(&slot);
+    }
+}
+
