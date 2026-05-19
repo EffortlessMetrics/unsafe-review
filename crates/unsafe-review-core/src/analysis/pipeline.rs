@@ -1279,6 +1279,30 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
         Ok(())
     }
 
+    #[test]
+    fn receipted_fixture_keeps_static_guard_gap_visible() -> Result<(), String> {
+        let output = fixture_output("raw_pointer_alignment_receipted")?;
+        let card = single_card("raw_pointer_alignment_receipted", &output)?;
+
+        assert_eq!(card.operation.family, OperationFamily::RawPointerRead);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(card.witness.present);
+        assert!(card.witness.summary.contains("miri"));
+        assert!(card.witness.summary.contains("ran"));
+        assert!(!card.missing.iter().any(|missing| missing.kind == "witness"));
+        assert!(card.missing.iter().any(|missing| missing.kind == "guard"));
+        assert!(
+            !obligation_discharge_present(card, "alignment"),
+            "Miri receipt evidence must not discharge the static alignment guard obligation"
+        );
+        assert!(
+            card.obligation_evidence
+                .iter()
+                .all(|evidence| evidence.witness.present)
+        );
+        Ok(())
+    }
+
     fn fixture_output(name: &str) -> Result<AnalyzeOutput, String> {
         let root = fixture_root(name);
         fixture_output_at(&root)
