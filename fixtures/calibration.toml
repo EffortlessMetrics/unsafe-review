@@ -106,7 +106,11 @@ required_core_fixtures = [
   "slice_from_raw_parts_mut_other_maybeuninit_not_guard",
   "vec_from_raw_parts",
   "vec_from_raw_parts_capacity_guard",
+  "vec_from_raw_parts_capacity_assert_guard",
   "vec_from_raw_parts_capacity_observed_not_guard",
+  "vec_from_raw_parts_capacity_value_observed_not_guard",
+  "vec_from_raw_parts_capacity_closed_branch_not_guard",
+  "vec_from_raw_parts_capacity_reassigned_not_guard",
   "vec_from_raw_parts_manuallydrop_origin",
   "box_from_raw",
   "box_from_raw_box_origin",
@@ -1192,9 +1196,49 @@ expected_operation_family = "vec_from_raw_parts"
 expected_hazard = "bounds"
 
 [[cases]]
+fixture = "vec_from_raw_parts_capacity_assert_guard"
+kind = "positive"
+claim = "Vec::from_raw_parts recognizes a same-call len/capacity assertion while leaving allocator and ownership evidence missing"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_from_raw_parts"
+expected_hazard = "bounds"
+
+[[cases]]
 fixture = "vec_from_raw_parts_capacity_observed_not_guard"
 kind = "false_positive_control"
 claim = "Vec::from_raw_parts does not accept capacity mentions unless they bound the cap argument passed to the call"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_from_raw_parts"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "vec_from_raw_parts_capacity_value_observed_not_guard"
+kind = "false_positive_control"
+claim = "Vec::from_raw_parts does not accept bare len/cap relation observations as capacity evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_from_raw_parts"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "vec_from_raw_parts_capacity_closed_branch_not_guard"
+kind = "false_positive_control"
+claim = "Vec::from_raw_parts does not accept closed positive len/cap branches as capacity evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_from_raw_parts"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "vec_from_raw_parts_capacity_reassigned_not_guard"
+kind = "false_positive_control"
+claim = "Vec::from_raw_parts does not accept len/cap evidence after the checked cap argument is reassigned"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"

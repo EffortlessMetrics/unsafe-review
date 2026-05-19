@@ -1188,6 +1188,35 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn vec_from_raw_parts_capacity_evidence_requires_enforced_len_cap_guard() -> Result<(), String>
+    {
+        for fixture in [
+            "vec_from_raw_parts_capacity_guard",
+            "vec_from_raw_parts_capacity_assert_guard",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
+
+            assert_eq!(card.operation.family, OperationFamily::VecFromRawParts);
+            assert!(obligation_discharge_present(card, "capacity"));
+        }
+
+        for fixture in [
+            "vec_from_raw_parts_capacity_observed_not_guard",
+            "vec_from_raw_parts_capacity_value_observed_not_guard",
+            "vec_from_raw_parts_capacity_closed_branch_not_guard",
+            "vec_from_raw_parts_capacity_reassigned_not_guard",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
+
+            assert_eq!(card.operation.family, OperationFamily::VecFromRawParts);
+            assert!(!obligation_discharge_present(card, "capacity"));
+        }
+        Ok(())
+    }
+
+    #[test]
     fn box_from_raw_uses_ownership_operation_family() -> Result<(), String> {
         let output = fixture_output("box_from_raw")?;
         let card = single_card("box_from_raw", &output)?;

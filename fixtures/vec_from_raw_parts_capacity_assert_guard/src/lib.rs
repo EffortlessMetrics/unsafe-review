@@ -1,0 +1,13 @@
+pub fn rebuild_vec(buf: *mut u8, len: usize, cap: usize) -> Vec<u8> {
+    assert!(len <= cap);
+    // SAFETY: fixture models a visible length/capacity guard but no allocator or ownership proof.
+    unsafe { Vec::from_raw_parts(buf, len, cap) }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn mentions_rebuild_vec() {
+        let _ = stringify!(super::rebuild_vec);
+    }
+}
