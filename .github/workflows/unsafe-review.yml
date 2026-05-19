@@ -26,7 +26,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: dtolnay/rust-toolchain@1.100.0
 
       - name: Build unsafe-review
         run: cargo build --locked -p unsafe-review
@@ -45,7 +45,7 @@ jobs:
         run: cargo run --locked -p xtask -- check-advisory-artifacts target/unsafe-review
 
       - name: Upload unsafe-review artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: unsafe-review
