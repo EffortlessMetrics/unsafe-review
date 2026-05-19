@@ -1312,19 +1312,38 @@ fn has_u8_bool_value_guard(before_call: &str, argument: &str) -> bool {
         format!("{argument}==1||{argument}==0"),
     ]
     .iter()
-    .any(|predicate| has_u8_bool_value_predicate_guard(before_call, predicate))
+    .any(|predicate| has_u8_bool_value_predicate_guard(before_call, predicate, argument))
         || has_u8_bool_invalid_early_return_guard(before_call, argument)
 }
 
-fn has_u8_bool_value_predicate_guard(before_call: &str, predicate: &str) -> bool {
-    before_call.contains(&format!("assert!({predicate})"))
-        || before_call.contains(&format!("assert!({predicate},"))
-        || before_call.contains(&format!("debug_assert!({predicate})"))
-        || before_call.contains(&format!("debug_assert!({predicate},"))
-        || has_open_positive_branch_guard(before_call, predicate)
+fn has_u8_bool_value_predicate_guard(before_call: &str, predicate: &str, argument: &str) -> bool {
+    [
+        format!("assert!({predicate})"),
+        format!("assert!({predicate},"),
+        format!("debug_assert!({predicate})"),
+        format!("debug_assert!({predicate},"),
+    ]
+    .iter()
+    .any(|pattern| has_fresh_guard_pattern(before_call, pattern, argument))
+        || has_open_positive_branch_guard(before_call, predicate, argument)
 }
 
-fn has_open_positive_branch_guard(before_call: &str, predicate: &str) -> bool {
+fn has_fresh_guard_pattern(before_call: &str, pattern: &str, argument: &str) -> bool {
+    let mut search_from = 0;
+    while let Some(offset) = before_call[search_from..].find(pattern) {
+        let pattern_start = search_from + offset;
+        let after_pattern = &before_call[pattern_start + pattern.len()..];
+        let statement_end = after_pattern.find(';').unwrap_or(after_pattern.len());
+        let after_guard = &after_pattern[statement_end..];
+        if !has_assignment_to_identifier(after_guard, argument) {
+            return true;
+        }
+        search_from = pattern_start + pattern.len();
+    }
+    false
+}
+
+fn has_open_positive_branch_guard(before_call: &str, predicate: &str, argument: &str) -> bool {
     let guard = format!("if{predicate}{{");
     let mut search_from = 0;
     while let Some(offset) = before_call[search_from..].find(&guard) {
@@ -1343,7 +1362,7 @@ fn has_open_positive_branch_guard(before_call: &str, predicate: &str) -> bool {
                 _ => {}
             }
         }
-        if depth > 0 {
+        if depth > 0 && !has_assignment_to_identifier(after_guard, argument) {
             return true;
         }
         search_from = guard_start + guard.len();
@@ -1352,21 +1371,27 @@ fn has_open_positive_branch_guard(before_call: &str, predicate: &str) -> bool {
 }
 
 fn has_u8_bool_invalid_early_return_guard(before_call: &str, argument: &str) -> bool {
-    has_invalid_byte_returning_branch(before_call, &format!("{argument}>1"))
-        || has_invalid_byte_returning_branch(before_call, &format!("1<{argument}"))
-        || has_invalid_byte_returning_branch(before_call, &format!("{argument}>=2"))
-        || has_invalid_byte_returning_branch(before_call, &format!("2<={argument}"))
+    has_invalid_byte_returning_branch(before_call, &format!("{argument}>1"), argument)
+        || has_invalid_byte_returning_branch(before_call, &format!("1<{argument}"), argument)
+        || has_invalid_byte_returning_branch(before_call, &format!("{argument}>=2"), argument)
+        || has_invalid_byte_returning_branch(before_call, &format!("2<={argument}"), argument)
 }
 
-fn has_invalid_byte_returning_branch(before_call: &str, predicate: &str) -> bool {
+fn has_invalid_byte_returning_branch(before_call: &str, predicate: &str, argument: &str) -> bool {
     let guard = format!("if{predicate}{{");
-    let Some((_prefix, after_guard)) = before_call.split_once(&guard) else {
-        return false;
-    };
-    after_guard
-        .split_once('}')
-        .map_or(after_guard, |(guard_body, _after)| guard_body)
-        .contains("return")
+    let mut search_from = 0;
+    while let Some(offset) = before_call[search_from..].find(&guard) {
+        let guard_start = search_from + offset;
+        let after_guard = &before_call[guard_start + guard.len()..];
+        let guard_end = after_guard.find('}').unwrap_or(after_guard.len());
+        let guard_body = &after_guard[..guard_end];
+        let after_branch = &after_guard[guard_end..];
+        if guard_body.contains("return") && !has_assignment_to_identifier(after_branch, argument) {
+            return true;
+        }
+        search_from = guard_start + guard.len();
+    }
+    false
 }
 
 fn is_simple_identifier(text: &str) -> bool {
@@ -1384,6 +1409,41 @@ fn source_value_identifier(argument: &str) -> Option<&str> {
     }
     let referenced = argument.strip_prefix('&')?;
     is_simple_identifier(referenced).then_some(referenced)
+}
+
+fn has_assignment_to_identifier(compact: &str, identifier: &str) -> bool {
+    let mut cursor = compact;
+    let mut offset = 0usize;
+    while let Some(pos) = cursor.find(identifier) {
+        let start = offset + pos;
+        let before = compact[..start].chars().next_back();
+        let after_start = start + identifier.len();
+        let after = &compact[after_start..];
+        let ends_on_boundary = after
+            .chars()
+            .next()
+            .is_none_or(|ch| !is_receiver_path_char(ch));
+        if before.is_none_or(|ch| !is_receiver_path_char(ch))
+            && ends_on_boundary
+            && starts_assignment_operator(after)
+        {
+            return true;
+        }
+        let next = pos + identifier.len();
+        offset += next;
+        cursor = &cursor[next..];
+    }
+    false
+}
+
+fn starts_assignment_operator(after_identifier: &str) -> bool {
+    if after_identifier.starts_with("==") || after_identifier.starts_with("=>") {
+        return false;
+    }
+    after_identifier.starts_with('=')
+        || ["+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>="]
+            .iter()
+            .any(|operator| after_identifier.starts_with(operator))
 }
 
 fn zeroed_target_type(compact: &str) -> Option<&str> {
@@ -3921,6 +3981,24 @@ mod tests {
             "unsafe { core::mem::transmute_copy::<u8, bool>(&value) }",
             vec![],
         );
+        let reassigned_after_assert = site_with_family(
+            OperationFamily::Transmute,
+            vec!["assert!(value <= 1);", "value = 2;"],
+            "unsafe { core::mem::transmute::<u8, bool>(value) }",
+            vec![],
+        );
+        let referenced_reassigned_after_assert = site_with_family(
+            OperationFamily::Transmute,
+            vec!["assert!(value <= 1);", "value = 2;"],
+            "unsafe { core::mem::transmute_copy::<u8, bool>(&value) }",
+            vec![],
+        );
+        let reassigned_after_early_return = site_with_family(
+            OperationFamily::Transmute,
+            vec!["if value > 1 {", "return false;", "}", "value = 2;"],
+            "unsafe { core::mem::transmute::<u8, bool>(value) }",
+            vec![],
+        );
 
         let other_arg_evidence = obligation_evidence(&other_arg, &obligations, &contract, &reach);
         let post_call_evidence =
@@ -3943,6 +4021,20 @@ mod tests {
             &contract,
             &reach,
         );
+        let reassigned_after_assert_evidence =
+            obligation_evidence(&reassigned_after_assert, &obligations, &contract, &reach);
+        let referenced_reassigned_after_assert_evidence = obligation_evidence(
+            &referenced_reassigned_after_assert,
+            &obligations,
+            &contract,
+            &reach,
+        );
+        let reassigned_after_early_return_evidence = obligation_evidence(
+            &reassigned_after_early_return,
+            &obligations,
+            &contract,
+            &reach,
+        );
 
         assert!(!other_arg_evidence[0].discharge.present);
         assert!(!post_call_evidence[0].discharge.present);
@@ -3955,6 +4047,13 @@ mod tests {
                 .discharge
                 .present
         );
+        assert!(!reassigned_after_assert_evidence[0].discharge.present);
+        assert!(
+            !referenced_reassigned_after_assert_evidence[0]
+                .discharge
+                .present
+        );
+        assert!(!reassigned_after_early_return_evidence[0].discharge.present);
     }
 
     #[test]
