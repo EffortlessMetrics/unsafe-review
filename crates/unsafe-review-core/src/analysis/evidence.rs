@@ -713,18 +713,79 @@ fn has_set_len_capacity_evidence(lower: &str) -> bool {
 
 fn has_capacity_bound_guard(lower: &str) -> bool {
     let compact = compact_code(lower);
-    let mentions_capacity = compact.contains("capacity()")
-        || compact.contains(".cap()")
-        || contains_word(lower, "cap")
-        || contains_word(lower, "capacity");
-    let has_guard_context = compact.contains("assert!(")
-        || compact.contains("debug_assert!(")
-        || compact.contains("if");
-    let has_comparison = compact.contains("<=")
-        || compact.contains(">=")
-        || compact.contains('<')
-        || compact.contains('>');
-    mentions_capacity && has_guard_context && has_comparison
+    let Some((receiver, new_len)) = set_len_receiver_and_argument(&compact) else {
+        return false;
+    };
+    let marker = format!("{receiver}.set_len(");
+    let Some(call_pos) = compact.find(&marker) else {
+        return false;
+    };
+    let before_call = &compact[..call_pos];
+    for capacity in [
+        format!("{receiver}.capacity()"),
+        format!("{receiver}.cap()"),
+    ] {
+        if has_set_len_capacity_relation(before_call, new_len, &capacity) {
+            return true;
+        }
+    }
+    set_len_capacity_bindings(before_call, receiver)
+        .into_iter()
+        .any(|capacity| has_set_len_capacity_relation(before_call, new_len, capacity))
+}
+
+fn set_len_capacity_bindings<'a>(before_call: &'a str, receiver: &str) -> Vec<&'a str> {
+    before_call
+        .split(';')
+        .filter_map(|statement| {
+            let (left, right) = statement.split_once('=')?;
+            let binding = let_binding_name(left)?;
+            let right = right.trim();
+            ((right == format!("{receiver}.capacity()") || right == format!("{receiver}.cap()"))
+                && !binding.is_empty())
+            .then_some(binding)
+        })
+        .collect()
+}
+
+fn has_set_len_capacity_relation(before_call: &str, new_len: &str, capacity: &str) -> bool {
+    let len_lte_cap = format!("{new_len}<={capacity}");
+    let cap_gte_len = format!("{capacity}>={new_len}");
+    let len_gt_cap = format!("{new_len}>{capacity}");
+    let cap_lt_len = format!("{capacity}<{new_len}");
+    has_set_len_capacity_predicate_guard(before_call, &len_lte_cap, new_len)
+        || has_set_len_capacity_predicate_guard(before_call, &cap_gte_len, new_len)
+        || has_set_len_capacity_early_return(before_call, &len_gt_cap, new_len)
+        || has_set_len_capacity_early_return(before_call, &cap_lt_len, new_len)
+}
+
+fn has_set_len_capacity_predicate_guard(before_call: &str, predicate: &str, new_len: &str) -> bool {
+    [
+        format!("assert!({predicate})"),
+        format!("assert!({predicate},"),
+        format!("debug_assert!({predicate})"),
+        format!("debug_assert!({predicate},"),
+    ]
+    .iter()
+    .any(|pattern| has_fresh_guard_pattern(before_call, pattern, new_len))
+        || has_open_positive_branch_guard(before_call, predicate, new_len)
+}
+
+fn has_set_len_capacity_early_return(before_call: &str, predicate: &str, new_len: &str) -> bool {
+    let guard = format!("if{predicate}{{");
+    let mut search_from = 0;
+    while let Some(offset) = before_call[search_from..].find(&guard) {
+        let guard_start = search_from + offset;
+        let after_guard = &before_call[guard_start + guard.len()..];
+        let guard_end = after_guard.find('}').unwrap_or(after_guard.len());
+        let guard_body = &after_guard[..guard_end];
+        let after_branch = &after_guard[guard_end..];
+        if guard_body.contains("return") && !has_assignment_to_identifier(after_branch, new_len) {
+            return true;
+        }
+        search_from = guard_start + guard.len();
+    }
+    false
 }
 
 fn has_set_len_const_cap_evidence(lower: &str) -> bool {
