@@ -69,6 +69,8 @@ Already landed in this lane:
 - syntax line/column property coverage
 - manual fuzz harness shape validation wired into `check-pr` without adding a
   fuzz workflow
+- Dependabot Cargo and GitHub Actions update inbox without workflow behavior,
+  policy authority, or default blocking changes
 
 Do not use candidate intake as permission to jump to release work, default
 blocking, automatic comments, witness execution by default, broad workflow
@@ -110,7 +112,7 @@ open candidate queue is empty.
 | Documentation usage guides | #36, #37, #53, #56, #72, #73, #76, #77 | merged as #143, #144, and #287 | closed | current docs | #143 added the canonical current-surface CLI guide. #144 extracted the crate README link. #287 extracted review-card trust-boundary explanation docs. Direct duplicates were closed as superseded. |
 | Diataxis docs structure | #35, #54, #70, #71 | none | closed | later docs | Broad documentation restructuring was closed as stale option inventory; future docs work should be rebuilt from current product surfaces. |
 | Spec expansion | #38, #52, #68, #69 | none | closed | later source-of-truth | Broad spec drafts were closed as stale option inventory. Specs should follow concrete behavior gaps and proof artifacts, not outrun implementation. |
-| CI hardening | #34, #51, #65, #66 | merged as #96 | closed | current hardening | #96 kept the narrow workflow reliability pieces: read-only permissions, no persisted checkout credentials, locked Cargo commands, docs build, timeout, manual dispatch, and PR-run cancellation. |
+| CI hardening | #34, #51, #65, #66 | merged as #96 and #363 | closed | current hardening | #96 kept the narrow workflow reliability pieces: read-only permissions, no persisted checkout credentials, locked Cargo commands, docs build, timeout, manual dispatch, and PR-run cancellation. #363 extracted only the Dependabot update inbox for Cargo and GitHub Actions maintenance signals, without adding blocking policy, witness execution, or automatic comments. |
 | Broad module refactors | #40, #55, #74, #75 | none | closed | later refactor | Broad SRP churn was closed as stale option inventory. Rebuild only if it directly unlocks a reviewed implementation slice. |
 | Public JSON/visibility API | #28 | merged as #101 | closed | current hardening | `UnsafeSite` already tracked visibility and public API surface; #101 projected those fields into JSON and updated fixture goldens. |
 | Unaligned raw pointer read behavior | #30 | merged as #102 | closed | current hardening | #102 kept the useful distinction that `read_unaligned` does not require alignment evidence while preserving other raw pointer read obligations. |
@@ -128,6 +130,7 @@ dogfood-calibrated evidence lane. The remaining ideas are option inventory only:
 | #35, #54, #70, #71 | Diataxis docs structure | closed | later docs | Broad documentation restructuring is not active-lane work and risks creating competing source-of-truth pages. |
 | #38, #52, #68, #69 | Spec expansion | closed | later source-of-truth | Specs should follow concrete behavior gaps and proof artifacts, not outrun implementation. |
 | #40, #55, #74, #75 | Broad module refactors | closed | later refactor | Avoid scanner/module churn unless it directly unlocks a reviewed implementation slice in the active lane. |
+| #34, #51, #65, #66 | CI maintenance extras | extracted and closed | current hardening | #363 kept the Dependabot inbox slice. Broader cache/workflow expansion remains deferred unless it directly protects a current evidence-loop artifact. |
 
 If any parked candidate becomes useful, choose one canonical PR for that theme,
 rebase or rebuild it on current `main`, and land only the narrow slice that maps
