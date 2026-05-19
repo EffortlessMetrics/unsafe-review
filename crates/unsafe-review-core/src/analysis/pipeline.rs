@@ -339,6 +339,7 @@ fn unsafe_call_path(expression: &str) -> String {
         .trim()
         .trim_start_matches("match")
         .trim();
+    let call = strip_trailing_turbofish(call);
     if call.is_empty() {
         "unsafe_fn_call".to_string()
     } else if let Some((_prefix, method)) = call.rsplit_once('.') {
@@ -348,6 +349,33 @@ fn unsafe_call_path(expression: &str) -> String {
     } else {
         call.trim_matches(':').to_string()
     }
+}
+
+fn strip_trailing_turbofish(call: &str) -> &str {
+    let call = call.trim();
+    if !call.ends_with('>') {
+        return call;
+    }
+
+    let mut depth = 0usize;
+    for (idx, ch) in call.char_indices().rev() {
+        match ch {
+            '>' => depth += 1,
+            '<' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    let prefix = &call[..idx];
+                    if let Some(without_colons) = prefix.strip_suffix("::") {
+                        return without_colons;
+                    }
+                    return call;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    call
 }
 
 fn contains_call_name(line: &str, name: &str) -> bool {
@@ -737,6 +765,26 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
         assert_eq!(
             unsafe_call_path("unsafe { self.reserve_rehash(hasher) }"),
             "reserve_rehash"
+        );
+    }
+
+    #[test]
+    fn unsafe_call_path_strips_trailing_turbofish_from_callee() {
+        assert_eq!(
+            unsafe_call_path("unsafe { crate::ffi::call_unchecked::<Header>(ptr) }"),
+            "call_unchecked"
+        );
+        assert_eq!(
+            unsafe_call_path("unsafe { self.call_unchecked::<Header>(ptr) }"),
+            "call_unchecked"
+        );
+        assert_eq!(
+            unsafe_call_path("unsafe { call_unchecked::<Header>(ptr) }"),
+            "call_unchecked"
+        );
+        assert_eq!(
+            unsafe_call_path("unsafe { crate::ffi::call_unchecked::<Option<Header>>(ptr) }"),
+            "call_unchecked"
         );
     }
 
