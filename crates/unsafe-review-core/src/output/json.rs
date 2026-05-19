@@ -292,6 +292,7 @@ mod tests {
         "unwrap_unchecked_other_infallible_not_guard",
         "unreachable_unchecked_path",
         "unreachable_unchecked_infallible_path",
+        "unreachable_unchecked_other_infallible_not_guard",
         "transmute_invalid_value",
         "transmute_layout_size_guard",
         "transmute_bool_valid_value_guard",
