@@ -1284,6 +1284,7 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     fn str_from_utf8_unchecked_uses_utf8_operation_family() -> Result<(), String> {
         for fixture in [
             "str_from_utf8_unchecked",
+            "str_from_utf8_unchecked_post_validation_not_guard",
             "str_from_utf8_unchecked_other_buffer_not_guard",
         ] {
             let output = fixture_output(fixture)?;
