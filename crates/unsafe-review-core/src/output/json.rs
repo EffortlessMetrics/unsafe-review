@@ -236,6 +236,7 @@ mod tests {
         "unsafe_fn_call_encode_utf8_remaining_cap",
         "unchecked_constructor_availability_guard",
         "nonnull_new_guard",
+        "nonnull_other_guard_not_evidence",
         "impl_trait_bound_owner_inference",
         "nested_unsafe_operation_call_dedupe",
         "adjacent_unchanged_unsafe_fn_no_card",

@@ -207,7 +207,7 @@ fn discharge_state_for(
             }
         }
         "non-null" | "pointer-live" => {
-            if has_nullability_guard(lower) {
+            if has_nullability_guard(site, lower) {
                 EvidenceState::present("Nullability guard code was detected")
             } else {
                 EvidenceState::missing("No nullability guard code was detected")
@@ -740,9 +740,36 @@ fn has_alignment_guard(lower: &str) -> bool {
         || lower.contains("as usize %")
 }
 
-fn has_nullability_guard(lower: &str) -> bool {
+fn has_nullability_guard(site: &ScannedSite, lower: &str) -> bool {
     let compact = compact_code(lower);
+    if let Some(arg) = nonnull_new_unchecked_argument(&site.operation.expression) {
+        let arg = compact_code(&arg.to_ascii_lowercase());
+        return compact.contains(&format!("nonnull::new({arg})"))
+            || compact.contains(&format!("{arg}.is_null()"));
+    }
     lower.contains("is_null") || compact.contains("nonnull::new(")
+}
+
+fn nonnull_new_unchecked_argument(expression: &str) -> Option<String> {
+    let compact = compact_code(&expression.to_ascii_lowercase());
+    let marker = "nonnull::new_unchecked(";
+    let start = compact.find(marker)? + marker.len();
+    let rest = &compact[start..];
+    let mut depth = 0usize;
+    let mut end = rest.len();
+    for (idx, ch) in rest.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' if depth == 0 => {
+                end = idx;
+                break;
+            }
+            ')' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    let arg = rest[..end].trim();
+    (!arg.is_empty()).then(|| arg.to_string())
 }
 
 fn contains_word(text: &str, word: &str) -> bool {
@@ -1016,6 +1043,53 @@ mod tests {
         );
         assert!(
             obligation_evidence(&explicit_guard, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+    }
+
+    #[test]
+    fn nonnull_guard_must_match_new_unchecked_argument() {
+        let obligations = vec![SafetyObligation::new(
+            "non-null",
+            "pointer is non-null before constructing NonNull",
+        )];
+        let contract = ContractEvidence::present("contract");
+        let reach = ReachEvidence {
+            state: "owner_reached".to_string(),
+            summary: "reached".to_string(),
+        };
+        let matching_guard = site_with_family(
+            OperationFamily::NonNullUnchecked,
+            vec!["NonNull::new(ptr)?;"],
+            "NonNull::new_unchecked(ptr)",
+            vec![],
+        );
+        let other_guard = site_with_family(
+            OperationFamily::NonNullUnchecked,
+            vec!["NonNull::new(other)?;"],
+            "NonNull::new_unchecked(ptr)",
+            vec![],
+        );
+        let method_guard = site_with_family(
+            OperationFamily::NonNullUnchecked,
+            vec!["if bucket.as_ptr().is_null() { return None; }"],
+            "NonNull::new_unchecked(bucket.as_ptr())",
+            vec![],
+        );
+
+        assert!(
+            obligation_evidence(&matching_guard, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
+            !obligation_evidence(&other_guard, &obligations, &contract, &reach)[0]
+                .discharge
+                .present
+        );
+        assert!(
+            obligation_evidence(&method_guard, &obligations, &contract, &reach)[0]
                 .discharge
                 .present
         );
