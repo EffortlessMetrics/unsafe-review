@@ -1,104 +1,156 @@
 <p align="center">
-  <img src="unsafe-review-logo.svg" alt="unsafe-review warning mark" width="160">
+  <img src="unsafe-review-logo.svg" alt="unsafe-review warning mark" width="120" />
 </p>
 
-# unsafe-review
+<h1 align="center">unsafe-review</h1>
 
-`unsafe-review` is a cheap PR-time review pass for unsafe Rust.
+<p align="center">
+  <em>Advisory unsafe-contract review for Rust PRs.</em>
+</p>
 
-It scans changed unsafe-adjacent code, identifies the safety conditions that matter,
-checks whether those conditions are documented, locally discharged, reached by tests,
-and routed to an appropriate witness such as Miri, `cargo-careful`, sanitizers, Loom,
-Shuttle, Kani, or Crux. It then emits one focused review card per gap.
+<p align="center">
+  <a href="https://github.com/EffortlessMetrics/unsafe-review/actions/workflows/ci.yml"><img src="https://github.com/EffortlessMetrics/unsafe-review/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
+  <a href="https://github.com/EffortlessMetrics/unsafe-review/releases"><img src="https://img.shields.io/github/v/release/EffortlessMetrics/unsafe-review?sort=semver&label=release" alt="GitHub release" /></a>
+  <a href="https://crates.io/crates/unsafe-review"><img src="https://img.shields.io/crates/d/unsafe-review.svg?label=crates.io%20downloads" alt="crates.io downloads" /></a>
+  <a href="https://docs.rs/unsafe-review"><img src="https://docs.rs/unsafe-review/badge.svg" alt="docs.rs" /></a>
+</p>
+
+<p align="center">
+  <a href="https://doc.rust-lang.org/cargo/reference/manifest.html#the-rust-version-field"><img src="https://img.shields.io/badge/MSRV-1.95-blue.svg" alt="MSRV" /></a>
+  <a href="#license"><img src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg" alt="License: MIT OR Apache-2.0" /></a>
+</p>
+
+`unsafe-review` points reviewers and coding agents at changed Rust unsafe seams
+that are missing review evidence: a safety contract, local guard, test reach, or
+witness receipt.
+
+It does not prove unsafe Rust sound. It makes unsafe Rust reviewable.
+
+The first useful run should feel small:
 
 ```text
-Miri:
-  Did this concrete execution hit UB?
+one PR
+-> one changed unsafe contract
+-> one missing evidence gap
+-> one recommended guard, test, or witness route
+```
 
-unsafe-review:
-  Does this unsafe change have the safety contract, guard, test reach,
-  and witness route needed to make review credible?
+Miri asks:
+
+```text
+Did this concrete execution hit UB?
+```
+
+`unsafe-review` asks the cheaper PR-time question:
+
+```text
+Does this unsafe change have the safety contract, guard, test reach,
+and witness route needed to make review credible?
 ```
 
 ## Trust boundary
 
-`unsafe-review` is **static unsafe contract review**. It reports missing or present
-review evidence. It is not a proof of memory safety, not a claim that the repository is
-UB-free, and not a Miri result unless a witness receipt is attached.
+`unsafe-review` reports static review evidence. It is not a proof of memory
+safety, not a UB-free claim, and not a Miri result unless a matching witness
+receipt is attached.
+
+It is advisory by default: no witness execution, no automatic comments, no source
+edits, and no default blocking policy.
+
+## Install
+
+```bash
+cargo install unsafe-review --locked
+unsafe-review --version
+unsafe-review doctor
+```
+
+Programmatic users should depend on `unsafe-review-core`. Most users should
+install the `unsafe-review` façade crate.
 
 ## Quick start
 
 ```bash
-cargo install unsafe-review
-
-# Review the current diff against origin/main
+# Review the current PR against main
 unsafe-review check --base origin/main
 
-# Fail only when explicit no-new-debt mode finds unbaselined actionable gaps
-unsafe-review check --base origin/main --policy no-new-debt
-
-# Review a supplied unified diff from a file or stdin
-unsafe-review check --diff change.diff --format json
-git diff origin/main...HEAD | unsafe-review check --diff - --format json
-
-# Write a sparse GitHub-ready PR summary artifact
+# Write the reviewer-facing summary
 unsafe-review check --base origin/main \
   --format pr-summary \
   --out target/unsafe-review/pr-summary.md
 
-# Write SARIF for code scanning upload or CI artifacts
+# Write machine-readable cards
 unsafe-review check --base origin/main \
-  --format sarif \
-  --out target/unsafe-review/cards.sarif
+  --format json \
+  --out target/unsafe-review/cards.json
 
-# Plan high-signal inline review comments without posting them
-unsafe-review check --base origin/main \
-  --format comment-plan \
-  --out target/unsafe-review/comment-plan.json
-
-# Write a read-only saved editor/LSP projection
-unsafe-review check --base origin/main \
-  --format lsp \
-  --out target/unsafe-review/lsp.json
-
-# Try the bundled smoke fixture
-unsafe-review check --root fixtures/raw_pointer_alignment \
-  --diff fixtures/raw_pointer_alignment/change.diff \
-  --format json
-
-# Static repo inventory and badge JSON; not a safety badge
-unsafe-review repo --format json
-unsafe-review badges --out badges/
-
-# Explain one card and produce an experimental context packet
-unsafe-review explain UR-src-lib-rs-42-raw-pointer-read
-unsafe-review context UR-src-lib-rs-42-raw-pointer-read --json
+# Explain one card
+unsafe-review explain <card-id>
 ```
 
-## Current implementation status
+Try the bundled smoke fixture:
 
-This workspace includes the specification system, fixture-backed experimental
-review cards, and an advisory PR artifact loop. The analyzer is intentionally
-conservative:
+```bash
+unsafe-review check \
+  --root fixtures/raw_pointer_alignment \
+  --diff fixtures/raw_pointer_alignment/change.diff \
+  --format pr-summary
+```
 
-- no `rustc_private`
-- no MIR dependency
-- no automatic source edits
-- no default blocking
-- no soundness claims
+## What unsafe-review produces
 
-The current static engine detects common unsafe seams and operations from source text,
-maps them to hazard classes and safety obligations, mines nearby `# Safety` / `SAFETY:`
-contract evidence, looks for simple local guards, and routes cards to likely witnesses.
+| Surface | Output | Use |
+|---|---|---|
+| Review cards | JSON / human / Markdown | The canonical evidence object |
+| PR summary | `pr-summary.md` | Reviewer first screen |
+| SARIF | `cards.sarif` | Code scanning / CI artifact |
+| Comment plan | `comment-plan.json` | Proposed comments, not posted |
+| Saved LSP projection | `lsp.json` | Read-only editor diagnostics and hovers |
+| Agent packet | `context <card-id> --json` | Bounded LLM repair context |
+| Receipt audit | JSON / Markdown | Match saved witness receipts to cards |
+| Outcome comparison | JSON / Markdown | Compare saved snapshots |
+| Repo posture | JSON / Markdown / badge JSON | Count open review gaps, not safety |
+| Policy report | JSON / Markdown | Advisory no-new-debt simulation |
 
-The current PR projection renders `cards.json`, `pr-summary.md`, `cards.sarif`, and
-`comment-plan.json` as advisory artifacts. It does not post comments, run witness
-tools, or enable blocking policy. Support tiers stay conservative: fixture-backed
-surfaces are experimental, the saved editor/LSP projection and bounded agent
-packets are read-only and experimental, repo posture, exact policy-ledger
-matching, explicit no-new-debt mode, and exact witness receipt import are
-experimental. Witness tools are not executed by default, and blocking policy plus
-broad suppression controls remain later lanes until they have proof.
+## Choose a path
+
+| If you need to... | Start with... | Typical output |
+|---|---|---|
+| Review a PR | `unsafe-review check --base origin/main` | ReviewCards and PR summary |
+| Feed CI artifacts | `--format json`, `--format sarif`, `--format pr-summary` | Uploaded advisory artifacts |
+| Explain one finding | `unsafe-review explain <card-id>` | Human-readable contract gap |
+| Hand work to an agent | `unsafe-review context <card-id> --json` | Bounded repair packet |
+| Audit saved witness receipts | `unsafe-review receipt audit` | Matched / stale / duplicate receipt report |
+| Compare before/after posture | `unsafe-review outcome --before before.json --after after.json` | New / resolved / improved / regressed cards |
+| Inspect repo posture | `unsafe-review repo --format markdown` | Open unsafe-review gaps |
+| Simulate policy | `unsafe-review policy report` | Advisory no-new-debt report |
+
+## What works today
+
+- **Fixture-backed ReviewCards** for many core unsafe operation families.
+- **Dogfood-backed evidence rules** across selected real Rust crates and PR diffs.
+- **Advisory PR artifacts**: cards JSON, PR summary, SARIF, and comment-plan.
+- **Read-only projections** for saved LSP/editor output and bounded agent packets.
+- **Saved receipt audit** for imported witness metadata.
+- **Outcome and repo posture reports** for before/after movement and open gaps.
+- **Advisory policy reports** for no-new-debt simulation.
+
+Everything above remains experimental and advisory. No current surface is
+calibrated as a blocking policy gate.
+
+## Status at a glance
+
+The README is the front door, not the support ledger. Current proof and support
+posture live in the status docs.
+
+| Area | Status source |
+|---|---|
+| Support posture | [Support summary](docs/status/SUPPORT_SUMMARY.md) |
+| Claim-to-proof ledger | [Support tiers](docs/status/SUPPORT_TIERS.md) |
+| First-use guide | [First-use guide](docs/FIRST_USE.md) |
+| ReviewCard trust boundary | [ReviewCard explanation](docs/explanation/review-cards-and-trust-boundary.md) |
+| Dogfood evidence | [Dogfood index](docs/dogfood/index.md) |
+| CLI reference | [CLI guide](docs/CLI.md) |
 
 ## Crate surface
 
@@ -116,10 +168,12 @@ families, and publish only seams that deserve a support promise.
 
 ```bash
 cargo fmt --check
-cargo check --workspace --all-targets
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-cargo xtask check-pr
+cargo check --workspace --all-targets --locked
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+cargo run --locked -p xtask -- check-pr
+cargo run --locked -p xtask -- check-calibration
+cargo run --locked -p xtask -- check-dogfood
 ```
 
 ## Documentation map
@@ -140,15 +194,17 @@ cargo xtask check-pr
 
 ## Fuzzing
 
-The repository includes a `cargo-fuzz` harness for the core analyzer. The harness
-builds a temporary Rust fixture from fuzz bytes, feeds a synthesized unified diff
-to `unsafe-review-core`, and checks that any rendered analysis output remains valid
-JSON.
+The repository includes a manual `cargo-fuzz` harness for analyzer robustness.
+It is not part of the default PR gate.
 
 ```bash
 cargo install cargo-fuzz
 cargo fuzz run analyze
 ```
 
-Inputs may optionally use `---DIFF---` on its own line to append arbitrary unified
-diff text after the generated `src/lib.rs` change.
+## License
+
+Licensed under either of:
+
+- Apache License, Version 2.0
+- MIT license
