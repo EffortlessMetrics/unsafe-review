@@ -485,6 +485,11 @@ mod tests {
                 true,
             ),
             (
+                "raw_pointer_write_previous_maybeuninit_not_guard",
+                OperationFamily::RawPointerWrite,
+                true,
+            ),
+            (
                 "raw_pointer_write_other_u8_not_guard",
                 OperationFamily::RawPointerWrite,
                 true,
@@ -675,6 +680,7 @@ mod tests {
         for fixture in [
             "raw_pointer_write_previous_u8_not_guard",
             "raw_pointer_write_previous_bool_not_guard",
+            "raw_pointer_write_previous_maybeuninit_not_guard",
         ] {
             let output = fixture_output(fixture)?;
             let card = single_card(fixture, &output)?;
