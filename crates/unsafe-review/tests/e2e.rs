@@ -1292,6 +1292,11 @@ fn policy_report_is_advisory_and_counts_baseline_state() -> Result<(), Box<dyn E
     let baselined = parse_json(&stdout_text(&baselined)?)?;
     assert_eq!(baselined["summary"]["new_gaps"], 0);
     assert_eq!(baselined["summary"]["baseline_known"], 1);
+    assert_eq!(baselined["summary"]["resolved_baseline"], 1);
+    assert_eq!(
+        baselined["resolved_baseline"][0]["evidence"],
+        "resolved fixture card"
+    );
 
     let markdown_path = temp.path().join("policy-report.md");
     let markdown = run_success([
@@ -1313,6 +1318,8 @@ fn policy_report_is_advisory_and_counts_baseline_state() -> Result<(), Box<dyn E
     assert!(markdown.contains("raw_pointer_read"));
     assert!(markdown.contains("unsafe { ptr.cast::<Header>().read() }"));
     assert!(markdown.contains("Known baseline card"));
+    assert!(markdown.contains("| Card | Owner | Review after | Expires | Reason | Evidence |"));
+    assert!(markdown.contains("resolved fixture card"));
     assert!(markdown.contains("## Trust boundary"));
 
     Ok(())
@@ -1446,6 +1453,13 @@ card_id = "{card_id}"
 owner = "core/policy"
 reason = "e2e no-new-debt baseline"
 evidence = "fixture card"
+review_after = "2026-08-01"
+
+[[entries]]
+card_id = "UR-resolved-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1"
+owner = "core/policy"
+reason = "resolved e2e baseline"
+evidence = "resolved fixture card"
 review_after = "2026-08-01"
 "#
         ),
