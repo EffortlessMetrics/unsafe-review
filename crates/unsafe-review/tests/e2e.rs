@@ -153,6 +153,10 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     assert_eq!(comment_plan["mode"], "plan_only");
     assert_eq!(comment_plan["comments"][0]["card_id"], card_id);
     assert_eq!(
+        comment_plan["comments"][0]["operation"],
+        "unsafe { ptr.cast::<Header>().read() }"
+    );
+    assert_eq!(
         comment_plan["comments"][0]["witness_routes"][0]["kind"],
         "miri"
     );
@@ -161,6 +165,12 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
             .as_str()
             .unwrap_or("")
             .contains("cargo +nightly miri test read_header")
+    );
+    assert!(
+        comment_plan["comments"][0]["body"]
+            .as_str()
+            .unwrap_or("")
+            .contains("unsafe { ptr.cast::<Header>().read() }")
     );
     assert!(
         comment_plan["comments"][0]["body"]
