@@ -37,8 +37,10 @@ pub struct PolicyReportCard {
     pub card_id: String,
     #[serde(rename = "class")]
     pub class_name: String,
+    pub operation_family: String,
     pub policy_status: String,
     pub missing_count: usize,
+    pub next_action: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -94,8 +96,10 @@ fn evaluate_with_date(output: &AnalyzeOutput, audit_date: &str) -> Result<Policy
         .map(|card| PolicyReportCard {
             card_id: card.id.0.clone(),
             class_name: card.class.as_str().to_string(),
+            operation_family: card.operation.family.as_str().to_string(),
             policy_status: policy_status(&card.class).to_string(),
             missing_count: card.missing.len(),
+            next_action: card.next_action.summary.clone(),
         })
         .collect::<Vec<_>>();
     let summary = PolicyReportSummary {
@@ -158,12 +162,17 @@ pub(crate) fn render_markdown(report: &PolicyReport) -> String {
     if report.cards.is_empty() {
         out.push_str("No current policy-relevant cards found.\n\n");
     } else {
-        out.push_str("| Status | Card | Class | Missing evidence |\n");
-        out.push_str("|---|---|---|---:|\n");
+        out.push_str("| Status | Card | Class | Operation | Missing evidence | Next action |\n");
+        out.push_str("|---|---|---|---|---:|---|\n");
         for card in &report.cards {
             out.push_str(&format!(
-                "| `{}` | `{}` | `{}` | {} |\n",
-                card.policy_status, card.card_id, card.class_name, card.missing_count
+                "| `{}` | `{}` | `{}` | `{}` | {} | {} |\n",
+                card.policy_status,
+                card.card_id,
+                card.class_name,
+                card.operation_family,
+                card.missing_count,
+                markdown_cell(&card.next_action)
             ));
         }
         out.push('\n');
@@ -282,6 +291,10 @@ fn optional_text(value: Option<&str>) -> String {
         .unwrap_or_else(|| "-".to_string())
 }
 
+fn markdown_cell(value: &str) -> String {
+    value.replace('|', "\\|").replace('\n', " ")
+}
+
 fn current_utc_date() -> Result<String, String> {
     let days = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -332,6 +345,15 @@ mod tests {
         assert_eq!(report.policy, "advisory");
         assert_eq!(report.summary.new_gaps, 1);
         assert_eq!(report.summary.baseline_known, 0);
+        let card = report
+            .cards
+            .first()
+            .ok_or_else(|| "policy report produced no cards".to_string())?;
+        assert_eq!(card.operation_family, "raw_pointer_read");
+        assert!(card.next_action.contains("Add or expose"));
+        let markdown = render_markdown(&report);
+        assert!(markdown.contains("| `raw_pointer_read` |"));
+        assert!(markdown.contains("Add or expose"));
         assert!(report.trust_boundary.contains("does not enforce blocking"));
         Ok(())
     }
