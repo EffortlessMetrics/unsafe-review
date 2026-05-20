@@ -41,6 +41,7 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
         fixture.join("change.diff").into_os_string(),
     ])?;
     let human = stdout_text(&human)?;
+    assert!(human.contains("operation: unsafe { ptr.cast::<Header>().read() }"));
     assert!(human.contains("operation_family: raw_pointer_read"));
     assert!(human.contains("next: Add or expose"));
 
