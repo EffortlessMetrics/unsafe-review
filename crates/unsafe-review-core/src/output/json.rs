@@ -291,6 +291,7 @@ mod tests {
         "raw_pointer_write_assignment",
         "raw_pointer_write_unaligned",
         "raw_pointer_write_bytes",
+        "raw_pointer_write_bool_bytes_guard",
         "raw_pointer_write_other_u8_not_guard",
         "raw_pointer_write_maybeuninit",
         "raw_pointer_write_other_maybeuninit_not_guard",
