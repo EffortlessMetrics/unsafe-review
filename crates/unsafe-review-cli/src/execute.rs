@@ -103,6 +103,7 @@ fn first_pr(options: FirstPrOptions) -> Result<(), String> {
         &options.out_dir.join("witness-plan.md"),
         render_witness_plan(&output),
     )?;
+    write_artifact(&options.out_dir.join("lsp.json"), render_lsp(&output))?;
 
     println!("unsafe-review first-pr");
     println!("- Review cards: {}", output.summary.cards);
@@ -151,6 +152,7 @@ fn first_pr(options: FirstPrOptions) -> Result<(), String> {
         "cards.sarif",
         "comment-plan.json",
         "witness-plan.md",
+        "lsp.json",
     ] {
         println!("  {}", options.out_dir.join(name).display());
     }
