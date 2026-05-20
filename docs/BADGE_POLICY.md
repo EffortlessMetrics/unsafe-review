@@ -12,7 +12,9 @@
 
 | Badge | Meaning | Not meaning |
 |---|---|---|
-| CI | Current GitHub Actions CI status. | Product correctness or safety proof. |
+| CI | Current GitHub Actions CI status. | Analyzer correctness or safety proof. |
+| Codecov | Uploaded coverage signal when a coverage workflow publishes. | Test adequacy, completeness, or safety proof. |
+| `ripr+` | Static oracle-exposure evidence imported from `ripr` posture. | Mutation testing execution or runtime mutation confirmation. |
 | GitHub release | Latest published GitHub release tag. | crates.io availability or release quality proof. |
 | crates.io downloads | Public crates.io download count for the install crate. | Adoption quality or safety proof. |
 | docs.rs | Current docs.rs build badge for the install crate. | API stability guarantee. |
@@ -23,13 +25,17 @@
 | MSRV | Declared minimum supported Rust version. | Toolchain-wide compatibility guarantee. |
 | License | Declared project license expression. | Legal advice. |
 
+Badge endpoints are repo-scoped static evidence projections from ReviewCards.
+They are not safety badges.
+They must be generated or checked by `xtask`.
+
 ## Generation contract
 
 When present, Shields endpoint JSON under `badges/` is generated content and must
 be checked, not hand-edited.
 
-- Generate from an installed or locally built CLI: `unsafe-review badges --out badges/`
-- Validate badge behavior: `cargo test -p unsafe-review --test e2e repo_inventory_and_badges_count_open_gaps_without_safety_claim --locked`
+- Generate/refresh endpoint files: `cargo run --locked -p xtask -- badges`
+- Validate endpoint files and README links: `cargo run --locked -p xtask -- badges --check`
 - Run the repo gate: `cargo run --locked -p xtask -- check-pr`
 
 Until endpoint JSON is generated and covered by the validation path above,
