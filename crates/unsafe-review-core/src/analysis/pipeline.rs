@@ -1870,6 +1870,18 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn card_identity_includes_exact_policy_matching_components() -> Result<(), String> {
+        let output = fixture_output("raw_pointer_alignment")?;
+        let card = single_card("raw_pointer_alignment", &output)?;
+
+        assert_eq!(
+            card.id.0,
+            "UR-raw-pointer-alignment-fixture-src-lib-rs-read-header-operation-raw_pointer_read-cast-header-8a1362456e39-pointer_validity-c1"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn card_identity_counts_duplicate_sites() -> Result<(), String> {
         let output = fixture_output("duplicate_raw_pointer_reads")?;
         if output.cards.len() != 2 {
