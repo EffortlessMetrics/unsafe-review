@@ -433,6 +433,15 @@ fn has_bounds_guard(site: &ScannedSite, lower: &str) -> bool {
             .unwrap_or_else(|| lower.to_string());
         return has_get_unchecked_bounds_guard(&guard_scope, &receiver, &index);
     }
+    if site.operation.family == OperationFamily::RawPointerWrite
+        && site
+            .operation
+            .expression
+            .to_ascii_lowercase()
+            .contains("write_bytes")
+    {
+        return has_write_bytes_bounds_evidence(lower);
+    }
     has_length_or_bounds_guard(lower)
 }
 
@@ -2029,7 +2038,7 @@ fn has_u8_write_bytes_context(lower: &str) -> bool {
 
 fn has_bool_write_bytes_pointer_context(lower: &str) -> bool {
     let compact = compact_code(lower);
-    let Some((_before_call, receiver, _byte)) = write_bytes_method_context(&compact) else {
+    let Some((_before_call, receiver, _byte, _len)) = write_bytes_method_context(&compact) else {
         return false;
     };
 
@@ -2038,7 +2047,7 @@ fn has_bool_write_bytes_pointer_context(lower: &str) -> bool {
 
 fn has_bool_write_bytes_value_evidence(lower: &str) -> bool {
     let compact = compact_code(lower);
-    let Some((before_call, receiver, byte)) = write_bytes_method_context(&compact) else {
+    let Some((before_call, receiver, byte, _len)) = write_bytes_method_context(&compact) else {
         return false;
     };
     let Some(byte) = source_value_identifier(byte) else {
@@ -2049,16 +2058,74 @@ fn has_bool_write_bytes_value_evidence(lower: &str) -> bool {
         && has_u8_bool_value_guard(before_call, byte)
 }
 
-fn write_bytes_method_context(compact: &str) -> Option<(&str, &str, &str)> {
+fn has_write_bytes_bounds_evidence(lower: &str) -> bool {
+    let compact = compact_code(lower);
+    let Some((_before_call, receiver, _byte, len)) = write_bytes_method_context(&compact) else {
+        return false;
+    };
+    let Some(slice) = receiver.strip_suffix(".as_mut_ptr()") else {
+        return false;
+    };
+
+    len == format!("{slice}.len()")
+}
+
+fn write_bytes_method_context(compact: &str) -> Option<(&str, &str, &str, &str)> {
     let call_marker = ".write_bytes(";
     let call_pos = compact.find(call_marker)?;
     let before_call = &compact[..call_pos];
-    let receiver = receiver_before_marker(compact, call_marker)?;
+    let receiver = receiver_expression_before_pos(compact, call_pos)?;
     let after_marker = &compact[call_pos + call_marker.len()..];
     let argument_end = matching_call_argument_end(after_marker)?;
     let arguments = &after_marker[..argument_end];
-    let (byte, _len) = split_top_level_pair(arguments)?;
-    (!byte.is_empty()).then_some((before_call, receiver, byte))
+    let (byte, len) = split_top_level_pair(arguments)?;
+    (!byte.is_empty() && !len.is_empty()).then_some((before_call, receiver, byte, len))
+}
+
+fn receiver_expression_before_pos(compact: &str, pos: usize) -> Option<&str> {
+    let before_marker = compact.get(..pos)?;
+    if let Some(receiver) = simple_receiver_from_before_marker(before_marker) {
+        return Some(receiver);
+    }
+    call_receiver_from_before_marker(before_marker)
+}
+
+fn simple_receiver_from_before_marker(before_marker: &str) -> Option<&str> {
+    let receiver_start = before_marker
+        .char_indices()
+        .rev()
+        .find_map(|(idx, ch)| (!is_receiver_path_char(ch)).then_some(idx + ch.len_utf8()))
+        .unwrap_or(0);
+    let receiver = &before_marker[receiver_start..];
+    (!receiver.is_empty()).then_some(receiver)
+}
+
+fn call_receiver_from_before_marker(before_marker: &str) -> Option<&str> {
+    if !before_marker.ends_with(')') {
+        return None;
+    }
+    let open = matching_open_for_trailing_call(before_marker)?;
+    let before_open = &before_marker[..open];
+    let receiver_start = before_open
+        .char_indices()
+        .rev()
+        .find_map(|(idx, ch)| (!is_receiver_path_char(ch)).then_some(idx + ch.len_utf8()))
+        .unwrap_or(0);
+    let receiver = &before_marker[receiver_start..];
+    (!receiver.is_empty()).then_some(receiver)
+}
+
+fn matching_open_for_trailing_call(text: &str) -> Option<usize> {
+    let mut depth = 0usize;
+    for (idx, ch) in text.char_indices().rev() {
+        match ch {
+            ')' => depth += 1,
+            '(' if depth == 1 => return Some(idx),
+            '(' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    None
 }
 
 fn pointer_binding_has_type_before_call(compact: &str, receiver: &str, pointer_type: &str) -> bool {

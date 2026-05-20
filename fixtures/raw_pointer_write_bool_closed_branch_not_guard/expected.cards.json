@@ -1,15 +1,15 @@
 [
   {
-    "id": "UR-raw-pointer-write-other-maybeuninit-not-guard-fixture-src-lib-rs-fill-tag-operation-raw_pointer_write-write-bytes-3c6249bf4467-pointer_validity-c1",
+    "id": "UR-raw-pointer-write-bool-closed-branch-not-guard-src-lib-rs-fill-bools-operation-raw_pointer_write-write-bytes-3c6249bf4467-pointer_validity-c1",
     "class": "guard_missing",
     "priority": "high",
     "confidence": "medium",
     "site": {
       "file": "src/lib.rs",
-      "line": 7,
+      "line": 6,
       "column": 5,
       "kind": "operation",
-      "owner": "fill_tag",
+      "owner": "fill_bools",
       "visibility": "private",
       "public_api_surface": false,
       "snippet": "unsafe { ptr.write_bytes(byte, len) }"
@@ -46,7 +46,7 @@
         "reach": {
           "present": true,
           "state": "present",
-          "summary": "1 related test file(s) mention owner `fill_tag`"
+          "summary": "1 related test file(s) mention owner `fill_bools`"
         },
         "witness": {
           "present": false,
@@ -70,7 +70,7 @@
         "reach": {
           "present": true,
           "state": "present",
-          "summary": "1 related test file(s) mention owner `fill_tag`"
+          "summary": "1 related test file(s) mention owner `fill_bools`"
         },
         "witness": {
           "present": false,
@@ -87,14 +87,14 @@
           "summary": "Nearby `SAFETY:` comment was detected"
         },
         "discharge": {
-          "present": false,
-          "state": "missing",
-          "summary": "No alignment guard code was detected"
+          "present": true,
+          "state": "present",
+          "summary": "bool raw write alignment evidence was detected"
         },
         "reach": {
           "present": true,
           "state": "present",
-          "summary": "1 related test file(s) mention owner `fill_tag`"
+          "summary": "1 related test file(s) mention owner `fill_bools`"
         },
         "witness": {
           "present": false,
@@ -118,7 +118,7 @@
         "reach": {
           "present": true,
           "state": "present",
-          "summary": "1 related test file(s) mention owner `fill_tag`"
+          "summary": "1 related test file(s) mention owner `fill_bools`"
         },
         "witness": {
           "present": false,
@@ -142,7 +142,7 @@
         "reach": {
           "present": true,
           "state": "present",
-          "summary": "1 related test file(s) mention owner `fill_tag`"
+          "summary": "1 related test file(s) mention owner `fill_bools`"
         },
         "witness": {
           "present": false,
@@ -152,20 +152,20 @@
       }
     ],
     "contract": "Nearby `SAFETY:` comment was detected",
-    "discharge": "No visible local guard detected",
-    "reach": "1 related test file(s) mention owner `fill_tag`",
+    "discharge": "Some inferred safety obligations are missing local guard evidence",
+    "reach": "1 related test file(s) mention owner `fill_bools`",
     "witness": "No imported witness receipt was found",
     "witness_routes": [
       {
         "kind": "miri",
         "reason": "Pure-Rust UB-adjacent hazard; Miri is the strongest concrete-execution witness when the path is supported",
-        "command": "cargo +nightly miri test fill_tag",
+        "command": "cargo +nightly miri test fill_bools",
         "required": false
       },
       {
         "kind": "cargo-careful",
         "reason": "cargo-careful is a cheaper compatibility-oriented runtime check for several unsafe preconditions",
-        "command": "cargo +nightly careful test fill_tag",
+        "command": "cargo +nightly careful test fill_bools",
         "required": false
       }
     ],
@@ -175,8 +175,8 @@
     ],
     "next_action": "Add or expose the local guard that discharges the `raw_pointer_write` safety obligation.",
     "verify_commands": [
-      "cargo +nightly miri test fill_tag",
-      "cargo +nightly careful test fill_tag"
+      "cargo +nightly miri test fill_bools",
+      "cargo +nightly careful test fill_bools"
     ]
   }
 ]
