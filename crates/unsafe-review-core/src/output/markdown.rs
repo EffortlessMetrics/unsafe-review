@@ -177,6 +177,10 @@ pub(crate) fn render_pr_summary(output: &AnalyzeOutput) -> String {
             "- Operation: `{}`\n",
             one_line(&card.operation.expression)
         ));
+        out.push_str(&format!(
+            "- Operation family: `{}`\n",
+            card.operation.family.as_str()
+        ));
         out.push_str(&format!("- Missing evidence: {}\n", missing_summary(card)));
         if let Some(route) = card.routes.first() {
             out.push_str(&format!(
@@ -197,16 +201,16 @@ pub(crate) fn render_pr_summary(output: &AnalyzeOutput) -> String {
 
     out.push_str("## Card table\n\n");
     out.push_str(
-        "| ID | Class | Location | Operation | Missing evidence | Route | Next action |\n",
+        "| ID | Class | Location | Operation family | Operation | Missing evidence | Route | Next action |\n",
     );
-    out.push_str("|---|---|---|---|---|---|---|\n");
+    out.push_str("|---|---|---|---|---|---|---|---|\n");
     for card in &output.cards {
         let route = card
             .routes
             .first()
             .map_or("human-deep-review", |route| route.kind.as_str());
         out.push_str(&format!(
-            "| `{}` | `{}` | {} | `{}` | {} | `{}` | {} |\n",
+            "| `{}` | `{}` | {} | `{}` | `{}` | {} | `{}` | {} |\n",
             md_cell(&card.id.to_string()),
             card.class.as_str(),
             md_cell(&format!(
@@ -214,6 +218,7 @@ pub(crate) fn render_pr_summary(output: &AnalyzeOutput) -> String {
                 path_display(&card.site.location.file),
                 card.site.location.line
             )),
+            card.operation.family.as_str(),
             md_cell(&one_line(&card.operation.expression)),
             md_cell(&missing_summary(card)),
             route,
@@ -389,6 +394,9 @@ mod tests {
         assert!(rendered.contains("# unsafe-review PR summary"));
         assert!(rendered.contains("## Top card"));
         assert!(rendered.contains("## Card table"));
+        assert!(rendered.contains("- Operation family: `raw_pointer_read`"));
+        assert!(rendered.contains("| ID | Class | Location | Operation family | Operation |"));
+        assert!(rendered.contains("| `raw_pointer_read` |"));
         assert!(rendered.contains("## Witness plan"));
         assert!(rendered.contains("Open actionable gaps: 1"));
         assert!(rendered.contains("Missing visible local guard"));
