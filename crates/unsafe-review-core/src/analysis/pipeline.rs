@@ -725,8 +725,9 @@ mod tests {
     }
 
     #[test]
-    fn raw_pointer_read_bounds_evidence_requires_same_origin() -> Result<(), String> {
+    fn raw_pointer_read_bounds_evidence_rejects_unenforced_guards() -> Result<(), String> {
         for fixture in [
+            "raw_pointer_read_bounds_observed_not_guard",
             "raw_pointer_read_other_len_not_guard",
             "raw_pointer_read_reassigned_origin_not_guard",
         ] {
