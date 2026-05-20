@@ -8,6 +8,7 @@
 | CLI guide | current user-facing commands and artifact surfaces | `docs/CLI.md` |
 | Explanations | concept notes and trust boundaries | `docs/explanation/` |
 | Proposals | why a workstream exists | `docs/proposals/` |
+| Releases | release targets, readiness notes, and publication receipts | `docs/releases/` |
 | Specs | behavior contracts | `docs/specs/` |
 | ADRs | durable architecture decisions | `docs/adr/` |
 | Contribution process | swarm-to-main routing and source PR requirements | `docs/contributing/SWARM_TO_MAIN.md` |
