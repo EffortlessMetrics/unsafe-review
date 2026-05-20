@@ -44,6 +44,22 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     assert!(human.contains("operation_family: raw_pointer_read"));
     assert!(human.contains("next: Add or expose"));
 
+    let markdown = run_success([
+        os("check"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        fixture.join("change.diff").into_os_string(),
+        os("--format"),
+        os("markdown"),
+    ])?;
+    let markdown = stdout_text(&markdown)?;
+    assert!(
+        markdown.contains("| ID | Class | Operation | Hazard | Missing | Route | Next action |")
+    );
+    assert!(markdown.contains("unsafe { ptr.cast::<Header>().read() }"));
+    assert!(markdown.contains("Add or expose the local guard"));
+
     let root_relative_diff = run_success([
         os("check"),
         os("--root"),
