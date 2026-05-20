@@ -316,8 +316,25 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     );
     assert_eq!(packet["context"]["operation_family"], "raw_pointer_read");
     assert!(packet["witness_routes"].is_array());
+    assert!(
+        packet["allowed_repairs"][0]
+            .as_str()
+            .unwrap_or("")
+            .contains("Add or expose the local guard")
+    );
+    assert!(
+        packet["verify_commands"][0]
+            .as_str()
+            .unwrap_or("")
+            .contains("cargo +nightly miri test read_header")
+    );
     assert!(packet["do_not_do"].is_array());
+    assert!(
+        serde_json::to_string(&packet["do_not_do"])?
+            .contains("do not change unrelated unsafe code")
+    );
     assert!(packet["stop_conditions"].is_array());
+    assert!(serde_json::to_string(&packet["stop_conditions"])?.contains("same unsafe seam"));
 
     let explain = run_success([
         os("explain"),
