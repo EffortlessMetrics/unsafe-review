@@ -695,7 +695,7 @@ fn pointer_origin_receiver_before(before_operation: &str, pointer: &str) -> Opti
     }
     let mut current_origin = None;
     for statement in before_operation.split(';') {
-        let Some((left, right)) = statement.split_once('=') else {
+        let Some((left, right)) = statement.rsplit_once('=') else {
             continue;
         };
         let Some(binding) = assignment_binding_name(left) else {
@@ -726,7 +726,7 @@ fn assignment_binding_name(left_side: &str) -> Option<&str> {
 fn has_origin_len_size_guard(compact: &str, origin: &str) -> bool {
     let len = format!("{origin}.len()");
     has_origin_len_size_assertion_guard(compact, &len)
-        || has_origin_len_size_open_positive_branch_guard(compact, &len)
+        || has_origin_len_size_open_positive_branch_guard(compact, &len, origin)
         || has_origin_len_size_early_return_guard(compact, &len, origin)
 }
 
@@ -750,10 +750,11 @@ fn has_origin_len_size_assertion_guard(compact: &str, len: &str) -> bool {
     })
 }
 
-fn has_origin_len_size_open_positive_branch_guard(compact: &str, len: &str) -> bool {
+fn has_origin_len_size_open_positive_branch_guard(compact: &str, len: &str, origin: &str) -> bool {
     origin_len_size_if_guards(compact).any(|guard| {
         origin_len_size_condition_is_positive(guard.condition, len)
             && branch_still_open_at_operation(guard.after_body_start)
+            && !contains_simple_assignment_to(guard.after_body_start, origin)
     })
 }
 
@@ -823,7 +824,9 @@ fn has_origin_len_capacity_equality_guard(compact: &str, origin: &str) -> bool {
     let capacity = format!("{origin}.capacity()");
     let cap = format!("{origin}.cap()");
     has_origin_len_capacity_assertion_guard(compact, &len, &capacity, &cap)
-        || has_origin_len_capacity_open_positive_branch_guard(compact, &len, &capacity, &cap)
+        || has_origin_len_capacity_open_positive_branch_guard(
+            compact, &len, &capacity, &cap, origin,
+        )
 }
 
 fn has_origin_len_capacity_assertion_guard(
@@ -865,11 +868,13 @@ fn has_origin_len_capacity_open_positive_branch_guard(
     len: &str,
     capacity: &str,
     cap: &str,
+    origin: &str,
 ) -> bool {
     origin_len_size_if_guards(compact).any(|guard| {
         origin_len_capacity_condition_matches(guard.condition, len, capacity, cap)
             && guard.condition.contains("==")
             && branch_still_open_at_operation(guard.after_body_start)
+            && !contains_simple_assignment_to(guard.after_body_start, origin)
     })
 }
 

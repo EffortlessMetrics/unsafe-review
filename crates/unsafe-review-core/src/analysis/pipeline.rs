@@ -729,6 +729,7 @@ mod tests {
         for fixture in [
             "raw_pointer_read_bounds_observed_not_guard",
             "raw_pointer_read_len_capacity_observed_not_guard",
+            "raw_pointer_read_open_branch_shadowed_origin_not_guard",
             "raw_pointer_read_other_len_not_guard",
             "raw_pointer_read_reassigned_origin_not_guard",
         ] {
@@ -741,6 +742,18 @@ mod tests {
             assert!(!obligation_discharge_present(card, "alignment"));
             assert!(!card.discharge.present);
         }
+        Ok(())
+    }
+
+    #[test]
+    fn raw_pointer_read_bounds_evidence_accepts_open_same_origin_branch() -> Result<(), String> {
+        let output = fixture_output("raw_pointer_read_open_branch_bounds_guard")?;
+        let card = single_card("raw_pointer_read_open_branch_bounds_guard", &output)?;
+
+        assert_eq!(card.operation.family, OperationFamily::RawPointerRead);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(obligation_discharge_present(card, "bounds"));
+        assert!(!obligation_discharge_present(card, "alignment"));
         Ok(())
     }
 
