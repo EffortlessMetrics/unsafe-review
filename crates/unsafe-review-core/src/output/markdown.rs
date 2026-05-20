@@ -415,8 +415,10 @@ mod tests {
         assert!(rendered.contains("# unsafe-review PR summary"));
         assert!(rendered.contains("## Top card"));
         assert!(rendered.contains("## Card table"));
+        assert!(rendered.contains("- Operation: `unsafe { ptr.cast::<Header>().read() }`"));
         assert!(rendered.contains("- Operation family: `raw_pointer_read`"));
         assert!(rendered.contains("| ID | Class | Location | Operation family | Operation |"));
+        assert!(rendered.contains("unsafe { ptr.cast::<Header>().read() }"));
         assert!(rendered.contains("| `raw_pointer_read` |"));
         assert!(rendered.contains("## Witness plan"));
         assert!(rendered.contains("Open actionable gaps: 1"));
