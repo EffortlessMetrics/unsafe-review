@@ -125,6 +125,12 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     assert_eq!(comment_plan["mode"], "plan_only");
     assert_eq!(comment_plan["comments"][0]["card_id"], card_id);
     assert!(
+        comment_plan["comments"][0]["body"]
+            .as_str()
+            .unwrap_or("")
+            .contains("unsafe-review did not post this comment")
+    );
+    assert!(
         comment_plan["trust_boundary"]
             .as_str()
             .unwrap_or("")

@@ -1279,6 +1279,15 @@ fn check_advisory_artifacts(dir: &Path) -> Result<(), String> {
                 "comment-plan.json references unknown card id `{card_id}`"
             ));
         }
+        let Some(body) = comment.get("body").and_then(serde_json::Value::as_str) else {
+            return Err("comment-plan.json comment is missing body".to_string());
+        };
+        if !body.contains("unsafe-review did not post this comment") {
+            return Err(
+                "comment-plan.json comment body must state that unsafe-review did not post this comment"
+                    .to_string(),
+            );
+        }
     }
     let comment_boundary = comment_plan
         .get("trust_boundary")
@@ -4032,7 +4041,7 @@ impl WitnessKind {
         write_valid_artifacts(&dir)?;
         fs::write(
             dir.join("comment-plan.json"),
-            r#"{"mode":"plan_only","policy":"advisory","comments":[{"card_id":"missing"}],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}"#,
+            r#"{"mode":"plan_only","policy":"advisory","comments":[{"card_id":"missing","body":"Plan boundary: artifact-only inline comment candidate; unsafe-review did not post this comment, run witnesses, or make a policy decision."}],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}"#,
         )
         .map_err(|err| format!("write comment plan failed: {err}"))?;
 
@@ -4040,6 +4049,30 @@ impl WitnessKind {
 
         fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
         assert!(result.err().unwrap_or_default().contains("unknown card id"));
+        Ok(())
+    }
+
+    #[test]
+    fn advisory_artifact_checker_rejects_comment_plan_without_posting_boundary()
+    -> Result<(), String> {
+        let dir = unique_temp_dir("unsafe-review-artifacts-comment-boundary")?;
+        fs::create_dir_all(&dir).map_err(|err| format!("create temp dir failed: {err}"))?;
+        write_valid_artifacts(&dir)?;
+        fs::write(
+            dir.join("comment-plan.json"),
+            r#"{"mode":"plan_only","policy":"advisory","comments":[{"card_id":"card-1","body":"Missing evidence only."}],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}"#,
+        )
+        .map_err(|err| format!("write comment plan failed: {err}"))?;
+
+        let result = check_advisory_artifacts(&dir);
+
+        fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        assert!(
+            result
+                .err()
+                .unwrap_or_default()
+                .contains("did not post this comment")
+        );
         Ok(())
     }
 
@@ -4160,7 +4193,7 @@ review_after = "2026-08-01"
         .map_err(|err| format!("write sarif failed: {err}"))?;
         fs::write(
             dir.join("comment-plan.json"),
-            r#"{"mode":"plan_only","policy":"advisory","comments":[{"card_id":"card-1"}],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}"#,
+            r#"{"mode":"plan_only","policy":"advisory","comments":[{"card_id":"card-1","body":"Plan boundary: artifact-only inline comment candidate; unsafe-review did not post this comment, run witnesses, or make a policy decision."}],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}"#,
         )
         .map_err(|err| format!("write comment plan failed: {err}"))?;
         Ok(())

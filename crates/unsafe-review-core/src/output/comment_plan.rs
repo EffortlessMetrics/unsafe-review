@@ -4,6 +4,7 @@ use crate::util::path_display;
 use serde::Serialize;
 
 const TRUST_BOUNDARY: &str = "Static unsafe contract review only; this is not a proof of memory safety, not UB-free status, and not a Miri result unless a witness receipt is attached.";
+const PLAN_BOUNDARY: &str = "Plan boundary: artifact-only inline comment candidate; unsafe-review did not post this comment, run witnesses, or make a policy decision.";
 
 pub(crate) fn render(output: &AnalyzeOutput) -> String {
     render_pretty(&CommentPlan::from(output))
@@ -103,6 +104,8 @@ fn comment_body(card: &ReviewCard) -> String {
             route.reason
         ));
     }
+    body.push_str(PLAN_BOUNDARY);
+    body.push_str("\n\n");
     body.push_str("Trust boundary: static unsafe contract review only; not memory-safety proof, not UB-free status, and not a Miri result unless a witness receipt is attached.");
     body
 }
@@ -134,6 +137,12 @@ mod tests {
         assert_eq!(value["comments"][0]["class"], "guard_missing");
         assert_eq!(value["comments"][0]["path"], "src/lib.rs");
         assert_eq!(value["comments"][0]["operation_family"], "raw_pointer_read");
+        assert!(
+            value["comments"][0]["body"]
+                .as_str()
+                .unwrap_or("")
+                .contains("unsafe-review did not post this comment")
+        );
         assert!(
             value["comments"][0]["body"]
                 .as_str()
