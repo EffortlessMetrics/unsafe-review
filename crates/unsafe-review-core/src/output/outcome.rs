@@ -55,9 +55,13 @@ pub struct OutcomeCard {
 pub struct OutcomeCardState {
     #[serde(rename = "class")]
     pub class_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation_family: Option<String>,
     pub priority: String,
     pub missing_count: usize,
     pub witness: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_action: Option<String>,
     pub missing: Vec<String>,
 }
 
@@ -79,9 +83,13 @@ struct SnapshotCard {
     id: String,
     #[serde(rename = "class")]
     class_name: String,
+    #[serde(default)]
+    operation_family: Option<String>,
     priority: String,
     #[serde(default)]
     witness: String,
+    #[serde(default)]
+    next_action: Option<String>,
     #[serde(default)]
     missing: Vec<String>,
 }
@@ -357,8 +365,10 @@ fn snapshot_id(snapshot: &Snapshot) -> String {
     for card in cards {
         feed_hash(&mut hash, &card.id);
         feed_hash(&mut hash, &card.class_name);
+        feed_hash(&mut hash, card.operation_family.as_deref().unwrap_or(""));
         feed_hash(&mut hash, &card.priority);
         feed_hash(&mut hash, &card.witness);
+        feed_hash(&mut hash, card.next_action.as_deref().unwrap_or(""));
         for missing in &card.missing {
             feed_hash(&mut hash, missing);
         }
@@ -395,12 +405,25 @@ impl OutcomeCards {
 
 fn markdown_state(state: Option<&OutcomeCardState>) -> String {
     match state {
-        Some(state) => format!(
-            "`{}` / `{}` / {} missing / witness `{}`",
-            state.class_name, state.priority, state.missing_count, state.witness
-        ),
+        Some(state) => {
+            let mut parts = vec![format!(
+                "`{}` / `{}` / {} missing / witness `{}`",
+                state.class_name, state.priority, state.missing_count, state.witness
+            )];
+            if let Some(operation_family) = state.operation_family.as_deref() {
+                parts.push(format!("operation `{}`", markdown_cell(operation_family)));
+            }
+            if let Some(next_action) = state.next_action.as_deref() {
+                parts.push(format!("next: {}", markdown_cell(next_action)));
+            }
+            parts.join("; ")
+        }
         None => "-".to_string(),
     }
+}
+
+fn markdown_cell(value: &str) -> String {
+    value.replace('|', "\\|").replace('\n', " ")
 }
 
 impl From<&Snapshot> for OutcomeSnapshotSummary {
@@ -417,9 +440,11 @@ impl From<&SnapshotCard> for OutcomeCardState {
     fn from(card: &SnapshotCard) -> Self {
         Self {
             class_name: card.class_name.clone(),
+            operation_family: card.operation_family.clone(),
             priority: card.priority.clone(),
             missing_count: card.missing.len(),
             witness: witness_state(card).label,
+            next_action: card.next_action.clone(),
             missing: card.missing.clone(),
         }
     }
@@ -537,6 +562,16 @@ mod tests {
         assert_eq!(value["mode"], "outcome");
         assert_eq!(value["summary"]["new"], 1);
         assert_eq!(value["cards"]["new"][0]["card_id"], "UR-new-c1");
+        assert_eq!(
+            value["cards"]["new"][0]["after"]["operation_family"],
+            "raw_pointer_read"
+        );
+        assert!(
+            value["cards"]["new"][0]["after"]["next_action"]
+                .as_str()
+                .unwrap_or("")
+                .contains("Add or expose")
+        );
         assert!(
             value["cards"]["new"][0]["reason"]
                 .as_str()
@@ -569,6 +604,8 @@ mod tests {
         assert!(markdown.contains("## Limitations"));
         assert!(markdown.contains("## Trust boundary"));
         assert!(markdown.contains("UR-new-c1"));
+        assert!(markdown.contains("raw_pointer_read"));
+        assert!(markdown.contains("Add or expose"));
         Ok(())
     }
 
@@ -717,8 +754,10 @@ mod tests {
             r#"{{
       "id": "{id}",
       "class": "{class_name}",
+      "operation_family": "raw_pointer_read",
       "priority": "{priority}",
       "witness": "{witness}",
+      "next_action": "Add or expose a safety contract, guard, test, or witness for raw_pointer_read.",
       "missing": [{missing}]
     }}"#
         )
