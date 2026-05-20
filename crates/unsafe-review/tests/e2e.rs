@@ -94,6 +94,9 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     let summary_text = fs::read_to_string(&summary_path)?;
     assert!(summary_text.contains("# unsafe-review PR summary"));
     assert!(summary_text.contains("## Card table"));
+    assert!(summary_text.contains("- Operation family: `raw_pointer_read`"));
+    assert!(summary_text.contains("| ID | Class | Location | Operation family | Operation |"));
+    assert!(summary_text.contains("| `raw_pointer_read` |"));
     assert!(summary_text.contains("## Trust boundary"));
 
     let sarif_path = temp.path().join("cards.sarif");

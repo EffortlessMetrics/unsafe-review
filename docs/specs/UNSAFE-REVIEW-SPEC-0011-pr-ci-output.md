@@ -15,8 +15,10 @@ Linked plan: ../../plans/0.1.0/implementation-plan.md
 PR output must be sparse: summary first, at most a few high-confidence inline comments, durable JSON/Markdown/SARIF artifacts.
 The first supported PR projection is a local Markdown summary artifact rendered
 from existing `ReviewCard`s. It includes counts, a top card, a card table, a
-witness plan, and the trust boundary. It does not post comments, run witness
-tools, or change policy mode.
+witness plan, and the trust boundary. The top card and table include the
+ReviewCard operation family so reviewers can group findings without
+reclassifying them. It does not post comments, run witness tools, or change
+policy mode.
 SARIF output is also a projection from existing `ReviewCard`s. SARIF results
 carry card identity, operation family, hazards, missing evidence, witness route
 recommendations, structured route details, verify commands, and the same trust
