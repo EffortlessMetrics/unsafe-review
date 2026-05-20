@@ -725,16 +725,97 @@ fn assignment_binding_name(left_side: &str) -> Option<&str> {
 
 fn has_origin_len_size_guard(compact: &str, origin: &str) -> bool {
     let len = format!("{origin}.len()");
-    ["assert!(", "debug_assert!(", "if"]
-        .into_iter()
-        .any(|prefix| {
-            compact.split(';').any(|statement| {
-                statement.contains(prefix)
-                    && statement.contains(&len)
-                    && statement.contains("size_of")
-                    && (statement.contains(">=") || statement.contains('>'))
-            })
-        })
+    has_origin_len_size_assertion_guard(compact, &len)
+        || has_origin_len_size_open_positive_branch_guard(compact, &len)
+        || has_origin_len_size_early_return_guard(compact, &len, origin)
+}
+
+fn has_origin_len_size_assertion_guard(compact: &str, len: &str) -> bool {
+    ["assert!(", "debug_assert!("].into_iter().any(|prefix| {
+        let mut cursor = compact;
+        let mut offset = 0usize;
+        while let Some(pos) = cursor.find(prefix) {
+            let statement_start = offset + pos + prefix.len();
+            let after_prefix = &compact[statement_start..];
+            let statement_end = after_prefix.find(';').unwrap_or(after_prefix.len());
+            let statement = &after_prefix[..statement_end];
+            if origin_len_size_condition_is_positive(statement, len) {
+                return true;
+            }
+            let next = pos + prefix.len();
+            offset += next;
+            cursor = &cursor[next..];
+        }
+        false
+    })
+}
+
+fn has_origin_len_size_open_positive_branch_guard(compact: &str, len: &str) -> bool {
+    origin_len_size_if_guards(compact).any(|guard| {
+        origin_len_size_condition_is_positive(guard.condition, len)
+            && branch_still_open_at_operation(guard.after_body_start)
+    })
+}
+
+fn has_origin_len_size_early_return_guard(compact: &str, len: &str, origin: &str) -> bool {
+    origin_len_size_if_guards(compact).any(|guard| {
+        if !origin_len_size_condition_is_negative(guard.condition, len) {
+            return false;
+        }
+        let (guard_body, after_guard_body) = guard
+            .after_body_start
+            .split_once('}')
+            .map_or((guard.after_body_start, ""), |(guard_body, after)| {
+                (guard_body, after)
+            });
+        guard_body.contains("return") && !contains_simple_assignment_to(after_guard_body, origin)
+    })
+}
+
+fn origin_len_size_condition_is_positive(condition: &str, len: &str) -> bool {
+    condition.contains("size_of")
+        && (condition.contains(&format!("{len}>"))
+            || condition.contains(&format!("<{len}"))
+            || condition.contains(&format!("<={len}")))
+}
+
+fn origin_len_size_condition_is_negative(condition: &str, len: &str) -> bool {
+    condition.contains("size_of")
+        && (condition.contains(&format!("{len}<"))
+            || condition.contains(&format!(">{len}"))
+            || condition.contains(&format!(">={len}")))
+}
+
+struct OriginLenSizeIfGuard<'a> {
+    condition: &'a str,
+    after_body_start: &'a str,
+}
+
+fn origin_len_size_if_guards(compact: &str) -> impl Iterator<Item = OriginLenSizeIfGuard<'_>> {
+    let mut guards = Vec::new();
+    let mut cursor = compact;
+    let mut offset = 0usize;
+    while let Some(pos) = cursor.find("if") {
+        let start = offset + pos;
+        let before = compact[..start].chars().next_back();
+        if before.is_some_and(is_receiver_path_char) {
+            let next = pos + 2;
+            offset += next;
+            cursor = &cursor[next..];
+            continue;
+        }
+        let after_if = &compact[start + 2..];
+        if let Some(brace_pos) = after_if.find('{') {
+            guards.push(OriginLenSizeIfGuard {
+                condition: &after_if[..brace_pos],
+                after_body_start: &after_if[brace_pos + 1..],
+            });
+        }
+        let next = pos + 2;
+        offset += next;
+        cursor = &cursor[next..];
+    }
+    guards.into_iter()
 }
 
 fn has_origin_len_capacity_equality_guard(compact: &str, origin: &str) -> bool {
