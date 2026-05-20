@@ -1,4 +1,5 @@
 pub(crate) mod agent;
+pub(crate) mod badges;
 pub(crate) mod comment_plan;
 pub(crate) mod human;
 pub(crate) mod json;
