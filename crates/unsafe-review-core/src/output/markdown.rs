@@ -270,6 +270,10 @@ pub(crate) fn render_card_detail(card: &ReviewCard) -> String {
         "**Operation:** `{}`\n\n",
         card.operation.expression
     ));
+    out.push_str(&format!(
+        "**Operation family:** `{}`\n\n",
+        card.operation.family.as_str()
+    ));
     out.push_str("## Required safety conditions\n\n");
     for obligation in &card.obligations {
         out.push_str(&format!("- {}\n", obligation.description));
@@ -316,6 +320,14 @@ pub(crate) fn render_card_detail(card: &ReviewCard) -> String {
     }
     out.push_str("\n## Next action\n\n");
     out.push_str(&card.next_action.summary);
+    if !card.next_action.verify_commands.is_empty() {
+        out.push_str("\n\n## Verify commands\n\n");
+        for command in &card.next_action.verify_commands {
+            out.push_str("```bash\n");
+            out.push_str(command);
+            out.push_str("\n```\n");
+        }
+    }
     out.push_str("\n\n## Trust boundary\n\n");
     out.push_str("This is static unsafe contract review. It is not a proof of memory safety and not a Miri result unless a witness receipt is attached.\n");
     out
@@ -361,6 +373,9 @@ mod tests {
         assert!(rendered.contains("Missing visible local guard"));
         assert!(rendered.contains("## Recommended witness routes"));
         assert!(rendered.contains("Pure-Rust UB-adjacent hazard"));
+        assert!(rendered.contains("**Operation family:** `raw_pointer_read`"));
+        assert!(rendered.contains("## Verify commands"));
+        assert!(rendered.contains("cargo +nightly miri test read_header"));
         assert!(rendered.contains("does not prove site execution"));
         assert!(rendered.contains("## Trust boundary"));
         Ok(())
