@@ -723,6 +723,17 @@ fn receipt_audit_reports_matching_saved_receipts_without_running_witnesses()
             .any(|status| status == "matched")
     );
     assert_eq!(receipt["matched_card"]["class"], "guard_missing");
+    assert_eq!(
+        receipt["matched_card"]["operation_family"],
+        "raw_pointer_read"
+    );
+    assert_eq!(receipt["matched_card"]["missing_count"], 2);
+    assert!(
+        receipt["matched_card"]["next_action"]
+            .as_str()
+            .unwrap_or("")
+            .contains("Add or expose")
+    );
 
     let markdown = run_success([
         os("receipt"),
@@ -741,6 +752,9 @@ fn receipt_audit_reports_matching_saved_receipts_without_running_witnesses()
     let markdown = fs::read_to_string(audit_path)?;
     assert!(markdown.contains("# unsafe-review receipt audit"));
     assert!(markdown.contains("Duplicate"));
+    assert!(markdown.contains("Matched card"));
+    assert!(markdown.contains("raw_pointer_read"));
+    assert!(markdown.contains("Add or expose"));
     assert!(markdown.contains("does not execute witnesses"));
     assert!(markdown.contains("| 1 | 1 | 0 | 0 | 0 |"));
     Ok(())

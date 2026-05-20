@@ -102,6 +102,8 @@ pub struct ReceiptAuditCard {
     #[serde(rename = "class")]
     pub class_name: &'static str,
     pub operation_family: &'static str,
+    pub missing_count: usize,
+    pub next_action: String,
 }
 
 pub(crate) fn audit_receipts(output: &AnalyzeOutput) -> Result<ReceiptAuditReport, String> {
@@ -340,6 +342,8 @@ fn audit_receipt_record(
             id: card.id.0.clone(),
             class_name: card.class.as_str(),
             operation_family: card.operation.family.as_str(),
+            missing_count: card.missing.len(),
+            next_action: card.next_action.summary.clone(),
         }),
         route_tools,
     }
@@ -739,6 +743,18 @@ mod tests {
         assert_eq!(report.summary.duplicate, 5);
         assert_eq!(report.summary.invalid, 1);
         assert!(report.trust_boundary.contains("does not execute witnesses"));
+        let matched_entry = report
+            .receipts
+            .iter()
+            .find(|entry| entry.path.ends_with("matched.json"))
+            .ok_or_else(|| "matched receipt entry missing".to_string())?;
+        let matched_card = matched_entry
+            .matched_card
+            .as_ref()
+            .ok_or_else(|| "matched receipt should include card context".to_string())?;
+        assert_eq!(matched_card.operation_family, "raw_pointer_read");
+        assert_eq!(matched_card.missing_count, 2);
+        assert!(matched_card.next_action.contains("Add or expose"));
         let duplicate_entries = report
             .receipts
             .iter()
