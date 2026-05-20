@@ -349,6 +349,27 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     assert!(explain.contains("**Operation family:** `raw_pointer_read`"));
     assert!(explain.contains("## Verify commands"));
     assert!(explain.contains("cargo +nightly miri test read_header"));
+    assert!(explain.contains(
+        "- `cargo-careful`: cargo-careful is a cheaper compatibility-oriented runtime check"
+    ));
+    assert!(explain.contains("cargo +nightly careful test read_header"));
+    assert!(explain.contains("## Next action"));
+    assert!(explain.contains(
+        "Add or expose the local guard that discharges the `raw_pointer_read` safety obligation."
+    ));
+    assert!(explain.contains("## What would resolve this"));
+    assert!(explain.contains(
+        "- Add or expose the local guard that discharges the `raw_pointer_read` safety obligation."
+    ));
+    assert!(explain.contains("Then attach a matching witness receipt only after running"));
+    assert!(explain.contains("## What would not resolve this"));
+    assert!(
+        explain.contains("A `SAFETY:` comment alone does not discharge missing guard evidence.")
+    );
+    assert!(
+        explain.contains("A related test mention is not proof that this unsafe site executed.")
+    );
+    assert!(explain.contains("Do not claim witness proof unless a matching receipt exists."));
     assert!(explain.contains("## Trust boundary"));
 
     Ok(())
