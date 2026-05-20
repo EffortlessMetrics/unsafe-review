@@ -14,6 +14,7 @@
       "public_api_surface": false,
       "snippet": "pub static mut GLOBAL_COUNT: usize = 0;"
     },
+    "operation": "pub static mut GLOBAL_COUNT: usize = 0;",
     "operation_family": "static_mut",
     "hazards": [
       "static_mut_global_state"

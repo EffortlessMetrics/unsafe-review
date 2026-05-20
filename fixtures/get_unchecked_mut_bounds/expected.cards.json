@@ -14,6 +14,7 @@
       "public_api_surface": false,
       "snippet": "unsafe { values.get_unchecked_mut(index) }"
     },
+    "operation": "unsafe { values.get_unchecked_mut(index) }",
     "operation_family": "get_unchecked",
     "hazards": [
       "bounds"

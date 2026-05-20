@@ -14,6 +14,7 @@
       "public_api_surface": true,
       "snippet": "pub unsafe fn split_contract() {"
     },
+    "operation": "pub unsafe fn split_contract() {",
     "operation_family": "unknown",
     "hazards": [
       "unknown"

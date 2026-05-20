@@ -14,6 +14,7 @@
       "public_api_surface": false,
       "snippet": "unsafe { ptr.cast::<Header>().read() }"
     },
+    "operation": "unsafe { ptr.cast::<Header>().read() }",
     "operation_family": "raw_pointer_read",
     "hazards": [
       "pointer_validity",

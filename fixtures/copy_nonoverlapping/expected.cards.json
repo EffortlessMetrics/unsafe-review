@@ -14,6 +14,7 @@
       "public_api_surface": false,
       "snippet": "unsafe { core::ptr::copy_nonoverlapping(src, dst, count) }"
     },
+    "operation": "unsafe { core::ptr::copy_nonoverlapping(src, dst, count) }",
     "operation_family": "copy_nonoverlapping",
     "hazards": [
       "pointer_validity",

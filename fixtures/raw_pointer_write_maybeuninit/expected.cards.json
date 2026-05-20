@@ -14,6 +14,7 @@
       "public_api_surface": false,
       "snippet": "unsafe { slice.as_mut_ptr().write_bytes(byte, slice.len()) }"
     },
+    "operation": "unsafe { slice.as_mut_ptr().write_bytes(byte, slice.len()) }",
     "operation_family": "raw_pointer_write",
     "hazards": [
       "pointer_validity",

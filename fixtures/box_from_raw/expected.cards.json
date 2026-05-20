@@ -14,6 +14,7 @@
       "public_api_surface": false,
       "snippet": "unsafe { Box::from_raw(ptr) }"
     },
+    "operation": "unsafe { Box::from_raw(ptr) }",
     "operation_family": "box_from_raw",
     "hazards": [
       "pointer_validity",

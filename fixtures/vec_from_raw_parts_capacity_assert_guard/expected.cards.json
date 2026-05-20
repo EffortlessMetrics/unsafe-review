@@ -14,6 +14,7 @@
       "public_api_surface": false,
       "snippet": "unsafe { Vec::from_raw_parts(buf, len, cap) }"
     },
+    "operation": "unsafe { Vec::from_raw_parts(buf, len, cap) }",
     "operation_family": "vec_from_raw_parts",
     "hazards": [
       "pointer_validity",

@@ -14,6 +14,7 @@
       "public_api_surface": false,
       "snippet": "unsafe { Pin::new_unchecked(value) }"
     },
+    "operation": "unsafe { Pin::new_unchecked(value) }",
     "operation_family": "pin_unchecked",
     "hazards": [
       "pin_invariant"

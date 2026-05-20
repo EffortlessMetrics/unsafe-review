@@ -14,6 +14,7 @@
       "public_api_surface": false,
       "snippet": "vec.set_len(new_len);"
     },
+    "operation": "vec.set_len(new_len);",
     "operation_family": "vec_set_len",
     "hazards": [
       "initialized_memory",

@@ -14,6 +14,7 @@
       "public_api_surface": false,
       "snippet": "unsafe { encode_utf8( c, ptr, remaining_cap, ) }"
     },
+    "operation": "unsafe { encode_utf8( c, ptr, remaining_cap, ) }",
     "operation_family": "unsafe_fn_call",
     "hazards": [
       "unknown"

@@ -14,6 +14,7 @@
       "public_api_surface": false,
       "snippet": "self.head.swap(ptr::null_mut(), Ordering::AcqRel)"
     },
+    "operation": "self.head.swap(ptr::null_mut(), Ordering::AcqRel)",
     "operation_family": "atomic_pointer_state",
     "hazards": [
       "atomic_ordering",

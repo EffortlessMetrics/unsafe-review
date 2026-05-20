@@ -14,6 +14,7 @@
       "public_api_surface": false,
       "snippet": "unsafe { forward(NonNull::new_unchecked(bucket.as_ptr())) }"
     },
+    "operation": "unsafe { forward(NonNull::new_unchecked(bucket.as_ptr())) }",
     "operation_family": "nonnull_unchecked",
     "hazards": [
       "pointer_validity"

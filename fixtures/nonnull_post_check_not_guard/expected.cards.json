@@ -14,6 +14,7 @@
       "public_api_surface": false,
       "snippet": "let value = unsafe { NonNull::new_unchecked(ptr) };"
     },
+    "operation": "let value = unsafe { NonNull::new_unchecked(ptr) };",
     "operation_family": "nonnull_unchecked",
     "hazards": [
       "pointer_validity"

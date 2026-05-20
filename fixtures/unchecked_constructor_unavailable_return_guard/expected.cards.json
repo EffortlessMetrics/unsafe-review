@@ -14,6 +14,7 @@
       "public_api_surface": false,
       "snippet": "Some(unsafe { One::new_unchecked(needle) })"
     },
+    "operation": "Some(unsafe { One::new_unchecked(needle) })",
     "operation_family": "unsafe_fn_call",
     "hazards": [
       "unknown"

@@ -14,6 +14,7 @@
       "public_api_surface": false,
       "snippet": "#[inline] unsafe fn write_one(ptr: *mut u8, byte: u8) {"
     },
+    "operation": "#[inline] unsafe fn write_one(ptr: *mut u8, byte: u8) {",
     "operation_family": "unknown",
     "hazards": [
       "unknown"
@@ -83,6 +84,7 @@
       "public_api_surface": false,
       "snippet": "core::ptr::write(ptr, byte);"
     },
+    "operation": "core::ptr::write(ptr, byte);",
     "operation_family": "raw_pointer_write",
     "hazards": [
       "pointer_validity",

@@ -14,6 +14,7 @@
       "public_api_surface": false,
       "snippet": "unsafe { register.write_volatile(value) }"
     },
+    "operation": "unsafe { register.write_volatile(value) }",
     "operation_family": "raw_pointer_write",
     "hazards": [
       "pointer_validity",

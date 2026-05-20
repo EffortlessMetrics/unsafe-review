@@ -14,6 +14,7 @@
       "public_api_surface": false,
       "snippet": "unsafe { core::ptr::replace(slot, value) }"
     },
+    "operation": "unsafe { core::ptr::replace(slot, value) }",
     "operation_family": "ptr_replace",
     "hazards": [
       "pointer_validity",
