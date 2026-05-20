@@ -36,8 +36,9 @@ calibration exists and support tiers are explicitly promoted.
 ## Current Release Target
 
 0.2.0 is public usability: install, run `doctor`, run one `first-pr` command,
-open one summary, explain one `ReviewCard`, and take one concrete review action.
-It is not a policy gate, live LSP release, witness runner, or proof claim. See
+open one summary, explain one `ReviewCard`, inspect `unsafe-review support`, and
+take one concrete review action. It is not a policy gate, live LSP release,
+witness runner, or proof claim. See
 [`0.2.0 Public Usability Target`](../releases/0.2.0-public-usability.md).
 
 ## Promotion Posture
