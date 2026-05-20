@@ -81,18 +81,21 @@ fn render_repo_posture(output: &AnalyzeOutput) -> String {
     if output.cards.is_empty() {
         out.push_str("No repo-scope unsafe-review cards found.\n\n");
     } else {
-        out.push_str("| ID | Class | Operation | Missing evidence | Route | Next action |\n");
-        out.push_str("|---|---|---|---|---|---|\n");
+        out.push_str(
+            "| ID | Class | Operation family | Operation | Missing evidence | Route | Next action |\n",
+        );
+        out.push_str("|---|---|---|---|---|---|---|\n");
         for card in &output.cards {
             let route = card
                 .routes
                 .first()
                 .map_or("human-deep-review", |route| route.kind.as_str());
             out.push_str(&format!(
-                "| `{}` | `{}` | `{}` | {} | `{}` | {} |\n",
+                "| `{}` | `{}` | `{}` | `{}` | {} | `{}` | {} |\n",
                 md_cell(&card.id.to_string()),
                 card.class.as_str(),
                 card.operation.family.as_str(),
+                md_cell(&one_line(&card.operation.expression)),
                 md_cell(&missing_summary(card)),
                 route,
                 md_cell(&card.next_action.summary)
@@ -450,6 +453,10 @@ mod tests {
         assert!(rendered.contains("## Top operation families"));
         assert!(rendered.contains("| `raw_pointer_read` | 1 |"));
         assert!(rendered.contains("## Witness routes"));
+        assert!(rendered.contains(
+            "| ID | Class | Operation family | Operation | Missing evidence | Route | Next action |"
+        ));
+        assert!(rendered.contains("unsafe { ptr.cast::<Header>().read() }"));
         assert!(rendered.contains("Add or expose the local guard"));
         assert!(rendered.contains("## Trust boundary"));
         assert!(rendered.contains("not raw unsafe usage"));
