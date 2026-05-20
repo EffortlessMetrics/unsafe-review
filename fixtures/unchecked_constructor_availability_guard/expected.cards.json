@@ -51,9 +51,18 @@
     "discharge": "All inferred safety obligations have visible local discharge evidence",
     "reach": "1 related test file(s) mention owner `new`",
     "witness": "No imported witness receipt was found",
+    "witness_routes": [
+      {
+        "kind": "human-deep-review",
+        "reason": "The analyzer could not infer a precise witness route; use manual unsafe contract review",
+        "command": null,
+        "required": false
+      }
+    ],
     "missing": [
       "No witness receipt imported for this card"
     ],
+    "next_action": "Attach a focused witness receipt or mark the static limitation explicitly.",
     "verify_commands": []
   }
 ]
