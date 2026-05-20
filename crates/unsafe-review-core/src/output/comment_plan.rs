@@ -1,5 +1,5 @@
 use crate::api::AnalyzeOutput;
-use crate::domain::{Confidence, Priority, ReviewCard};
+use crate::domain::{Confidence, Priority, ReviewCard, WitnessRoute};
 use crate::util::path_display;
 use serde::Serialize;
 
@@ -54,6 +54,8 @@ struct PlannedComment {
     priority: &'static str,
     confidence: &'static str,
     operation_family: &'static str,
+    witness_routes: Vec<PlannedWitnessRoute>,
+    verify_commands: Vec<String>,
     selection_reason: &'static str,
     body: String,
 }
@@ -68,8 +70,29 @@ impl From<&ReviewCard> for PlannedComment {
             priority: card.priority.as_str(),
             confidence: card.confidence.as_str(),
             operation_family: card.operation.family.as_str(),
+            witness_routes: card.routes.iter().map(PlannedWitnessRoute::from).collect(),
+            verify_commands: card.next_action.verify_commands.clone(),
             selection_reason: selection_reason(card),
             body: comment_body(card),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct PlannedWitnessRoute {
+    kind: &'static str,
+    reason: String,
+    command: Option<String>,
+    required: bool,
+}
+
+impl From<&WitnessRoute> for PlannedWitnessRoute {
+    fn from(route: &WitnessRoute) -> Self {
+        Self {
+            kind: route.kind.as_str(),
+            reason: route.reason.clone(),
+            command: route.command.clone(),
+            required: route.required,
         }
     }
 }
@@ -104,6 +127,9 @@ fn comment_body(card: &ReviewCard) -> String {
             route.reason
         ));
     }
+    if let Some(command) = card.next_action.verify_commands.first() {
+        body.push_str(&format!("Verify command: `{command}`\n\n"));
+    }
     body.push_str(PLAN_BOUNDARY);
     body.push_str("\n\n");
     body.push_str("Trust boundary: static unsafe contract review only; not memory-safety proof, not UB-free status, and not a Miri result unless a witness receipt is attached.");
@@ -137,6 +163,19 @@ mod tests {
         assert_eq!(value["comments"][0]["class"], "guard_missing");
         assert_eq!(value["comments"][0]["path"], "src/lib.rs");
         assert_eq!(value["comments"][0]["operation_family"], "raw_pointer_read");
+        assert_eq!(value["comments"][0]["witness_routes"][0]["kind"], "miri");
+        assert!(
+            value["comments"][0]["verify_commands"][0]
+                .as_str()
+                .unwrap_or("")
+                .contains("cargo +nightly miri test read_header")
+        );
+        assert!(
+            value["comments"][0]["body"]
+                .as_str()
+                .unwrap_or("")
+                .contains("Verify command: `cargo +nightly miri test read_header`")
+        );
         assert!(
             value["comments"][0]["body"]
                 .as_str()

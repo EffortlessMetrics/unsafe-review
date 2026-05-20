@@ -26,7 +26,10 @@ comment-plan artifacts. It does not run witness tools, post inline comments, or
 enable blocking policy.
 Inline comment planning is artifact-only. The plan contains candidate comments
 for actionable high-priority or high-confidence cards, but no workflow posts
-those comments by default.
+those comments by default. Each planned comment carries the same ReviewCard
+witness route details and verify commands used by JSON, SARIF, and LSP
+projections so review bots and maintainers do not need to parse comment prose or
+reclassify findings.
 
 ## Non-goals
 
