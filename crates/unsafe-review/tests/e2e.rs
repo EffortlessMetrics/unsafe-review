@@ -754,6 +754,10 @@ fn receipt_audit_reports_matching_saved_receipts_without_running_witnesses()
     );
     assert_eq!(receipt["matched_card"]["class"], "guard_missing");
     assert_eq!(
+        receipt["matched_card"]["operation"],
+        "unsafe { ptr.cast::<Header>().read() }"
+    );
+    assert_eq!(
         receipt["matched_card"]["operation_family"],
         "raw_pointer_read"
     );
@@ -784,6 +788,7 @@ fn receipt_audit_reports_matching_saved_receipts_without_running_witnesses()
     assert!(markdown.contains("Duplicate"));
     assert!(markdown.contains("Matched card"));
     assert!(markdown.contains("raw_pointer_read"));
+    assert!(markdown.contains("unsafe { ptr.cast::<Header>().read() }"));
     assert!(markdown.contains("Add or expose"));
     assert!(markdown.contains("does not execute witnesses"));
     assert!(markdown.contains("| 1 | 1 | 0 | 0 | 0 |"));

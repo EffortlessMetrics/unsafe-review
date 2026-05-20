@@ -69,9 +69,10 @@ fn matched_card(card: Option<&ReceiptAuditCard>) -> String {
         return "-".to_string();
     };
     format!(
-        "`{}` / `{}` / {} missing; next: {}",
+        "`{}` / `{}` / `{}` / {} missing; next: {}",
         card.class_name,
         card.operation_family,
+        markdown_cell(&card.operation),
         card.missing_count,
         markdown_cell(&card.next_action)
     )

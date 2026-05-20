@@ -329,10 +329,10 @@ unsafe-review receipt audit \
 
 The audit reports matched, unmatched, stale, expired, wrong-identity,
 wrong-tool, weaker-than-required, duplicate, and invalid receipt metadata.
-Matched receipts include current ReviewCard operation, missing-count, and next
-action context so receipt evidence does not hide remaining gaps. It is advisory
-only: it does not execute witness commands, infer site reach, make policy
-decisions, or claim safety.
+Matched receipts include current ReviewCard operation expression, operation
+family, missing-count, and next-action context so receipt evidence does not hide
+remaining gaps. It is advisory only: it does not execute witness commands, infer
+site reach, make policy decisions, or claim safety.
 
 `unsafe-review` imports receipts. It does not run Miri, `cargo-careful`,
 sanitizers, Loom, Shuttle, Kani, or Crux by default.
