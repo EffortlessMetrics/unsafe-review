@@ -291,11 +291,16 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     ])?;
     let witness_plan = fs::read_to_string(&witness_plan_path)?;
     assert!(witness_plan.contains("# unsafe-review witness plan"));
+    assert!(witness_plan.contains("## Route groups"));
+    assert!(witness_plan.contains("### Miri / cargo-careful"));
     assert!(witness_plan.contains("Operation: `unsafe { ptr.cast::<Header>().read() }`"));
     assert!(witness_plan.contains("Route: `miri`"));
     assert!(witness_plan.contains("Next action: Add or expose"));
     assert!(witness_plan.contains("Verify command"));
     assert!(witness_plan.contains("cargo +nightly miri test read_header"));
+    assert!(witness_plan.contains("What it can show"));
+    assert!(witness_plan.contains("What it cannot prove"));
+    assert!(witness_plan.contains("unsafe-review receipt import-miri"));
     assert!(witness_plan.contains("does not run Miri"));
 
     let context = run_success([
@@ -467,8 +472,11 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
 
     let witness_plan = fs::read_to_string(out_dir.join("witness-plan.md"))?;
     assert!(witness_plan.contains("# unsafe-review witness plan"));
-    assert!(witness_plan.contains(&format!("### `{card_id}`")));
+    assert!(witness_plan.contains("### Miri / cargo-careful"));
+    assert!(witness_plan.contains(&format!("#### `{card_id}`")));
     assert!(witness_plan.contains("does not run Miri"));
+    assert!(witness_plan.contains("Receipt hint"));
+    assert!(witness_plan.contains("unsafe-review receipt import-miri"));
     assert!(
         witness_plan
             .contains("does not run Miri, cargo-careful, sanitizers, Loom, Shuttle, Kani, or Crux")
