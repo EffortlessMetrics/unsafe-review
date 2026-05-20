@@ -444,6 +444,11 @@ fn has_bounds_guard(site: &ScannedSite, lower: &str) -> bool {
     {
         return has_write_bytes_bounds_evidence(&site.operation.expression);
     }
+    if site.operation.family == OperationFamily::RawPointerRead {
+        let guard_scope = code_before_operation(lower, &site.operation.expression)
+            .unwrap_or_else(|| lower.to_string());
+        return has_raw_pointer_read_bounds_evidence(&site.operation.expression, &guard_scope);
+    }
     has_length_or_bounds_guard(lower)
 }
 
@@ -643,6 +648,94 @@ fn has_len_capacity_equality_guard(lower: &str) -> bool {
     has_equality
         && compact.contains("len")
         && (compact.contains("capacity") || contains_word(&compact, "cap"))
+}
+
+fn has_raw_pointer_read_bounds_evidence(expression: &str, before_operation: &str) -> bool {
+    let compact_expression = compact_code(&expression.to_ascii_lowercase());
+    let Some(pointer) = raw_pointer_read_pointer_receiver(&compact_expression) else {
+        return has_length_or_bounds_guard(before_operation);
+    };
+    let before_operation = compact_code(before_operation);
+    let Some(origin) = pointer_origin_receiver_before(&before_operation, pointer) else {
+        return false;
+    };
+
+    has_origin_len_size_guard(&before_operation, &origin)
+        || has_origin_len_capacity_equality_guard(&before_operation, &origin)
+}
+
+fn raw_pointer_read_pointer_receiver(compact_expression: &str) -> Option<&str> {
+    if let Some(receiver) = receiver_before_marker(compact_expression, ".cast::<") {
+        return Some(receiver);
+    }
+    if let Some(receiver) = receiver_before_marker(compact_expression, ".read(") {
+        return Some(receiver);
+    }
+    if let Some(receiver) = receiver_before_marker(compact_expression, ".read_volatile(") {
+        return Some(receiver);
+    }
+    raw_pointer_read_function_argument(compact_expression)
+}
+
+fn raw_pointer_read_function_argument(compact_expression: &str) -> Option<&str> {
+    let marker = "ptr::read(";
+    let call_pos = compact_expression.find(marker)? + marker.len();
+    let after_marker = &compact_expression[call_pos..];
+    let argument_end = matching_call_argument_end(after_marker)?;
+    let argument = after_marker[..argument_end]
+        .split_once("as*")
+        .map_or(&after_marker[..argument_end], |(argument, _)| argument)
+        .trim();
+    (!argument.is_empty()).then_some(argument)
+}
+
+fn pointer_origin_receiver_before(before_operation: &str, pointer: &str) -> Option<String> {
+    if pointer.contains(".as_ptr()") || pointer.contains(".as_mut_ptr()") {
+        return pointer
+            .split(".as_")
+            .next()
+            .filter(|receiver| !receiver.is_empty())
+            .map(str::to_string);
+    }
+    before_operation.split(';').find_map(|statement| {
+        let (left, right) = statement.split_once('=')?;
+        let binding = let_binding_name(left)?;
+        if binding != pointer {
+            return None;
+        }
+        right
+            .strip_suffix(".as_ptr()")
+            .or_else(|| right.strip_suffix(".as_mut_ptr()"))
+            .filter(|receiver| !receiver.is_empty())
+            .map(str::to_string)
+    })
+}
+
+fn has_origin_len_size_guard(compact: &str, origin: &str) -> bool {
+    let len = format!("{origin}.len()");
+    ["assert!(", "debug_assert!(", "if"]
+        .into_iter()
+        .any(|prefix| {
+            compact.split(';').any(|statement| {
+                statement.contains(prefix)
+                    && statement.contains(&len)
+                    && statement.contains("size_of")
+                    && (statement.contains(">=") || statement.contains('>'))
+            })
+        })
+}
+
+fn has_origin_len_capacity_equality_guard(compact: &str, origin: &str) -> bool {
+    let len = format!("{origin}.len()");
+    let capacity = format!("{origin}.capacity()");
+    let cap = format!("{origin}.cap()");
+    compact.split(';').any(|statement| {
+        (statement.contains("assert_eq!(")
+            || statement.contains("debug_assert_eq!(")
+            || statement.contains("=="))
+            && statement.contains(&len)
+            && (statement.contains(&capacity) || statement.contains(&cap))
+    })
 }
 
 fn has_slice_end_pointer_arithmetic_evidence(lower: &str) -> bool {
