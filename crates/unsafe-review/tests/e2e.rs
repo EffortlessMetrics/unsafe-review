@@ -164,6 +164,19 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     assert_eq!(lsp["status"]["state"], "actionable");
     assert_eq!(lsp["status"]["cards"], 1);
     assert_eq!(lsp["diagnostics"][0]["card_id"], card_id);
+    assert!(
+        lsp["diagnostics"][0]["next_action"]
+            .as_str()
+            .unwrap_or("")
+            .contains("Add or expose the local guard")
+    );
+    assert_eq!(lsp["diagnostics"][0]["witness_routes"][0]["kind"], "miri");
+    assert!(
+        lsp["diagnostics"][0]["verify_commands"][0]
+            .as_str()
+            .unwrap_or("")
+            .contains("cargo +nightly miri test read_header")
+    );
     assert_eq!(lsp["hovers"][0]["card_id"], card_id);
     assert!(
         lsp["hovers"][0]["contents"]

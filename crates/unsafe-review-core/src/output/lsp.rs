@@ -1,5 +1,5 @@
 use crate::api::{AnalyzeOutput, Scope};
-use crate::domain::{Priority, ReviewCard};
+use crate::domain::{Priority, ReviewCard, WitnessRoute};
 use crate::util::path_display;
 use serde::Serialize;
 
@@ -59,6 +59,9 @@ struct LspDiagnostic<'a> {
     operation_family: &'static str,
     hazards: Vec<&'static str>,
     missing_evidence: Vec<&'a str>,
+    next_action: &'a str,
+    witness_routes: Vec<LspWitnessRoute<'a>>,
+    verify_commands: &'a [String],
     trust_boundary: &'static str,
 }
 
@@ -83,7 +86,29 @@ impl<'a> From<&'a ReviewCard> for LspDiagnostic<'a> {
                 .iter()
                 .map(|missing| missing.message.as_str())
                 .collect(),
+            next_action: &card.next_action.summary,
+            witness_routes: card.routes.iter().map(LspWitnessRoute::from).collect(),
+            verify_commands: &card.next_action.verify_commands,
             trust_boundary: TRUST_BOUNDARY,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct LspWitnessRoute<'a> {
+    kind: &'static str,
+    reason: &'a str,
+    command: Option<&'a str>,
+    required: bool,
+}
+
+impl<'a> From<&'a WitnessRoute> for LspWitnessRoute<'a> {
+    fn from(route: &'a WitnessRoute) -> Self {
+        Self {
+            kind: route.kind.as_str(),
+            reason: &route.reason,
+            command: route.command.as_deref(),
+            required: route.required,
         }
     }
 }
@@ -333,6 +358,19 @@ mod tests {
             "raw_pointer_read"
         );
         assert_eq!(value["diagnostics"][0]["severity"], 2);
+        assert!(
+            value["diagnostics"][0]["next_action"]
+                .as_str()
+                .unwrap_or("")
+                .contains("Add or expose the local guard")
+        );
+        assert_eq!(value["diagnostics"][0]["witness_routes"][0]["kind"], "miri");
+        assert!(
+            value["diagnostics"][0]["verify_commands"][0]
+                .as_str()
+                .unwrap_or("")
+                .contains("cargo +nightly miri test read_header")
+        );
         assert!(
             value["hovers"][0]["contents"]
                 .as_str()
