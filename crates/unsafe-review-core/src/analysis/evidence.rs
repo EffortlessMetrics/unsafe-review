@@ -172,10 +172,12 @@ fn discharge_state_for(
     }
     match key {
         "alignment" => {
-            if family == &OperationFamily::RawPointerWrite && has_u8_write_bytes_context(lower) {
+            if family == &OperationFamily::RawPointerWrite
+                && has_u8_write_bytes_context(site, lower)
+            {
                 EvidenceState::present("u8 raw write alignment evidence was detected")
             } else if family == &OperationFamily::RawPointerWrite
-                && has_bool_write_bytes_pointer_context(lower)
+                && has_bool_write_bytes_pointer_context(site, lower)
             {
                 EvidenceState::present("bool raw write alignment evidence was detected")
             } else if has_alignment_guard(site, lower) {
@@ -237,11 +239,11 @@ fn discharge_state_for(
             {
                 EvidenceState::present("MaybeUninit raw write target evidence was detected")
             } else if family == &OperationFamily::RawPointerWrite
-                && has_u8_write_bytes_context(lower)
+                && has_u8_write_bytes_context(site, lower)
             {
                 EvidenceState::present("u8 write_bytes target evidence was detected")
             } else if family == &OperationFamily::RawPointerWrite
-                && has_bool_write_bytes_value_evidence(lower)
+                && has_bool_write_bytes_value_evidence(site, lower)
             {
                 EvidenceState::present("bool write_bytes value evidence was detected")
             } else if family == &OperationFamily::VecFromRawParts
@@ -2027,35 +2029,53 @@ fn has_maybeuninit_ptr_write_value_context(compact: &str) -> bool {
     compact.contains("ptr::write(") && compact.contains("maybeuninit::new(")
 }
 
-fn has_u8_write_bytes_context(lower: &str) -> bool {
-    let compact = compact_code(lower);
-    let Some(receiver) = receiver_before_marker(&compact, ".write_bytes(") else {
-        return compact.contains("write_bytes(") && compact.contains(":*mutu8");
-    };
-
-    pointer_binding_has_type_before_call(&compact, receiver, "*mutu8")
-}
-
-fn has_bool_write_bytes_pointer_context(lower: &str) -> bool {
-    let compact = compact_code(lower);
-    let Some((_before_call, receiver, _byte, _len)) = write_bytes_method_context(&compact) else {
+fn has_u8_write_bytes_context(site: &ScannedSite, lower: &str) -> bool {
+    let compact_expression = compact_code(&site.operation.expression.to_ascii_lowercase());
+    let Some((_before_call, receiver, _byte, _len)) =
+        write_bytes_method_context(&compact_expression)
+    else {
         return false;
     };
 
-    pointer_binding_has_type_before_call(&compact, receiver, "*mutbool")
+    pointer_binding_has_type_before_operation(lower, &site.operation.expression, receiver, "*mutu8")
 }
 
-fn has_bool_write_bytes_value_evidence(lower: &str) -> bool {
-    let compact = compact_code(lower);
-    let Some((before_call, receiver, byte, _len)) = write_bytes_method_context(&compact) else {
+fn has_bool_write_bytes_pointer_context(site: &ScannedSite, lower: &str) -> bool {
+    let compact_expression = compact_code(&site.operation.expression.to_ascii_lowercase());
+    let Some((_before_call, receiver, _byte, _len)) =
+        write_bytes_method_context(&compact_expression)
+    else {
+        return false;
+    };
+
+    pointer_binding_has_type_before_operation(
+        lower,
+        &site.operation.expression,
+        receiver,
+        "*mutbool",
+    )
+}
+
+fn has_bool_write_bytes_value_evidence(site: &ScannedSite, lower: &str) -> bool {
+    let compact_expression = compact_code(&site.operation.expression.to_ascii_lowercase());
+    let Some((_before_call, receiver, byte, _len)) =
+        write_bytes_method_context(&compact_expression)
+    else {
         return false;
     };
     let Some(byte) = source_value_identifier(byte) else {
         return false;
     };
+    let Some(before_operation) = code_before_operation(lower, &site.operation.expression) else {
+        return false;
+    };
 
-    pointer_binding_has_type_before_call(&compact, receiver, "*mutbool")
-        && has_u8_bool_value_guard(before_call, byte)
+    pointer_binding_has_type_before_operation(
+        lower,
+        &site.operation.expression,
+        receiver,
+        "*mutbool",
+    ) && has_u8_bool_value_guard(&before_operation, byte)
 }
 
 fn has_write_bytes_bounds_evidence(lower: &str) -> bool {
@@ -2128,12 +2148,16 @@ fn matching_open_for_trailing_call(text: &str) -> Option<usize> {
     None
 }
 
-fn pointer_binding_has_type_before_call(compact: &str, receiver: &str, pointer_type: &str) -> bool {
-    let Some(write_pos) = compact.find("write_bytes(") else {
+fn pointer_binding_has_type_before_operation(
+    lower: &str,
+    expression: &str,
+    receiver: &str,
+    pointer_type: &str,
+) -> bool {
+    let Some(before_operation) = code_before_operation(lower, expression) else {
         return false;
     };
-    let before_call = &compact[..write_pos];
-    before_call.contains(&format!("{receiver}:{pointer_type}"))
+    before_operation.contains(&format!("{receiver}:{pointer_type}"))
 }
 
 fn has_set_len_shrink_evidence(lower: &str) -> bool {
