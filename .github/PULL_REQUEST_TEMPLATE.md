@@ -24,3 +24,13 @@ Source:
 - [ ] No automatic comments
 - [ ] No blocking policy
 - [ ] No safety / UB-free / Miri-clean claim
+
+## Disposition authority
+
+- [ ] I am not closing, merging, parking, superseding, or otherwise materially
+      mutating this PR due to Codex session state, agent cap, or because
+      another PR is active.
+- [ ] If closing, I named the repository-level reason.
+- [ ] If closing as superseded, I linked the merged replacement.
+- [ ] If parking, I left the PR open unless the owner explicitly requested
+      closure.

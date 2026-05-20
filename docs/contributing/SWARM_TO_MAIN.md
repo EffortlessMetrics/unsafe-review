@@ -51,6 +51,59 @@ Source: direct-main source-only repo hygiene
 If a source PR is not swarm-originated, it must say why the work belongs in
 `unsafe-review` now.
 
+## Agent state is not PR state
+
+Agent runtime state is not a repository disposition reason. A Codex session
+being busy, capped, assigned to another PR, or unable to continue in the
+current branch must not decide whether a PR is closed, merged, parked, marked
+superseded, or otherwise materially mutated.
+
+Those conditions may be recorded as a handoff comment only:
+
+```text
+This agent session cannot continue work on this PR right now.
+```
+
+That statement does not imply repository disposition.
+
+Forbidden close or disposition reasons include:
+
+- this Codex session is working on another PR,
+- Codex has an agent cap,
+- the current session cannot continue,
+- this branch is not the current active task,
+- another PR is being worked first.
+
+Valid PR dispositions must be based on repository facts:
+
+- merged,
+- mergeable and ready,
+- parked for a later lane,
+- superseded by a merged PR,
+- duplicate of the chosen canonical PR,
+- stale after useful content was extracted,
+- invalid, unsafe, destructive, or wrong repository,
+- owner-directed close.
+
+Parking is not closure. If a PR is useful but belongs to a later lane, leave it
+open unless the owner explicitly requests closure or the useful work has been
+preserved elsewhere.
+
+Every close must name the repository-level reason. When applicable, it must
+also link the replacement PR, issue, branch, commit, or handoff that preserves
+the useful work, and state whether the work can be reopened later.
+
+Suggested disposition labels:
+
+- `parked`
+- `candidate`
+- `ready-to-port`
+- `needs-rebase`
+- `later-lane`
+- `superseded`
+- `do-not-close-agent-state`
+- `blocked-agent-cap`
+
 ## Promotion eligibility
 
 A swarm slice is eligible for source promotion only after it has:
