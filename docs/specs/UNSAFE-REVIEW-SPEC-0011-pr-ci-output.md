@@ -20,9 +20,9 @@ ReviewCard operation expression and operation family so reviewers can identify
 the exact unsafe operation and group findings without reclassifying them. It
 does not post comments, run witness tools, or change policy mode.
 SARIF output is also a projection from existing `ReviewCard`s. SARIF results
-carry card identity, operation family, hazards, missing evidence, witness route
-recommendations, structured route details, verify commands, and the same trust
-boundary in result properties.
+carry card identity, operation expression, operation family, hazards, missing
+evidence, witness route recommendations, structured route details, verify
+commands, and the same trust boundary in result properties.
 The advisory GitHub workflow uploads the JSON, Markdown summary, SARIF, and
 comment-plan artifacts. It does not run witness tools, post inline comments, or
 enable blocking policy.

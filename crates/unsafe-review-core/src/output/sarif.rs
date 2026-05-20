@@ -311,6 +311,10 @@ mod tests {
             "raw_pointer_read"
         );
         assert_eq!(
+            value["runs"][0]["results"][0]["properties"]["operation"],
+            "unsafe { ptr.cast::<Header>().read() }"
+        );
+        assert_eq!(
             value["runs"][0]["results"][0]["properties"]["witnessRouteDetails"][0]["kind"],
             "miri"
         );
