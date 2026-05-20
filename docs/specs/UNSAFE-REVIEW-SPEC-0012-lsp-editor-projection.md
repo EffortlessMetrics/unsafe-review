@@ -18,8 +18,9 @@ The first supported surface is a saved JSON projection rendered with
 edit source. The projection derives diagnostics, hovers, and command-style
 action data from existing `ReviewCard`s. Diagnostics carry structured next
 action, witness route details, verify commands, missing evidence, and the
-static-review trust boundary so editor consumers do not need to parse hover text
-or reclassify findings.
+static-review trust boundary. Diagnostics also include the concrete operation
+expression from the `ReviewCard`, so editor consumers do not need to parse hover
+text or reclassify findings.
 
 ## Non-goals
 

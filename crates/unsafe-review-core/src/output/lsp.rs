@@ -56,6 +56,7 @@ struct LspDiagnostic<'a> {
     source: &'static str,
     code: &'static str,
     message: String,
+    operation: &'a str,
     operation_family: &'static str,
     hazards: Vec<&'static str>,
     missing_evidence: Vec<&'a str>,
@@ -79,6 +80,7 @@ impl<'a> From<&'a ReviewCard> for LspDiagnostic<'a> {
                 card.operation.family.as_str(),
                 card.next_action.summary
             ),
+            operation: &card.operation.expression,
             operation_family: card.operation.family.as_str(),
             hazards: card.hazards.iter().map(|hazard| hazard.as_str()).collect(),
             missing_evidence: card
@@ -232,9 +234,10 @@ fn code_actions(card: &ReviewCard) -> Vec<LspCodeAction<'_>> {
 fn hover_contents(card: &ReviewCard) -> String {
     let mut text = String::new();
     text.push_str(&format!(
-        "unsafe-review `{}` for `{}`\n\n",
+        "unsafe-review `{}` for `{}` operation `{}`\n\n",
         card.class.as_str(),
-        card.operation.family.as_str()
+        card.operation.family.as_str(),
+        card.operation.expression
     ));
     text.push_str("Required safety conditions:\n");
     for obligation in &card.obligations {
@@ -354,6 +357,10 @@ mod tests {
         assert_eq!(value["diagnostics"][0]["source"], "unsafe-review");
         assert_eq!(value["diagnostics"][0]["path"], "src/lib.rs");
         assert_eq!(
+            value["diagnostics"][0]["operation"],
+            "unsafe { ptr.cast::<Header>().read() }"
+        );
+        assert_eq!(
             value["diagnostics"][0]["operation_family"],
             "raw_pointer_read"
         );
@@ -376,6 +383,12 @@ mod tests {
                 .as_str()
                 .unwrap_or("")
                 .contains("Required safety conditions")
+        );
+        assert!(
+            value["hovers"][0]["contents"]
+                .as_str()
+                .unwrap_or("")
+                .contains("operation `unsafe { ptr.cast::<Header>().read() }`")
         );
         assert!(
             value["hovers"][0]["contents"]
