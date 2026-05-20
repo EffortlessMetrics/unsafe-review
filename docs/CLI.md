@@ -61,6 +61,33 @@ show the operation expression, operation family, and next action from the same
 `ReviewCard`. It does not block, execute witnesses, or create broad suppression
 authority.
 
+## First PR Bundle
+
+For a first local review pass, write the standard advisory artifact bundle:
+
+```bash
+unsafe-review first-pr --base origin/main
+```
+
+`review` is an alias for `first-pr`.
+
+By default this writes:
+
+```text
+target/unsafe-review/cards.json
+target/unsafe-review/pr-summary.md
+target/unsafe-review/cards.sarif
+target/unsafe-review/comment-plan.json
+target/unsafe-review/witness-plan.md
+```
+
+Use `--out-dir <dir>` to choose another artifact directory, or `--diff file|-`
+to review a supplied diff.
+
+The command analyzes once and renders every artifact from the same
+`ReviewCard`s. It stays advisory-only: it does not execute witness tools, post
+comments, edit source, or enforce blocking policy.
+
 ## Output Formats
 
 All output formats project the same `ReviewCard`s. They must not reclassify
