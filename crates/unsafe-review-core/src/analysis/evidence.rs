@@ -235,7 +235,7 @@ fn discharge_state_for(
             {
                 EvidenceState::present("MaybeUninit slice element evidence was detected")
             } else if family == &OperationFamily::RawPointerWrite
-                && has_maybeuninit_raw_write_context(lower)
+                && has_maybeuninit_raw_write_context(site, lower)
             {
                 EvidenceState::present("MaybeUninit raw write target evidence was detected")
             } else if family == &OperationFamily::RawPointerWrite
@@ -1978,30 +1978,41 @@ fn maybeuninit_slice_return_type(before_call: &str) -> bool {
         })
 }
 
-fn has_maybeuninit_raw_write_context(lower: &str) -> bool {
-    let compact = compact_code(lower);
-    has_maybeuninit_write_bytes_target_context(&compact)
-        || has_maybeuninit_ptr_write_value_context(&compact)
+fn has_maybeuninit_raw_write_context(site: &ScannedSite, lower: &str) -> bool {
+    let compact_expression = compact_code(&site.operation.expression.to_ascii_lowercase());
+    has_maybeuninit_write_bytes_target_context(site, lower, &compact_expression)
+        || has_maybeuninit_ptr_write_value_context(&compact_expression)
 }
 
-fn has_maybeuninit_write_bytes_target_context(compact: &str) -> bool {
-    let Some(write_pos) = compact.find("write_bytes(") else {
+fn has_maybeuninit_write_bytes_target_context(
+    site: &ScannedSite,
+    lower: &str,
+    compact_expression: &str,
+) -> bool {
+    if !compact_expression.contains("write_bytes(") {
         return false;
     };
-    let before_write = &compact[..write_pos];
-    if maybeuninit_slice_parameter_before_write(before_write)
-        || maybeuninit_impl_receiver_before_write(before_write)
-    {
+    let Some((_before_call, receiver, _byte, _len)) =
+        write_bytes_method_context(compact_expression)
+    else {
+        return false;
+    };
+    if receiver.contains("maybeuninit") {
         return true;
     }
-
-    let Some(receiver) = receiver_before_marker(compact, ".write_bytes(") else {
+    let Some(before_operation) = code_before_operation(lower, &site.operation.expression) else {
         return false;
     };
-    receiver.contains("maybeuninit")
+
+    if receiver == "self" || receiver.starts_with("self.") {
+        return maybeuninit_impl_receiver_before_write(&before_operation);
+    }
+    receiver
+        .strip_suffix(".as_mut_ptr()")
+        .is_some_and(|slice| maybeuninit_slice_parameter_before_write(&before_operation, slice))
 }
 
-fn maybeuninit_slice_parameter_before_write(before_write: &str) -> bool {
+fn maybeuninit_slice_parameter_before_write(before_write: &str, slice: &str) -> bool {
     let Some(fn_pos) = before_write.rfind("fn") else {
         return false;
     };
@@ -2010,7 +2021,9 @@ fn maybeuninit_slice_parameter_before_write(before_write: &str) -> bool {
         .split_once('{')
         .map_or(fn_context, |(signature, _body)| signature);
 
-    signature.contains("maybeuninit") && signature.contains('&') && signature.contains('[')
+    signature.contains("maybeuninit")
+        && (signature.contains(&format!("{slice}:&mut["))
+            || signature.contains(&format!("{slice}:&[")))
 }
 
 fn maybeuninit_impl_receiver_before_write(before_write: &str) -> bool {
@@ -2025,8 +2038,8 @@ fn maybeuninit_impl_receiver_before_write(before_write: &str) -> bool {
     header.contains("for[") && header.contains("maybeuninit")
 }
 
-fn has_maybeuninit_ptr_write_value_context(compact: &str) -> bool {
-    compact.contains("ptr::write(") && compact.contains("maybeuninit::new(")
+fn has_maybeuninit_ptr_write_value_context(compact_expression: &str) -> bool {
+    compact_expression.contains("ptr::write(") && compact_expression.contains("maybeuninit::new(")
 }
 
 fn has_u8_write_bytes_context(site: &ScannedSite, lower: &str) -> bool {
