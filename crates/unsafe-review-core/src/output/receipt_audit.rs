@@ -1,4 +1,4 @@
-use crate::analysis::receipts::ReceiptAuditReport;
+use crate::analysis::receipts::{ReceiptAuditCard, ReceiptAuditReport};
 
 pub(crate) fn render_json(report: &ReceiptAuditReport) -> String {
     match serde_json::to_string_pretty(report) {
@@ -31,20 +31,21 @@ pub(crate) fn render_markdown(report: &ReceiptAuditReport) -> String {
     if report.receipts.is_empty() {
         out.push_str("No receipt files found.\n\n");
     } else {
-        out.push_str("| Status | Receipt | Card | Tool | Strength | Issues |\n");
-        out.push_str("|---|---|---|---|---|---|\n");
+        out.push_str("| Status | Receipt | Card | Matched card | Tool | Strength | Issues |\n");
+        out.push_str("|---|---|---|---|---|---|---|\n");
         for receipt in &report.receipts {
             out.push_str(&format!(
-                "| {} | `{}` | {} | {} | {} | {} |\n",
-                receipt.statuses.join(", "),
+                "| {} | `{}` | {} | {} | {} | {} | {} |\n",
+                markdown_cell(&receipt.statuses.join(", ")),
                 receipt.path,
                 optional_code(receipt.card_id.as_deref()),
+                matched_card(receipt.matched_card.as_ref()),
                 optional_code(receipt.receipt_tool.as_deref()),
                 optional_code(receipt.strength.as_deref()),
                 if receipt.issues.is_empty() {
                     "-".to_string()
                 } else {
-                    receipt.issues.join("; ")
+                    markdown_cell(&receipt.issues.join("; "))
                 }
             ));
         }
@@ -61,4 +62,21 @@ fn optional_code(value: Option<&str>) -> String {
         Some(value) if !value.is_empty() => format!("`{value}`"),
         _ => "-".to_string(),
     }
+}
+
+fn matched_card(card: Option<&ReceiptAuditCard>) -> String {
+    let Some(card) = card else {
+        return "-".to_string();
+    };
+    format!(
+        "`{}` / `{}` / {} missing; next: {}",
+        card.class_name,
+        card.operation_family,
+        card.missing_count,
+        markdown_cell(&card.next_action)
+    )
+}
+
+fn markdown_cell(value: &str) -> String {
+    value.replace('|', "\\|").replace('\n', " ")
 }
