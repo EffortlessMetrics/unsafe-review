@@ -725,12 +725,12 @@ fn assignment_binding_name(left_side: &str) -> Option<&str> {
 
 fn has_origin_len_size_guard(compact: &str, origin: &str) -> bool {
     let len = format!("{origin}.len()");
-    has_origin_len_size_assertion_guard(compact, &len)
+    has_origin_len_size_assertion_guard(compact, &len, origin)
         || has_origin_len_size_open_positive_branch_guard(compact, &len, origin)
         || has_origin_len_size_early_return_guard(compact, &len, origin)
 }
 
-fn has_origin_len_size_assertion_guard(compact: &str, len: &str) -> bool {
+fn has_origin_len_size_assertion_guard(compact: &str, len: &str, origin: &str) -> bool {
     ["assert!(", "debug_assert!("].into_iter().any(|prefix| {
         let mut cursor = compact;
         let mut offset = 0usize;
@@ -739,7 +739,10 @@ fn has_origin_len_size_assertion_guard(compact: &str, len: &str) -> bool {
             let after_prefix = &compact[statement_start..];
             let statement_end = after_prefix.find(';').unwrap_or(after_prefix.len());
             let statement = &after_prefix[..statement_end];
-            if origin_len_size_condition_is_positive(statement, len) {
+            let after_statement = &after_prefix[statement_end..];
+            if origin_len_size_condition_is_positive(statement, len)
+                && !contains_simple_assignment_to(after_statement, origin)
+            {
                 return true;
             }
             let next = pos + prefix.len();
@@ -823,7 +826,7 @@ fn has_origin_len_capacity_equality_guard(compact: &str, origin: &str) -> bool {
     let len = format!("{origin}.len()");
     let capacity = format!("{origin}.capacity()");
     let cap = format!("{origin}.cap()");
-    has_origin_len_capacity_assertion_guard(compact, &len, &capacity, &cap)
+    has_origin_len_capacity_assertion_guard(compact, &len, &capacity, &cap, origin)
         || has_origin_len_capacity_open_positive_branch_guard(
             compact, &len, &capacity, &cap, origin,
         )
@@ -834,6 +837,7 @@ fn has_origin_len_capacity_assertion_guard(
     len: &str,
     capacity: &str,
     cap: &str,
+    origin: &str,
 ) -> bool {
     [
         ("assert_eq!(", false),
@@ -850,8 +854,10 @@ fn has_origin_len_capacity_assertion_guard(
             let after_prefix = &compact[statement_start..];
             let statement_end = after_prefix.find(';').unwrap_or(after_prefix.len());
             let statement = &after_prefix[..statement_end];
+            let after_statement = &after_prefix[statement_end..];
             if origin_len_capacity_condition_matches(statement, len, capacity, cap)
                 && (!requires_operator || statement.contains("=="))
+                && !contains_simple_assignment_to(after_statement, origin)
             {
                 return true;
             }
