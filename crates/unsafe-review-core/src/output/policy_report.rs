@@ -37,6 +37,7 @@ pub struct PolicyReportCard {
     pub card_id: String,
     #[serde(rename = "class")]
     pub class_name: String,
+    pub operation: String,
     pub operation_family: String,
     pub policy_status: String,
     pub missing_count: usize,
@@ -96,6 +97,7 @@ fn evaluate_with_date(output: &AnalyzeOutput, audit_date: &str) -> Result<Policy
         .map(|card| PolicyReportCard {
             card_id: card.id.0.clone(),
             class_name: card.class.as_str().to_string(),
+            operation: card.operation.expression.clone(),
             operation_family: card.operation.family.as_str().to_string(),
             policy_status: policy_status(&card.class).to_string(),
             missing_count: card.missing.len(),
@@ -162,15 +164,16 @@ pub(crate) fn render_markdown(report: &PolicyReport) -> String {
     if report.cards.is_empty() {
         out.push_str("No current policy-relevant cards found.\n\n");
     } else {
-        out.push_str("| Status | Card | Class | Operation | Missing evidence | Next action |\n");
-        out.push_str("|---|---|---|---|---:|---|\n");
+        out.push_str("| Status | Card | Class | Operation family | Operation | Missing evidence | Next action |\n");
+        out.push_str("|---|---|---|---|---|---:|---|\n");
         for card in &report.cards {
             out.push_str(&format!(
-                "| `{}` | `{}` | `{}` | `{}` | {} | {} |\n",
+                "| `{}` | `{}` | `{}` | `{}` | `{}` | {} | {} |\n",
                 card.policy_status,
                 card.card_id,
                 card.class_name,
                 card.operation_family,
+                markdown_cell(&card.operation),
                 card.missing_count,
                 markdown_cell(&card.next_action)
             ));
@@ -349,10 +352,13 @@ mod tests {
             .cards
             .first()
             .ok_or_else(|| "policy report produced no cards".to_string())?;
+        assert_eq!(card.operation, "unsafe { ptr.cast::<Header>().read() }");
         assert_eq!(card.operation_family, "raw_pointer_read");
         assert!(card.next_action.contains("Add or expose"));
         let markdown = render_markdown(&report);
+        assert!(markdown.contains("Operation family | Operation"));
         assert!(markdown.contains("| `raw_pointer_read` |"));
+        assert!(markdown.contains("unsafe { ptr.cast::<Header>().read() }"));
         assert!(markdown.contains("Add or expose"));
         assert!(report.trust_boundary.contains("does not enforce blocking"));
         Ok(())

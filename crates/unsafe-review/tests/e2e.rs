@@ -1172,6 +1172,10 @@ fn policy_report_is_advisory_and_counts_baseline_state() -> Result<(), Box<dyn E
     assert_eq!(report["policy"], "advisory");
     assert_eq!(report["summary"]["new_gaps"], 1);
     assert_eq!(report["summary"]["baseline_known"], 0);
+    assert_eq!(
+        report["cards"][0]["operation"],
+        "unsafe { ptr.cast::<Header>().read() }"
+    );
     assert_eq!(report["cards"][0]["operation_family"], "raw_pointer_read");
     assert!(
         json_str(&report["cards"][0]["next_action"], "cards[0].next_action")?
@@ -1230,6 +1234,7 @@ fn policy_report_is_advisory_and_counts_baseline_state() -> Result<(), Box<dyn E
     assert!(markdown.contains("# unsafe-review policy report"));
     assert!(markdown.contains("Next action"));
     assert!(markdown.contains("raw_pointer_read"));
+    assert!(markdown.contains("unsafe { ptr.cast::<Header>().read() }"));
     assert!(markdown.contains("Known baseline card"));
     assert!(markdown.contains("## Trust boundary"));
 
