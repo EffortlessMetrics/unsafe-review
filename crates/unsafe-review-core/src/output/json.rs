@@ -294,6 +294,7 @@ mod tests {
         "raw_pointer_read_len_capacity_observed_not_guard",
         "raw_pointer_read_open_branch_bounds_guard",
         "raw_pointer_read_open_branch_shadowed_origin_not_guard",
+        "raw_pointer_read_typed_shadowed_origin_not_guard",
         "raw_pointer_read_other_len_not_guard",
         "raw_pointer_read_reassigned_origin_not_guard",
         "raw_pointer_write_assignment",
