@@ -83,8 +83,9 @@ diagnostics, hovers, and command data for copying packets, copying witness
 commands, explaining routes, and opening statically related tests. There is no
 editor extension or live LSP server in this surface.
 
-`witness-plan` is a routing artifact. It lists suggested witness commands and
-limitations from existing cards, but it does not run those commands.
+`witness-plan` is a routing artifact. It lists ReviewCard next actions,
+suggested witness commands, and limitations from existing cards, but it does
+not run those commands.
 
 ## PR Artifacts
 
