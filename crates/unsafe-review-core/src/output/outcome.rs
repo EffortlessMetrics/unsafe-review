@@ -56,6 +56,8 @@ pub struct OutcomeCardState {
     #[serde(rename = "class")]
     pub class_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub operation_family: Option<String>,
     pub priority: String,
     pub missing_count: usize,
@@ -83,6 +85,8 @@ struct SnapshotCard {
     id: String,
     #[serde(rename = "class")]
     class_name: String,
+    #[serde(default)]
+    operation: Option<String>,
     #[serde(default)]
     operation_family: Option<String>,
     priority: String,
@@ -365,6 +369,7 @@ fn snapshot_id(snapshot: &Snapshot) -> String {
     for card in cards {
         feed_hash(&mut hash, &card.id);
         feed_hash(&mut hash, &card.class_name);
+        feed_hash(&mut hash, card.operation.as_deref().unwrap_or(""));
         feed_hash(&mut hash, card.operation_family.as_deref().unwrap_or(""));
         feed_hash(&mut hash, &card.priority);
         feed_hash(&mut hash, &card.witness);
@@ -411,7 +416,13 @@ fn markdown_state(state: Option<&OutcomeCardState>) -> String {
                 state.class_name, state.priority, state.missing_count, state.witness
             )];
             if let Some(operation_family) = state.operation_family.as_deref() {
-                parts.push(format!("operation `{}`", markdown_cell(operation_family)));
+                parts.push(format!(
+                    "operation family `{}`",
+                    markdown_cell(operation_family)
+                ));
+            }
+            if let Some(operation) = state.operation.as_deref() {
+                parts.push(format!("operation `{}`", markdown_cell(operation)));
             }
             if let Some(next_action) = state.next_action.as_deref() {
                 parts.push(format!("next: {}", markdown_cell(next_action)));
@@ -440,6 +451,7 @@ impl From<&SnapshotCard> for OutcomeCardState {
     fn from(card: &SnapshotCard) -> Self {
         Self {
             class_name: card.class_name.clone(),
+            operation: card.operation.clone(),
             operation_family: card.operation_family.clone(),
             priority: card.priority.clone(),
             missing_count: card.missing.len(),
@@ -566,6 +578,10 @@ mod tests {
             value["cards"]["new"][0]["after"]["operation_family"],
             "raw_pointer_read"
         );
+        assert_eq!(
+            value["cards"]["new"][0]["after"]["operation"],
+            "unsafe { ptr.cast::<Header>().read() }"
+        );
         assert!(
             value["cards"]["new"][0]["after"]["next_action"]
                 .as_str()
@@ -605,6 +621,7 @@ mod tests {
         assert!(markdown.contains("## Trust boundary"));
         assert!(markdown.contains("UR-new-c1"));
         assert!(markdown.contains("raw_pointer_read"));
+        assert!(markdown.contains("unsafe { ptr.cast::<Header>().read() }"));
         assert!(markdown.contains("Add or expose"));
         Ok(())
     }
@@ -754,6 +771,7 @@ mod tests {
             r#"{{
       "id": "{id}",
       "class": "{class_name}",
+      "operation": "unsafe {{ ptr.cast::<Header>().read() }}",
       "operation_family": "raw_pointer_read",
       "priority": "{priority}",
       "witness": "{witness}",

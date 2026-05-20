@@ -532,6 +532,10 @@ fn outcome_compares_existing_json_snapshots_without_safety_claim() -> Result<(),
         outcome["cards"]["new"][0]["after"]["operation_family"],
         "raw_pointer_read"
     );
+    assert_eq!(
+        outcome["cards"]["new"][0]["after"]["operation"],
+        "unsafe { ptr.cast::<Header>().read() }"
+    );
     assert!(
         outcome["cards"]["new"][0]["after"]["next_action"]
             .as_str()
@@ -580,6 +584,7 @@ fn outcome_compares_existing_json_snapshots_without_safety_claim() -> Result<(),
     assert!(markdown.contains("## Trust boundary"));
     assert!(markdown.contains("| 1 | 0 | 0 | 0 | 0 |"));
     assert!(markdown.contains("raw_pointer_read"));
+    assert!(markdown.contains("unsafe { ptr.cast::<Header>().read() }"));
     assert!(markdown.contains("Add or expose"));
 
     Ok(())

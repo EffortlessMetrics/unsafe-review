@@ -113,8 +113,9 @@ separate policy surfaces and are not part of badge proof.
 - Each outcome card includes a reason that explains the snapshot movement, such
   as a class change, missing-evidence count change, witness receipt strength
   movement, new card, or resolved card.
-- Outcome card states include saved ReviewCard operation family and next action
-  when present in the input snapshots, without changing outcome classification.
+- Outcome card states include saved ReviewCard operation expression, operation
+  family, and next action when present in the input snapshots, without changing
+  outcome classification.
 - If evidence is not knowable statically, repo output and badges count the
   card state instead of overclaiming.
 
