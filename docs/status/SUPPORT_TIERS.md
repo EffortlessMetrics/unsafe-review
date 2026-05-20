@@ -36,9 +36,11 @@ assertions, enclosing positive branches, and unavailable-path early returns, and
 rejects other receivers, bare observations, and closed positive branches.
 
 Copy operation range evidence is intentionally conservative:
-`copy_nonoverlapping_other_len_not_guard` and `ptr_copy_other_len_not_guard`
-pin that an unrelated slice length assertion does not discharge the
-source/destination range obligation.
+`copy_nonoverlapping_slice_range_guard` and `ptr_copy_slice_range_guard` pin
+same-call source and destination slice length guards as valid-range evidence,
+while `copy_nonoverlapping_other_len_not_guard` and
+`ptr_copy_other_len_not_guard` pin that an unrelated slice length assertion does
+not discharge the source/destination range obligation.
 
 | Capability | Tier | Surface | Proof | Known limits |
 |---|---|---|---|---|
