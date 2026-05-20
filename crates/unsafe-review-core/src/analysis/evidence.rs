@@ -691,24 +691,36 @@ fn raw_pointer_read_function_argument(compact_expression: &str) -> Option<&str> 
 
 fn pointer_origin_receiver_before(before_operation: &str, pointer: &str) -> Option<String> {
     if pointer.contains(".as_ptr()") || pointer.contains(".as_mut_ptr()") {
-        return pointer
-            .split(".as_")
-            .next()
-            .filter(|receiver| !receiver.is_empty())
-            .map(str::to_string);
+        return pointer_origin_receiver(pointer).map(str::to_string);
     }
-    before_operation.split(';').find_map(|statement| {
-        let (left, right) = statement.split_once('=')?;
-        let binding = let_binding_name(left)?;
+    let mut current_origin = None;
+    for statement in before_operation.split(';') {
+        let Some((left, right)) = statement.split_once('=') else {
+            continue;
+        };
+        let Some(binding) = assignment_binding_name(left) else {
+            continue;
+        };
         if binding != pointer {
-            return None;
+            continue;
         }
-        right
-            .strip_suffix(".as_ptr()")
-            .or_else(|| right.strip_suffix(".as_mut_ptr()"))
-            .filter(|receiver| !receiver.is_empty())
-            .map(str::to_string)
-    })
+        current_origin = pointer_origin_receiver(right).map(str::to_string);
+    }
+    current_origin
+}
+
+fn pointer_origin_receiver(expression: &str) -> Option<&str> {
+    expression
+        .strip_suffix(".as_ptr()")
+        .or_else(|| expression.strip_suffix(".as_mut_ptr()"))
+        .filter(|receiver| !receiver.is_empty())
+}
+
+fn assignment_binding_name(left_side: &str) -> Option<&str> {
+    if let Some(binding) = let_binding_name(left_side) {
+        return Some(binding);
+    }
+    is_simple_identifier(left_side).then_some(left_side)
 }
 
 fn has_origin_len_size_guard(compact: &str, origin: &str) -> bool {
