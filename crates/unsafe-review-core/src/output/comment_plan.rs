@@ -5,6 +5,7 @@ use serde::Serialize;
 
 const TRUST_BOUNDARY: &str = "Static unsafe contract review only; this is not a proof of memory safety, not UB-free status, and not a Miri result unless a witness receipt is attached.";
 const PLAN_BOUNDARY: &str = "Plan boundary: artifact-only inline comment candidate; unsafe-review did not post this comment, run witnesses, or make a policy decision.";
+const MAX_PLANNED_COMMENTS: usize = 3;
 
 pub(crate) fn render(output: &AnalyzeOutput) -> String {
     render_pretty(&CommentPlan::from(output))
@@ -38,6 +39,7 @@ impl From<&AnalyzeOutput> for CommentPlan {
                 .cards
                 .iter()
                 .filter(|card| should_plan_comment(card))
+                .take(MAX_PLANNED_COMMENTS)
                 .map(PlannedComment::from)
                 .collect(),
             trust_boundary: TRUST_BOUNDARY,
@@ -219,6 +221,36 @@ mod tests {
                 .as_str()
                 .unwrap_or("")
                 .contains("not UB-free status")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn comment_plan_caps_planned_comments() -> Result<(), String> {
+        let mut output = fixture_output("raw_pointer_alignment")?;
+        let template = output
+            .cards
+            .first()
+            .cloned()
+            .ok_or_else(|| "fixture should emit a card".to_string())?;
+        output.cards = (0..5)
+            .map(|idx| {
+                let mut card = template.clone();
+                card.id.0 = format!("card-{idx}");
+                card
+            })
+            .collect();
+        output.summary.cards = output.cards.len();
+        output.summary.open_actionable_gaps = output.cards.len();
+
+        let value = parse_json(&render(&output))?;
+
+        assert_eq!(
+            value["comments"]
+                .as_array()
+                .ok_or_else(|| "comments should be an array".to_string())?
+                .len(),
+            MAX_PLANNED_COMMENTS
         );
         Ok(())
     }
