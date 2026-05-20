@@ -725,6 +725,19 @@ mod tests {
     }
 
     #[test]
+    fn raw_pointer_read_bounds_evidence_requires_same_origin() -> Result<(), String> {
+        let output = fixture_output("raw_pointer_read_other_len_not_guard")?;
+        let card = single_card("raw_pointer_read_other_len_not_guard", &output)?;
+
+        assert_eq!(card.operation.family, OperationFamily::RawPointerRead);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(!obligation_discharge_present(card, "bounds"));
+        assert!(!obligation_discharge_present(card, "alignment"));
+        assert!(!card.discharge.present);
+        Ok(())
+    }
+
+    #[test]
     fn raw_pointer_alignment_evidence_accepts_enforced_same_pointer_guard() -> Result<(), String> {
         for fixture in [
             "raw_pointer_alignment_is_aligned_guard",
