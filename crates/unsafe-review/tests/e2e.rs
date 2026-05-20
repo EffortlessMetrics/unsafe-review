@@ -343,17 +343,17 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
         OsString::from(card_id),
     ])?;
     let explain = stdout_text(&explain)?;
+    assert!(explain.contains("## Why this card exists"));
     assert!(explain.contains("## Required safety conditions"));
-    assert!(explain.contains("## Recommended witness routes"));
+    assert!(explain.contains("## Evidence found"));
+    assert!(explain.contains("## Evidence missing"));
     assert!(explain.contains("**Operation:** `unsafe { ptr.cast::<Header>().read() }`"));
     assert!(explain.contains("**Operation family:** `raw_pointer_read`"));
-    assert!(explain.contains("## Verify commands"));
     assert!(explain.contains("cargo +nightly miri test read_header"));
     assert!(explain.contains(
         "- `cargo-careful`: cargo-careful is a cheaper compatibility-oriented runtime check"
     ));
     assert!(explain.contains("cargo +nightly careful test read_header"));
-    assert!(explain.contains("## Next action"));
     assert!(explain.contains(
         "Add or expose the local guard that discharges the `raw_pointer_read` safety obligation."
     ));
@@ -370,7 +370,9 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
         explain.contains("A related test mention is not proof that this unsafe site executed.")
     );
     assert!(explain.contains("Do not claim witness proof unless a matching receipt exists."));
+    assert!(explain.contains("## Witness route"));
     assert!(explain.contains("## Trust boundary"));
+    assert!(explain.contains("not UB-free status"));
 
     Ok(())
 }
