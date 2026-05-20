@@ -115,6 +115,7 @@ required_core_fixtures = [
   "raw_pointer_read_len_capacity_observed_not_guard",
   "raw_pointer_read_open_branch_bounds_guard",
   "raw_pointer_read_open_branch_shadowed_origin_not_guard",
+  "raw_pointer_read_typed_shadowed_origin_not_guard",
   "raw_pointer_read_other_len_not_guard",
   "raw_pointer_read_reassigned_origin_not_guard",
   "pointer_arithmetic_num_ctrl_bytes_guard",
@@ -1294,6 +1295,16 @@ expected_hazard = "pointer_validity"
 fixture = "raw_pointer_read_open_branch_shadowed_origin_not_guard"
 kind = "false_positive_control"
 claim = "raw pointer read open-branch bounds evidence rejects shadowed pointer origins"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_read"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "raw_pointer_read_typed_shadowed_origin_not_guard"
+kind = "false_positive_control"
+claim = "raw pointer read bounds evidence rejects typed shadowed pointer origins"
 support_tier = "Raw pointer card slice"
 expected_cards = 1
 expected_class = "guard_missing"

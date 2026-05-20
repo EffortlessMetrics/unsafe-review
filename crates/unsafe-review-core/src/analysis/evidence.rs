@@ -620,7 +620,11 @@ fn contains_simple_assignment_to(compact: &str, name: &str) -> bool {
     if !is_simple_identifier(name) {
         return false;
     }
-    if compact.contains(&format!("let{name}=")) || compact.contains(&format!("letmut{name}=")) {
+    if compact.contains(&format!("let{name}="))
+        || compact.contains(&format!("letmut{name}="))
+        || compact.contains(&format!("let{name}:"))
+        || compact.contains(&format!("letmut{name}:"))
+    {
         return true;
     }
     let marker = format!("{name}=");
