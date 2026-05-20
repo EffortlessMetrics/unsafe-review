@@ -422,7 +422,9 @@ fn is_documented_private_unsafe_contract_obligation(
 
 fn has_length_or_bounds_guard(lower: &str) -> bool {
     let compact = compact_code(lower);
-    has_bounds_assertion_guard(&compact) || has_bounds_open_positive_branch_guard(&compact)
+    has_bounds_assertion_guard(&compact)
+        || has_bounds_open_positive_branch_guard(&compact)
+        || has_len_capacity_equality_guard(lower)
 }
 
 fn has_bounds_guard(site: &ScannedSite, lower: &str) -> bool {
