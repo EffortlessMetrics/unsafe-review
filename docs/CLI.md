@@ -165,10 +165,10 @@ Use `explain` for a human-readable explanation of one card:
 unsafe-review explain --root fixtures/raw_pointer_alignment <card-id>
 ```
 
-The explanation includes the operation expression, operation family, required
-safety conditions, missing evidence, recommended witness routes, verify
-commands, next action, and the static-review trust boundary. It does not execute
-witnesses.
+The explanation is reviewer-first: why the card exists, required safety
+conditions, evidence found, evidence missing, what would resolve it, what would
+not resolve it, the recommended witness route, and the static-review trust
+boundary. It does not execute witnesses.
 
 Use `context` for the bounded agent packet:
 
