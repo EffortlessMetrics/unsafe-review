@@ -51,7 +51,8 @@ The `cards` array must reuse the canonical `ReviewCard` JSON shape. Repo JSON
 must not reclassify cards, invent a separate evidence model, or summarize raw
 unsafe usage as safety posture.
 
-Badge JSON is a small open-gap summary for shields-compatible consumers:
+Badge JSON is a small serde-backed open-gap summary for shields-compatible
+consumers:
 
 - `unsafe-review.json` reports `<n> open gaps`
 - `unsafe-review-plus.json` reports contract, guard, and current
