@@ -10,6 +10,7 @@
 | Proposals | why a workstream exists | `docs/proposals/` |
 | Specs | behavior contracts | `docs/specs/` |
 | ADRs | durable architecture decisions | `docs/adr/` |
+| Contribution process | swarm-to-main routing and source PR requirements | `docs/contributing/SWARM_TO_MAIN.md` |
 | Implementation plans | PR-sized sequence and proof commands | `plans/` |
 | Active lane | current dogfood-calibrated evidence loop | `docs/status/DOGFOOD_CALIBRATED_EVIDENCE_LANE.md` |
 | Dogfood index | selected real-crate dogfood targets and recorded outcome movement | `docs/dogfood/index.md`, `docs/dogfood/index.json` |
