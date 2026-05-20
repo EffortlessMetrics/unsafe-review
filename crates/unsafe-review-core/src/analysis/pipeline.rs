@@ -773,6 +773,18 @@ mod tests {
     }
 
     #[test]
+    fn raw_pointer_read_bounds_evidence_accepts_as_cast_pointer_origin() -> Result<(), String> {
+        let output = fixture_output("raw_pointer_read_as_cast_origin_bounds_guard")?;
+        let card = single_card("raw_pointer_read_as_cast_origin_bounds_guard", &output)?;
+
+        assert_eq!(card.operation.family, OperationFamily::RawPointerRead);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(obligation_discharge_present(card, "bounds"));
+        assert!(!obligation_discharge_present(card, "alignment"));
+        Ok(())
+    }
+
+    #[test]
     fn raw_pointer_alignment_evidence_accepts_enforced_same_pointer_guard() -> Result<(), String> {
         for fixture in [
             "raw_pointer_alignment_is_aligned_guard",
