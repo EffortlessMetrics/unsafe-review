@@ -17,10 +17,24 @@ pub struct PolicyReport {
     pub policy: String,
     pub audit_date: String,
     pub trust_boundary: String,
+    pub limitations: Vec<String>,
+    pub classification_explanations: PolicyReportClassificationExplanations,
     pub summary: PolicyReportSummary,
     pub cards: Vec<PolicyReportCard>,
     pub resolved_baseline: Vec<PolicyLedgerEntry>,
+    pub unmatched_baseline: Vec<PolicyLedgerEntry>,
     pub expired_suppressions: Vec<PolicyLedgerEntry>,
+    pub invalid_ledger_entries: Vec<PolicyInvalidLedgerEntry>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct PolicyReportClassificationExplanations {
+    pub new_gap: String,
+    pub baseline_known: String,
+    pub suppressed: String,
+    pub resolved_baseline: String,
+    pub expired_suppression: String,
+    pub non_actionable: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
@@ -30,7 +44,9 @@ pub struct PolicyReportSummary {
     pub baseline_known: usize,
     pub suppressed: usize,
     pub resolved_baseline: usize,
+    pub unmatched_baseline: usize,
     pub expired_suppressions: usize,
+    pub invalid_ledger_entries: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -41,6 +57,7 @@ pub struct PolicyReportCard {
     pub operation: String,
     pub operation_family: String,
     pub policy_status: String,
+    pub policy_reason: String,
     pub missing_count: usize,
     pub next_action: String,
 }
@@ -53,6 +70,12 @@ pub struct PolicyLedgerEntry {
     pub evidence: Option<String>,
     pub review_after: Option<String>,
     pub expires: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct PolicyInvalidLedgerEntry {
+    pub path: String,
+    pub reason: String,
 }
 
 pub(crate) fn evaluate(output: &AnalyzeOutput) -> Result<PolicyReport, String> {
@@ -102,6 +125,7 @@ fn evaluate_with_date(output: &AnalyzeOutput, audit_date: &str) -> Result<Policy
             operation: card.operation.expression.clone(),
             operation_family: card.operation.family.as_str().to_string(),
             policy_status: policy_status(&card.class).to_string(),
+            policy_reason: policy_reason(policy_status(&card.class)).to_string(),
             missing_count: card.missing.len(),
             next_action: card.next_action.summary.clone(),
         })
@@ -121,7 +145,9 @@ fn evaluate_with_date(output: &AnalyzeOutput, audit_date: &str) -> Result<Policy
             .filter(|card| card.policy_status == "suppressed")
             .count(),
         resolved_baseline: resolved_baseline.len(),
+        unmatched_baseline: resolved_baseline.len(),
         expired_suppressions: expired_suppressions.len(),
+        invalid_ledger_entries: 0,
     };
 
     Ok(PolicyReport {
@@ -131,10 +157,14 @@ fn evaluate_with_date(output: &AnalyzeOutput, audit_date: &str) -> Result<Policy
         policy: "advisory".to_string(),
         audit_date: audit_date.to_string(),
         trust_boundary: TRUST_BOUNDARY.to_string(),
+        limitations: policy_report_limitations(),
+        classification_explanations: PolicyReportClassificationExplanations::default(),
         summary,
         cards,
+        unmatched_baseline: resolved_baseline.clone(),
         resolved_baseline,
         expired_suppressions,
+        invalid_ledger_entries: Vec::new(),
     })
 }
 
@@ -162,6 +192,31 @@ pub(crate) fn render_markdown(report: &PolicyReport) -> String {
         report.summary.expired_suppressions
     ));
 
+    out.push_str("## Classification explanations\n\n");
+    out.push_str("| Classification | Meaning |\n");
+    out.push_str("|---|---|\n");
+    out.push_str(&format!(
+        "| `new_gap` | {} |\n",
+        markdown_cell(&report.classification_explanations.new_gap)
+    ));
+    out.push_str(&format!(
+        "| `baseline_known` | {} |\n",
+        markdown_cell(&report.classification_explanations.baseline_known)
+    ));
+    out.push_str(&format!(
+        "| `suppressed` | {} |\n",
+        markdown_cell(&report.classification_explanations.suppressed)
+    ));
+    out.push_str(&format!(
+        "| `resolved_baseline` | {} |\n",
+        markdown_cell(&report.classification_explanations.resolved_baseline)
+    ));
+    out.push_str(&format!(
+        "| `expired_suppression` | {} |\n",
+        markdown_cell(&report.classification_explanations.expired_suppression)
+    ));
+    out.push('\n');
+
     out.push_str("## Current cards\n\n");
     if report.cards.is_empty() {
         out.push_str(NO_CHANGED_GAPS_MESSAGE);
@@ -169,12 +224,13 @@ pub(crate) fn render_markdown(report: &PolicyReport) -> String {
         out.push_str(NO_CHANGED_GAPS_LIMITATION);
         out.push_str("\n\n");
     } else {
-        out.push_str("| Status | Card | Class | Operation family | Operation | Missing evidence | Next action |\n");
-        out.push_str("|---|---|---|---|---|---:|---|\n");
+        out.push_str("| Status | Reason | Card | Class | Operation family | Operation | Missing evidence | Next action |\n");
+        out.push_str("|---|---|---|---|---|---|---:|---|\n");
         for card in &report.cards {
             out.push_str(&format!(
-                "| `{}` | `{}` | `{}` | `{}` | `{}` | {} | {} |\n",
+                "| `{}` | {} | `{}` | `{}` | `{}` | `{}` | {} | {} |\n",
                 card.policy_status,
+                markdown_cell(&card.policy_reason),
                 card.card_id,
                 card.class_name,
                 card.operation_family,
@@ -196,6 +252,14 @@ pub(crate) fn render_markdown(report: &PolicyReport) -> String {
         "Expired suppression entries",
         &report.expired_suppressions,
     );
+
+    out.push_str("## Limitations\n\n");
+    for limitation in &report.limitations {
+        out.push_str("- ");
+        out.push_str(limitation);
+        out.push('\n');
+    }
+    out.push('\n');
 
     out.push_str("## Trust boundary\n\n");
     out.push_str(&report.trust_boundary);
@@ -251,6 +315,42 @@ fn policy_status(class: &ReviewClass) -> &'static str {
         class if class.is_actionable() => "new_gap",
         _ => "non_actionable",
     }
+}
+
+fn policy_reason(status: &str) -> &'static str {
+    match status {
+        "new_gap" => {
+            "Exact ReviewCard identity was not found in the baseline ledger or active suppression ledger."
+        }
+        "baseline_known" => "Exact ReviewCard identity matched a baseline ledger entry.",
+        "suppressed" => "Exact ReviewCard identity matched an active suppression ledger entry.",
+        "non_actionable" => "ReviewCard class is not actionable under the advisory policy report.",
+        _ => "Policy status is not recognized by this schema version.",
+    }
+}
+
+impl Default for PolicyReportClassificationExplanations {
+    fn default() -> Self {
+        Self {
+            new_gap: policy_reason("new_gap").to_string(),
+            baseline_known: policy_reason("baseline_known").to_string(),
+            suppressed: policy_reason("suppressed").to_string(),
+            resolved_baseline:
+                "Baseline ledger entry no longer appears in the current ReviewCard set.".to_string(),
+            expired_suppression:
+                "Suppression ledger entry expiry date is before the report audit date.".to_string(),
+            non_actionable: policy_reason("non_actionable").to_string(),
+        }
+    }
+}
+
+fn policy_report_limitations() -> Vec<String> {
+    vec![
+        "Advisory report only; it does not change command exit status or enforce blocking policy.".to_string(),
+        "Matching is exact counted ReviewCard identity only; broad path, owner, or operation-family suppression is not supported.".to_string(),
+        "The report does not execute witnesses, post comments, edit source, or prove memory safety.".to_string(),
+        "Malformed ledger entries fail the report instead of being recovered into invalid_ledger_entries.".to_string(),
+    ]
 }
 
 fn optional_text(value: Option<&str>) -> String {
@@ -313,20 +413,41 @@ mod tests {
 
         assert_eq!(report.mode, "policy-report");
         assert_eq!(report.policy, "advisory");
+        assert_eq!(report.limitations.len(), 4);
+        assert!(report.limitations[0].contains("Advisory report only"));
+        assert!(
+            report
+                .classification_explanations
+                .new_gap
+                .contains("baseline ledger or active suppression ledger")
+        );
         assert_eq!(report.summary.new_gaps, 1);
         assert_eq!(report.summary.baseline_known, 0);
+        assert_eq!(report.summary.unmatched_baseline, 0);
+        assert_eq!(report.summary.invalid_ledger_entries, 0);
+        assert!(report.unmatched_baseline.is_empty());
+        assert!(report.invalid_ledger_entries.is_empty());
         let card = report
             .cards
             .first()
             .ok_or_else(|| "policy report produced no cards".to_string())?;
         assert_eq!(card.operation, "unsafe { ptr.cast::<Header>().read() }");
         assert_eq!(card.operation_family, "raw_pointer_read");
+        assert_eq!(card.policy_status, "new_gap");
+        assert!(
+            card.policy_reason
+                .contains("was not found in the baseline ledger")
+        );
         assert!(card.next_action.contains("Add or expose"));
         let markdown = render_markdown(&report);
+        assert!(markdown.contains("## Classification explanations"));
+        assert!(markdown.contains("Exact ReviewCard identity was not found"));
         assert!(markdown.contains("Operation family | Operation"));
+        assert!(markdown.contains("| Status | Reason | Card | Class |"));
         assert!(markdown.contains("| `raw_pointer_read` |"));
         assert!(markdown.contains("unsafe { ptr.cast::<Header>().read() }"));
         assert!(markdown.contains("Add or expose"));
+        assert!(markdown.contains("## Limitations"));
         assert!(report.trust_boundary.contains("does not enforce blocking"));
         Ok(())
     }
@@ -429,11 +550,14 @@ expires = "2026-01-01"
         assert_eq!(report.summary.new_gaps, 0);
         assert_eq!(report.summary.baseline_known, 1);
         assert_eq!(report.summary.resolved_baseline, 1);
+        assert_eq!(report.summary.unmatched_baseline, 1);
         assert_eq!(report.summary.expired_suppressions, 1);
+        assert_eq!(report.summary.invalid_ledger_entries, 0);
         assert_eq!(
             report.resolved_baseline[0].evidence.as_deref(),
             Some("fixture")
         );
+        assert_eq!(report.unmatched_baseline, report.resolved_baseline);
         assert_eq!(
             report.expired_suppressions[0].evidence.as_deref(),
             Some("fixture")

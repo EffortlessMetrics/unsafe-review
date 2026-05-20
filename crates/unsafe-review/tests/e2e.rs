@@ -1504,8 +1504,19 @@ fn policy_report_is_advisory_and_counts_baseline_state() -> Result<(), Box<dyn E
     let report = parse_json(&stdout_text(&report)?)?;
     assert_eq!(report["mode"], "policy-report");
     assert_eq!(report["policy"], "advisory");
+    assert_eq!(report["schema_version"], "0.1");
+    assert_eq!(report["limitations"].as_array().map(Vec::len), Some(4));
+    assert!(
+        json_str(
+            &report["classification_explanations"]["new_gap"],
+            "classification_explanations.new_gap"
+        )?
+        .contains("baseline ledger or active suppression ledger")
+    );
     assert_eq!(report["summary"]["new_gaps"], 1);
     assert_eq!(report["summary"]["baseline_known"], 0);
+    assert_eq!(report["summary"]["unmatched_baseline"], 0);
+    assert_eq!(report["summary"]["invalid_ledger_entries"], 0);
     assert_eq!(
         report["cards"][0]["operation"],
         "unsafe { ptr.cast::<Header>().read() }"
@@ -1515,6 +1526,15 @@ fn policy_report_is_advisory_and_counts_baseline_state() -> Result<(), Box<dyn E
         json_str(&report["cards"][0]["next_action"], "cards[0].next_action")?
             .contains("Add or expose")
     );
+    assert!(
+        json_str(
+            &report["cards"][0]["policy_reason"],
+            "cards[0].policy_reason"
+        )?
+        .contains("was not found in the baseline ledger")
+    );
+    assert!(report["unmatched_baseline"].as_array().is_some());
+    assert!(report["invalid_ledger_entries"].as_array().is_some());
     assert!(
         json_str(&report["trust_boundary"], "trust_boundary")?
             .contains("does not enforce blocking policy")
@@ -1550,9 +1570,15 @@ fn policy_report_is_advisory_and_counts_baseline_state() -> Result<(), Box<dyn E
     assert_eq!(baselined["summary"]["new_gaps"], 0);
     assert_eq!(baselined["summary"]["baseline_known"], 1);
     assert_eq!(baselined["summary"]["resolved_baseline"], 1);
+    assert_eq!(baselined["summary"]["unmatched_baseline"], 1);
+    assert_eq!(baselined["summary"]["invalid_ledger_entries"], 0);
     assert_eq!(
         baselined["resolved_baseline"][0]["evidence"],
         "resolved fixture card"
+    );
+    assert_eq!(
+        baselined["unmatched_baseline"][0]["card_id"],
+        baselined["resolved_baseline"][0]["card_id"]
     );
 
     let markdown_path = temp.path().join("policy-report.md");
@@ -1571,12 +1597,16 @@ fn policy_report_is_advisory_and_counts_baseline_state() -> Result<(), Box<dyn E
     assert_eq!(stdout_text(&markdown)?.trim(), "");
     let markdown = fs::read_to_string(markdown_path)?;
     assert!(markdown.contains("# unsafe-review policy report"));
+    assert!(markdown.contains("## Classification explanations"));
+    assert!(markdown.contains("Exact ReviewCard identity matched a baseline ledger entry"));
     assert!(markdown.contains("Next action"));
+    assert!(markdown.contains("| Status | Reason | Card | Class |"));
     assert!(markdown.contains("raw_pointer_read"));
     assert!(markdown.contains("unsafe { ptr.cast::<Header>().read() }"));
     assert!(markdown.contains("Known baseline card"));
     assert!(markdown.contains("| Card | Owner | Review after | Expires | Reason | Evidence |"));
     assert!(markdown.contains("resolved fixture card"));
+    assert!(markdown.contains("## Limitations"));
     assert!(markdown.contains("## Trust boundary"));
 
     Ok(())
