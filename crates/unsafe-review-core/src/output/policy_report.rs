@@ -1,8 +1,8 @@
 use crate::api::AnalyzeOutput;
 use crate::domain::ReviewClass;
+use crate::policy::{LedgerEntry as PolicyLedgerRecord, LedgerKind, load_ledger_entries};
 use serde::Serialize;
 use std::collections::BTreeSet;
-use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -223,62 +223,21 @@ fn render_ledger_section(out: &mut String, title: &str, entries: &[PolicyLedgerE
     out.push('\n');
 }
 
-#[derive(Clone, Copy)]
-enum LedgerKind {
-    Baseline,
-    Suppression,
-}
-
 fn ledger_entries(path: &Path, kind: LedgerKind) -> Result<Vec<PolicyLedgerEntry>, String> {
-    if !path.is_file() {
-        return Ok(Vec::new());
-    }
-    let text =
-        fs::read_to_string(path).map_err(|err| format!("read {} failed: {err}", path.display()))?;
-    let value = text
-        .parse::<toml::Table>()
-        .map(toml::Value::Table)
-        .map_err(|err| format!("{} is not valid TOML: {err}", path.display()))?;
-    let status = value
-        .get("status")
-        .and_then(toml::Value::as_str)
-        .unwrap_or("active");
-    if status == "empty" {
-        return Ok(Vec::new());
-    }
-    let entries = value
-        .get("entries")
-        .and_then(toml::Value::as_array)
-        .map_or(&[][..], Vec::as_slice);
-    let mut report_entries = Vec::new();
-    for entry in entries {
-        let Some(entry) = entry.as_table() else {
-            continue;
-        };
-        let Some(card_id) = entry.get("card_id").and_then(toml::Value::as_str) else {
-            continue;
-        };
-        report_entries.push(PolicyLedgerEntry {
-            card_id: card_id.to_string(),
-            owner: optional_string(entry, "owner"),
-            reason: optional_string(entry, "reason"),
-            evidence: optional_string(entry, "evidence"),
-            review_after: optional_string(entry, "review_after"),
-            expires: match kind {
-                LedgerKind::Baseline => None,
-                LedgerKind::Suppression => optional_string(entry, "expires"),
-            },
-        });
-    }
-    Ok(report_entries)
+    load_ledger_entries(path, kind).map(|entries| entries.into_iter().map(From::from).collect())
 }
 
-fn optional_string(entry: &toml::map::Map<String, toml::Value>, key: &str) -> Option<String> {
-    entry
-        .get(key)
-        .and_then(toml::Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .map(ToOwned::to_owned)
+impl From<PolicyLedgerRecord> for PolicyLedgerEntry {
+    fn from(entry: PolicyLedgerRecord) -> Self {
+        Self {
+            card_id: entry.card_id,
+            owner: Some(entry.owner),
+            reason: Some(entry.reason),
+            evidence: Some(entry.evidence),
+            review_after: entry.review_after,
+            expires: entry.expires,
+        }
+    }
 }
 
 fn policy_status(class: &ReviewClass) -> &'static str {
@@ -329,6 +288,7 @@ fn civil_from_days(days_since_epoch: i64) -> (i32, u32, u32) {
 mod tests {
     use super::*;
     use crate::api::{AnalysisMode, AnalyzeInput, DiffSource, PolicyMode, Scope, analyze};
+    use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -456,6 +416,46 @@ expires = "2026-01-01"
         assert!(markdown.contains("| Card | Owner | Review after | Expires | Reason | Evidence |"));
         assert!(markdown.contains("## Expired suppression entries"));
         assert!(markdown.contains("fixture"));
+        Ok(())
+    }
+
+    #[test]
+    fn policy_report_rejects_malformed_ledger_metadata() -> Result<(), String> {
+        let source = fixture_path("raw_pointer_alignment");
+        let root = unique_temp_dir("unsafe-review-policy-report-invalid")?;
+        copy_dir(&source, &root)?;
+        let output = analyze(AnalyzeInput {
+            root: root.clone(),
+            scope: Scope::Repo,
+            diff: DiffSource::NoneRepoScan,
+            mode: AnalysisMode::Repo,
+            policy: PolicyMode::Advisory,
+            include_unchanged_tests: true,
+            max_cards: None,
+        })?;
+        let policy = root.join("policy");
+        fs::create_dir_all(&policy).map_err(|err| format!("create policy failed: {err}"))?;
+        fs::write(
+            policy.join("unsafe-review-baseline.toml"),
+            r#"schema_version = "0.1"
+status = "active"
+
+[[entries]]
+card_id = "UR-invalid-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1"
+owner = "core/policy"
+reason = "accepted current debt"
+review_after = "2026-08-01"
+"#,
+        )
+        .map_err(|err| format!("write invalid baseline failed: {err}"))?;
+
+        let err = match evaluate_with_date(&output, "2026-05-18") {
+            Ok(_) => return Err("missing evidence should reject the policy report".to_string()),
+            Err(err) => err,
+        };
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp root failed: {err}"))?;
+        assert!(err.contains("missing string `evidence`"));
         Ok(())
     }
 
