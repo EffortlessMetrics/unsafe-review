@@ -225,6 +225,8 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     let witness_plan = fs::read_to_string(&witness_plan_path)?;
     assert!(witness_plan.contains("# unsafe-review witness plan"));
     assert!(witness_plan.contains("Route: `miri`"));
+    assert!(witness_plan.contains("Next action: Add or expose"));
+    assert!(witness_plan.contains("Verify command"));
     assert!(witness_plan.contains("cargo +nightly miri test read_header"));
     assert!(witness_plan.contains("does not run Miri"));
 

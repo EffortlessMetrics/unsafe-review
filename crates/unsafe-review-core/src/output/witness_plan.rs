@@ -37,6 +37,23 @@ fn render_card(out: &mut String, card: &ReviewCard) {
         missing_summary(card),
         card.witness.summary
     ));
+    out.push_str(&format!(
+        "- Next action: {}\n",
+        one_line(&card.next_action.summary)
+    ));
+    if !card.next_action.verify_commands.is_empty() {
+        out.push_str("- Verify command");
+        if card.next_action.verify_commands.len() > 1 {
+            out.push('s');
+        }
+        out.push_str(":\n\n");
+        for command in &card.next_action.verify_commands {
+            out.push_str("```bash\n");
+            out.push_str(command);
+            out.push_str("\n```\n");
+        }
+    }
+    out.push('\n');
 
     if card.routes.is_empty() {
         out.push_str("- Route: `human-deep-review`\n");
@@ -92,6 +109,8 @@ mod tests {
         assert!(rendered.contains("# unsafe-review witness plan"));
         assert!(rendered.contains("Route: `miri`"));
         assert!(rendered.contains("cargo +nightly miri test read_header"));
+        assert!(rendered.contains("Next action: Add or expose"));
+        assert!(rendered.contains("Verify command"));
         assert!(rendered.contains("Missing visible local guard"));
         assert!(rendered.contains("does not run Miri"));
         assert!(rendered.contains("not UB-free status"));
