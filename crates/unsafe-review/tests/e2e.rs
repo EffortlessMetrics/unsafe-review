@@ -501,6 +501,16 @@ fn outcome_compares_existing_json_snapshots_without_safety_claim() -> Result<(),
     assert_eq!(outcome["summary"]["new"], 1);
     assert_eq!(outcome["summary"]["resolved"], 0);
     assert!(outcome["cards"]["new"][0]["card_id"].is_string());
+    assert_eq!(
+        outcome["cards"]["new"][0]["after"]["operation_family"],
+        "raw_pointer_read"
+    );
+    assert!(
+        outcome["cards"]["new"][0]["after"]["next_action"]
+            .as_str()
+            .unwrap_or("")
+            .contains("Add or expose")
+    );
     assert!(
         outcome["cards"]["new"][0]["reason"]
             .as_str()
@@ -542,6 +552,8 @@ fn outcome_compares_existing_json_snapshots_without_safety_claim() -> Result<(),
     assert!(markdown.contains("## Limitations"));
     assert!(markdown.contains("## Trust boundary"));
     assert!(markdown.contains("| 1 | 0 | 0 | 0 | 0 |"));
+    assert!(markdown.contains("raw_pointer_read"));
+    assert!(markdown.contains("Add or expose"));
 
     Ok(())
 }
