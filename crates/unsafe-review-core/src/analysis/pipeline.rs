@@ -470,6 +470,11 @@ mod tests {
                 true,
             ),
             (
+                "raw_pointer_write_previous_slice_not_guard",
+                OperationFamily::RawPointerWrite,
+                true,
+            ),
+            (
                 "raw_pointer_write_other_u8_not_guard",
                 OperationFamily::RawPointerWrite,
                 true,
@@ -640,6 +645,18 @@ mod tests {
         assert!(!obligation_discharge_present(card, "pointer-live"));
         assert!(!obligation_discharge_present(card, "bounds"));
         assert!(!obligation_discharge_present(card, "allocation"));
+        Ok(())
+    }
+
+    #[test]
+    fn raw_pointer_write_bounds_evidence_requires_current_operation() -> Result<(), String> {
+        let output = fixture_output("raw_pointer_write_previous_slice_not_guard")?;
+        let card = single_card("raw_pointer_write_previous_slice_not_guard", &output)?;
+
+        assert_eq!(card.operation.family, OperationFamily::RawPointerWrite);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(!obligation_discharge_present(card, "bounds"));
+        assert!(!obligation_discharge_present(card, "initialized"));
         Ok(())
     }
 

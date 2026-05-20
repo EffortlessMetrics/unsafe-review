@@ -440,7 +440,7 @@ fn has_bounds_guard(site: &ScannedSite, lower: &str) -> bool {
             .to_ascii_lowercase()
             .contains("write_bytes")
     {
-        return has_write_bytes_bounds_evidence(lower);
+        return has_write_bytes_bounds_evidence(&site.operation.expression);
     }
     has_length_or_bounds_guard(lower)
 }
