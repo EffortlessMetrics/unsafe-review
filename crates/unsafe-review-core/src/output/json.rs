@@ -333,6 +333,7 @@ mod tests {
         "vec_set_len_capacity_observed_not_guard",
         "vec_set_len_unrelated_capacity_comparison_not_guard",
         "vec_set_len_cap_argument_not_guard",
+        "vec_set_len_reassigned_receiver_not_guard",
         "vec_set_len_with_capacity",
         "vec_set_len_call_result_init",
         "vec_set_len_shrink",
