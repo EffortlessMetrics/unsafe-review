@@ -85,6 +85,8 @@ required_core_fixtures = [
   "raw_pointer_write_bool_reassigned_byte_not_guard",
   "raw_pointer_write_bool_closed_branch_not_guard",
   "raw_pointer_write_previous_slice_not_guard",
+  "raw_pointer_write_previous_u8_not_guard",
+  "raw_pointer_write_previous_bool_not_guard",
   "raw_pointer_write_other_u8_not_guard",
   "raw_pointer_write_maybeuninit",
   "raw_pointer_write_other_maybeuninit_not_guard",
@@ -993,6 +995,26 @@ expected_hazard = "pointer_validity"
 fixture = "raw_pointer_write_previous_slice_not_guard"
 kind = "false_positive_control"
 claim = "raw pointer write_bytes bounds evidence must belong to the current operation"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_write"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "raw_pointer_write_previous_u8_not_guard"
+kind = "false_positive_control"
+claim = "raw pointer write_bytes u8 target evidence must belong to the current operation"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_write"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "raw_pointer_write_previous_bool_not_guard"
+kind = "false_positive_control"
+claim = "raw pointer write_bytes bool target evidence must belong to the current operation"
 support_tier = "Raw pointer card slice"
 expected_cards = 1
 expected_class = "guard_missing"

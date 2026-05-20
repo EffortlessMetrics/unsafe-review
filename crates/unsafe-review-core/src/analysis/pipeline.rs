@@ -475,6 +475,16 @@ mod tests {
                 true,
             ),
             (
+                "raw_pointer_write_previous_u8_not_guard",
+                OperationFamily::RawPointerWrite,
+                true,
+            ),
+            (
+                "raw_pointer_write_previous_bool_not_guard",
+                OperationFamily::RawPointerWrite,
+                true,
+            ),
+            (
                 "raw_pointer_write_other_u8_not_guard",
                 OperationFamily::RawPointerWrite,
                 true,
@@ -657,6 +667,23 @@ mod tests {
         assert_eq!(card.class, ReviewClass::GuardMissing);
         assert!(!obligation_discharge_present(card, "bounds"));
         assert!(!obligation_discharge_present(card, "initialized"));
+        Ok(())
+    }
+
+    #[test]
+    fn raw_pointer_write_target_evidence_requires_current_operation() -> Result<(), String> {
+        for fixture in [
+            "raw_pointer_write_previous_u8_not_guard",
+            "raw_pointer_write_previous_bool_not_guard",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
+
+            assert_eq!(card.operation.family, OperationFamily::RawPointerWrite);
+            assert_eq!(card.class, ReviewClass::GuardMissing);
+            assert!(!obligation_discharge_present(card, "alignment"));
+            assert!(!obligation_discharge_present(card, "initialized"));
+        }
         Ok(())
     }
 
