@@ -29,6 +29,17 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     assert_eq!(value["cards"][0]["operation_family"], "raw_pointer_read");
     let card_id = json_str(&value["cards"][0]["id"], "cards[0].id")?;
 
+    let human = run_success([
+        os("check"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        fixture.join("change.diff").into_os_string(),
+    ])?;
+    let human = stdout_text(&human)?;
+    assert!(human.contains("operation_family: raw_pointer_read"));
+    assert!(human.contains("next: Add or expose"));
+
     let root_relative_diff = run_success([
         os("check"),
         os("--root"),
