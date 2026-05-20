@@ -111,6 +111,16 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     let sarif = parse_json(&fs::read_to_string(&sarif_path)?)?;
     assert_eq!(sarif["version"], "2.1.0");
     assert!(sarif["runs"][0]["results"].is_array());
+    assert_eq!(
+        sarif["runs"][0]["results"][0]["properties"]["witnessRouteDetails"][0]["kind"],
+        "miri"
+    );
+    assert!(
+        sarif["runs"][0]["results"][0]["properties"]["verifyCommands"][0]
+            .as_str()
+            .unwrap_or("")
+            .contains("cargo +nightly miri test read_header")
+    );
 
     let comment_plan = run_success([
         os("check"),
