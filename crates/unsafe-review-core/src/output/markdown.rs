@@ -27,19 +27,21 @@ pub(crate) fn render(output: &AnalyzeOutput) -> String {
         out.push_str("No actionable unsafe-review cards found.\n\n");
     }
     out.push_str("## Cards\n\n");
-    out.push_str("| ID | Class | Hazard | Missing | Route |\n");
-    out.push_str("|---|---|---|---|---|\n");
+    out.push_str("| ID | Class | Operation | Hazard | Missing | Route | Next action |\n");
+    out.push_str("|---|---|---|---|---|---|---|\n");
     for card in &output.cards {
         let hazard = card.hazards.first().map_or("unknown", |h| h.as_str());
         let missing = card.missing.first().map_or("", |m| m.kind.as_str());
         let route = card.routes.first().map_or("human", |r| r.kind.as_str());
         out.push_str(&format!(
-            "| `{}` | `{}` | `{}` | `{}` | `{}` |\n",
-            card.id,
+            "| `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | {} |\n",
+            md_cell(&card.id.to_string()),
             card.class.as_str(),
+            md_cell(&one_line(&card.operation.expression)),
             hazard,
             missing,
-            route
+            route,
+            md_cell(&card.next_action.summary)
         ));
     }
     out.push_str("\n## Trust boundary\n\n");
@@ -362,6 +364,22 @@ mod tests {
     use super::*;
     use crate::api::{AnalysisMode, AnalyzeInput, DiffSource, PolicyMode, Scope, analyze};
     use std::path::PathBuf;
+
+    #[test]
+    fn markdown_report_projects_operation_and_next_action() -> Result<(), String> {
+        let output = fixture_output("raw_pointer_alignment")?;
+        let rendered = render(&output);
+
+        assert!(rendered.contains("# unsafe-review"));
+        assert!(
+            rendered
+                .contains("| ID | Class | Operation | Hazard | Missing | Route | Next action |")
+        );
+        assert!(rendered.contains("unsafe { ptr.cast::<Header>().read() }"));
+        assert!(rendered.contains("Add or expose the local guard"));
+        assert!(rendered.contains("not a proof of memory safety"));
+        Ok(())
+    }
 
     #[test]
     fn card_detail_explains_conditions_missing_evidence_and_routes() -> Result<(), String> {

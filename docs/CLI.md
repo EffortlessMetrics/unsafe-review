@@ -70,7 +70,7 @@ findings independently.
 |---|---|---|
 | `human` | `unsafe-review check --base origin/main` | terminal review |
 | `json` | `unsafe-review check --base origin/main --format json` | canonical machine-readable cards with operation, evidence, routes, and next action |
-| `markdown` | `unsafe-review check --diff change.diff --format markdown` | local report |
+| `markdown` | `unsafe-review check --diff change.diff --format markdown` | local report with operation and next-action context |
 | `pr-summary` | `unsafe-review check --base origin/main --format pr-summary --out target/unsafe-review/pr-summary.md` | sparse reviewer-facing PR artifact |
 | `sarif` | `unsafe-review check --base origin/main --format sarif --out target/unsafe-review/cards.sarif` | code-scanning-compatible artifact |
 | `comment-plan` | `unsafe-review check --base origin/main --format comment-plan --out target/unsafe-review/comment-plan.json` | artifact-only inline comment candidates with card ID, operation, routes, and verify commands |
