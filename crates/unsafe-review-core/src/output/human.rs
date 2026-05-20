@@ -107,6 +107,7 @@ mod tests {
         let rendered = render(&output);
 
         assert!(rendered.contains("required safety conditions:"));
+        assert!(rendered.contains("operation: unsafe { ptr.cast::<Header>().read() }"));
         assert!(rendered.contains("operation_family: raw_pointer_read"));
         assert!(rendered.contains("pointer is aligned for the accessed type"));
         assert!(rendered.contains("obligation evidence:"));
