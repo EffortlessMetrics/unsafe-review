@@ -293,6 +293,7 @@ mod tests {
         "raw_pointer_write_bytes",
         "raw_pointer_write_bool_bytes_guard",
         "raw_pointer_write_bool_reassigned_byte_not_guard",
+        "raw_pointer_write_bool_closed_branch_not_guard",
         "raw_pointer_write_other_u8_not_guard",
         "raw_pointer_write_maybeuninit",
         "raw_pointer_write_other_maybeuninit_not_guard",
