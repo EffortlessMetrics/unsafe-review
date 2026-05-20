@@ -44,6 +44,7 @@ target/unsafe-review/pr-summary.md
 target/unsafe-review/cards.sarif
 target/unsafe-review/comment-plan.json
 target/unsafe-review/witness-plan.md
+target/unsafe-review/lsp.json
 ```
 
 The default policy is advisory. The bundle is artifact-only: it does not run
@@ -62,6 +63,11 @@ This repository is unsafe.
 Miri failed.
 Miri passed.
 ```
+
+If no changed unsafe-review gaps are found, the terminal, PR summary, witness
+plan, and comment-plan artifact keep the same boundary: no changed gaps is not
+proof that the repo is safe, UB-free, Miri-clean, or that any unsafe site
+executed.
 
 For a deterministic smoke case, run the bundled fixture from a repo checkout:
 
@@ -115,14 +121,16 @@ artifact only; `unsafe-review` does not post comments by default.
 
 `first-pr` prints an `Inspect top card` command for the highest-priority card.
 Run that command to see why the card exists, what evidence is missing, what would
-resolve it, and what would not resolve it:
+resolve it, what would not resolve it, which witness route fits, and what
+unsafe-review is not claiming:
 
 ```bash
 unsafe-review explain <card-id>
 ```
 
 You can also copy any other card id from JSON, human output, or the PR summary
-and pass it to `explain`.
+and pass it to `explain`. For fixture-backed examples of common card families,
+see [Explain examples](explanation/explain-examples.md).
 
 Generate a bounded repair packet for an LLM or agent:
 

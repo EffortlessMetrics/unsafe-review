@@ -17,6 +17,10 @@ use unsafe_review_core::{
     render_receipt_audit_markdown, render_sarif, render_witness_plan, validate_witness_receipts,
 };
 
+const NO_CHANGED_GAPS_MESSAGE: &str = "No changed unsafe-review gaps were found.";
+const NO_CHANGED_GAPS_LIMITATION: &str =
+    "This does not prove the repo safe, UB-free, Miri-clean, or that any unsafe site executed.";
+
 pub(crate) fn execute(command: Command) -> Result<(), String> {
     match command {
         Command::Help => {
@@ -25,6 +29,10 @@ pub(crate) fn execute(command: Command) -> Result<(), String> {
         }
         Command::Version => {
             println!("unsafe-review {}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
+        Command::Support => {
+            print_support();
             Ok(())
         }
         Command::Doctor { root } => doctor(&root),
@@ -47,6 +55,37 @@ pub(crate) fn execute(command: Command) -> Result<(), String> {
         Command::PolicyReport(options) => policy_report(options),
         Command::Lsp => crate::lsp::serve(),
     }
+}
+
+fn print_support() {
+    println!("unsafe-review support");
+    println!();
+    println!("Current posture:");
+    println!("- ReviewCards: experimental; selected slices are fixture-backed or dogfood-backed.");
+    println!(
+        "- first-pr bundle: advisory; projects cards, summaries, SARIF, comment plans, witness plans, and saved LSP JSON from ReviewCards."
+    );
+    println!(
+        "- receipts: saved-output template/import/audit only; receipts attach external evidence to exact card identities."
+    );
+    println!("- outcome comparison: saved snapshot comparison only.");
+    println!("- policy report: advisory no-new-debt simulation only.");
+    println!("- comment posting: not default.");
+    println!("- source edits: not supported.");
+    println!("- witness execution: not default.");
+    println!("- blocking policy: not default.");
+    println!("- live LSP: deferred; saved lsp.json is the current editor-adjacent artifact.");
+    println!();
+    println!("Trust boundary:");
+    println!("- static unsafe contract review only.");
+    println!("- not memory-safety proof.");
+    println!("- not UB-free status.");
+    println!("- not Miri-clean status.");
+    println!("- not a site-execution claim unless a matching receipt says so.");
+    println!();
+    println!("Docs:");
+    println!("- docs/status/SUPPORT_SUMMARY.md");
+    println!("- docs/status/SUPPORT_TIERS.md");
 }
 
 fn run_check(options: CheckOptions, scope: Scope, mode: AnalysisMode) -> Result<(), String> {
@@ -104,20 +143,23 @@ fn first_pr(options: FirstPrOptions) -> Result<(), String> {
         &options.out_dir.join("witness-plan.md"),
         render_witness_plan(&output),
     )?;
+    write_artifact(&options.out_dir.join("lsp.json"), render_lsp(&output))?;
 
     println!("unsafe-review first-pr");
+    println!("unsafe-review wrote an advisory PR bundle.");
+    println!("- Artifact directory: {}", options.out_dir.display());
     println!("- Review cards: {}", output.summary.cards);
     println!(
         "- Open actionable gaps: {}",
         output.summary.open_actionable_gaps
     );
+    println!("Open:");
+    println!("  {}", options.out_dir.join("pr-summary.md").display());
     if output.summary.open_actionable_gaps == 0 {
-        println!("No changed unsafe-review gaps were found.");
-        println!(
-            "This does not prove the repo safe, not UB-free status, not a Miri-clean claim, and not proof that any unsafe site executed."
-        );
+        println!("{NO_CHANGED_GAPS_MESSAGE}");
+        println!("{NO_CHANGED_GAPS_LIMITATION}");
     } else if let Some(card) = output.cards.first() {
-        println!("Top action:");
+        println!("Top card:");
         println!(
             "  {}:{} `{}`",
             card.site.location.file.display(),
@@ -152,11 +194,13 @@ fn first_pr(options: FirstPrOptions) -> Result<(), String> {
         "cards.sarif",
         "comment-plan.json",
         "witness-plan.md",
+        "lsp.json",
     ] {
         println!("  {}", options.out_dir.join(name).display());
     }
+    println!("Trust boundary:");
     println!(
-        "Trust boundary: advisory static review only; did not run witnesses, post comments, edit source, or enforce blocking policy."
+        "  advisory static review only; did not run witnesses, post comments, edit source, or enforce blocking policy."
     );
 
     Ok(())
@@ -690,6 +734,7 @@ fn print_help() {
     println!("  badges  [--root .] [--out badges]");
     println!("  explain [--root .] [--json|--format json] <card-id>");
     println!("  context [--root .] [--json|--format json] <card-id>");
+    println!("  support");
     println!(
         "  outcome --before <cards.json> --after <cards.json> [--format json|markdown] [--out file]"
     );

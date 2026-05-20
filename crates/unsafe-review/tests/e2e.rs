@@ -216,7 +216,9 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
             .contains("actionable high-priority review card")
     );
     let planned_body = planned_comment["body"].as_str().unwrap_or("");
-    assert!(planned_body.contains("`guard_missing` for `raw_pointer_read`"));
+    assert!(planned_body.contains(
+        "`guard_missing` for `unsafe { ptr.cast::<Header>().read() }` (`raw_pointer_read`)"
+    ));
     assert!(planned_body.contains("Missing visible local guard for inferred safety obligations"));
     assert!(planned_body.contains("No witness receipt imported for this card"));
     assert!(planned_body.contains("Next action: Add or expose the local guard"));
@@ -340,8 +342,9 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     assert!(witness_plan.contains("- Review cards: 1"));
     assert!(witness_plan.contains("- Open actionable gaps: 1"));
     assert!(witness_plan.contains("- Policy mode: `advisory`"));
-    assert!(witness_plan.contains("## Routes"));
-    assert!(witness_plan.contains(&format!("### `{card_id}`")));
+    assert!(witness_plan.contains("## Route groups"));
+    assert!(witness_plan.contains("### Miri / cargo-careful"));
+    assert!(witness_plan.contains(&format!("#### `{card_id}`")));
     assert!(witness_plan.contains("- Class: `guard_missing`"));
     assert!(witness_plan.contains("- Location: src/lib.rs:8"));
     assert!(witness_plan.contains("- Operation: `unsafe { ptr.cast::<Header>().read() }`"));
@@ -360,6 +363,9 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
         witness_plan.contains("cargo-careful is a cheaper compatibility-oriented runtime check")
     );
     assert!(witness_plan.contains("cargo +nightly careful test read_header"));
+    assert!(witness_plan.contains("What it can show"));
+    assert!(witness_plan.contains("What it cannot prove"));
+    assert!(witness_plan.contains("unsafe-review receipt import-miri"));
     assert!(witness_plan.contains("## Trust boundary"));
     assert!(witness_plan.contains("does not run Miri"));
     assert!(
@@ -508,16 +514,18 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     assert!(explain.contains("**Class:** `guard_missing`"));
     assert!(explain.contains("**Location:** src/lib.rs:8"));
     assert!(explain.contains("**Operation:** `unsafe { ptr.cast::<Header>().read() }`"));
+    assert!(explain.contains("**Operation family:** `raw_pointer_read`"));
+    assert!(explain.contains("## Why this card exists"));
     assert!(explain.contains("## Required safety conditions"));
     assert!(explain.contains("- pointer is live and dereferenceable for the accessed type"));
     assert!(explain.contains("- pointer is aligned for the accessed type"));
-    assert!(explain.contains("## Hazards"));
+    assert!(explain.contains("Relevant hazard families:"));
     assert!(explain.contains("- `pointer_validity`"));
     assert!(explain.contains("- `alignment`"));
-    assert!(explain.contains("## Evidence"));
+    assert!(explain.contains("## Evidence found"));
     assert!(explain.contains("- Contract: Nearby `SAFETY:` comment was detected"));
     assert!(explain.contains(
-        "- Discharge: Some inferred safety obligations are missing local guard evidence"
+        "- Guard/discharge: Some inferred safety obligations are missing local guard evidence"
     ));
     assert!(explain.contains("- Reach: 1 related test file(s) mention owner `read_header`"));
     assert!(
@@ -526,24 +534,23 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
         )
     );
     assert!(explain.contains("- Witness: No imported witness receipt was found"));
-    assert!(explain.contains("## Obligation evidence"));
+    assert!(explain.contains("Obligation evidence matrix:"));
     assert!(explain.contains(
         "- `bounds`: contract `present`, guard `present`, reach `present`, witness `missing`"
     ));
     assert!(explain.contains(
         "- `alignment`: contract `present`, guard `missing`, reach `present`, witness `missing`"
     ));
-    assert!(explain.contains("## Missing evidence"));
+    assert!(explain.contains("## Evidence missing"));
     assert!(explain.contains("- Missing visible local guard for inferred safety obligations"));
     assert!(explain.contains("- No witness receipt imported for this card"));
-    assert!(explain.contains("## Recommended witness routes"));
+    assert!(explain.contains("## Witness route"));
     assert!(explain.contains("- `miri`: Pure-Rust UB-adjacent hazard"));
     assert!(explain.contains("cargo +nightly miri test read_header"));
     assert!(explain.contains(
         "- `cargo-careful`: cargo-careful is a cheaper compatibility-oriented runtime check"
     ));
     assert!(explain.contains("cargo +nightly careful test read_header"));
-    assert!(explain.contains("## Next action"));
     assert!(explain.contains(
         "Add or expose the local guard that discharges the `raw_pointer_read` safety obligation."
     ));
@@ -560,9 +567,11 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
         explain.contains("A related test mention is not proof that this unsafe site executed.")
     );
     assert!(explain.contains("Do not claim witness proof unless a matching receipt exists."));
+    assert!(explain.contains("## Witness route"));
     assert!(explain.contains("## Trust boundary"));
     assert!(explain.contains("not a proof of memory safety"));
     assert!(explain.contains("not a Miri result unless a witness receipt is attached"));
+    assert!(explain.contains("not UB-free status"));
     assert!(!explain.contains("Miri passed"));
     assert!(!explain.contains("site reached"));
 
@@ -587,9 +596,13 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
     let stdout = stdout_text(&output)?;
 
     assert!(stdout.contains("unsafe-review first-pr"));
+    assert!(stdout.contains("unsafe-review wrote an advisory PR bundle."));
+    assert!(stdout.contains("- Artifact directory:"));
     assert!(stdout.contains("- Review cards: 1"));
     assert!(stdout.contains("- Open actionable gaps: 1"));
-    assert!(stdout.contains("Top action:"));
+    assert!(stdout.contains("Open:"));
+    assert!(stdout.contains("pr-summary.md"));
+    assert!(stdout.contains("Top card:"));
     assert!(stdout.contains("`raw_pointer_read`"));
     assert!(stdout.contains("Class: `guard_missing`"));
     assert!(stdout.contains("Route: `miri`"));
@@ -600,6 +613,8 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
     assert!(stdout.contains("cards.sarif"));
     assert!(stdout.contains("comment-plan.json"));
     assert!(stdout.contains("witness-plan.md"));
+    assert!(stdout.contains("lsp.json"));
+    assert!(stdout.contains("Trust boundary:"));
     assert!(stdout.contains("did not run witnesses"));
     assert!(stdout.contains("post comments"));
     assert!(stdout.contains("enforce blocking policy"));
@@ -653,14 +668,30 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
 
     let witness_plan = fs::read_to_string(out_dir.join("witness-plan.md"))?;
     assert!(witness_plan.contains("# unsafe-review witness plan"));
-    assert!(witness_plan.contains(&format!("### `{card_id}`")));
+    assert!(witness_plan.contains("### Miri / cargo-careful"));
+    assert!(witness_plan.contains(&format!("#### `{card_id}`")));
     assert!(witness_plan.contains("does not run Miri"));
+    assert!(witness_plan.contains("Receipt hint"));
+    assert!(witness_plan.contains("unsafe-review receipt import-miri"));
     assert!(
         witness_plan
             .contains("does not run Miri, cargo-careful, sanitizers, Loom, Shuttle, Kani, or Crux")
     );
     assert!(!witness_plan.contains("Miri passed"));
     assert!(!witness_plan.contains("site reached"));
+
+    let lsp = parse_json(&fs::read_to_string(out_dir.join("lsp.json"))?)?;
+    assert_eq!(lsp["mode"], "read_only_projection");
+    assert_eq!(lsp["policy"], "advisory");
+    assert_eq!(lsp["diagnostics"][0]["card_id"], card_id);
+    assert_eq!(lsp["hovers"][0]["card_id"], card_id);
+    assert_eq!(lsp["code_actions"][0]["card_id"], card_id);
+    assert!(
+        lsp["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("not a Miri result")
+    );
 
     Ok(())
 }
@@ -683,12 +714,17 @@ fn first_pr_clean_output_stays_advisory_not_all_clear() -> Result<(), Box<dyn Er
     let stdout = stdout_text(&output)?;
 
     assert!(stdout.contains("unsafe-review first-pr"));
+    assert!(stdout.contains("unsafe-review wrote an advisory PR bundle."));
+    assert!(stdout.contains("- Artifact directory:"));
     assert!(stdout.contains("- Review cards: 0"));
     assert!(stdout.contains("- Open actionable gaps: 0"));
+    assert!(stdout.contains("Open:"));
+    assert!(stdout.contains("pr-summary.md"));
     assert!(stdout.contains("No changed unsafe-review gaps were found."));
     assert!(stdout.contains("This does not prove the repo safe"));
-    assert!(stdout.contains("not UB-free status"));
-    assert!(stdout.contains("not a Miri-clean claim"));
+    assert!(stdout.contains("UB-free"));
+    assert!(stdout.contains("Miri-clean"));
+    assert!(stdout.contains("unsafe site executed"));
     assert!(!stdout.contains("All clear"));
 
     let cards = parse_json(&fs::read_to_string(out_dir.join("cards.json"))?)?;
@@ -702,15 +738,40 @@ fn first_pr_clean_output_stays_advisory_not_all_clear() -> Result<(), Box<dyn Er
     );
 
     let summary = fs::read_to_string(out_dir.join("pr-summary.md"))?;
-    assert!(summary.contains("No actionable unsafe-review cards found."));
-    assert!(summary.contains("not a proof of memory safety"));
+    assert!(summary.contains("No changed unsafe-review gaps were found."));
+    assert!(summary.contains("This does not prove the repo safe"));
+    assert!(summary.contains("unsafe site executed"));
     assert!(!summary.contains("All clear"));
 
     let witness_plan = fs::read_to_string(out_dir.join("witness-plan.md"))?;
+    assert!(witness_plan.contains("No changed unsafe-review gaps were found."));
     assert!(witness_plan.contains("No witness routes are recommended"));
     assert!(witness_plan.contains("not UB-free status"));
     assert!(!witness_plan.contains("Miri passed"));
     assert!(!witness_plan.contains("site reached"));
+
+    let comment_plan = parse_json(&fs::read_to_string(out_dir.join("comment-plan.json"))?)?;
+    assert_eq!(
+        comment_plan["no_changed_gaps"]["message"],
+        "No changed unsafe-review gaps were found."
+    );
+    assert!(
+        comment_plan["no_changed_gaps"]["limitation"]
+            .as_str()
+            .unwrap_or("")
+            .contains("unsafe site executed")
+    );
+
+    let lsp = parse_json(&fs::read_to_string(out_dir.join("lsp.json"))?)?;
+    assert_eq!(lsp["mode"], "read_only_projection");
+    assert_eq!(lsp["diagnostics"].as_array().map_or(1, Vec::len), 0);
+    assert_eq!(lsp["hovers"].as_array().map_or(1, Vec::len), 0);
+    assert!(
+        lsp["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("not a Miri result")
+    );
 
     Ok(())
 }
@@ -772,6 +833,35 @@ fn doctor_reports_first_install_signals_without_running_witnesses() -> Result<()
     assert!(text.contains("policy: advisory by default"));
     assert!(text.contains("witness execution: not run by doctor or by default"));
     assert!(text.contains("trust boundary: static review evidence"));
+
+    Ok(())
+}
+
+#[test]
+fn support_reports_current_posture_without_overclaims() -> Result<(), Box<dyn Error>> {
+    let output = run_success([os("support")])?;
+    let text = stdout_text(&output)?;
+
+    assert!(text.contains("unsafe-review support"));
+    assert!(text.contains("ReviewCards: experimental"));
+    assert!(text.contains("first-pr bundle: advisory"));
+    assert!(text.contains("receipts: saved-output template/import/audit only"));
+    assert!(text.contains("policy report: advisory"));
+    assert!(text.contains("comment posting: not default"));
+    assert!(text.contains("source edits: not supported"));
+    assert!(text.contains("witness execution: not default"));
+    assert!(text.contains("blocking policy: not default"));
+    assert!(text.contains("live LSP: deferred"));
+    assert!(text.contains("saved lsp.json"));
+    assert!(text.contains("static unsafe contract review only"));
+    assert!(text.contains("not memory-safety proof"));
+    assert!(text.contains("not UB-free status"));
+    assert!(text.contains("not Miri-clean status"));
+    assert!(text.contains("not a site-execution claim"));
+    assert!(text.contains("docs/status/SUPPORT_SUMMARY.md"));
+    assert!(!text.contains("safe to use"));
+    assert!(!text.contains("Miri passed"));
+    assert!(!text.contains("All clear"));
 
     Ok(())
 }
@@ -1041,7 +1131,9 @@ fn safe_repo_human_output_stays_quiet() -> Result<(), Box<dyn Error>> {
     let text = stdout_text(&output)?;
 
     assert!(text.contains("cards: 0, open gaps: 0"));
-    assert!(text.contains("No unsafe-review cards found."));
+    assert!(text.contains("No changed unsafe-review gaps were found."));
+    assert!(text.contains("This does not prove the repo safe"));
+    assert!(!text.contains("All clear"));
 
     Ok(())
 }
@@ -2281,7 +2373,9 @@ fn suppression_policy_suppresses_only_exact_review_card_identity() -> Result<(),
     ])?;
     let markdown = stdout_text(&markdown)?;
     assert!(markdown.contains("| 1 | 0 | 0 | 1 | 0 | 0 |"));
-    assert!(markdown.contains("| Status | Card | Ledger | Location | Class | Operation | Hazards | Missing evidence | Routes |"));
+    assert!(markdown.contains(
+        "| Status | Reason | Card | Ledger | Location | Class | Operation family | Operation | Hazards | Missing evidence | Routes | Next action |"
+    ));
     assert!(markdown.contains("`suppressed`"));
     assert!(markdown.contains("owner=core/policy"));
     assert!(markdown.contains("reason=e2e exact suppression"));
@@ -2308,18 +2402,34 @@ fn policy_report_is_advisory_and_counts_baseline_state() -> Result<(), Box<dyn E
     let report = parse_json(&stdout_text(&report)?)?;
     assert_eq!(report["mode"], "policy-report");
     assert_eq!(report["policy"], "advisory");
+    assert_eq!(report["schema_version"], "0.1");
+    assert_eq!(report["limitations"].as_array().map(Vec::len), Some(4));
+    assert!(
+        json_str(
+            &report["classification_explanations"]["new_gap"],
+            "classification_explanations.new_gap"
+        )?
+        .contains("baseline ledger or active suppression ledger")
+    );
     assert_eq!(report["summary"]["new_gaps"], 1);
     assert_eq!(report["summary"]["baseline_known"], 0);
+    assert_eq!(report["summary"]["unmatched_baseline"], 0);
+    assert_eq!(report["summary"]["invalid_ledger_entries"], 0);
     let card = &report["cards"][0];
     assert!(card["card_id"].as_str().unwrap_or("").starts_with("UR-"));
     assert_eq!(card["class"], "guard_missing");
     assert_eq!(card["policy_status"], "new_gap");
+    assert!(
+        json_str(&card["policy_reason"], "cards[0].policy_reason")?
+            .contains("was not found in the baseline ledger")
+    );
     assert!(card["ledger"].is_null());
     assert_eq!(card["site"]["file"], "src/lib.rs");
     assert_eq!(card["site"]["line"], 8);
     assert_eq!(card["site"]["kind"], "operation");
     assert_eq!(card["site"]["owner"], "read_header");
     assert_eq!(card["operation_family"], "raw_pointer_read");
+    assert_eq!(card["operation"], "unsafe { ptr.cast::<Header>().read() }");
     assert!(card["hazards"].as_array().is_some_and(|hazards| {
         hazards.iter().any(|hazard| hazard == "pointer_validity")
             && hazards.iter().any(|hazard| hazard == "alignment")
@@ -2335,6 +2445,18 @@ fn policy_report_is_advisory_and_counts_baseline_state() -> Result<(), Box<dyn E
         card["witness_routes"]
             .as_array()
             .is_some_and(|routes| routes.iter().any(|route| route == "miri"))
+    );
+    assert!(report["unmatched_baseline"].as_array().is_some());
+    assert!(
+        report["unmatched_baseline"]
+            .as_array()
+            .is_some_and(Vec::is_empty)
+    );
+    assert!(report["invalid_ledger_entries"].as_array().is_some());
+    assert!(
+        report["invalid_ledger_entries"]
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
     assert!(
         json_str(&report["trust_boundary"], "trust_boundary")?
@@ -2370,6 +2492,9 @@ fn policy_report_is_advisory_and_counts_baseline_state() -> Result<(), Box<dyn E
     let baselined = parse_json(&stdout_text(&baselined)?)?;
     assert_eq!(baselined["summary"]["new_gaps"], 0);
     assert_eq!(baselined["summary"]["baseline_known"], 1);
+    assert_eq!(baselined["summary"]["resolved_baseline"], 0);
+    assert_eq!(baselined["summary"]["unmatched_baseline"], 0);
+    assert_eq!(baselined["summary"]["invalid_ledger_entries"], 0);
     assert_eq!(baselined["cards"][0]["card_id"], card_id);
     assert_eq!(baselined["cards"][0]["class"], "baseline_known");
     assert_eq!(baselined["cards"][0]["policy_status"], "baseline_known");
@@ -2386,6 +2511,16 @@ fn policy_report_is_advisory_and_counts_baseline_state() -> Result<(), Box<dyn E
     assert_eq!(
         baselined["cards"][0]["operation_family"],
         "raw_pointer_read"
+    );
+    assert!(
+        baselined["resolved_baseline"]
+            .as_array()
+            .is_some_and(Vec::is_empty)
+    );
+    assert!(
+        baselined["unmatched_baseline"]
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
 
     let markdown_path = temp.path().join("policy-report.md");
@@ -2404,8 +2539,10 @@ fn policy_report_is_advisory_and_counts_baseline_state() -> Result<(), Box<dyn E
     assert_eq!(stdout_text(&markdown)?.trim(), "");
     let markdown = fs::read_to_string(markdown_path)?;
     assert!(markdown.contains("# unsafe-review policy report"));
+    assert!(markdown.contains("## Classification explanations"));
+    assert!(markdown.contains("Exact ReviewCard identity matched a baseline ledger entry"));
     assert!(markdown.contains(
-        "| Status | Card | Ledger | Location | Class | Operation | Hazards | Missing evidence | Routes |"
+        "| Status | Reason | Card | Ledger | Location | Class | Operation family | Operation | Hazards | Missing evidence | Routes | Next action |"
     ));
     assert!(markdown.contains("owner=core/policy"));
     assert!(markdown.contains("reason=e2e no-new-debt baseline"));
@@ -2414,9 +2551,12 @@ fn policy_report_is_advisory_and_counts_baseline_state() -> Result<(), Box<dyn E
     assert!(markdown.contains("src/lib.rs:8 (operation/read_header)"));
     assert!(markdown.contains("`baseline_known`"));
     assert!(markdown.contains("`raw_pointer_read`"));
+    assert!(markdown.contains("unsafe { ptr.cast::<Header>().read() }"));
+    assert!(markdown.contains("Known baseline card"));
     assert!(markdown.contains("pointer_validity, alignment"));
     assert!(markdown.contains("Missing visible local guard for inferred safety obligations"));
     assert!(markdown.contains("miri"));
+    assert!(markdown.contains("## Limitations"));
     assert!(markdown.contains("## Trust boundary"));
 
     Ok(())
@@ -2478,8 +2618,11 @@ expires = "2026-01-01"
     let report = parse_json(&stdout_text(&report)?)?;
     assert_eq!(report["summary"]["new_gaps"], 1);
     assert_eq!(report["summary"]["resolved_baseline"], 1);
+    assert_eq!(report["summary"]["unmatched_baseline"], 1);
     assert_eq!(report["summary"]["expired_suppressions"], 1);
+    assert_eq!(report["summary"]["invalid_ledger_entries"], 0);
     assert_eq!(report["resolved_baseline"][0]["card_id"], resolved_id);
+    assert_eq!(report["unmatched_baseline"][0]["card_id"], resolved_id);
     assert_eq!(report["resolved_baseline"][0]["owner"], "core/policy");
     assert_eq!(
         report["resolved_baseline"][0]["reason"],
@@ -2517,6 +2660,8 @@ expires = "2026-01-01"
         os("markdown"),
     ])?;
     let markdown = stdout_text(&markdown)?;
+    assert!(markdown.contains("## Classification explanations"));
+    assert!(markdown.contains("Exact ReviewCard identity was not found"));
     assert!(markdown.contains("## Resolved baseline entries"));
     assert!(markdown.contains("## Expired suppression entries"));
     assert!(markdown.contains("| Card | Owner | Review after | Expires | Reason | Evidence |"));
@@ -2525,6 +2670,7 @@ expires = "2026-01-01"
     assert!(markdown.contains("resolved fixture debt"));
     assert!(markdown.contains("expired false-positive review"));
     assert!(markdown.contains("e2e policy report"));
+    assert!(markdown.contains("## Limitations"));
     assert!(markdown.contains("## Trust boundary"));
 
     Ok(())
