@@ -292,6 +292,7 @@ mod tests {
         "raw_pointer_read_len_capacity_assert_shadowed_origin_not_guard",
         "raw_pointer_read_bounds_observed_not_guard",
         "raw_pointer_read_len_capacity_observed_not_guard",
+        "raw_pointer_read_cast_origin_bounds_guard",
         "raw_pointer_read_open_branch_bounds_guard",
         "raw_pointer_read_open_branch_shadowed_origin_not_guard",
         "raw_pointer_read_typed_shadowed_origin_not_guard",

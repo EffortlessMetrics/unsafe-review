@@ -714,10 +714,18 @@ fn pointer_origin_receiver_before(before_operation: &str, pointer: &str) -> Opti
 }
 
 fn pointer_origin_receiver(expression: &str) -> Option<&str> {
+    let expression = pointer_expression_before_cast(expression);
     expression
         .strip_suffix(".as_ptr()")
         .or_else(|| expression.strip_suffix(".as_mut_ptr()"))
         .filter(|receiver| !receiver.is_empty())
+}
+
+fn pointer_expression_before_cast(expression: &str) -> &str {
+    expression
+        .find(".cast::<")
+        .or_else(|| expression.find(".cast()"))
+        .map_or(expression, |cast_pos| &expression[..cast_pos])
 }
 
 fn assignment_binding_name(left_side: &str) -> Option<&str> {
