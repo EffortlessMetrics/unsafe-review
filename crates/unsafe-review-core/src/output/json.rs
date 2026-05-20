@@ -1,5 +1,5 @@
 use crate::api::{AnalyzeOutput, Scope, Summary};
-use crate::domain::{EvidenceState, ObligationEvidence, ReviewCard};
+use crate::domain::{EvidenceState, ObligationEvidence, ReviewCard, WitnessRoute};
 use crate::util::path_display;
 use serde::Serialize;
 
@@ -96,7 +96,9 @@ struct JsonCard<'a> {
     discharge: &'a str,
     reach: &'a str,
     witness: &'a str,
+    witness_routes: Vec<JsonWitnessRoute<'a>>,
     missing: Vec<&'a str>,
+    next_action: &'a str,
     verify_commands: &'a [String],
 }
 
@@ -124,12 +126,33 @@ impl<'a> From<&'a ReviewCard> for JsonCard<'a> {
             discharge: &card.discharge.summary,
             reach: &card.reach.summary,
             witness: &card.witness.summary,
+            witness_routes: card.routes.iter().map(JsonWitnessRoute::from).collect(),
             missing: card
                 .missing
                 .iter()
                 .map(|missing| missing.message.as_str())
                 .collect(),
+            next_action: &card.next_action.summary,
             verify_commands: &card.next_action.verify_commands,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct JsonWitnessRoute<'a> {
+    kind: &'static str,
+    reason: &'a str,
+    command: Option<&'a str>,
+    required: bool,
+}
+
+impl<'a> From<&'a WitnessRoute> for JsonWitnessRoute<'a> {
+    fn from(route: &'a WitnessRoute) -> Self {
+        Self {
+            kind: route.kind.as_str(),
+            reason: &route.reason,
+            command: route.command.as_deref(),
+            required: route.required,
         }
     }
 }
@@ -368,6 +391,13 @@ mod tests {
         assert_eq!(value["cards"][0]["site"]["public_api_surface"], false);
         assert_eq!(value["cards"][0]["operation_family"], "raw_pointer_read");
         assert!(value["cards"][0]["obligation_evidence"].is_array());
+        assert_eq!(value["cards"][0]["witness_routes"][0]["kind"], "miri");
+        assert!(
+            value["cards"][0]["next_action"]
+                .as_str()
+                .unwrap_or("")
+                .contains("Add or expose the local guard")
+        );
         assert!(value["cards"][0]["verify_commands"].is_array());
         Ok(())
     }

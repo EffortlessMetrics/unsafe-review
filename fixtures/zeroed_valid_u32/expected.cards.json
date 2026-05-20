@@ -53,9 +53,24 @@
     "discharge": "All inferred safety obligations have visible local discharge evidence",
     "reach": "1 related test file(s) mention owner `zero_u32`",
     "witness": "No imported witness receipt was found",
+    "witness_routes": [
+      {
+        "kind": "miri",
+        "reason": "Pure-Rust UB-adjacent hazard; Miri is the strongest concrete-execution witness when the path is supported",
+        "command": "cargo +nightly miri test zero_u32",
+        "required": false
+      },
+      {
+        "kind": "cargo-careful",
+        "reason": "cargo-careful is a cheaper compatibility-oriented runtime check for several unsafe preconditions",
+        "command": "cargo +nightly careful test zero_u32",
+        "required": false
+      }
+    ],
     "missing": [
       "No witness receipt imported for this card"
     ],
+    "next_action": "Attach a focused witness receipt or mark the static limitation explicitly.",
     "verify_commands": [
       "cargo +nightly miri test zero_u32",
       "cargo +nightly careful test zero_u32"

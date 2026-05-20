@@ -18,7 +18,10 @@ serde-backed DTOs so escaping, arrays, and required fields are parser-checked ra
 than hand-rendered strings.
 Cards include an `obligation_evidence` array that reports contract, discharge,
 reach, and witness state per safety obligation. Top-level evidence summaries remain
-for compatibility and human scanning.
+for compatibility and human scanning. Cards also expose the ReviewCard's
+structured witness routes and next-action summary so JSON consumers can route the
+same reviewer action as PR summaries, SARIF, LSP hovers, and agent packets without
+reclassifying findings.
 
 ## Non-goals
 
