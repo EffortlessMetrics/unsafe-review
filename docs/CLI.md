@@ -76,6 +76,10 @@ findings independently.
 | `lsp` | `unsafe-review check --base origin/main --format lsp --out target/unsafe-review/lsp.json` | saved editor diagnostics and hovers |
 | `witness-plan` | `unsafe-review check --base origin/main --format witness-plan --out target/unsafe-review/witness-plan.md` | reviewer-facing witness route plan |
 
+The default human output is for terminal review. It names the card identity,
+operation family, operation expression, obligation evidence, witness route, next
+action, verify commands, and trust boundary without executing witnesses.
+
 `comment-plan` is plan-only. It does not post comments.
 
 `lsp` writes saved JSON only. It includes a read-only status object,
