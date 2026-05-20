@@ -279,6 +279,7 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     ])?;
     let witness_plan = fs::read_to_string(&witness_plan_path)?;
     assert!(witness_plan.contains("# unsafe-review witness plan"));
+    assert!(witness_plan.contains("Operation: `unsafe { ptr.cast::<Header>().read() }`"));
     assert!(witness_plan.contains("Route: `miri`"));
     assert!(witness_plan.contains("Next action: Add or expose"));
     assert!(witness_plan.contains("Verify command"));
@@ -315,6 +316,7 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     let explain = stdout_text(&explain)?;
     assert!(explain.contains("## Required safety conditions"));
     assert!(explain.contains("## Recommended witness routes"));
+    assert!(explain.contains("**Operation:** `unsafe { ptr.cast::<Header>().read() }`"));
     assert!(explain.contains("**Operation family:** `raw_pointer_read`"));
     assert!(explain.contains("## Verify commands"));
     assert!(explain.contains("cargo +nightly miri test read_header"));

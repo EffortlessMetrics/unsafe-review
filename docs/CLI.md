@@ -89,9 +89,9 @@ diagnostics, hovers, and command data for copying packets, copying witness
 commands, explaining routes, and opening statically related tests. There is no
 editor extension or live LSP server in this surface.
 
-`witness-plan` is a routing artifact. It lists ReviewCard next actions,
-suggested witness commands, and limitations from existing cards, but it does
-not run those commands.
+`witness-plan` is a routing artifact. It lists ReviewCard operation expressions,
+next actions, suggested witness commands, and limitations from existing cards,
+but it does not run those commands.
 
 ## PR Artifacts
 
@@ -122,9 +122,10 @@ Use `explain` for a human-readable explanation of one card:
 unsafe-review explain --root fixtures/raw_pointer_alignment <card-id>
 ```
 
-The explanation includes the operation family, required safety conditions,
-missing evidence, recommended witness routes, verify commands, next action, and
-the static-review trust boundary. It does not execute witnesses.
+The explanation includes the operation expression, operation family, required
+safety conditions, missing evidence, recommended witness routes, verify
+commands, next action, and the static-review trust boundary. It does not execute
+witnesses.
 
 Use `context` for the bounded agent packet:
 
