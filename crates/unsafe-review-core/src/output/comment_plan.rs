@@ -53,6 +53,7 @@ struct PlannedComment {
     class: &'static str,
     priority: &'static str,
     confidence: &'static str,
+    operation: String,
     operation_family: &'static str,
     witness_routes: Vec<PlannedWitnessRoute>,
     verify_commands: Vec<String>,
@@ -69,6 +70,7 @@ impl From<&ReviewCard> for PlannedComment {
             class: card.class.as_str(),
             priority: card.priority.as_str(),
             confidence: card.confidence.as_str(),
+            operation: card.operation.expression.clone(),
             operation_family: card.operation.family.as_str(),
             witness_routes: card.routes.iter().map(PlannedWitnessRoute::from).collect(),
             verify_commands: card.next_action.verify_commands.clone(),
@@ -114,8 +116,9 @@ fn selection_reason(card: &ReviewCard) -> &'static str {
 fn comment_body(card: &ReviewCard) -> String {
     let mut body = String::new();
     body.push_str(&format!(
-        "`unsafe-review` found `{}` for `{}`.\n\n",
+        "`unsafe-review` found `{}` for `{}` (`{}`).\n\n",
         card.class.as_str(),
+        one_line(&card.operation.expression),
         card.operation.family.as_str()
     ));
     body.push_str(&format!("Missing evidence: {}\n\n", missing_summary(card)));
@@ -147,6 +150,10 @@ fn missing_summary(card: &ReviewCard) -> String {
         .join("; ")
 }
 
+fn one_line(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -162,6 +169,10 @@ mod tests {
         assert_eq!(value["comments"].as_array().map_or(0, Vec::len), 1);
         assert_eq!(value["comments"][0]["class"], "guard_missing");
         assert_eq!(value["comments"][0]["path"], "src/lib.rs");
+        assert_eq!(
+            value["comments"][0]["operation"],
+            "unsafe { ptr.cast::<Header>().read() }"
+        );
         assert_eq!(value["comments"][0]["operation_family"], "raw_pointer_read");
         assert_eq!(value["comments"][0]["witness_routes"][0]["kind"], "miri");
         assert!(
@@ -169,6 +180,12 @@ mod tests {
                 .as_str()
                 .unwrap_or("")
                 .contains("cargo +nightly miri test read_header")
+        );
+        assert!(
+            value["comments"][0]["body"]
+                .as_str()
+                .unwrap_or("")
+                .contains("unsafe { ptr.cast::<Header>().read() }")
         );
         assert!(
             value["comments"][0]["body"]

@@ -73,7 +73,7 @@ findings independently.
 | `markdown` | `unsafe-review check --diff change.diff --format markdown` | local report |
 | `pr-summary` | `unsafe-review check --base origin/main --format pr-summary --out target/unsafe-review/pr-summary.md` | sparse reviewer-facing PR artifact |
 | `sarif` | `unsafe-review check --base origin/main --format sarif --out target/unsafe-review/cards.sarif` | code-scanning-compatible artifact |
-| `comment-plan` | `unsafe-review check --base origin/main --format comment-plan --out target/unsafe-review/comment-plan.json` | artifact-only inline comment candidates |
+| `comment-plan` | `unsafe-review check --base origin/main --format comment-plan --out target/unsafe-review/comment-plan.json` | artifact-only inline comment candidates with card ID, operation, routes, and verify commands |
 | `lsp` | `unsafe-review check --base origin/main --format lsp --out target/unsafe-review/lsp.json` | saved editor diagnostics and hovers |
 | `witness-plan` | `unsafe-review check --base origin/main --format witness-plan --out target/unsafe-review/witness-plan.md` | reviewer-facing witness route plan |
 
@@ -81,7 +81,8 @@ The default human output is for terminal review. It names the card identity,
 operation family, operation expression, obligation evidence, witness route, next
 action, verify commands, and trust boundary without executing witnesses.
 
-`comment-plan` is plan-only. It does not post comments.
+`comment-plan` is plan-only. It carries the concrete ReviewCard operation
+expression for each planned comment and does not post comments.
 
 `lsp` writes saved JSON only. It includes a read-only status object,
 diagnostics, hovers, and command data for copying packets, copying witness
