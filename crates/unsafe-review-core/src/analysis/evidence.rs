@@ -174,6 +174,10 @@ fn discharge_state_for(
         "alignment" => {
             if family == &OperationFamily::RawPointerWrite && has_u8_write_bytes_context(lower) {
                 EvidenceState::present("u8 raw write alignment evidence was detected")
+            } else if family == &OperationFamily::RawPointerWrite
+                && has_bool_write_bytes_context(lower)
+            {
+                EvidenceState::present("bool raw write alignment evidence was detected")
             } else if has_alignment_guard(site, lower) {
                 EvidenceState::present("Alignment guard code was detected")
             } else {
@@ -236,6 +240,10 @@ fn discharge_state_for(
                 && has_u8_write_bytes_context(lower)
             {
                 EvidenceState::present("u8 write_bytes target evidence was detected")
+            } else if family == &OperationFamily::RawPointerWrite
+                && has_bool_write_bytes_context(lower)
+            {
+                EvidenceState::present("bool write_bytes value evidence was detected")
             } else if family == &OperationFamily::VecFromRawParts
                 && has_vec_from_raw_parts_origin_initialized_evidence(
                     &site.operation.expression,
@@ -2017,6 +2025,31 @@ fn has_u8_write_bytes_context(lower: &str) -> bool {
     };
 
     pointer_binding_has_type_before_call(&compact, receiver, "*mutu8")
+}
+
+fn has_bool_write_bytes_context(lower: &str) -> bool {
+    let compact = compact_code(lower);
+    let Some((before_call, receiver, byte)) = write_bytes_method_context(&compact) else {
+        return false;
+    };
+    let Some(byte) = source_value_identifier(byte) else {
+        return false;
+    };
+
+    pointer_binding_has_type_before_call(&compact, receiver, "*mutbool")
+        && has_u8_bool_value_guard(before_call, byte)
+}
+
+fn write_bytes_method_context(compact: &str) -> Option<(&str, &str, &str)> {
+    let call_marker = ".write_bytes(";
+    let call_pos = compact.find(call_marker)?;
+    let before_call = &compact[..call_pos];
+    let receiver = receiver_before_marker(compact, call_marker)?;
+    let after_marker = &compact[call_pos + call_marker.len()..];
+    let argument_end = matching_call_argument_end(after_marker)?;
+    let arguments = &after_marker[..argument_end];
+    let (byte, _len) = split_top_level_pair(arguments)?;
+    (!byte.is_empty()).then_some((before_call, receiver, byte))
 }
 
 fn pointer_binding_has_type_before_call(compact: &str, receiver: &str, pointer_type: &str) -> bool {
