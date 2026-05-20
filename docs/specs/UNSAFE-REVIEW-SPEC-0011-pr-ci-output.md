@@ -19,7 +19,8 @@ witness plan, and the trust boundary. It does not post comments, run witness
 tools, or change policy mode.
 SARIF output is also a projection from existing `ReviewCard`s. SARIF results
 carry card identity, operation family, hazards, missing evidence, witness route
-recommendations, and the same trust boundary in result properties.
+recommendations, structured route details, verify commands, and the same trust
+boundary in result properties.
 The advisory GitHub workflow uploads the JSON, Markdown summary, SARIF, and
 comment-plan artifacts. It does not run witness tools, post inline comments, or
 enable blocking policy.

@@ -1259,6 +1259,12 @@ fn check_advisory_artifacts(dir: &Path) -> Result<(), String> {
                 "cards.sarif result references unknown card id `{card_id}`"
             ));
         }
+        json_array_at(
+            result,
+            "/properties/witnessRouteDetails",
+            "cards.sarif result",
+        )?;
+        json_array_at(result, "/properties/verifyCommands", "cards.sarif result")?;
     }
     let sarif_boundary = sarif
         .pointer("/runs/0/properties/trustBoundary")
@@ -4053,6 +4059,29 @@ impl WitnessKind {
     }
 
     #[test]
+    fn advisory_artifact_checker_rejects_sarif_without_route_details() -> Result<(), String> {
+        let dir = unique_temp_dir("unsafe-review-artifacts-sarif-routes")?;
+        fs::create_dir_all(&dir).map_err(|err| format!("create temp dir failed: {err}"))?;
+        write_valid_artifacts(&dir)?;
+        fs::write(
+            dir.join("cards.sarif"),
+            r#"{"version":"2.1.0","runs":[{"results":[{"properties":{"cardId":"card-1","verifyCommands":["cargo test"]}}],"properties":{"trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}]}"#,
+        )
+        .map_err(|err| format!("write sarif failed: {err}"))?;
+
+        let result = check_advisory_artifacts(&dir);
+
+        fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        assert!(
+            result
+                .err()
+                .unwrap_or_default()
+                .contains("witnessRouteDetails")
+        );
+        Ok(())
+    }
+
+    #[test]
     fn advisory_artifact_checker_rejects_comment_plan_without_posting_boundary()
     -> Result<(), String> {
         let dir = unique_temp_dir("unsafe-review-artifacts-comment-boundary")?;
@@ -4188,7 +4217,7 @@ review_after = "2026-08-01"
         .map_err(|err| format!("write pr summary failed: {err}"))?;
         fs::write(
             dir.join("cards.sarif"),
-            r#"{"version":"2.1.0","runs":[{"results":[{"properties":{"cardId":"card-1"}}],"properties":{"trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}]}"#,
+            r#"{"version":"2.1.0","runs":[{"results":[{"properties":{"cardId":"card-1","witnessRouteDetails":[{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}],"verifyCommands":["cargo +nightly miri test card"]}}],"properties":{"trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}]}"#,
         )
         .map_err(|err| format!("write sarif failed: {err}"))?;
         fs::write(
