@@ -149,6 +149,12 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     assert_eq!(lsp["status"]["cards"], 1);
     assert_eq!(lsp["diagnostics"][0]["card_id"], card_id);
     assert_eq!(lsp["hovers"][0]["card_id"], card_id);
+    assert!(
+        lsp["hovers"][0]["contents"]
+            .as_str()
+            .unwrap_or("")
+            .contains("does not prove the unsafe site executed")
+    );
     assert_eq!(
         lsp["code_actions"][0]["command"],
         "unsafe-review.copyAgentPacket"

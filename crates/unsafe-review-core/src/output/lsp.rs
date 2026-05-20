@@ -230,6 +230,9 @@ fn hover_contents(card: &ReviewCard) -> String {
             route.reason
         ));
     }
+    text.push_str(
+        "\nReach note: static related-test evidence does not prove the unsafe site executed.\n",
+    );
     text.push_str("\nTrust boundary: ");
     text.push_str(TRUST_BOUNDARY);
     text
@@ -335,6 +338,12 @@ mod tests {
                 .as_str()
                 .unwrap_or("")
                 .contains("Required safety conditions")
+        );
+        assert!(
+            value["hovers"][0]["contents"]
+                .as_str()
+                .unwrap_or("")
+                .contains("does not prove the unsafe site executed")
         );
         assert_eq!(
             value["code_actions"][0]["command"],
