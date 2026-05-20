@@ -822,13 +822,64 @@ fn has_origin_len_capacity_equality_guard(compact: &str, origin: &str) -> bool {
     let len = format!("{origin}.len()");
     let capacity = format!("{origin}.capacity()");
     let cap = format!("{origin}.cap()");
-    compact.split(';').any(|statement| {
-        (statement.contains("assert_eq!(")
-            || statement.contains("debug_assert_eq!(")
-            || statement.contains("=="))
-            && statement.contains(&len)
-            && (statement.contains(&capacity) || statement.contains(&cap))
+    has_origin_len_capacity_assertion_guard(compact, &len, &capacity, &cap)
+        || has_origin_len_capacity_open_positive_branch_guard(compact, &len, &capacity, &cap)
+}
+
+fn has_origin_len_capacity_assertion_guard(
+    compact: &str,
+    len: &str,
+    capacity: &str,
+    cap: &str,
+) -> bool {
+    [
+        ("assert_eq!(", false),
+        ("debug_assert_eq!(", false),
+        ("assert!(", true),
+        ("debug_assert!(", true),
+    ]
+    .into_iter()
+    .any(|(prefix, requires_operator)| {
+        let mut cursor = compact;
+        let mut offset = 0usize;
+        while let Some(pos) = cursor.find(prefix) {
+            let statement_start = offset + pos + prefix.len();
+            let after_prefix = &compact[statement_start..];
+            let statement_end = after_prefix.find(';').unwrap_or(after_prefix.len());
+            let statement = &after_prefix[..statement_end];
+            if origin_len_capacity_condition_matches(statement, len, capacity, cap)
+                && (!requires_operator || statement.contains("=="))
+            {
+                return true;
+            }
+            let next = pos + prefix.len();
+            offset += next;
+            cursor = &cursor[next..];
+        }
+        false
     })
+}
+
+fn has_origin_len_capacity_open_positive_branch_guard(
+    compact: &str,
+    len: &str,
+    capacity: &str,
+    cap: &str,
+) -> bool {
+    origin_len_size_if_guards(compact).any(|guard| {
+        origin_len_capacity_condition_matches(guard.condition, len, capacity, cap)
+            && guard.condition.contains("==")
+            && branch_still_open_at_operation(guard.after_body_start)
+    })
+}
+
+fn origin_len_capacity_condition_matches(
+    condition: &str,
+    len: &str,
+    capacity: &str,
+    cap: &str,
+) -> bool {
+    condition.contains(len) && (condition.contains(capacity) || condition.contains(cap))
 }
 
 fn has_slice_end_pointer_arithmetic_evidence(lower: &str) -> bool {

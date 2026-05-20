@@ -289,6 +289,7 @@ mod tests {
         "raw_pointer_read_volatile",
         "raw_pointer_read_len_capacity_assert",
         "raw_pointer_read_bounds_observed_not_guard",
+        "raw_pointer_read_len_capacity_observed_not_guard",
         "raw_pointer_read_other_len_not_guard",
         "raw_pointer_read_reassigned_origin_not_guard",
         "raw_pointer_write_assignment",
