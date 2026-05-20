@@ -280,9 +280,21 @@ mod tests {
         assert!(value["missing"].is_array());
         assert!(value["missing_evidence"].is_array());
         assert!(value["allowed_repairs"].is_array());
+        assert!(
+            value["allowed_repairs"][0]
+                .as_str()
+                .unwrap_or("")
+                .contains("Add or expose the local guard")
+        );
         assert_eq!(value["repair_scope"], "this card only");
         assert!(value["witness_routes"].is_array());
         assert!(value["verify_commands"].is_array());
+        assert!(
+            value["verify_commands"][0]
+                .as_str()
+                .unwrap_or("")
+                .contains("cargo +nightly miri test read_header")
+        );
         assert!(value["do_not_do"].is_array());
         assert!(
             serde_json::to_string(&value["do_not_do"])
@@ -290,6 +302,11 @@ mod tests {
                 .contains("do not change unrelated unsafe code")
         );
         assert!(value["stop_conditions"].is_array());
+        assert!(
+            serde_json::to_string(&value["stop_conditions"])
+                .map_err(|err| format!("render stop_conditions failed: {err}"))?
+                .contains("same unsafe seam")
+        );
         assert!(
             value["trust_boundary"]
                 .as_str()
