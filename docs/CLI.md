@@ -56,8 +56,9 @@ unsafe-review policy report \
 
 The policy report compares current `ReviewCard`s with exact baseline and
 suppression ledgers. It counts new gaps, baseline-known cards, suppressed cards,
-resolved baseline entries, and expired suppressions. It does not block, execute
-witnesses, or create broad suppression authority.
+resolved baseline entries, and expired suppressions. Current-card entries also
+show the operation family and next action from the same `ReviewCard`. It does
+not block, execute witnesses, or create broad suppression authority.
 
 ## Output Formats
 
