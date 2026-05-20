@@ -1,5 +1,6 @@
 use crate::api::AnalyzeOutput;
 use crate::domain::{Confidence, Priority, ReviewCard, WitnessRoute};
+use crate::output::{NO_CHANGED_GAPS_LIMITATION, NO_CHANGED_GAPS_MESSAGE};
 use crate::util::path_display;
 use serde::Serialize;
 
@@ -25,6 +26,8 @@ struct CommentPlan {
     mode: &'static str,
     policy: &'static str,
     comments: Vec<PlannedComment>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    no_changed_gaps: Option<NoChangedGaps>,
     trust_boundary: &'static str,
 }
 
@@ -42,9 +45,19 @@ impl From<&AnalyzeOutput> for CommentPlan {
                 .take(MAX_PLANNED_COMMENTS)
                 .map(PlannedComment::from)
                 .collect(),
+            no_changed_gaps: (output.summary.open_actionable_gaps == 0).then_some(NoChangedGaps {
+                message: NO_CHANGED_GAPS_MESSAGE,
+                limitation: NO_CHANGED_GAPS_LIMITATION,
+            }),
             trust_boundary: TRUST_BOUNDARY,
         }
     }
+}
+
+#[derive(Serialize)]
+struct NoChangedGaps {
+    message: &'static str,
+    limitation: &'static str,
 }
 
 #[derive(Serialize)]
@@ -216,6 +229,11 @@ mod tests {
         let value = parse_json(&render(&output))?;
 
         assert_eq!(value["comments"].as_array().map_or(1, Vec::len), 0);
+        assert_eq!(value["no_changed_gaps"]["message"], NO_CHANGED_GAPS_MESSAGE);
+        assert_eq!(
+            value["no_changed_gaps"]["limitation"],
+            NO_CHANGED_GAPS_LIMITATION
+        );
         assert!(
             value["trust_boundary"]
                 .as_str()

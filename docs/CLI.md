@@ -110,7 +110,10 @@ operation family, operation expression, obligation evidence, witness route, next
 action, verify commands, and trust boundary without executing witnesses.
 
 `comment-plan` is plan-only. It carries the concrete ReviewCard operation
-expression for each planned comment and does not post comments.
+expression for each planned comment and does not post comments. When no changed
+unsafe-review gaps are found, `comments` is empty and the artifact includes a
+`no_changed_gaps` message with the same no-proof limitation used by the terminal
+and Markdown surfaces.
 
 `lsp` writes saved JSON only. It includes a read-only status object,
 diagnostics, hovers, and command data for copying packets, copying witness
@@ -150,9 +153,9 @@ cargo xtask check-first-pr-artifacts target/unsafe-review
 ```
 
 That verifier keeps the bundle advisory: it checks route limitations,
-comment-plan caps and renderable inline fields, card identity consistency, and
-absence of positive safety/proof wording. It does not run witnesses, post
-comments, edit source, or make a policy decision.
+comment-plan caps and renderable inline fields, zero-gap wording, card identity
+consistency, and absence of positive safety/proof wording. It does not run
+witnesses, post comments, edit source, or make a policy decision.
 
 ## Explain And Context
 
