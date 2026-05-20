@@ -14,6 +14,7 @@
       "public_api_surface": false,
       "snippet": "*ptr = value;"
     },
+    "operation": "*ptr = value;",
     "operation_family": "raw_pointer_write",
     "hazards": [
       "pointer_validity",

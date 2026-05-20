@@ -14,6 +14,7 @@
       "public_api_surface": false,
       "snippet": "unsafe { core::str::from_utf8_unchecked(bytes) }"
     },
+    "operation": "unsafe { core::str::from_utf8_unchecked(bytes) }",
     "operation_family": "str_from_utf8_unchecked",
     "hazards": [
       "invalid_value"

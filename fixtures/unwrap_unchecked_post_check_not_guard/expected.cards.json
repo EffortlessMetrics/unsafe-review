@@ -14,6 +14,7 @@
       "public_api_surface": false,
       "snippet": "let value = unsafe { option.unwrap_unchecked() };"
     },
+    "operation": "let value = unsafe { option.unwrap_unchecked() };",
     "operation_family": "unwrap_unchecked",
     "hazards": [
       "invalid_value"

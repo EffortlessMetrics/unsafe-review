@@ -14,6 +14,7 @@
       "public_api_surface": false,
       "snippet": "unsafe { core::hint::unreachable_unchecked() }"
     },
+    "operation": "unsafe { core::hint::unreachable_unchecked() }",
     "operation_family": "unreachable_unchecked",
     "hazards": [
       "invalid_value"

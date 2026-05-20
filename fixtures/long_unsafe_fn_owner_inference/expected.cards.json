@@ -14,6 +14,7 @@
       "public_api_surface": true,
       "snippet": "pub unsafe fn run(ptr: *mut u8) {"
     },
+    "operation": "pub unsafe fn run(ptr: *mut u8) {",
     "operation_family": "unknown",
     "hazards": [
       "unknown"
@@ -82,6 +83,7 @@
       "public_api_surface": false,
       "snippet": "unsafe { ptr.drop_in_place() };"
     },
+    "operation": "unsafe { ptr.drop_in_place() };",
     "operation_family": "drop_in_place",
     "hazards": [
       "pointer_validity",

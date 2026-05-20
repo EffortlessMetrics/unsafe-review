@@ -14,6 +14,7 @@
       "public_api_surface": false,
       "snippet": "unsafe { slot.assume_init_mut() }"
     },
+    "operation": "unsafe { slot.assume_init_mut() }",
     "operation_family": "maybe_uninit_assume_init",
     "hazards": [
       "initialized_memory",

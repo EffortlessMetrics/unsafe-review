@@ -14,6 +14,7 @@
       "public_api_surface": false,
       "snippet": "unsafe impl<T: Send> Sync for Receiver<T> {}"
     },
+    "operation": "unsafe impl<T: Send> Sync for Receiver<T> {}",
     "operation_family": "unsafe_impl_send_sync",
     "hazards": [
       "send_sync_invariant",

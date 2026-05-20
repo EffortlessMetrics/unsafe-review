@@ -26,6 +26,10 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     assert_eq!(value["scope"], "diff");
     assert_eq!(value["summary"]["cards"], 1);
     assert_eq!(value["cards"][0]["class"], "guard_missing");
+    assert_eq!(
+        value["cards"][0]["operation"],
+        "unsafe { ptr.cast::<Header>().read() }"
+    );
     assert_eq!(value["cards"][0]["operation_family"], "raw_pointer_read");
     let card_id = json_str(&value["cards"][0]["id"], "cards[0].id")?;
 

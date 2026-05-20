@@ -14,6 +14,7 @@
       "public_api_surface": false,
       "snippet": "unsafe { core::slice::from_raw_parts_mut(ptr, len) }"
     },
+    "operation": "unsafe { core::slice::from_raw_parts_mut(ptr, len) }",
     "operation_family": "slice_from_raw_parts",
     "hazards": [
       "pointer_validity",

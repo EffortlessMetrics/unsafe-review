@@ -14,6 +14,7 @@
       "public_api_surface": true,
       "snippet": "pub unsafe trait CallerMustUpholdContract {"
     },
+    "operation": "pub unsafe trait CallerMustUpholdContract {",
     "operation_family": "unknown",
     "hazards": [
       "unknown"

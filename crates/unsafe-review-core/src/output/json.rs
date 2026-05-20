@@ -88,6 +88,7 @@ struct JsonCard<'a> {
     priority: &'static str,
     confidence: &'static str,
     site: JsonSite<'a>,
+    operation: &'a str,
     operation_family: &'static str,
     hazards: Vec<&'static str>,
     obligations: Vec<&'a str>,
@@ -110,6 +111,7 @@ impl<'a> From<&'a ReviewCard> for JsonCard<'a> {
             priority: card.priority.as_str(),
             confidence: card.confidence.as_str(),
             site: JsonSite::from(card),
+            operation: &card.operation.expression,
             operation_family: card.operation.family.as_str(),
             hazards: card.hazards.iter().map(|hazard| hazard.as_str()).collect(),
             obligations: card
@@ -389,6 +391,10 @@ mod tests {
         assert_eq!(value["cards"][0]["site"]["file"], "src/lib.rs");
         assert_eq!(value["cards"][0]["site"]["visibility"], "private");
         assert_eq!(value["cards"][0]["site"]["public_api_surface"], false);
+        assert_eq!(
+            value["cards"][0]["operation"],
+            "unsafe { ptr.cast::<Header>().read() }"
+        );
         assert_eq!(value["cards"][0]["operation_family"], "raw_pointer_read");
         assert!(value["cards"][0]["obligation_evidence"].is_array());
         assert_eq!(value["cards"][0]["witness_routes"][0]["kind"], "miri");

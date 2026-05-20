@@ -14,6 +14,7 @@
       "public_api_surface": false,
       "snippet": "unsafe { core::mem::zeroed::<u32>() }"
     },
+    "operation": "unsafe { core::mem::zeroed::<u32>() }",
     "operation_family": "zeroed",
     "hazards": [
       "invalid_value",
