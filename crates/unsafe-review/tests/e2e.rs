@@ -290,6 +290,10 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     assert_eq!(packet["policy"], "advisory");
     assert_eq!(packet["card_id"], card_id);
     assert_eq!(packet["card"]["id"], card_id);
+    assert_eq!(
+        packet["context"]["operation"],
+        "unsafe { ptr.cast::<Header>().read() }"
+    );
     assert_eq!(packet["context"]["operation_family"], "raw_pointer_read");
     assert!(packet["witness_routes"].is_array());
     assert!(packet["do_not_do"].is_array());

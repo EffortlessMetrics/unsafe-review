@@ -263,6 +263,10 @@ mod tests {
         assert_eq!(value["card_id"], card.id.0);
         assert_eq!(value["card"]["id"], card.id.0);
         assert_eq!(value["card"]["class"], "guard_missing");
+        assert_eq!(
+            value["context"]["operation"],
+            "unsafe { ptr.cast::<Header>().read() }"
+        );
         assert_eq!(value["context"]["operation_family"], "raw_pointer_read");
         assert!(value["safety_contract"]["required_conditions"].is_array());
         assert!(
