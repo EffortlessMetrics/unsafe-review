@@ -148,6 +148,10 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     assert_eq!(sarif["version"], "2.1.0");
     assert!(sarif["runs"][0]["results"].is_array());
     assert_eq!(
+        sarif["runs"][0]["results"][0]["properties"]["operation"],
+        "unsafe { ptr.cast::<Header>().read() }"
+    );
+    assert_eq!(
         sarif["runs"][0]["results"][0]["properties"]["witnessRouteDetails"][0]["kind"],
         "miri"
     );
