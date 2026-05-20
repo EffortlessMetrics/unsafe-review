@@ -175,7 +175,7 @@ fn discharge_state_for(
             if family == &OperationFamily::RawPointerWrite && has_u8_write_bytes_context(lower) {
                 EvidenceState::present("u8 raw write alignment evidence was detected")
             } else if family == &OperationFamily::RawPointerWrite
-                && has_bool_write_bytes_context(lower)
+                && has_bool_write_bytes_pointer_context(lower)
             {
                 EvidenceState::present("bool raw write alignment evidence was detected")
             } else if has_alignment_guard(site, lower) {
@@ -241,7 +241,7 @@ fn discharge_state_for(
             {
                 EvidenceState::present("u8 write_bytes target evidence was detected")
             } else if family == &OperationFamily::RawPointerWrite
-                && has_bool_write_bytes_context(lower)
+                && has_bool_write_bytes_value_evidence(lower)
             {
                 EvidenceState::present("bool write_bytes value evidence was detected")
             } else if family == &OperationFamily::VecFromRawParts
@@ -2027,7 +2027,16 @@ fn has_u8_write_bytes_context(lower: &str) -> bool {
     pointer_binding_has_type_before_call(&compact, receiver, "*mutu8")
 }
 
-fn has_bool_write_bytes_context(lower: &str) -> bool {
+fn has_bool_write_bytes_pointer_context(lower: &str) -> bool {
+    let compact = compact_code(lower);
+    let Some((_before_call, receiver, _byte)) = write_bytes_method_context(&compact) else {
+        return false;
+    };
+
+    pointer_binding_has_type_before_call(&compact, receiver, "*mutbool")
+}
+
+fn has_bool_write_bytes_value_evidence(lower: &str) -> bool {
     let compact = compact_code(lower);
     let Some((before_call, receiver, byte)) = write_bytes_method_context(&compact) else {
         return false;
