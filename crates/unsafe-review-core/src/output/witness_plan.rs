@@ -107,6 +107,7 @@ mod tests {
         let rendered = render(&output);
 
         assert!(rendered.contains("# unsafe-review witness plan"));
+        assert!(rendered.contains("Operation: `unsafe { ptr.cast::<Header>().read() }`"));
         assert!(rendered.contains("Route: `miri`"));
         assert!(rendered.contains("cargo +nightly miri test read_header"));
         assert!(rendered.contains("Next action: Add or expose"));

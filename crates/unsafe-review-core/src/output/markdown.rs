@@ -394,6 +394,7 @@ mod tests {
         let rendered = render_card_detail(card);
 
         assert!(rendered.contains("## Required safety conditions"));
+        assert!(rendered.contains("**Operation:** `unsafe { ptr.cast::<Header>().read() }`"));
         assert!(rendered.contains("pointer is aligned for the accessed type"));
         assert!(rendered.contains("## Missing evidence"));
         assert!(rendered.contains("Missing visible local guard"));
