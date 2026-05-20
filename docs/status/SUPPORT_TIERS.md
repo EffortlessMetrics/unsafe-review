@@ -35,6 +35,11 @@ Unchecked-constructor availability evidence is pinned for same-receiver
 assertions, enclosing positive branches, and unavailable-path early returns, and
 rejects other receivers, bare observations, and closed positive branches.
 
+Copy operation range evidence is intentionally conservative:
+`copy_nonoverlapping_other_len_not_guard` and `ptr_copy_other_len_not_guard`
+pin that an unrelated slice length assertion does not discharge the
+source/destination range obligation.
+
 | Capability | Tier | Surface | Proof | Known limits |
 |---|---|---|---|---|
 | Diff unsafe site inventory | experimental | CLI JSON/human | syntax-backed fixture goldens for unsafe blocks, split unsafe blocks, inline unsafe operation dedupe, attributed unsafe functions, raw pointer operations, import/declaration, adjacent unchanged unsafe declaration, multi-line `impl Trait` owner inference, long unsafe-function owner inference, macro owner inference, and `cfg(target_feature)` false-positive controls, negative safe-code cases, and human output operation-expression plus operation-family context | source-based, not MIR |

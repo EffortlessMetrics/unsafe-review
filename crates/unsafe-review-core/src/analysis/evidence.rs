@@ -421,9 +421,8 @@ fn is_documented_private_unsafe_contract_obligation(
 }
 
 fn has_length_or_bounds_guard(lower: &str) -> bool {
-    let has_comparison = lower.contains(">=") || lower.contains('<');
-    (has_comparison && (lower.contains("len") || lower.contains("num_ctrl_bytes")))
-        || has_len_capacity_equality_guard(lower)
+    let compact = compact_code(lower);
+    has_bounds_assertion_guard(&compact) || has_bounds_open_positive_branch_guard(&compact)
 }
 
 fn has_bounds_guard(site: &ScannedSite, lower: &str) -> bool {
@@ -444,12 +443,124 @@ fn has_bounds_guard(site: &ScannedSite, lower: &str) -> bool {
     {
         return has_write_bytes_bounds_evidence(&site.operation.expression);
     }
+    let guard_scope = code_before_operation(lower, &site.operation.expression)
+        .unwrap_or_else(|| lower.to_string());
     if site.operation.family == OperationFamily::RawPointerRead {
-        let guard_scope = code_before_operation(lower, &site.operation.expression)
-            .unwrap_or_else(|| lower.to_string());
         return has_raw_pointer_read_bounds_evidence(&site.operation.expression, &guard_scope);
     }
-    has_length_or_bounds_guard(lower)
+    if matches!(
+        site.operation.family,
+        OperationFamily::CopyNonOverlapping | OperationFamily::PtrCopy
+    ) {
+        // A generic length comparison does not prove both copy source and destination ranges.
+        return false;
+    }
+    has_length_or_bounds_guard(&guard_scope)
+}
+
+fn has_bounds_assertion_guard(compact: &str) -> bool {
+    ["assert!(", "debug_assert!("].into_iter().any(|prefix| {
+        let mut cursor = compact;
+        let mut offset = 0usize;
+        while let Some(pos) = cursor.find(prefix) {
+            let statement_start = offset + pos + prefix.len();
+            let after_prefix = &compact[statement_start..];
+            let statement_end = after_prefix.find(';').unwrap_or(after_prefix.len());
+            let statement = &after_prefix[..statement_end];
+            if has_bounds_condition(statement) {
+                return true;
+            }
+            let next = pos + prefix.len();
+            offset += next;
+            cursor = &cursor[next..];
+        }
+        false
+    })
+}
+
+fn has_bounds_open_positive_branch_guard(compact: &str) -> bool {
+    let mut cursor = compact;
+    let mut offset = 0usize;
+    while let Some(pos) = cursor.find("if") {
+        let start = offset + pos;
+        let before = compact[..start].chars().next_back();
+        if before.is_some_and(is_receiver_path_char) {
+            let next = pos + 2;
+            offset += next;
+            cursor = &cursor[next..];
+            continue;
+        }
+        let after_if = &compact[start + 2..];
+        if let Some(brace_pos) = after_if.find('{') {
+            let condition = &after_if[..brace_pos];
+            let after_body_start = &after_if[brace_pos + 1..];
+            if has_bounds_condition(condition) && branch_still_open_at_operation(after_body_start) {
+                return true;
+            }
+        }
+        let next = pos + 2;
+        offset += next;
+        cursor = &cursor[next..];
+    }
+    false
+}
+
+fn has_bounds_condition(compact: &str) -> bool {
+    for op in [">=", "<=", "<", ">"] {
+        let mut cursor = compact;
+        let mut offset = 0usize;
+        while let Some(pos) = cursor.find(op) {
+            let op_start = offset + pos;
+            let op_end = op_start + op.len();
+            let left = comparison_left_operand(compact, op_start);
+            let right = comparison_right_operand(compact, op_end);
+            if operand_mentions_bounds(left) || operand_mentions_bounds(right) {
+                return true;
+            }
+            let next = pos + op.len();
+            offset += next;
+            cursor = &cursor[next..];
+        }
+    }
+    false
+}
+
+fn comparison_left_operand(compact: &str, op_start: usize) -> &str {
+    let left = &compact[..op_start];
+    let start = left
+        .rfind(['{', ';', ',', '=', '!'])
+        .map_or(0, |idx| idx + 1);
+    &left[start..]
+}
+
+fn comparison_right_operand(compact: &str, op_end: usize) -> &str {
+    let right = &compact[op_end..];
+    let end = right.find(['{', '}', ';', ',', '=']).unwrap_or(right.len());
+    &right[..end]
+}
+
+fn operand_mentions_bounds(operand: &str) -> bool {
+    operand.contains(".len()")
+        || operand.contains(".capacity()")
+        || operand.contains("num_ctrl_bytes()")
+        || compact_contains_identifier(operand, "len")
+        || compact_contains_identifier(operand, "capacity")
+}
+
+fn compact_contains_identifier(text: &str, ident: &str) -> bool {
+    let mut cursor = text;
+    while let Some(pos) = cursor.find(ident) {
+        let before = cursor[..pos].chars().next_back();
+        let after = cursor[pos + ident.len()..].chars().next();
+        if before.is_none_or(|ch| !is_receiver_path_char(ch))
+            && after.is_none_or(|ch| !is_receiver_path_char(ch))
+        {
+            return true;
+        }
+        let next = pos + ident.len();
+        cursor = &cursor[next..];
+    }
+    false
 }
 
 fn code_before_operation(lower: &str, expression: &str) -> Option<String> {
