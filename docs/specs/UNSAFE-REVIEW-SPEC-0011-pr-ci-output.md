@@ -415,7 +415,7 @@ weak reach-only cards
 static_unknown cards
 cards without changed-line location
 cards with ambiguous macro site
-cards already baseline-known or suppressed
+cards already baseline_known or suppressed
 ```
 
 Each candidate must include:
@@ -425,6 +425,10 @@ selection_reason
 ```
 
 Automatic posting is a later trusted-workflow feature, not this gate.
+
+Detailed PR-comment experience rules for selection quality, actionability,
+dedupe, noise budget, and the future posting model are defined in
+[UNSAFE-REVIEW-SPEC-0022](UNSAFE-REVIEW-SPEC-0022-pr-commenting-experience.md).
 
 ### 6. GitHub job summary contract
 
