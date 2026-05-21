@@ -53,6 +53,8 @@ const POLICY_FILES: &[&str] = &[
     "policy/package-boundary.toml",
     "policy/source-sync.toml",
     "policy/docs-automation.toml",
+    "policy/accuracy-calibration.toml",
+    "policy/public-surfaces.toml",
 ];
 const WORKFLOW_ALLOWLIST: &str = "policy/workflow-allowlist.toml";
 const WORKFLOW_DIR: &str = ".github/workflows";
