@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -38,12 +39,14 @@ const POLICY_FILES: &[&str] = &[
     "policy/doc-artifacts.toml",
     "policy/ci-lane-whitelist.toml",
     "policy/package-boundary.toml",
+    "policy/source-sync.toml",
 ];
 const WORKFLOW_ALLOWLIST: &str = "policy/workflow-allowlist.toml";
 const WORKFLOW_DIR: &str = ".github/workflows";
 const DOC_ARTIFACT_LEDGER: &str = "policy/doc-artifacts.toml";
 const CI_LANE_LEDGER: &str = "policy/ci-lane-whitelist.toml";
 const PACKAGE_BOUNDARY_LEDGER: &str = "policy/package-boundary.toml";
+const SOURCE_SYNC_LEDGER: &str = "policy/source-sync.toml";
 const ACTIVE_GOAL_MANIFEST: &str = ".unsafe-review/goals/active.toml";
 const DOC_ARTIFACT_KINDS: &[&str] = &["proposal", "spec", "adr", "plan", "goal"];
 const DOC_ARTIFACT_STATUSES: &[&str] = &["proposed", "accepted", "active", "done", "deferred"];
@@ -151,6 +154,8 @@ const PUBLIC_BADGE_ENDPOINTS: &[(&str, &str)] = &[
     ("badges/unsafe-review.json", "unsafe-review"),
     ("badges/unsafe-review-plus.json", "unsafe-review+"),
 ];
+const SOURCE_MAIN_REF: &str = "refs/unsafe-review-sync/source-main";
+const SWARM_MAIN_REF: &str = "refs/unsafe-review-sync/swarm-main";
 
 fn main() {
     if let Err(err) = run(std::env::args().collect()) {
@@ -167,7 +172,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
     match args.get(1).map(|arg| arg.as_str()) {
         None | Some("help") | Some("--help") => {
             println!(
-                "xtask commands: check-pr, check-docs, check-policy, check-support-tiers, check-fixtures, check-calibration, check-dogfood, check-fuzz, check-doc-artifacts, check-goals, check-package-boundary, check-ci-lanes, check-advisory-artifacts <dir>, check-first-pr-artifacts <dir>"
+                "xtask commands: check-pr, check-docs, check-policy, check-support-tiers, check-fixtures, check-calibration, check-dogfood, check-fuzz, check-doc-artifacts, check-goals, check-package-boundary, check-ci-lanes, check-advisory-artifacts <dir>, check-first-pr-artifacts <dir>, source-divergence, check-source-sync"
             );
             Ok(())
         }
@@ -241,6 +246,10 @@ fn run(args: Vec<String>) -> Result<(), String> {
             };
             require_max_args(&args, "check-first-pr-artifacts", 3)?;
             check_first_pr_artifacts(Path::new(dir))
+        }
+        Some("source-divergence") | Some("check-source-sync") => {
+            require_no_extra_args(&args, "source-divergence")?;
+            report_source_divergence()
         }
         Some(other) => Err(format!("unknown xtask command `{other}`")),
     }
@@ -2835,6 +2844,171 @@ fn check_tracked_generated_artifacts() -> Result<(), String> {
     Ok(())
 }
 
+fn report_source_divergence() -> Result<(), String> {
+    let checkpoint = source_sync_checkpoint()?;
+    fetch_main_ref(&checkpoint.source_repo, SOURCE_MAIN_REF)?;
+    fetch_main_ref(&checkpoint.swarm_repo, SWARM_MAIN_REF)?;
+
+    let counts = git_stdout([
+        "rev-list",
+        "--left-right",
+        "--count",
+        &format!("{SOURCE_MAIN_REF}...{SWARM_MAIN_REF}"),
+    ])?;
+    let (source_only, swarm_only) = parse_rev_list_counts(&counts)?;
+    let new_source_commits = git_stdout([
+        "rev-list",
+        "--count",
+        &format!("{}..{SOURCE_MAIN_REF}", checkpoint.acknowledged_source_main),
+    ])?
+    .parse::<usize>()
+    .map_err(|err| format!("invalid source checkpoint count: {err}"))?;
+    let source_head = git_stdout(["rev-parse", "--short", SOURCE_MAIN_REF])?;
+    let swarm_head = git_stdout(["rev-parse", "--short", SWARM_MAIN_REF])?;
+    let source_commits = git_stdout([
+        "log",
+        "--oneline",
+        "--max-count=10",
+        SOURCE_MAIN_REF,
+        "--not",
+        &checkpoint.acknowledged_source_main,
+    ])?;
+    let swarm_commits = git_stdout([
+        "log",
+        "--oneline",
+        "--max-count=10",
+        SWARM_MAIN_REF,
+        "--not",
+        SOURCE_MAIN_REF,
+    ])?;
+
+    println!("source-divergence: advisory");
+    println!("source_repo={}", checkpoint.source_repo);
+    println!("swarm_repo={}", checkpoint.swarm_repo);
+    println!("source_main={source_head}");
+    println!("swarm_main={swarm_head}");
+    println!(
+        "acknowledged_source_main={}",
+        checkpoint.acknowledged_source_main
+    );
+    println!("acknowledged_by={}", checkpoint.acknowledged_by);
+    println!("new_source_commits={new_source_commits}");
+    println!("raw_source_only={source_only}");
+    println!("raw_swarm_only={swarm_only}");
+
+    if new_source_commits == 0 {
+        println!("status: no source commits after the acknowledged swarm sync point");
+    } else {
+        println!(
+            "status: source is ahead of swarm; open a swarm sync PR before routine development"
+        );
+    }
+    if swarm_only > 0 {
+        println!(
+            "note: swarm has work not present in source; this is expected for unpromoted workbench changes"
+        );
+    }
+
+    print_commit_section("new_source_commits", &source_commits);
+    print_commit_section("swarm_only_commits", &swarm_commits);
+    Ok(())
+}
+
+struct SourceSyncCheckpoint {
+    source_repo: String,
+    swarm_repo: String,
+    acknowledged_source_main: String,
+    acknowledged_by: String,
+}
+
+fn source_sync_checkpoint() -> Result<SourceSyncCheckpoint, String> {
+    let value = parse_toml_file(Path::new(SOURCE_SYNC_LEDGER))?;
+    require_toml_string(&value, "schema_version", SOURCE_SYNC_LEDGER)?;
+    require_toml_string(&value, "policy", SOURCE_SYNC_LEDGER)?;
+    let source_repo = required_toml_string(&value, "source_repo", SOURCE_SYNC_LEDGER)?.to_string();
+    let swarm_repo = required_toml_string(&value, "swarm_repo", SOURCE_SYNC_LEDGER)?.to_string();
+    let acknowledged_source_main =
+        required_toml_string(&value, "acknowledged_source_main", SOURCE_SYNC_LEDGER)?.to_string();
+    let acknowledged_by =
+        required_toml_string(&value, "acknowledged_by", SOURCE_SYNC_LEDGER)?.to_string();
+    require_file(&acknowledged_by)?;
+    Ok(SourceSyncCheckpoint {
+        source_repo,
+        swarm_repo,
+        acknowledged_source_main,
+        acknowledged_by,
+    })
+}
+
+fn fetch_main_ref(repo_url: &str, target_ref: &str) -> Result<(), String> {
+    let refspec = format!("+refs/heads/main:{target_ref}");
+    let output = Command::new("git")
+        .args(["fetch", "--no-tags", "--quiet", repo_url, &refspec])
+        .output()
+        .map_err(|err| format!("failed to run git fetch for {repo_url}: {err}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "git fetch {repo_url} failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ))
+    }
+}
+
+fn git_stdout<I, S>(args: I) -> Result<String, String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let output = Command::new("git")
+        .args(args)
+        .output()
+        .map_err(|err| format!("failed to run git: {err}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "git command failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn parse_rev_list_counts(text: &str) -> Result<(usize, usize), String> {
+    let mut fields = text.split_whitespace();
+    let Some(left) = fields.next() else {
+        return Err("git rev-list count output is empty".to_string());
+    };
+    let Some(right) = fields.next() else {
+        return Err(format!(
+            "git rev-list count output must contain two counts: {text}"
+        ));
+    };
+    if fields.next().is_some() {
+        return Err(format!(
+            "git rev-list count output must contain only two counts: {text}"
+        ));
+    }
+    let left = left
+        .parse::<usize>()
+        .map_err(|err| format!("invalid source-only count `{left}`: {err}"))?;
+    let right = right
+        .parse::<usize>()
+        .map_err(|err| format!("invalid swarm-only count `{right}`: {err}"))?;
+    Ok((left, right))
+}
+
+fn print_commit_section(label: &str, commits: &str) {
+    println!("{label}:");
+    if commits.trim().is_empty() {
+        println!("  none");
+        return;
+    }
+    for line in commits.lines() {
+        println!("  {line}");
+    }
+}
+
 fn parse_toml_file(path: &Path) -> Result<toml::Value, String> {
     let text = read_to_string(path)?;
     text.parse::<toml::Table>()
@@ -3474,6 +3648,13 @@ mod tests {
         }
     }
 
+    fn err_text<T>(result: Result<T, String>) -> Result<String, String> {
+        match result {
+            Ok(_) => Err("expected error".to_string()),
+            Err(err) => Ok(err),
+        }
+    }
+
     #[test]
     fn xtask_rejects_unexpected_trailing_args() -> Result<(), String> {
         let args = vec![
@@ -3506,6 +3687,22 @@ mod tests {
         assert!(err.contains("check-advisory-artifacts"));
         assert!(err.contains("extra"));
         require_max_args(&args[..3], "check-advisory-artifacts", 3)?;
+        Ok(())
+    }
+
+    #[test]
+    fn source_divergence_counts_parse_git_output() -> Result<(), String> {
+        assert_eq!(parse_rev_list_counts("424\t113\n")?, (424, 113));
+        assert_eq!(parse_rev_list_counts("0 7")?, (0, 7));
+        Ok(())
+    }
+
+    #[test]
+    fn source_divergence_counts_reject_malformed_output() -> Result<(), String> {
+        assert!(err_text(parse_rev_list_counts(""))?.contains("empty"));
+        assert!(err_text(parse_rev_list_counts("12"))?.contains("two counts"));
+        assert!(err_text(parse_rev_list_counts("12 3 extra"))?.contains("only two counts"));
+        assert!(err_text(parse_rev_list_counts("source 3"))?.contains("invalid source-only count"));
         Ok(())
     }
 
