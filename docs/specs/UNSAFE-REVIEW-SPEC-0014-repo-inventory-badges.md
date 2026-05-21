@@ -75,8 +75,29 @@ missing-evidence counts, and saved witness receipt strength from the supplied
 snapshots. It must not rerun analysis, run witnesses, post policy decisions, or
 claim repository safety.
 
+Outcome comparison also includes a compact `reviewer_delta` front panel derived
+from the same grouped card outcomes. It reports new/resolved/improved/regressed
+counts, receipt-strength movement, and top remaining gaps from the after
+snapshot. It does not introduce another classification path.
+
 Baseline-known items, suppressions, and no-new-debt policy promotion remain
 separate policy surfaces and are not part of badge proof.
+
+## Projection contract
+
+Repo posture and badges are ReviewCard projections. They summarize unresolved
+unsafe-review evidence gaps; they do not count raw unsafe usage as repository
+posture and do not certify repository safety.
+
+Badge meanings are fixed:
+
+- `unsafe-review`: open unsafe-review gap count
+- `unsafe-review+`: contract, guard, and guarded-unwitnessed evidence mix
+
+Badges must never imply that the repo is sound, memory-safe, UB-free,
+Miri-clean, verified, all clear, policy-ready, or that any unsafe site executed.
+If a badge endpoint cannot be generated or verified, the public badge row must
+be withheld or marked planned rather than inferred from another surface.
 
 ## Non-goals
 
@@ -110,6 +131,9 @@ separate policy surfaces and are not part of badge proof.
   `after_id` snapshot fingerprints, grouped `cards.new`, `cards.resolved`,
   `cards.improved`, `cards.regressed`, and `cards.unchanged` arrays, explicit
   limitations, and the trust boundary.
+- Outcome JSON includes `reviewer_delta` with compact reviewer counts,
+  receipt movement, and top remaining gaps projected from the same outcome
+  cards.
 - Each outcome card includes a reason that explains the snapshot movement, such
   as a class change, missing-evidence count change, witness receipt strength
   movement, new card, or resolved card.

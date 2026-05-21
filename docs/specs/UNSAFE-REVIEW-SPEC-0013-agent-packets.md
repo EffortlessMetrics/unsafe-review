@@ -28,9 +28,15 @@ source of analyzer truth. It carries:
 - the card identity, class, priority, and confidence
 - the unsafe site context, concrete operation expression, operation family,
   snippet, and hazards
+- bounded source context containing the unsafe site, nearby safety-contract
+  summary, nearby guard-evidence summaries, and at most three related test
+  mentions
 - required safety conditions and obligation-level evidence
 - missing evidence
-- allowed repairs scoped to the current card
+- allowed repairs scoped to the current card, derived from the ReviewCard
+  operation family and missing obligation evidence
+- `agent_readiness`, an advisory classification of whether this card is a
+  bounded repair-delegation candidate
 - witness routes and verify commands from the card
 - do-not-do rules
 - stop conditions
@@ -40,10 +46,39 @@ For compatibility with the initial context-packet scaffold, the packet keeps
 top-level `card_id`, `required_safety_conditions`, `missing`, and string-array
 `allowed_repairs` fields while adding richer structured fields.
 
+`source_context` is intentionally bounded. It may include the unsafe site
+snippet, ReviewCard-derived summaries for nearby contract and guard evidence,
+and a few related test mentions. It must not dump whole files by default, and a
+related test mention remains reach evidence only; it is not a claim that the
+unsafe site executed.
+
+`agent_readiness` is additive metadata, not analyzer truth. A packet is marked
+`ready` only when the ReviewCard has an actionable class, a concrete operation
+family, medium-or-high confidence, card-scoped allowed repairs, and a verify
+command. Cards that require human deep review, unsupported witness routes,
+ambiguous operation families, weak confidence, or external specialist routing
+are marked not ready with reasons. This classification does not execute an
+agent, apply edits, run witnesses, or resolve the card.
+
 Packets constrain LLMs with task, contract, missing evidence, allowed repairs,
 do-not-do list, verify commands, and stop conditions. They are copy-only in
 v0.x; `unsafe-review` does not run an agent, edit source, post comments, or
 claim that the packet resolves the card.
+
+## Projection contract
+
+Agent packets are card-scoped handoffs, not autonomous repair authority. Each
+packet must name one ReviewCard, the exact missing obligation evidence, allowed
+repair shapes, do-not-do rules, verify commands, and stop conditions.
+
+The packet may classify whether the card is ready for bounded repair delegation,
+but that classification is advisory metadata. It must not hide the ReviewCard,
+weaken missing evidence, or promote human-deep-review, ambiguous macro-heavy,
+unsupported provenance, or FFI ownership cards into automatic repair tasks.
+
+Bounded source context must stay small: unsafe site, nearby contract/guard
+summaries, related test mentions, witness route, and explicit trust boundary.
+Whole-file dumps are out of scope by default.
 
 ## Non-goals
 
@@ -67,8 +102,18 @@ claim that the packet resolves the card.
 - The packet names `source = review_card` and repeats the card identity.
 - The packet carries the exact ReviewCard operation expression and operation
   family, so repair work is scoped to one unsafe operation.
+- The packet carries bounded `source_context` with the unsafe site, local
+  contract/guard summaries, related test mentions, and explicit limits against
+  whole-file dumps and site-execution claims.
 - The packet includes obligation-level evidence, missing evidence, witness
   routes, do-not-do rules, stop conditions, and the trust boundary.
+- Allowed repairs name the current card's missing obligation shape. For
+  example, raw-pointer read packets may name same-pointer alignment or
+  initialization evidence, while copy packets may name range and non-overlap
+  evidence. They must not suggest an obligation the ReviewCard does not carry.
+- Agent readiness is `ready` for a high-confidence, card-scoped repair packet
+  with a verify command, and is not ready for human-review or unsupported
+  operation families such as inline assembly and FFI ownership boundaries.
 - If evidence is not knowable statically, the packet names the limitation
   instead of overclaiming.
 

@@ -21,6 +21,8 @@ Specs define behavior. They do not carry the PR queue.
 15. [Public API and crate surface](UNSAFE-REVIEW-SPEC-0015-public-api-crate-surface.md)
 16. [Fixtures, calibration, support tiers](UNSAFE-REVIEW-SPEC-0016-fixtures-calibration-support.md)
 17. [Security and file policy](UNSAFE-REVIEW-SPEC-0017-security-file-policy.md)
+18. [First-run cockpit (0.2.0 lane)](UNSAFE-REVIEW-SPEC-0019-first-run-cockpit.md)
+19. [Source-of-truth stack](UNSAFE-REVIEW-SPEC-0020-source-of-truth-stack.md)
 
 
 ## Appendices
