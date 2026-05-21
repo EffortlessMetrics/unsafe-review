@@ -1,5 +1,5 @@
 use crate::api::{AnalyzeOutput, Scope};
-use crate::domain::{Priority, ReviewCard, WitnessRoute};
+use crate::domain::{EvidenceState, ObligationEvidence, Priority, ReviewCard, WitnessRoute};
 use crate::util::path_display;
 use serde::Serialize;
 
@@ -59,6 +59,9 @@ struct LspDiagnostic<'a> {
     operation: &'a str,
     operation_family: &'static str,
     hazards: Vec<&'static str>,
+    required_safety_conditions: Vec<LspSafetyCondition<'a>>,
+    evidence_summary: LspEvidenceSummary<'a>,
+    obligation_evidence: Vec<LspObligationEvidence<'a>>,
     missing_evidence: Vec<&'a str>,
     next_action: &'a str,
     witness_routes: Vec<LspWitnessRoute<'a>>,
@@ -83,6 +86,20 @@ impl<'a> From<&'a ReviewCard> for LspDiagnostic<'a> {
             operation: &card.operation.expression,
             operation_family: card.operation.family.as_str(),
             hazards: card.hazards.iter().map(|hazard| hazard.as_str()).collect(),
+            required_safety_conditions: card
+                .obligations
+                .iter()
+                .map(|obligation| LspSafetyCondition {
+                    key: &obligation.key,
+                    description: &obligation.description,
+                })
+                .collect(),
+            evidence_summary: LspEvidenceSummary::from(card),
+            obligation_evidence: card
+                .obligation_evidence
+                .iter()
+                .map(LspObligationEvidence::from)
+                .collect(),
             missing_evidence: card
                 .missing
                 .iter()
@@ -92,6 +109,101 @@ impl<'a> From<&'a ReviewCard> for LspDiagnostic<'a> {
             witness_routes: card.routes.iter().map(LspWitnessRoute::from).collect(),
             verify_commands: &card.next_action.verify_commands,
             trust_boundary: TRUST_BOUNDARY,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct LspSafetyCondition<'a> {
+    key: &'a str,
+    description: &'a str,
+}
+
+#[derive(Serialize)]
+struct LspEvidenceSummary<'a> {
+    contract: LspSimpleEvidence<'a>,
+    discharge: LspSimpleEvidence<'a>,
+    reach: LspReachEvidence<'a>,
+    witness: LspSimpleEvidence<'a>,
+    reach_limitation: &'static str,
+}
+
+impl<'a> From<&'a ReviewCard> for LspEvidenceSummary<'a> {
+    fn from(card: &'a ReviewCard) -> Self {
+        Self {
+            contract: LspSimpleEvidence {
+                present: card.contract.present,
+                state: present_label(card.contract.present),
+                summary: &card.contract.summary,
+            },
+            discharge: LspSimpleEvidence {
+                present: card.discharge.present,
+                state: present_label(card.discharge.present),
+                summary: &card.discharge.summary,
+            },
+            reach: LspReachEvidence {
+                state: &card.reach.state,
+                summary: &card.reach.summary,
+            },
+            witness: LspSimpleEvidence {
+                present: card.witness.present,
+                state: present_label(card.witness.present),
+                summary: &card.witness.summary,
+            },
+            reach_limitation: "static reach evidence is not proof that the unsafe site executed",
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct LspSimpleEvidence<'a> {
+    present: bool,
+    state: &'static str,
+    summary: &'a str,
+}
+
+#[derive(Serialize)]
+struct LspReachEvidence<'a> {
+    state: &'a str,
+    summary: &'a str,
+}
+
+#[derive(Serialize)]
+struct LspObligationEvidence<'a> {
+    key: &'a str,
+    description: &'a str,
+    contract: LspEvidenceState<'a>,
+    discharge: LspEvidenceState<'a>,
+    reach: LspEvidenceState<'a>,
+    witness: LspEvidenceState<'a>,
+}
+
+impl<'a> From<&'a ObligationEvidence> for LspObligationEvidence<'a> {
+    fn from(evidence: &'a ObligationEvidence) -> Self {
+        Self {
+            key: &evidence.obligation.key,
+            description: &evidence.obligation.description,
+            contract: LspEvidenceState::from(&evidence.contract),
+            discharge: LspEvidenceState::from(&evidence.discharge),
+            reach: LspEvidenceState::from(&evidence.reach),
+            witness: LspEvidenceState::from(&evidence.witness),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct LspEvidenceState<'a> {
+    present: bool,
+    state: &'a str,
+    summary: &'a str,
+}
+
+impl<'a> From<&'a EvidenceState> for LspEvidenceState<'a> {
+    fn from(state: &'a EvidenceState) -> Self {
+        Self {
+            present: state.present,
+            state: &state.state,
+            summary: &state.summary,
         }
     }
 }
@@ -144,7 +256,23 @@ struct LspCodeAction<'a> {
     title: String,
     kind: &'static str,
     command: &'static str,
+    payload: LspCodeActionPayload<'a>,
     arguments: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct LspCodeActionPayload<'a> {
+    kind: &'static str,
+    card_id: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    line: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    command: Option<&'a str>,
+    trust_boundary: &'static str,
 }
 
 #[derive(Serialize)]
@@ -180,6 +308,15 @@ fn code_actions(card: &ReviewCard) -> Vec<LspCodeAction<'_>> {
             title: format!("Copy unsafe-review packet for {}", card.id.0),
             kind: "quickfix",
             command: "unsafe-review.copyAgentPacket",
+            payload: LspCodeActionPayload {
+                kind: "unsafe-review.agent_packet",
+                card_id: &card.id.0,
+                file: None,
+                line: None,
+                name: None,
+                command: None,
+                trust_boundary: TRUST_BOUNDARY,
+            },
             arguments: vec![card.id.0.clone()],
         },
         LspCodeAction {
@@ -189,6 +326,15 @@ fn code_actions(card: &ReviewCard) -> Vec<LspCodeAction<'_>> {
             title: "Explain unsafe-review witness route".to_string(),
             kind: "quickfix",
             command: "unsafe-review.explainWitnessRoute",
+            payload: LspCodeActionPayload {
+                kind: "unsafe-review.witness_route",
+                card_id: &card.id.0,
+                file: None,
+                line: None,
+                name: None,
+                command: None,
+                trust_boundary: TRUST_BOUNDARY,
+            },
             arguments: vec![card.id.0.clone()],
         },
     ];
@@ -209,6 +355,15 @@ fn code_actions(card: &ReviewCard) -> Vec<LspCodeAction<'_>> {
             title: format!("Open related test {}", test.name),
             kind: "quickfix",
             command: "unsafe-review.openRelatedTest",
+            payload: LspCodeActionPayload {
+                kind: "unsafe-review.related_test",
+                card_id: &card.id.0,
+                file: Some(&test.file),
+                line: Some(test.line),
+                name: Some(&test.name),
+                command: None,
+                trust_boundary: TRUST_BOUNDARY,
+            },
             arguments: vec![
                 card.id.0.clone(),
                 test.file.clone(),
@@ -225,6 +380,15 @@ fn code_actions(card: &ReviewCard) -> Vec<LspCodeAction<'_>> {
             title: "Copy recommended witness command".to_string(),
             kind: "quickfix",
             command: "unsafe-review.copyWitnessCommand",
+            payload: LspCodeActionPayload {
+                kind: "unsafe-review.witness_command",
+                card_id: &card.id.0,
+                file: None,
+                line: None,
+                name: None,
+                command: Some(command),
+                trust_boundary: TRUST_BOUNDARY,
+            },
             arguments: vec![command.clone()],
         });
     }
@@ -239,16 +403,50 @@ fn hover_contents(card: &ReviewCard) -> String {
         card.operation.family.as_str(),
         card.operation.expression
     ));
+    text.push_str(&format!(
+        "Card: `{}`; priority `{}`; confidence `{}`\n\n",
+        card.id,
+        card.priority.as_str(),
+        card.confidence.as_str()
+    ));
     text.push_str("Required safety conditions:\n");
     for obligation in &card.obligations {
         text.push_str(&format!("- {}\n", obligation.description));
     }
+    text.push_str("\nEvidence summary:\n");
+    text.push_str(&format!(
+        "- Contract [{}]: {}\n",
+        present_label(card.contract.present),
+        card.contract.summary
+    ));
+    text.push_str(&format!(
+        "- Guard/discharge [{}]: {}\n",
+        present_label(card.discharge.present),
+        card.discharge.summary
+    ));
+    text.push_str(&format!(
+        "- Reach [{}]: {}\n",
+        card.reach.state, card.reach.summary
+    ));
+    text.push_str(&format!(
+        "- Witness [{}]: {}\n",
+        present_label(card.witness.present),
+        card.witness.summary
+    ));
     text.push_str("\nMissing evidence:\n");
     if card.missing.is_empty() {
         text.push_str("- none recorded\n");
     } else {
         for missing in &card.missing {
             text.push_str(&format!("- {}\n", missing.message));
+        }
+    }
+    text.push_str("\nNext action:\n");
+    text.push_str(&format!("- {}\n", card.next_action.summary));
+    if !card.next_action.verify_commands.is_empty() {
+        text.push_str("\nVerify commands:\n");
+        for command in &card.next_action.verify_commands {
+            text.push_str(&format!("- `{command}`\n"));
         }
     }
     if let Some(route) = card.routes.first() {
@@ -264,6 +462,10 @@ fn hover_contents(card: &ReviewCard) -> String {
     text.push_str("\nTrust boundary: ");
     text.push_str(TRUST_BOUNDARY);
     text
+}
+
+fn present_label(present: bool) -> &'static str {
+    if present { "present" } else { "missing" }
 }
 
 fn range_for(card: &ReviewCard) -> LspRange {
@@ -364,6 +566,51 @@ mod tests {
             value["diagnostics"][0]["operation_family"],
             "raw_pointer_read"
         );
+        assert_eq!(
+            value["diagnostics"][0]["required_safety_conditions"][0]["key"],
+            "pointer-live"
+        );
+        assert!(
+            value["diagnostics"][0]["required_safety_conditions"][0]["description"]
+                .as_str()
+                .unwrap_or("")
+                .contains("pointer is live")
+        );
+        assert_eq!(
+            value["diagnostics"][0]["evidence_summary"]["contract"]["state"],
+            "present"
+        );
+        assert!(
+            value["diagnostics"][0]["evidence_summary"]["contract"]["summary"]
+                .as_str()
+                .unwrap_or("")
+                .contains("SAFETY")
+        );
+        assert_eq!(
+            value["diagnostics"][0]["evidence_summary"]["discharge"]["state"],
+            "missing"
+        );
+        assert!(
+            value["diagnostics"][0]["evidence_summary"]["reach_limitation"]
+                .as_str()
+                .unwrap_or("")
+                .contains("not proof")
+        );
+        assert_eq!(
+            value["diagnostics"][0]["obligation_evidence"][0]["key"],
+            "pointer-live"
+        );
+        assert!(
+            value["diagnostics"][0]["obligation_evidence"]
+                .as_array()
+                .is_some_and(|items| {
+                    items.iter().any(|item| {
+                        item["key"] == "alignment"
+                            && item["discharge"]["state"] == "missing"
+                            && item["witness"]["state"] == "missing"
+                    })
+                })
+        );
         assert_eq!(value["diagnostics"][0]["severity"], 2);
         assert!(
             value["diagnostics"][0]["next_action"]
@@ -382,6 +629,12 @@ mod tests {
             value["hovers"][0]["contents"]
                 .as_str()
                 .unwrap_or("")
+                .contains("Card: `UR-")
+        );
+        assert!(
+            value["hovers"][0]["contents"]
+                .as_str()
+                .unwrap_or("")
                 .contains("Required safety conditions")
         );
         assert!(
@@ -394,16 +647,86 @@ mod tests {
             value["hovers"][0]["contents"]
                 .as_str()
                 .unwrap_or("")
+                .contains("Evidence summary")
+        );
+        assert!(
+            value["hovers"][0]["contents"]
+                .as_str()
+                .unwrap_or("")
+                .contains("Contract [present]")
+        );
+        assert!(
+            value["hovers"][0]["contents"]
+                .as_str()
+                .unwrap_or("")
+                .contains("Guard/discharge [missing]")
+        );
+        assert!(
+            value["hovers"][0]["contents"]
+                .as_str()
+                .unwrap_or("")
+                .contains("Witness [missing]")
+        );
+        assert!(
+            value["hovers"][0]["contents"]
+                .as_str()
+                .unwrap_or("")
+                .contains("Next action")
+        );
+        assert!(
+            value["hovers"][0]["contents"]
+                .as_str()
+                .unwrap_or("")
+                .contains("Verify commands")
+        );
+        assert!(
+            value["hovers"][0]["contents"]
+                .as_str()
+                .unwrap_or("")
                 .contains("does not prove the unsafe site executed")
         );
         assert_eq!(
             value["code_actions"][0]["command"],
             "unsafe-review.copyAgentPacket"
         );
+        assert_eq!(
+            value["code_actions"][0]["payload"]["kind"],
+            "unsafe-review.agent_packet"
+        );
+        assert_eq!(
+            value["code_actions"][0]["payload"]["card_id"],
+            value["diagnostics"][0]["card_id"]
+        );
+        assert!(value["code_actions"][0]["arguments"].is_array());
         assert!(value["code_actions"].as_array().is_some_and(|actions| {
             actions
                 .iter()
                 .any(|action| action["command"] == "unsafe-review.openRelatedTest")
+        }));
+        assert!(value["code_actions"].as_array().is_some_and(|actions| {
+            actions.iter().any(|action| {
+                action["command"] == "unsafe-review.openRelatedTest"
+                    && action["payload"]["kind"] == "unsafe-review.related_test"
+                    && action["payload"]["card_id"] == value["diagnostics"][0]["card_id"]
+                    && action["payload"]["file"] == "src/lib.rs"
+                    && action["payload"]["line"] == 3
+                    && action["payload"]["name"] == "read_header"
+            })
+        }));
+        assert!(value["code_actions"].as_array().is_some_and(|actions| {
+            actions.iter().any(|action| {
+                action["command"] == "unsafe-review.copyWitnessCommand"
+                    && action["payload"]["kind"] == "unsafe-review.witness_command"
+                    && action["payload"]["card_id"] == value["diagnostics"][0]["card_id"]
+                    && action["payload"]["command"]
+                        .as_str()
+                        .unwrap_or("")
+                        .contains("cargo +nightly miri test read_header")
+                    && action["payload"]["trust_boundary"]
+                        .as_str()
+                        .unwrap_or("")
+                        .contains("not UB-free status")
+            })
         }));
         assert!(
             !serde_json::to_string(&value["code_actions"])

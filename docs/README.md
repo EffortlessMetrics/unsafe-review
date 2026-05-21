@@ -6,7 +6,8 @@
 | Roadmap | release direction | `docs/ROADMAP.md` |
 | First-use guide | install and first useful local run from crates.io | `docs/FIRST_USE.md` |
 | CLI guide | current user-facing commands and artifact surfaces | `docs/CLI.md` |
-| Explanations | concept notes, trust boundaries, and reviewer examples | `docs/explanation/` |
+| Explanations | concept notes, trust boundaries, reviewer examples, and agent packet examples | `docs/explanation/` |
+| Editor workflow | saved read-only editor projection walkthrough | `docs/editor/saved-lsp-json.md` |
 | Proposals | why a workstream exists | `docs/proposals/` |
 | Releases | release targets, readiness notes, and publication receipts | `docs/releases/` |
 | Specs | behavior contracts | `docs/specs/` |
@@ -14,7 +15,7 @@
 | Contribution process | swarm-to-main routing and source PR requirements | `docs/contributing/SWARM_TO_MAIN.md` |
 | Implementation plans | PR-sized sequence and proof commands | `plans/` |
 | Active lane | current dogfood-calibrated evidence loop | `docs/status/DOGFOOD_CALIBRATED_EVIDENCE_LANE.md` |
-| Dogfood index | selected real-crate dogfood targets and recorded outcome movement | `docs/dogfood/index.md`, `docs/dogfood/index.json` |
+| Dogfood index | selected real-crate dogfood targets, usefulness notes, and recorded outcome movement | `docs/dogfood/index.md`, `docs/dogfood/index.json`, `docs/dogfood/usefulness-notes.md` |
 | Fuzzing | manual analyzer robustness harness and input contract | `docs/FUZZING.md` |
 | Support summary | concise support posture front panel | `docs/status/SUPPORT_SUMMARY.md` |
 | Support tiers | detailed product claim to proof ledger | `docs/status/SUPPORT_TIERS.md` |

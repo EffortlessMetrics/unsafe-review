@@ -235,6 +235,41 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
         lsp["diagnostics"][0]["operation"],
         "unsafe { ptr.cast::<Header>().read() }"
     );
+    assert_eq!(
+        lsp["diagnostics"][0]["required_safety_conditions"][0]["key"],
+        "pointer-live"
+    );
+    assert!(
+        lsp["diagnostics"][0]["required_safety_conditions"][0]["description"]
+            .as_str()
+            .unwrap_or("")
+            .contains("pointer is live")
+    );
+    assert_eq!(
+        lsp["diagnostics"][0]["evidence_summary"]["contract"]["state"],
+        "present"
+    );
+    assert_eq!(
+        lsp["diagnostics"][0]["evidence_summary"]["discharge"]["state"],
+        "missing"
+    );
+    assert!(
+        lsp["diagnostics"][0]["evidence_summary"]["reach_limitation"]
+            .as_str()
+            .unwrap_or("")
+            .contains("not proof")
+    );
+    assert!(
+        lsp["diagnostics"][0]["obligation_evidence"]
+            .as_array()
+            .is_some_and(|items| {
+                items.iter().any(|item| {
+                    item["key"] == "alignment"
+                        && item["discharge"]["state"] == "missing"
+                        && item["witness"]["state"] == "missing"
+                })
+            })
+    );
     assert!(
         lsp["diagnostics"][0]["next_action"]
             .as_str()
@@ -259,7 +294,37 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
         lsp["hovers"][0]["contents"]
             .as_str()
             .unwrap_or("")
+            .contains("Evidence summary")
+    );
+    assert!(
+        lsp["hovers"][0]["contents"]
+            .as_str()
+            .unwrap_or("")
+            .contains("Contract [present]")
+    );
+    assert!(
+        lsp["hovers"][0]["contents"]
+            .as_str()
+            .unwrap_or("")
+            .contains("Guard/discharge [missing]")
+    );
+    assert!(
+        lsp["hovers"][0]["contents"]
+            .as_str()
+            .unwrap_or("")
             .contains("Missing visible local guard")
+    );
+    assert!(
+        lsp["hovers"][0]["contents"]
+            .as_str()
+            .unwrap_or("")
+            .contains("Next action")
+    );
+    assert!(
+        lsp["hovers"][0]["contents"]
+            .as_str()
+            .unwrap_or("")
+            .contains("cargo +nightly miri test read_header")
     );
     assert!(
         lsp["hovers"][0]["contents"]
@@ -271,10 +336,42 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
         lsp["code_actions"][0]["command"],
         "unsafe-review.copyAgentPacket"
     );
+    assert_eq!(
+        lsp["code_actions"][0]["payload"]["kind"],
+        "unsafe-review.agent_packet"
+    );
+    assert_eq!(
+        lsp["code_actions"][0]["payload"]["card_id"]
+            .as_str()
+            .unwrap_or(""),
+        card_id
+    );
+    assert!(lsp["code_actions"][0]["arguments"].is_array());
     assert!(lsp["code_actions"].as_array().is_some_and(|actions| {
         actions
             .iter()
             .any(|action| action["command"] == "unsafe-review.openRelatedTest")
+    }));
+    assert!(lsp["code_actions"].as_array().is_some_and(|actions| {
+        actions.iter().any(|action| {
+            action["command"] == "unsafe-review.openRelatedTest"
+                && action["payload"]["kind"] == "unsafe-review.related_test"
+                && action["payload"]["card_id"].as_str() == Some(card_id)
+                && action["payload"]["file"] == "src/lib.rs"
+                && action["payload"]["line"] == 3
+                && action["payload"]["name"] == "read_header"
+        })
+    }));
+    assert!(lsp["code_actions"].as_array().is_some_and(|actions| {
+        actions.iter().any(|action| {
+            action["command"] == "unsafe-review.copyWitnessCommand"
+                && action["payload"]["kind"] == "unsafe-review.witness_command"
+                && action["payload"]["card_id"].as_str() == Some(card_id)
+                && action["payload"]["command"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("cargo +nightly miri test read_header")
+        })
     }));
 
     let witness_plan_path = temp.path().join("witness-plan.md");
@@ -320,13 +417,34 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
         "unsafe { ptr.cast::<Header>().read() }"
     );
     assert_eq!(packet["context"]["operation_family"], "raw_pointer_read");
-    assert!(packet["witness_routes"].is_array());
+    assert_eq!(
+        packet["source_context"]["unsafe_site"]["file"],
+        "src/lib.rs"
+    );
+    assert_eq!(
+        packet["source_context"]["unsafe_site"]["snippet"],
+        "unsafe { ptr.cast::<Header>().read() }"
+    );
     assert!(
-        packet["allowed_repairs"][0]
+        packet["source_context"]["nearby_safety_contract"]["summary"]
             .as_str()
             .unwrap_or("")
-            .contains("Add or expose the local guard")
+            .contains("SAFETY")
     );
+    assert_eq!(
+        packet["source_context"]["nearby_guard_evidence"][0]["key"],
+        "bounds"
+    );
+    assert_eq!(
+        packet["source_context"]["related_tests"][0]["name"],
+        "read_header"
+    );
+    assert!(packet["witness_routes"].is_array());
+    assert_eq!(packet["agent_readiness"]["ready"], true);
+    assert_eq!(packet["agent_readiness"]["state"], "ready");
+    let allowed_repairs = serde_json::to_string(&packet["allowed_repairs"])?;
+    assert!(allowed_repairs.contains("alignment guard"));
+    assert!(allowed_repairs.contains("witness receipt"));
     assert!(
         packet["verify_commands"][0]
             .as_str()
@@ -419,6 +537,10 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
     assert!(stdout.contains("witness-plan.md"));
     assert!(stdout.contains("lsp.json"));
     assert!(stdout.contains("Trust boundary:"));
+    assert!(stdout.contains("static unsafe contract review only"));
+    assert!(stdout.contains("not memory-safety proof"));
+    assert!(stdout.contains("not UB-free status"));
+    assert!(stdout.contains("not Miri-clean status"));
     assert!(stdout.contains("did not run witnesses"));
     assert!(stdout.contains("post comments"));
     assert!(stdout.contains("enforce blocking policy"));
@@ -581,6 +703,22 @@ fn first_pr_clean_output_stays_advisory_not_all_clear() -> Result<(), Box<dyn Er
 }
 
 #[test]
+fn help_reports_first_run_trust_boundary_without_overclaims() -> Result<(), Box<dyn Error>> {
+    let output = run_success([os("--help")])?;
+    let text = stdout_text(&output)?;
+
+    assert!(text.contains("unsafe-review: cheap unsafe contract review for Rust"));
+    assert!(text.contains("Trust boundary: static unsafe contract review only"));
+    assert!(text.contains("not memory-safety proof"));
+    assert!(text.contains("not UB-free status"));
+    assert!(text.contains("not Miri-clean status"));
+    assert!(!text.contains("soundness proof"));
+    assert!(!text.contains("All clear"));
+
+    Ok(())
+}
+
+#[test]
 fn check_reports_missing_diff_file_as_cli_failure() -> Result<(), Box<dyn Error>> {
     let fixture = fixture_root("safe_code_no_cards");
     let missing_diff = fixture.join("missing.diff");
@@ -626,6 +764,10 @@ fn doctor_reports_first_install_signals_without_running_witnesses() -> Result<()
     assert!(text.contains("git command:"));
     assert!(text.contains("git repository:"));
     assert!(text.contains("base ref origin/main:"));
+    assert!(text.contains("cargo metadata:"));
+    assert!(text.contains("artifact dir"));
+    assert!(text.contains("target"));
+    assert!(text.contains("unsafe-review"));
     assert!(text.contains("Witness tool signals"));
     assert!(text.contains("miri:"));
     assert!(text.contains("cargo-careful:"));
@@ -636,7 +778,9 @@ fn doctor_reports_first_install_signals_without_running_witnesses() -> Result<()
     assert!(text.contains("crux:"));
     assert!(text.contains("policy: advisory by default"));
     assert!(text.contains("witness execution: not run by doctor or by default"));
-    assert!(text.contains("trust boundary: static review evidence"));
+    assert!(text.contains("trust boundary: static unsafe contract review only"));
+    assert!(text.contains("not memory-safety proof"));
+    assert!(text.contains("not UB-free status"));
 
     Ok(())
 }
@@ -856,6 +1000,18 @@ fn outcome_compares_existing_json_snapshots_without_safety_claim() -> Result<(),
     assert_eq!(outcome["after"]["cards"], 1);
     assert_eq!(outcome["summary"]["new"], 1);
     assert_eq!(outcome["summary"]["resolved"], 0);
+    assert_eq!(outcome["reviewer_delta"]["new_cards"], 1);
+    assert_eq!(outcome["reviewer_delta"]["resolved_cards"], 0);
+    assert_eq!(
+        outcome["reviewer_delta"]["top_remaining_gaps"][0]["operation_family"],
+        "raw_pointer_read"
+    );
+    assert!(
+        outcome["reviewer_delta"]["top_remaining_gaps"][0]["next_action"]
+            .as_str()
+            .unwrap_or("")
+            .contains("Add or expose")
+    );
     assert!(outcome["cards"]["new"][0]["card_id"].is_string());
     assert_eq!(
         outcome["cards"]["new"][0]["after"]["operation_family"],
@@ -908,6 +1064,10 @@ fn outcome_compares_existing_json_snapshots_without_safety_claim() -> Result<(),
     ])?;
     let markdown = stdout_text(&markdown)?;
     assert!(markdown.contains("# unsafe-review outcome"));
+    assert!(markdown.contains("## Reviewer delta"));
+    assert!(markdown.contains("- New cards: 1"));
+    assert!(markdown.contains("- Receipt movement: 0 improved, 0 regressed"));
+    assert!(markdown.contains("Top remaining gaps"));
     assert!(markdown.contains("| Status | Card | Reason | Before | After |"));
     assert!(markdown.contains("## Limitations"));
     assert!(markdown.contains("## Trust boundary"));
@@ -1072,6 +1232,26 @@ fn receipt_audit_reports_matching_saved_receipts_without_running_witnesses()
             .unwrap_or("")
             .contains("does not execute witnesses")
     );
+    assert!(
+        value["limitations"]
+            .as_array()
+            .ok_or("receipt audit limitations should be an array")?
+            .iter()
+            .any(|limitation| limitation
+                .as_str()
+                .unwrap_or("")
+                .contains("does not execute Miri"))
+    );
+    assert!(
+        value["limitations"]
+            .as_array()
+            .ok_or("receipt audit limitations should be an array")?
+            .iter()
+            .any(|limitation| limitation
+                .as_str()
+                .unwrap_or("")
+                .contains("do not erase missing contracts"))
+    );
     let receipt = &value["receipts"][0];
     assert_eq!(receipt["receipt_tool"], "miri");
     assert!(
@@ -1119,6 +1299,9 @@ fn receipt_audit_reports_matching_saved_receipts_without_running_witnesses()
     assert!(markdown.contains("raw_pointer_read"));
     assert!(markdown.contains("unsafe { ptr.cast::<Header>().read() }"));
     assert!(markdown.contains("Add or expose"));
+    assert!(markdown.contains("## Limitations"));
+    assert!(markdown.contains("does not execute Miri"));
+    assert!(markdown.contains("do not erase missing contracts"));
     assert!(markdown.contains("does not execute witnesses"));
     assert!(markdown.contains("| 1 | 1 | 0 | 0 | 0 |"));
     Ok(())

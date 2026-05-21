@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -35,9 +36,23 @@ const POLICY_FILES: &[&str] = &[
     "policy/workflow-allowlist.toml",
     "policy/process-allowlist.toml",
     "policy/network-allowlist.toml",
+    "policy/doc-artifacts.toml",
+    "policy/ci-lane-whitelist.toml",
+    "policy/package-boundary.toml",
+    "policy/source-sync.toml",
 ];
 const WORKFLOW_ALLOWLIST: &str = "policy/workflow-allowlist.toml";
 const WORKFLOW_DIR: &str = ".github/workflows";
+const DOC_ARTIFACT_LEDGER: &str = "policy/doc-artifacts.toml";
+const CI_LANE_LEDGER: &str = "policy/ci-lane-whitelist.toml";
+const PACKAGE_BOUNDARY_LEDGER: &str = "policy/package-boundary.toml";
+const SOURCE_SYNC_LEDGER: &str = "policy/source-sync.toml";
+const ACTIVE_GOAL_MANIFEST: &str = ".unsafe-review-spec/goals/active.toml";
+const DOC_ARTIFACT_KINDS: &[&str] = &["proposal", "spec", "adr", "plan", "goal"];
+const DOC_ARTIFACT_STATUSES: &[&str] = &["proposed", "accepted", "active", "done", "deferred"];
+const GOAL_WORK_ITEM_STATUSES: &[&str] = &["ready", "active", "blocked", "done", "superseded"];
+const PACKAGE_CLASSIFICATIONS: &[&str] = &["published", "private", "internal", "deferred"];
+const CI_LANE_STATUSES: &[&str] = &["advisory", "required", "deferred", "retired"];
 
 const FIXTURE_REQUIRED_FILES: &[&str] = &["Cargo.toml", "change.diff", "src/lib.rs"];
 
@@ -139,6 +154,8 @@ const PUBLIC_BADGE_ENDPOINTS: &[(&str, &str)] = &[
     ("badges/unsafe-review.json", "unsafe-review"),
     ("badges/unsafe-review-plus.json", "unsafe-review+"),
 ];
+const SOURCE_MAIN_REF: &str = "refs/unsafe-review-sync/source-main";
+const SWARM_MAIN_REF: &str = "refs/unsafe-review-sync/swarm-main";
 
 fn main() {
     if let Err(err) = run(std::env::args().collect()) {
@@ -155,7 +172,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
     match args.get(1).map(|arg| arg.as_str()) {
         None | Some("help") | Some("--help") => {
             println!(
-                "xtask commands: check-pr, check-docs, check-policy, check-support-tiers, check-fixtures, check-calibration, check-dogfood, check-fuzz, check-advisory-artifacts <dir>, check-first-pr-artifacts <dir>"
+                "xtask commands: check-pr, check-docs, check-policy, check-support-tiers, check-fixtures, check-calibration, check-dogfood, check-fuzz, check-doc-artifacts, check-goals, check-package-boundary, check-ci-lanes, check-advisory-artifacts <dir>, check-first-pr-artifacts <dir>, source-divergence, check-source-sync"
             );
             Ok(())
         }
@@ -179,6 +196,22 @@ fn run(args: Vec<String>) -> Result<(), String> {
         Some("check-policy") => {
             require_no_extra_args(&args, "check-policy")?;
             check_policy()
+        }
+        Some("check-doc-artifacts") => {
+            require_no_extra_args(&args, "check-doc-artifacts")?;
+            check_doc_artifacts()
+        }
+        Some("check-goals") => {
+            require_no_extra_args(&args, "check-goals")?;
+            check_goals()
+        }
+        Some("check-package-boundary") => {
+            require_no_extra_args(&args, "check-package-boundary")?;
+            check_package_boundary()
+        }
+        Some("check-ci-lanes") => {
+            require_no_extra_args(&args, "check-ci-lanes")?;
+            check_ci_lanes()
         }
         Some("check-support-tiers") => {
             require_no_extra_args(&args, "check-support-tiers")?;
@@ -213,6 +246,10 @@ fn run(args: Vec<String>) -> Result<(), String> {
             };
             require_max_args(&args, "check-first-pr-artifacts", 3)?;
             check_first_pr_artifacts(Path::new(dir))
+        }
+        Some("source-divergence") | Some("check-source-sync") => {
+            require_no_extra_args(&args, "source-divergence")?;
+            report_source_divergence()
         }
         Some(other) => Err(format!("unknown xtask command `{other}`")),
     }
@@ -272,7 +309,7 @@ fn check_docs() -> Result<(), String> {
         Path::new("MANIFEST.md"),
         Path::new("docs"),
         Path::new("plans"),
-        Path::new(".unsafe-review"),
+        Path::new(".unsafe-review-spec"),
         Path::new("policy"),
     ])?;
     println!("check-docs: ok");
@@ -293,8 +330,222 @@ fn check_policy() -> Result<(), String> {
         Path::new("policy/unsafe-review-suppressions.toml"),
         LedgerKind::Suppression,
     )?;
-    parse_toml_file(Path::new(".unsafe-review/goals/active.toml"))?;
+    check_doc_artifacts()?;
+    check_goals()?;
+    check_package_boundary()?;
+    check_ci_lanes()?;
     println!("check-policy: ok");
+    Ok(())
+}
+
+fn check_doc_artifacts() -> Result<(), String> {
+    let ids = check_doc_artifacts_impl()?;
+    println!("check-doc-artifacts: ok ({} artifacts)", ids.len());
+    Ok(())
+}
+
+fn check_doc_artifacts_impl() -> Result<BTreeSet<String>, String> {
+    let value = parse_toml_file(Path::new(DOC_ARTIFACT_LEDGER))?;
+    require_toml_string(&value, "schema_version", DOC_ARTIFACT_LEDGER)?;
+    let artifacts = toml_array(&value, "artifact", DOC_ARTIFACT_LEDGER)?;
+    if artifacts.is_empty() {
+        return Err(format!(
+            "{DOC_ARTIFACT_LEDGER} must list at least one artifact"
+        ));
+    }
+
+    let mut ids = BTreeSet::new();
+    let mut linked_ids = Vec::new();
+    for (idx, artifact) in artifacts.iter().enumerate() {
+        let table = toml_table(artifact, DOC_ARTIFACT_LEDGER, "artifact", idx)?;
+        let id = required_table_string(table, "id", DOC_ARTIFACT_LEDGER, "artifact", idx)?;
+        let kind = required_table_string(table, "kind", DOC_ARTIFACT_LEDGER, "artifact", idx)?;
+        let path = required_table_string(table, "path", DOC_ARTIFACT_LEDGER, "artifact", idx)?;
+        let status = required_table_string(table, "status", DOC_ARTIFACT_LEDGER, "artifact", idx)?;
+        required_table_string(table, "owner", DOC_ARTIFACT_LEDGER, "artifact", idx)?;
+
+        require_known(kind, DOC_ARTIFACT_KINDS, DOC_ARTIFACT_LEDGER, "kind")?;
+        require_known(status, DOC_ARTIFACT_STATUSES, DOC_ARTIFACT_LEDGER, "status")?;
+        if !ids.insert(id.to_string()) {
+            return Err(format!(
+                "{DOC_ARTIFACT_LEDGER} contains duplicate id `{id}`"
+            ));
+        }
+        require_file(path)?;
+        if let Some(linked_proposal) = table.get("linked_proposal").and_then(toml::Value::as_str) {
+            linked_ids.push((
+                id.to_string(),
+                "linked_proposal",
+                linked_proposal.to_string(),
+            ));
+        }
+        if let Some(linked_spec) = table.get("linked_spec").and_then(toml::Value::as_str) {
+            linked_ids.push((id.to_string(), "linked_spec", linked_spec.to_string()));
+        }
+        if let Some(policy_impact) = table.get("policy_impact") {
+            for path in toml_str_array(policy_impact, DOC_ARTIFACT_LEDGER, "policy_impact")? {
+                require_file(path)?;
+            }
+        }
+    }
+
+    for (id, field, linked_id) in linked_ids {
+        if !ids.contains(&linked_id) {
+            return Err(format!(
+                "{DOC_ARTIFACT_LEDGER} artifact `{id}` has {field} `{linked_id}` not listed as an artifact"
+            ));
+        }
+    }
+
+    Ok(ids)
+}
+
+fn check_goals() -> Result<(), String> {
+    let artifact_ids = check_doc_artifacts_impl()?;
+    let value = parse_toml_file(Path::new(ACTIVE_GOAL_MANIFEST))?;
+    require_toml_string(&value, "schema_version", ACTIVE_GOAL_MANIFEST)?;
+    for key in ["id", "title", "status", "owner", "created", "objective"] {
+        required_toml_string(&value, key, ACTIVE_GOAL_MANIFEST)?;
+    }
+    require_known(
+        required_toml_string(&value, "status", ACTIVE_GOAL_MANIFEST)?,
+        GOAL_WORK_ITEM_STATUSES,
+        ACTIVE_GOAL_MANIFEST,
+        "status",
+    )?;
+    let end_state = toml_array(&value, "end_state", ACTIVE_GOAL_MANIFEST)?;
+    if end_state.is_empty() {
+        return Err(format!(
+            "{ACTIVE_GOAL_MANIFEST} end_state must not be empty"
+        ));
+    }
+    for item in end_state {
+        if item.as_str().is_none_or(|value| value.trim().is_empty()) {
+            return Err(format!(
+                "{ACTIVE_GOAL_MANIFEST} end_state entries must be non-empty strings"
+            ));
+        }
+    }
+
+    let work_items = toml_array(&value, "work_item", ACTIVE_GOAL_MANIFEST)?;
+    if work_items.is_empty() {
+        return Err(format!(
+            "{ACTIVE_GOAL_MANIFEST} must list at least one work_item"
+        ));
+    }
+    let mut ids = BTreeSet::new();
+    for (idx, item) in work_items.iter().enumerate() {
+        let table = toml_table(item, ACTIVE_GOAL_MANIFEST, "work_item", idx)?;
+        let id = required_table_string(table, "id", ACTIVE_GOAL_MANIFEST, "work_item", idx)?;
+        if !ids.insert(id.to_string()) {
+            return Err(format!(
+                "{ACTIVE_GOAL_MANIFEST} contains duplicate work_item `{id}`"
+            ));
+        }
+        let status =
+            required_table_string(table, "status", ACTIVE_GOAL_MANIFEST, "work_item", idx)?;
+        require_known(
+            status,
+            GOAL_WORK_ITEM_STATUSES,
+            ACTIVE_GOAL_MANIFEST,
+            "work_item.status",
+        )?;
+        for key in ["proposal", "spec"] {
+            if let Some(linked_id) = table.get(key).and_then(toml::Value::as_str)
+                && !artifact_ids.contains(linked_id)
+            {
+                return Err(format!(
+                    "{ACTIVE_GOAL_MANIFEST} work_item `{id}` references {key} `{linked_id}` not listed in {DOC_ARTIFACT_LEDGER}"
+                ));
+            }
+        }
+        let plan = required_table_string(table, "plan", ACTIVE_GOAL_MANIFEST, "work_item", idx)?;
+        require_file(plan)?;
+        let commands = table.get("commands").ok_or_else(|| {
+            format!("{ACTIVE_GOAL_MANIFEST} work_item `{id}` is missing commands")
+        })?;
+        let commands = toml_str_array(commands, ACTIVE_GOAL_MANIFEST, "commands")?;
+        if commands.is_empty() {
+            return Err(format!(
+                "{ACTIVE_GOAL_MANIFEST} work_item `{id}` commands must not be empty"
+            ));
+        }
+    }
+    println!("check-goals: ok ({} work items)", ids.len());
+    Ok(())
+}
+
+fn check_package_boundary() -> Result<(), String> {
+    let value = parse_toml_file(Path::new(PACKAGE_BOUNDARY_LEDGER))?;
+    require_toml_string(&value, "schema_version", PACKAGE_BOUNDARY_LEDGER)?;
+    let packages = toml_array(&value, "package", PACKAGE_BOUNDARY_LEDGER)?;
+    if packages.is_empty() {
+        return Err(format!(
+            "{PACKAGE_BOUNDARY_LEDGER} must list at least one package"
+        ));
+    }
+    let mut names = BTreeSet::new();
+    for (idx, package) in packages.iter().enumerate() {
+        let table = toml_table(package, PACKAGE_BOUNDARY_LEDGER, "package", idx)?;
+        let name = required_table_string(table, "name", PACKAGE_BOUNDARY_LEDGER, "package", idx)?;
+        if !names.insert(name.to_string()) {
+            return Err(format!(
+                "{PACKAGE_BOUNDARY_LEDGER} contains duplicate package `{name}`"
+            ));
+        }
+        let path = required_table_string(table, "path", PACKAGE_BOUNDARY_LEDGER, "package", idx)?;
+        let classification = required_table_string(
+            table,
+            "classification",
+            PACKAGE_BOUNDARY_LEDGER,
+            "package",
+            idx,
+        )?;
+        require_known(
+            classification,
+            PACKAGE_CLASSIFICATIONS,
+            PACKAGE_BOUNDARY_LEDGER,
+            "classification",
+        )?;
+        required_table_string(table, "owner", PACKAGE_BOUNDARY_LEDGER, "package", idx)?;
+        required_table_string(table, "reason", PACKAGE_BOUNDARY_LEDGER, "package", idx)?;
+        require_file(&format!("{path}/Cargo.toml"))?;
+    }
+    println!("check-package-boundary: ok ({} packages)", names.len());
+    Ok(())
+}
+
+fn check_ci_lanes() -> Result<(), String> {
+    let value = parse_toml_file(Path::new(CI_LANE_LEDGER))?;
+    require_toml_string(&value, "schema_version", CI_LANE_LEDGER)?;
+    let lanes = toml_array(&value, "lane", CI_LANE_LEDGER)?;
+    if lanes.is_empty() {
+        return Err(format!("{CI_LANE_LEDGER} must list at least one lane"));
+    }
+    let mut ids = BTreeSet::new();
+    for (idx, lane) in lanes.iter().enumerate() {
+        let table = toml_table(lane, CI_LANE_LEDGER, "lane", idx)?;
+        let id = required_table_string(table, "id", CI_LANE_LEDGER, "lane", idx)?;
+        if !ids.insert(id.to_string()) {
+            return Err(format!("{CI_LANE_LEDGER} contains duplicate lane `{id}`"));
+        }
+        for key in [
+            "owner",
+            "intent",
+            "proof_obligation",
+            "cost_estimate",
+            "trigger_policy",
+            "review_after",
+        ] {
+            required_table_string(table, key, CI_LANE_LEDGER, "lane", idx)?;
+        }
+        let status = required_table_string(table, "status", CI_LANE_LEDGER, "lane", idx)?;
+        require_known(status, CI_LANE_STATUSES, CI_LANE_LEDGER, "status")?;
+        if id == "policy-contracts" {
+            require_file(".github/workflows/policy-contracts.yml")?;
+        }
+    }
+    println!("check-ci-lanes: ok ({} lanes)", ids.len());
     Ok(())
 }
 
@@ -1441,6 +1692,13 @@ fn check_lsp_artifact(dir: &Path, card_ids: &BTreeSet<String>) -> Result<(), Str
                 "lsp.json diagnostic references unknown card id `{card_id}`"
             ));
         }
+        json_array_at(
+            diagnostic,
+            "/required_safety_conditions",
+            "lsp.json diagnostic",
+        )?;
+        json_array_at(diagnostic, "/obligation_evidence", "lsp.json diagnostic")?;
+        check_lsp_diagnostic_evidence(diagnostic)?;
         json_array_at(diagnostic, "/witness_routes", "lsp.json diagnostic")?;
         json_array_at(diagnostic, "/verify_commands", "lsp.json diagnostic")?;
         let boundary = diagnostic
@@ -1465,13 +1723,15 @@ fn check_lsp_artifact(dir: &Path, card_ids: &BTreeSet<String>) -> Result<(), Str
     }
 
     for action in json_array_at(&lsp, "/code_actions", "lsp.json")? {
-        require_known_card_id(action, "lsp.json code_action", card_ids)?;
+        let action_card_id = require_known_card_id(action, "lsp.json code_action", card_ids)?;
         let Some(command) = action.get("command").and_then(serde_json::Value::as_str) else {
             return Err("lsp.json code_action is missing command".to_string());
         };
         if command.trim().is_empty() {
             return Err("lsp.json code_action command must not be empty".to_string());
         }
+        json_array_at(action, "/arguments", "lsp.json code_action")?;
+        check_lsp_code_action_payload(action, action_card_id, command, card_ids)?;
         if action.get("edit").is_some() || action.get("workspace_edit").is_some() {
             return Err("lsp.json code_action must not contain source edits".to_string());
         }
@@ -1479,16 +1739,167 @@ fn check_lsp_artifact(dir: &Path, card_ids: &BTreeSet<String>) -> Result<(), Str
     Ok(())
 }
 
-fn require_known_card_id(
-    value: &serde_json::Value,
-    context: &str,
+fn check_lsp_diagnostic_evidence(diagnostic: &serde_json::Value) -> Result<(), String> {
+    let conditions = json_array_at(
+        diagnostic,
+        "/required_safety_conditions",
+        "lsp.json diagnostic",
+    )?;
+    for condition in conditions {
+        require_non_empty_json_str(condition, "key", "lsp.json diagnostic condition")?;
+        require_non_empty_json_str(condition, "description", "lsp.json diagnostic condition")?;
+    }
+
+    let evidence_summary = diagnostic
+        .get("evidence_summary")
+        .ok_or_else(|| "lsp.json diagnostic is missing evidence_summary".to_string())?;
+    for key in ["contract", "discharge", "witness"] {
+        let Some(evidence) = evidence_summary.get(key) else {
+            return Err(format!(
+                "lsp.json diagnostic evidence_summary is missing {key}"
+            ));
+        };
+        if !evidence
+            .get("present")
+            .is_some_and(serde_json::Value::is_boolean)
+        {
+            return Err(format!(
+                "lsp.json diagnostic evidence_summary.{key} is missing boolean present"
+            ));
+        }
+        require_non_empty_json_str(
+            evidence,
+            "state",
+            &format!("lsp.json diagnostic evidence_summary.{key}"),
+        )?;
+        require_non_empty_json_str(
+            evidence,
+            "summary",
+            &format!("lsp.json diagnostic evidence_summary.{key}"),
+        )?;
+    }
+    let Some(reach) = evidence_summary.get("reach") else {
+        return Err("lsp.json diagnostic evidence_summary is missing reach".to_string());
+    };
+    require_non_empty_json_str(reach, "state", "lsp.json diagnostic evidence_summary.reach")?;
+    require_non_empty_json_str(
+        reach,
+        "summary",
+        "lsp.json diagnostic evidence_summary.reach",
+    )?;
+    let reach_limitation = require_non_empty_json_str(
+        evidence_summary,
+        "reach_limitation",
+        "lsp.json diagnostic evidence_summary",
+    )?;
+    if !text_contains_ignore_ascii_case(reach_limitation, "not proof") {
+        return Err(
+            "lsp.json diagnostic evidence_summary.reach_limitation must say reach evidence is not proof"
+                .to_string(),
+        );
+    }
+
+    for evidence in json_array_at(diagnostic, "/obligation_evidence", "lsp.json diagnostic")? {
+        require_non_empty_json_str(evidence, "key", "lsp.json diagnostic obligation_evidence")?;
+        require_non_empty_json_str(
+            evidence,
+            "description",
+            "lsp.json diagnostic obligation_evidence",
+        )?;
+        for key in ["contract", "discharge", "reach", "witness"] {
+            let Some(state) = evidence.get(key) else {
+                return Err(format!(
+                    "lsp.json diagnostic obligation_evidence is missing {key}"
+                ));
+            };
+            if !state
+                .get("present")
+                .is_some_and(serde_json::Value::is_boolean)
+            {
+                return Err(format!(
+                    "lsp.json diagnostic obligation_evidence.{key} is missing boolean present"
+                ));
+            }
+            require_non_empty_json_str(
+                state,
+                "state",
+                &format!("lsp.json diagnostic obligation_evidence.{key}"),
+            )?;
+            require_non_empty_json_str(
+                state,
+                "summary",
+                &format!("lsp.json diagnostic obligation_evidence.{key}"),
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+fn check_lsp_code_action_payload(
+    action: &serde_json::Value,
+    action_card_id: &str,
+    command: &str,
     card_ids: &BTreeSet<String>,
 ) -> Result<(), String> {
+    let Some(payload) = action.get("payload") else {
+        return Err("lsp.json code_action is missing payload".to_string());
+    };
+    if !payload.is_object() {
+        return Err("lsp.json code_action payload must be an object".to_string());
+    }
+    let payload_card_id = require_known_card_id(payload, "lsp.json code_action payload", card_ids)?;
+    if payload_card_id != action_card_id {
+        return Err(format!(
+            "lsp.json code_action payload card_id `{payload_card_id}` does not match action card_id `{action_card_id}`"
+        ));
+    }
+    let expected_kind = match command {
+        "unsafe-review.copyAgentPacket" => "unsafe-review.agent_packet",
+        "unsafe-review.explainWitnessRoute" => "unsafe-review.witness_route",
+        "unsafe-review.openRelatedTest" => {
+            require_non_empty_json_str(payload, "file", "lsp.json code_action payload")?;
+            let line = json_usize_at(payload, "/line", "lsp.json code_action payload")?;
+            if line == 0 {
+                return Err("lsp.json code_action payload line must be one-based".to_string());
+            }
+            require_non_empty_json_str(payload, "name", "lsp.json code_action payload")?;
+            "unsafe-review.related_test"
+        }
+        "unsafe-review.copyWitnessCommand" => {
+            require_non_empty_json_str(payload, "command", "lsp.json code_action payload")?;
+            "unsafe-review.witness_command"
+        }
+        _ => {
+            return Err(format!(
+                "lsp.json code_action command `{command}` is not verifier-known"
+            ));
+        }
+    };
+    require_json_str(
+        payload,
+        "kind",
+        expected_kind,
+        "lsp.json code_action payload",
+    )?;
+    let boundary = payload
+        .get("trust_boundary")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "lsp.json code_action payload is missing trust_boundary".to_string())?;
+    require_boundary_text(boundary, "lsp.json code_action payload")?;
+    Ok(())
+}
+
+fn require_known_card_id<'a>(
+    value: &'a serde_json::Value,
+    context: &str,
+    card_ids: &BTreeSet<String>,
+) -> Result<&'a str, String> {
     let Some(card_id) = value.get("card_id").and_then(serde_json::Value::as_str) else {
         return Err(format!("{context} is missing card_id"));
     };
     if card_ids.contains(card_id) {
-        Ok(())
+        Ok(card_id)
     } else {
         Err(format!("{context} references unknown card id `{card_id}`"))
     }
@@ -2593,6 +3004,171 @@ fn check_tracked_generated_artifacts() -> Result<(), String> {
     Ok(())
 }
 
+fn report_source_divergence() -> Result<(), String> {
+    let checkpoint = source_sync_checkpoint()?;
+    fetch_main_ref(&checkpoint.source_repo, SOURCE_MAIN_REF)?;
+    fetch_main_ref(&checkpoint.swarm_repo, SWARM_MAIN_REF)?;
+
+    let counts = git_stdout([
+        "rev-list",
+        "--left-right",
+        "--count",
+        &format!("{SOURCE_MAIN_REF}...{SWARM_MAIN_REF}"),
+    ])?;
+    let (source_only, swarm_only) = parse_rev_list_counts(&counts)?;
+    let new_source_commits = git_stdout([
+        "rev-list",
+        "--count",
+        &format!("{}..{SOURCE_MAIN_REF}", checkpoint.acknowledged_source_main),
+    ])?
+    .parse::<usize>()
+    .map_err(|err| format!("invalid source checkpoint count: {err}"))?;
+    let source_head = git_stdout(["rev-parse", "--short", SOURCE_MAIN_REF])?;
+    let swarm_head = git_stdout(["rev-parse", "--short", SWARM_MAIN_REF])?;
+    let source_commits = git_stdout([
+        "log",
+        "--oneline",
+        "--max-count=10",
+        SOURCE_MAIN_REF,
+        "--not",
+        &checkpoint.acknowledged_source_main,
+    ])?;
+    let swarm_commits = git_stdout([
+        "log",
+        "--oneline",
+        "--max-count=10",
+        SWARM_MAIN_REF,
+        "--not",
+        SOURCE_MAIN_REF,
+    ])?;
+
+    println!("source-divergence: advisory");
+    println!("source_repo={}", checkpoint.source_repo);
+    println!("swarm_repo={}", checkpoint.swarm_repo);
+    println!("source_main={source_head}");
+    println!("swarm_main={swarm_head}");
+    println!(
+        "acknowledged_source_main={}",
+        checkpoint.acknowledged_source_main
+    );
+    println!("acknowledged_by={}", checkpoint.acknowledged_by);
+    println!("new_source_commits={new_source_commits}");
+    println!("raw_source_only={source_only}");
+    println!("raw_swarm_only={swarm_only}");
+
+    if new_source_commits == 0 {
+        println!("status: no source commits after the acknowledged swarm sync point");
+    } else {
+        println!(
+            "status: source is ahead of swarm; open a swarm sync PR before routine development"
+        );
+    }
+    if swarm_only > 0 {
+        println!(
+            "note: swarm has work not present in source; this is expected for unpromoted workbench changes"
+        );
+    }
+
+    print_commit_section("new_source_commits", &source_commits);
+    print_commit_section("swarm_only_commits", &swarm_commits);
+    Ok(())
+}
+
+struct SourceSyncCheckpoint {
+    source_repo: String,
+    swarm_repo: String,
+    acknowledged_source_main: String,
+    acknowledged_by: String,
+}
+
+fn source_sync_checkpoint() -> Result<SourceSyncCheckpoint, String> {
+    let value = parse_toml_file(Path::new(SOURCE_SYNC_LEDGER))?;
+    require_toml_string(&value, "schema_version", SOURCE_SYNC_LEDGER)?;
+    require_toml_string(&value, "policy", SOURCE_SYNC_LEDGER)?;
+    let source_repo = required_toml_string(&value, "source_repo", SOURCE_SYNC_LEDGER)?.to_string();
+    let swarm_repo = required_toml_string(&value, "swarm_repo", SOURCE_SYNC_LEDGER)?.to_string();
+    let acknowledged_source_main =
+        required_toml_string(&value, "acknowledged_source_main", SOURCE_SYNC_LEDGER)?.to_string();
+    let acknowledged_by =
+        required_toml_string(&value, "acknowledged_by", SOURCE_SYNC_LEDGER)?.to_string();
+    require_file(&acknowledged_by)?;
+    Ok(SourceSyncCheckpoint {
+        source_repo,
+        swarm_repo,
+        acknowledged_source_main,
+        acknowledged_by,
+    })
+}
+
+fn fetch_main_ref(repo_url: &str, target_ref: &str) -> Result<(), String> {
+    let refspec = format!("+refs/heads/main:{target_ref}");
+    let output = Command::new("git")
+        .args(["fetch", "--no-tags", "--quiet", repo_url, &refspec])
+        .output()
+        .map_err(|err| format!("failed to run git fetch for {repo_url}: {err}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "git fetch {repo_url} failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ))
+    }
+}
+
+fn git_stdout<I, S>(args: I) -> Result<String, String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let output = Command::new("git")
+        .args(args)
+        .output()
+        .map_err(|err| format!("failed to run git: {err}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "git command failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn parse_rev_list_counts(text: &str) -> Result<(usize, usize), String> {
+    let mut fields = text.split_whitespace();
+    let Some(left) = fields.next() else {
+        return Err("git rev-list count output is empty".to_string());
+    };
+    let Some(right) = fields.next() else {
+        return Err(format!(
+            "git rev-list count output must contain two counts: {text}"
+        ));
+    };
+    if fields.next().is_some() {
+        return Err(format!(
+            "git rev-list count output must contain only two counts: {text}"
+        ));
+    }
+    let left = left
+        .parse::<usize>()
+        .map_err(|err| format!("invalid source-only count `{left}`: {err}"))?;
+    let right = right
+        .parse::<usize>()
+        .map_err(|err| format!("invalid swarm-only count `{right}`: {err}"))?;
+    Ok((left, right))
+}
+
+fn print_commit_section(label: &str, commits: &str) {
+    println!("{label}:");
+    if commits.trim().is_empty() {
+        println!("  none");
+        return;
+    }
+    for line in commits.lines() {
+        println!("  {line}");
+    }
+}
+
 fn parse_toml_file(path: &Path) -> Result<toml::Value, String> {
     let text = read_to_string(path)?;
     text.parse::<toml::Table>()
@@ -2673,6 +3249,81 @@ fn required_toml_string<'a>(
         Err(format!("{path} string key `{key}` is empty"))
     } else {
         Ok(value)
+    }
+}
+
+fn toml_array<'a>(
+    value: &'a toml::Value,
+    key: &str,
+    path: &str,
+) -> Result<&'a Vec<toml::Value>, String> {
+    value
+        .get(key)
+        .and_then(toml::Value::as_array)
+        .ok_or_else(|| format!("{path} is missing array key `{key}`"))
+}
+
+fn toml_table<'a>(
+    value: &'a toml::Value,
+    path: &str,
+    key: &str,
+    idx: usize,
+) -> Result<&'a toml::map::Map<String, toml::Value>, String> {
+    value
+        .as_table()
+        .ok_or_else(|| format!("{path} {key}[{idx}] must be a table"))
+}
+
+fn toml_str_array<'a>(
+    value: &'a toml::Value,
+    path: &str,
+    key: &str,
+) -> Result<Vec<&'a str>, String> {
+    let values = value
+        .as_array()
+        .ok_or_else(|| format!("{path} `{key}` must be an array"))?;
+    let mut result = Vec::new();
+    for (idx, value) in values.iter().enumerate() {
+        let Some(text) = value.as_str() else {
+            return Err(format!("{path} `{key}`[{idx}] must be a string"));
+        };
+        if text.trim().is_empty() {
+            return Err(format!("{path} `{key}`[{idx}] must not be empty"));
+        }
+        result.push(text);
+    }
+    Ok(result)
+}
+
+fn required_table_string<'a>(
+    table: &'a toml::map::Map<String, toml::Value>,
+    key: &str,
+    path: &str,
+    table_name: &str,
+    idx: usize,
+) -> Result<&'a str, String> {
+    let Some(value) = table.get(key).and_then(toml::Value::as_str) else {
+        return Err(format!(
+            "{path} {table_name}[{idx}] is missing string `{key}`"
+        ));
+    };
+    if value.trim().is_empty() {
+        Err(format!(
+            "{path} {table_name}[{idx}] string `{key}` is empty"
+        ))
+    } else {
+        Ok(value)
+    }
+}
+
+fn require_known(value: &str, known: &[&str], path: &str, field: &str) -> Result<(), String> {
+    if known.contains(&value) {
+        Ok(())
+    } else {
+        Err(format!(
+            "{path} has unsupported {field} `{value}`; expected one of {}",
+            known.join(", ")
+        ))
     }
 }
 
@@ -3157,6 +3808,13 @@ mod tests {
         }
     }
 
+    fn err_text<T>(result: Result<T, String>) -> Result<String, String> {
+        match result {
+            Ok(_) => Err("expected error".to_string()),
+            Err(err) => Ok(err),
+        }
+    }
+
     #[test]
     fn xtask_rejects_unexpected_trailing_args() -> Result<(), String> {
         let args = vec![
@@ -3189,6 +3847,22 @@ mod tests {
         assert!(err.contains("check-advisory-artifacts"));
         assert!(err.contains("extra"));
         require_max_args(&args[..3], "check-advisory-artifacts", 3)?;
+        Ok(())
+    }
+
+    #[test]
+    fn source_divergence_counts_parse_git_output() -> Result<(), String> {
+        assert_eq!(parse_rev_list_counts("424\t113\n")?, (424, 113));
+        assert_eq!(parse_rev_list_counts("0 7")?, (0, 7));
+        Ok(())
+    }
+
+    #[test]
+    fn source_divergence_counts_reject_malformed_output() -> Result<(), String> {
+        assert!(err_text(parse_rev_list_counts(""))?.contains("empty"));
+        assert!(err_text(parse_rev_list_counts("12"))?.contains("two counts"));
+        assert!(err_text(parse_rev_list_counts("12 3 extra"))?.contains("only two counts"));
+        assert!(err_text(parse_rev_list_counts("source 3"))?.contains("invalid source-only count"));
         Ok(())
     }
 
@@ -4310,6 +4984,49 @@ impl WitnessKind {
     }
 
     #[test]
+    fn first_pr_artifact_checker_rejects_lsp_without_obligation_evidence() -> Result<(), String> {
+        let dir = unique_temp_dir("unsafe-review-first-pr-lsp-obligation-evidence")?;
+        fs::create_dir_all(&dir).map_err(|err| format!("create temp dir failed: {err}"))?;
+        write_valid_first_pr_artifacts(&dir)?;
+        fs::write(
+            dir.join("lsp.json"),
+            r#"{"tool":"unsafe-review","mode":"read_only_projection","policy":"advisory","status":{"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"},"diagnostics":[{"card_id":"card-1","witness_routes":[{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}],"verify_commands":["cargo +nightly miri test card"],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}],"hovers":[{"card_id":"card-1","contents":"Trust boundary: static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}],"code_actions":[{"card_id":"card-1","command":"unsafe-review.copyAgentPacket","payload":{"kind":"unsafe-review.agent_packet","card_id":"card-1","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"},"arguments":["card-1"]}],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}"#,
+        )
+        .map_err(|err| format!("write lsp failed: {err}"))?;
+
+        let result = check_first_pr_artifacts(&dir);
+
+        fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        assert!(
+            result
+                .err()
+                .unwrap_or_default()
+                .contains("required_safety_conditions")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn first_pr_artifact_checker_rejects_lsp_code_action_without_payload() -> Result<(), String> {
+        let dir = unique_temp_dir("unsafe-review-first-pr-lsp-action-payload")?;
+        fs::create_dir_all(&dir).map_err(|err| format!("create temp dir failed: {err}"))?;
+        write_valid_first_pr_artifacts(&dir)?;
+        fs::write(
+            dir.join("lsp.json"),
+            valid_lsp_json(
+                r#"[{"card_id":"card-1","command":"unsafe-review.copyAgentPacket","arguments":["card-1"]}]"#,
+            ),
+        )
+        .map_err(|err| format!("write lsp failed: {err}"))?;
+
+        let result = check_first_pr_artifacts(&dir);
+
+        fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        assert!(result.err().unwrap_or_default().contains("missing payload"));
+        Ok(())
+    }
+
+    #[test]
     fn first_pr_artifact_checker_rejects_positive_overclaims() -> Result<(), String> {
         let dir = unique_temp_dir("unsafe-review-first-pr-overclaim")?;
         fs::create_dir_all(&dir).map_err(|err| format!("create temp dir failed: {err}"))?;
@@ -4605,10 +5322,18 @@ review_after = "2026-08-01"
         .map_err(|err| format!("write witness plan failed: {err}"))?;
         fs::write(
             dir.join("lsp.json"),
-            r#"{"tool":"unsafe-review","mode":"read_only_projection","policy":"advisory","status":{"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"},"diagnostics":[{"card_id":"card-1","witness_routes":[{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}],"verify_commands":["cargo +nightly miri test card"],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}],"hovers":[{"card_id":"card-1","contents":"Trust boundary: static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}],"code_actions":[{"card_id":"card-1","command":"unsafe-review.collectAgentPacket"}],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}"#,
+            valid_lsp_json(
+                r#"[{"card_id":"card-1","command":"unsafe-review.copyAgentPacket","payload":{"kind":"unsafe-review.agent_packet","card_id":"card-1","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"},"arguments":["card-1"]}]"#,
+            ),
         )
         .map_err(|err| format!("write lsp failed: {err}"))?;
         Ok(())
+    }
+
+    fn valid_lsp_json(code_actions: &str) -> String {
+        format!(
+            r#"{{"tool":"unsafe-review","mode":"read_only_projection","policy":"advisory","status":{{"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}},"diagnostics":[{{"card_id":"card-1","required_safety_conditions":[{{"key":"alignment","description":"pointer aligned"}}],"evidence_summary":{{"contract":{{"present":true,"state":"present","summary":"safety contract"}},"discharge":{{"present":false,"state":"missing","summary":"No visible local guard"}},"reach":{{"state":"owner_reached","summary":"related test mention"}},"witness":{{"present":false,"state":"missing","summary":"No imported witness receipt"}},"reach_limitation":"static reach evidence is not proof that the unsafe site executed"}},"obligation_evidence":[{{"key":"alignment","description":"pointer aligned","contract":{{"present":true,"state":"present","summary":"safety contract"}},"discharge":{{"present":false,"state":"missing","summary":"No visible local guard"}},"reach":{{"present":true,"state":"present","summary":"related test mention"}},"witness":{{"present":false,"state":"missing","summary":"No imported witness receipt"}}}}],"witness_routes":[{{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}}],"verify_commands":["cargo +nightly miri test card"],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}],"hovers":[{{"card_id":"card-1","contents":"Trust boundary: static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}],"code_actions":{code_actions},"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}"#
+        )
     }
 
     fn write_valid_zero_card_first_pr_artifacts(dir: &Path) -> Result<(), String> {

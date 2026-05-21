@@ -172,9 +172,10 @@ cargo xtask check-first-pr-artifacts target/unsafe-review
 ```
 
 That verifier keeps the bundle advisory: it checks route limitations,
-comment-plan caps and renderable inline fields, zero-gap wording, card identity
-consistency, and absence of positive safety/proof wording. It does not run
-witnesses, post comments, edit source, or make a policy decision.
+comment-plan caps and renderable inline fields, saved LSP diagnostic evidence
+and action payloads, zero-gap wording, card identity consistency, and absence
+of positive safety/proof wording. It does not run witnesses, post comments,
+edit source, or make a policy decision.
 
 ## Explain And Context
 
@@ -200,7 +201,9 @@ unsafe-review context --root fixtures/raw_pointer_alignment <card-id> --json
 The context packet is copy-only. It includes a card-scoped task, missing
 evidence, allowed repairs, do-not-do rules, verify commands, stop conditions,
 and the static-review trust boundary. It does not execute an agent and does not
-edit source.
+edit source. See
+[Agent packet examples](explanation/agent-packet-examples.md) for
+fixture-backed examples of repair-ready and human-review-only packets.
 
 ## Repo Posture And Badges
 
@@ -231,9 +234,10 @@ unsafe-review outcome \
 
 Outcome comparison is read-only. It compares existing `ReviewCard` identities,
 classes, operation expressions and families, missing-evidence counts, next
-actions, and saved witness receipt strength from the supplied snapshots. It
-does not rerun analysis, run witnesses, post policy decisions, or claim
-repository safety.
+actions, and saved witness receipt strength from the supplied snapshots. The
+report includes a compact reviewer delta with new, resolved, improved,
+regressed, receipt-movement, and top-remaining-gap context. It does not rerun
+analysis, run witnesses, post policy decisions, or claim repository safety.
 
 ## Witness Receipts
 
@@ -398,7 +402,8 @@ wrong-tool, weaker-than-required, duplicate, and invalid receipt metadata.
 Matched receipts include current ReviewCard operation expression, operation
 family, missing-count, and next-action context so receipt evidence does not hide
 remaining gaps. It is advisory only: it does not execute witness commands, infer
-site reach, make policy decisions, or claim safety.
+site reach, make policy decisions, or claim safety. JSON and Markdown output
+include limitations that keep the saved-metadata boundary explicit.
 
 `unsafe-review` imports receipts. It does not run Miri, `cargo-careful`,
 sanitizers, Loom, Shuttle, Kani, or Crux by default.
@@ -412,10 +417,11 @@ unsafe-review doctor
 ```
 
 `doctor` reports first-install signals: workspace root, Git availability,
-whether `origin/main` is visible, witness tool availability or configuration
-hints, advisory policy, and the trust boundary. Missing witness tools are
-reported, not treated as a default failure. The command does not run Miri,
-`cargo-careful`, sanitizers, Loom, Shuttle, Kani, Crux, or any witness test.
+whether `origin/main` is visible, Cargo metadata readiness, artifact directory
+writability, witness tool availability or configuration hints, advisory policy,
+and the trust boundary. Missing witness tools are reported, not treated as a
+default failure. The command does not run Miri, `cargo-careful`, sanitizers,
+Loom, Shuttle, Kani, Crux, or any witness test.
 
 ## Flag Forms
 
