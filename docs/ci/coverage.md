@@ -35,6 +35,12 @@ The workflow lives at [`.github/workflows/coverage.yml`](../../.github/workflows
 It is registered in `policy/workflow-allowlist.toml` (`workflow-0006`) and
 in `policy/ci-lane-whitelist.toml` (`coverage` lane).
 
+Codecov's own project / patch status checks are made **informational** via
+[`codecov.yml`](../../codecov.yml). Codecov surfaces coverage telemetry, but
+project / patch coverage status is informational and is not a required
+branch-protection gate. Lowering coverage on a PR does not block merge by
+default.
+
 Behavior:
 
 - triggers on `pull_request`, `push` to main, and `workflow_dispatch`,
