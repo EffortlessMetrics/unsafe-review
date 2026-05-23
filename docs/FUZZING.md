@@ -17,8 +17,8 @@ scope/mode/max-card settings, and checks that rendered JSON remains parseable.
 
 The first two input bytes are interpreted as a small config header:
 
-- bit 0 toggles `Scope::Diff` / `Scope::Full`
-- bit 1 toggles `AnalysisMode::Draft` / `AnalysisMode::Normal`
+- bit 0 toggles `Scope::Diff` / `Scope::Repo`
+- bit 1 toggles `AnalysisMode::Draft` / `AnalysisMode::Ready`
 - bit 2 can emit a diff with no generated hunk (diff-tail only)
 - bit 3 toggles bounded `max_cards` (`1..=128`) / `None`
 - byte 2 seeds the bounded `max_cards` value
