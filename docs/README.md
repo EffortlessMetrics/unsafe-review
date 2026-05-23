@@ -11,6 +11,7 @@
 | GitHub Actions user guide | copy-paste drop-in workflow for downstream Rust repositories | `docs/ci/github-actions.md`, `.github/examples/unsafe-review-first-pr.yml` |
 | Explanations | concept notes, trust boundaries, reviewer examples, and agent packet examples | `docs/explanation/` |
 | Editor workflow | saved read-only editor projection walkthrough | `docs/editor/saved-lsp-json.md` |
+| Editor extension MVP | publishable saved-lsp viewer extension scope and non-goals | `docs/editor/extension-mvp.md` |
 | Proposals | why a workstream exists | `docs/proposals/` |
 | Releases | release targets, readiness notes, and publication receipts | `docs/releases/` |
 | Specs | behavior contracts | `docs/specs/` |
