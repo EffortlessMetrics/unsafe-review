@@ -9,15 +9,13 @@ pub(crate) fn render(output: &AnalyzeOutput) -> (String, String) {
         message: output.summary.open_actionable_gaps.to_string(),
         color,
     };
+    let weak_evidence_gaps = output.summary.contract_missing
+        + output.summary.guard_missing
+        + output.summary.guarded_unwitnessed;
     let plus = ShieldsBadge {
         schema_version: 1,
         label: "unsafe-review+",
-        message: format!(
-            "{} contract / {} guard / {} witness",
-            output.summary.contract_missing,
-            output.summary.guard_missing,
-            output.summary.guarded_unwitnessed
-        ),
+        message: weak_evidence_gaps.to_string(),
         color,
     };
     (render_pretty(&main), render_pretty(&plus))
@@ -73,7 +71,7 @@ mod tests {
 
         assert_eq!(plus["schemaVersion"], 1);
         assert_eq!(plus["label"], "unsafe-review+");
-        assert_eq!(plus["message"], "0 contract / 1 guard / 0 witness");
+        assert_eq!(plus["message"], "1");
         assert_eq!(plus["color"], "yellow");
         assert_ne!(plus["message"], "UB-free");
         Ok(())
@@ -89,7 +87,7 @@ mod tests {
         assert_eq!(main["message"], "0");
         assert_eq!(main["color"], "green");
         assert_ne!(main["message"], "safe");
-        assert_eq!(plus["message"], "0 contract / 0 guard / 0 witness");
+        assert_eq!(plus["message"], "0");
         assert_ne!(plus["message"], "Miri-clean");
         Ok(())
     }
