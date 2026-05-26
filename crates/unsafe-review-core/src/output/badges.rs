@@ -6,7 +6,7 @@ pub(crate) fn render(output: &AnalyzeOutput) -> (String, String) {
     let main = ShieldsBadge {
         schema_version: 1,
         label: "unsafe-review",
-        message: format!("{} open gaps", output.summary.open_actionable_gaps),
+        message: output.summary.open_actionable_gaps.to_string(),
         color,
     };
     let plus = ShieldsBadge {
@@ -67,7 +67,7 @@ mod tests {
 
         assert_eq!(main["schemaVersion"], 1);
         assert_eq!(main["label"], "unsafe-review");
-        assert_eq!(main["message"], "1 open gaps");
+        assert_eq!(main["message"], "1");
         assert_eq!(main["color"], "yellow");
         assert_ne!(main["message"], "safe");
 
@@ -86,7 +86,7 @@ mod tests {
         let main = parse_json(&main)?;
         let plus = parse_json(&plus)?;
 
-        assert_eq!(main["message"], "0 open gaps");
+        assert_eq!(main["message"], "0");
         assert_eq!(main["color"], "green");
         assert_ne!(main["message"], "safe");
         assert_eq!(plus["message"], "0 contract / 0 guard / 0 witness");
