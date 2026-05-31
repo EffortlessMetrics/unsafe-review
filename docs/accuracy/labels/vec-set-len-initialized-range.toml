@@ -1,0 +1,517 @@
+schema_version = "0.1"
+status = "fixture_pinned"
+claim_id = "vec-set-len-initialized-range-evidence"
+operation_family = "vec_set_len"
+hazard = "initialized_memory"
+partition = "fixture"
+source_kind = "fixture_golden"
+trust_boundary = """
+Static unsafe contract review only. These labels describe fixture-pinned
+ReviewCard initialized-range evidence behavior; they are not a proof of memory safety, not UB-free status, not a Miri result, not Miri-clean status, not site execution evidence, not calibrated precision or recall, not witness adequacy, and not policy readiness.
+"""
+
+[[samples]]
+id = "vec-set-len-basic-missing-initialized-range"
+fixture = "vec_set_len"
+kind = "positive"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "initialized"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "A capacity guard alone does not prove the extended Vec range has been initialized."
+
+[[samples]]
+id = "vec-set-len-comment-not-initialized-range"
+fixture = "vec_set_len_comment_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "initialized"
+expected_contract_state = "present"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A SAFETY comment that claims the extended range was initialized is contract prose only; it does not create local initialized-range discharge evidence."
+
+[[samples]]
+id = "vec-set-len-initialized-loop-present"
+fixture = "vec_set_len_initialized_loop"
+kind = "positive"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "initialized"
+expected_discharge_state = "present"
+label_source = "fixture_golden"
+rationale = "A visible initialization loop over the extended range discharges initialized-range evidence."
+
+[[samples]]
+id = "vec-set-len-slice-binding-initialized-loop-present"
+fixture = "vec_set_len_slice_binding_initialized_loop"
+kind = "positive"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "initialized"
+expected_discharge_state = "present"
+label_source = "fixture_golden"
+rationale = "A same-vector slice binding that covers the set_len target range and is initialized in a loop discharges initialized-range evidence."
+
+[[samples]]
+id = "vec-set-len-other-slice-binding-not-initialized-range"
+fixture = "vec_set_len_other_slice_binding_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "initialized"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A slice-binding initialization loop over another slice does not prove the target Vec range is initialized before set_len."
+
+[[samples]]
+id = "vec-set-len-partial-slice-binding-not-initialized-range"
+fixture = "vec_set_len_partial_slice_binding_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "initialized"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A same-vector slice-binding initialization loop whose range stops before the set_len target does not prove the full extended Vec range is initialized."
+
+[[samples]]
+id = "vec-set-len-stale-slice-binding-not-initialized-range"
+fixture = "vec_set_len_stale_slice_binding_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "initialized"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A same-vector slice binding becomes stale when the binding is shadowed before the initialization loop and must not discharge Vec::set_len initialized-range evidence."
+
+[[samples]]
+id = "vec-set-len-single-index-not-initialized-range"
+fixture = "vec_set_len_single_index_init_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "initialized"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A direct write to one index of the target Vec does not prove the full extended range passed to set_len is initialized."
+
+[[samples]]
+id = "vec-set-len-capacity-observed-missing"
+fixture = "vec_set_len_capacity_observed_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "initialized"
+expected_contract_state = "present"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A capacity observation without an initialized-range proof does not discharge Vec::set_len initialization."
+
+[[samples]]
+id = "vec-set-len-unrelated-capacity-comparison-missing"
+fixture = "vec_set_len_unrelated_capacity_comparison_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "initialized"
+expected_contract_state = "present"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "An unrelated capacity comparison must not discharge the target Vec::set_len initialized range."
+
+[[samples]]
+id = "vec-set-len-capacity-binding-present"
+fixture = "vec_set_len_capacity_binding"
+kind = "positive"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "capacity"
+expected_contract_state = "present"
+expected_discharge_state = "present"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A fresh same-vector capacity binding used in a new-length bound discharges the Vec::set_len capacity obligation but not initialized-range evidence."
+
+[[samples]]
+id = "vec-set-len-stale-capacity-binding-missing"
+fixture = "vec_set_len_stale_capacity_binding_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "capacity"
+expected_contract_state = "present"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A capacity binding measured before the Vec receiver is reassigned does not prove capacity for the later Vec::set_len target."
+
+[[samples]]
+id = "vec-set-len-cap-argument-missing"
+fixture = "vec_set_len_cap_argument_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "initialized"
+expected_contract_state = "present"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A local argument named cap is not initialized-range evidence for the Vec::set_len target."
+
+[[samples]]
+id = "vec-set-len-unrelated-const-cap-missing-capacity"
+fixture = "vec_set_len_unrelated_const_cap_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "capacity"
+expected_contract_state = "present"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "An unrelated const-CAP MaybeUninit buffer does not prove capacity for the Vec receiver passed to set_len."
+
+[[samples]]
+id = "vec-set-len-self-new-const-cap-missing-capacity"
+fixture = "vec_set_len_self_new_const_cap_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "capacity"
+expected_contract_state = "present"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A same-receiver initialization loop does not prove capacity for set_len(CAP) when the fixed-capacity storage is hidden behind an opaque Self::new constructor."
+
+[[samples]]
+id = "vec-set-len-reassigned-receiver-missing"
+fixture = "vec_set_len_reassigned_receiver_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "initialized"
+expected_contract_state = "present"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "Initialization or capacity evidence becomes stale after the checked Vec receiver is reassigned."
+
+[[samples]]
+id = "vec-set-len-reassigned-new-len-missing"
+fixture = "vec_set_len_reassigned_new_len_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "capacity"
+expected_contract_state = "present"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "Capacity evidence becomes stale when the checked new length is reassigned before Vec::set_len."
+
+[[samples]]
+id = "vec-set-len-compound-reassigned-new-len-missing"
+fixture = "vec_set_len_compound_reassigned_new_len_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "capacity"
+expected_contract_state = "present"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "Capacity evidence becomes stale when compound assignment mutates the checked new length before Vec::set_len."
+
+[[samples]]
+id = "vec-set-len-shadowed-new-len-missing"
+fixture = "vec_set_len_shadowed_new_len_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "capacity"
+expected_contract_state = "present"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "Capacity evidence becomes stale when a later let-binding shadows the checked new length before Vec::set_len."
+
+[[samples]]
+id = "vec-set-len-call-result-init-present"
+fixture = "vec_set_len_call_result_init"
+kind = "positive"
+expected_cards = 1
+expected_class = "unsafe_unreached"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "initialized"
+expected_discharge_state = "present"
+label_source = "fixture_golden"
+rationale = "A call-result length tied to encoded bytes is accepted as initialized-range evidence."
+
+[[samples]]
+id = "vec-set-len-shrink-present"
+fixture = "vec_set_len_shrink"
+kind = "positive"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "initialized"
+expected_discharge_state = "present"
+label_source = "fixture_golden"
+rationale = "Shrinking a Vec length does not expose newly uninitialized elements, so initialized-range evidence is present."
+
+[[samples]]
+id = "vec-set-len-last-index-shrink-present"
+fixture = "vec_set_len_last_index_shrink"
+kind = "positive"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "initialized"
+expected_contract_state = "present"
+expected_discharge_state = "present"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A non-empty last-index shrink keeps the new length inside the already initialized Vec range."
+
+[[samples]]
+id = "vec-set-len-stale-last-index-shrink-missing"
+fixture = "vec_set_len_stale_last_index_shrink_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "initialized"
+expected_contract_state = "present"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A last_index shrink bound measured before the Vec receiver is reassigned does not prove the later Vec::set_len target shrinks within initialized range."
+
+[[samples]]
+id = "vec-set-len-other-last-index-shrink-not-guard"
+fixture = "vec_set_len_other_last_index_shrink_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "initialized"
+expected_contract_state = "present"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A last_index derived from another Vec receiver does not prove the target Vec's new length is within its initialized range."
+
+[[samples]]
+id = "vec-set-len-start-bound-shrink-present"
+fixture = "vec_set_len_start_bound_shrink"
+kind = "positive"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "initialized"
+expected_contract_state = "present"
+expected_discharge_state = "present"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A start/end bound proving the new length is within current len is shrink evidence for Vec::set_len."
+
+[[samples]]
+id = "vec-set-len-stale-start-bound-shrink-missing"
+fixture = "vec_set_len_stale_start_bound_shrink_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "initialized"
+expected_contract_state = "present"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A start/end shrink bound tied to a length binding measured before the Vec receiver is reassigned does not prove the later Vec::set_len target shrinks within initialized range."
+
+[[samples]]
+id = "vec-set-len-zero-clear-present"
+fixture = "vec_set_len_zero_clear"
+kind = "positive"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "initialized"
+expected_discharge_state = "present"
+label_source = "fixture_golden"
+rationale = "Setting length to zero is treated as initialized-range evidence because no extended range is exposed."
+
+[[samples]]
+id = "vec-set-len-with-capacity-missing-initialized-range"
+fixture = "vec_set_len_with_capacity"
+kind = "positive"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "initialized"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "Allocating enough capacity does not initialize the extended Vec range."
+
+[[samples]]
+id = "vec-set-len-stale-with-capacity-missing-capacity"
+fixture = "vec_set_len_stale_with_capacity_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "capacity"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "Vec::with_capacity(new_len) capacity evidence becomes stale when the vector receiver is reassigned before Vec::set_len."
+
+[[samples]]
+id = "vec-set-len-stale-with-capacity-len-missing-capacity"
+fixture = "vec_set_len_stale_with_capacity_len_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "capacity"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "Vec::with_capacity(new_len) capacity evidence becomes stale when the checked new_len is reassigned before Vec::set_len."
+
+[[samples]]
+id = "vec-set-len-reserve-capacity-missing-initialized-range"
+fixture = "vec_set_len_reserve_capacity"
+kind = "positive"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "capacity"
+expected_discharge_state = "present"
+label_source = "fixture_golden"
+rationale = "A same-vector reserve(additional) call can prove capacity for len + additional, but it does not initialize the extended Vec range."
+
+[[samples]]
+id = "vec-set-len-reserve-stale-additional-missing-capacity"
+fixture = "vec_set_len_reserve_reassigned_additional_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "capacity"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "A reserve(additional) call is stale capacity evidence when additional is reassigned after computing the new Vec length."
+
+[[samples]]
+id = "vec-set-len-try-reserve-capacity-missing-initialized-range"
+fixture = "vec_set_len_try_reserve_capacity"
+kind = "positive"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "capacity"
+expected_discharge_state = "present"
+label_source = "fixture_golden"
+rationale = "A same-vector try_reserve(additional)? call can prove capacity on the continuing path for len + additional, but it does not initialize the extended Vec range."
+
+[[samples]]
+id = "vec-set-len-try-reserve-stale-additional-missing-capacity"
+fixture = "vec_set_len_try_reserve_reassigned_additional_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "capacity"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "A try_reserve(additional)? call is stale capacity evidence when additional is reassigned after computing the new Vec length."
+
+[[samples]]
+id = "vec-set-len-post-init-not-guard"
+fixture = "vec_set_len_post_init_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "initialized"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "Initialization after `set_len` does not discharge evidence needed before exposing the extended range."
+
+[[samples]]
+id = "vec-set-len-unrelated-init-not-guard"
+fixture = "vec_set_len_unrelated_initialization_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+expected_obligation_key = "initialized"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "Initialization of unrelated storage does not discharge the target Vec initialized-range obligation."

@@ -1,9 +1,9 @@
 # UNSAFE-REVIEW-SPEC-0019 — First-run cockpit (0.2.0 lane)
 
-- Status: Draft
-- Last updated: 2026-05-20
+- Status: Accepted
+- Last updated: 2026-05-21
 - Owners: unsafe-review maintainers
-- Depends on: 0001, 0002, 0008, 0009, 0010, 0011, 0012, 0013, 0016
+- Depends on: 0001, 0002, 0008, 0009, 0010, 0011, 0012, 0013, 0016, 0024
 
 ## 1. Purpose
 
@@ -45,12 +45,20 @@ Implementations MAY use equivalent install/open commands by platform, but behavi
 
 - `cards.json`
 - `pr-summary.md`
+- `github-summary.md`
 - `cards.sarif`
 - `comment-plan.json`
 - `witness-plan.md`
 - `lsp.json` (saved projection; optional when no cards or no projection content)
+- `repair-queue.json`
 
-Bundle shape MUST pass `cargo xtask check-first-pr-artifacts <dir>`.
+Bundle shape MUST pass
+`cargo run --locked -p xtask -- check-first-pr-artifacts <dir>`.
+
+When cards are present, `pr-summary.md` and `github-summary.md` MUST include
+top-card handoff commands for human explanation and bounded agent context:
+`unsafe-review explain <card-id>` and
+`unsafe-review context <card-id> --json`.
 
 ## 5. First-pr terminal summary contract
 
@@ -58,8 +66,14 @@ On successful bundle write, terminal output MUST include:
 
 - Artifact directory.
 - Card count.
-- Top-card handoff command (`unsafe-review explain <card-id>` when present).
+- Top-card handoff commands (`unsafe-review explain <card-id>` and
+  `unsafe-review context <card-id> --json` when present).
 - `pr-summary.md` location.
+- `repair-queue.json` location as a copy-only agent handoff; terminal output
+  must not imply that unsafe-review ran an agent.
+- A `receipt audit` command for checking saved witness receipt metadata against
+  the same first-pr card set; terminal output must not imply that unsafe-review
+  ran a witness.
 - Trust boundary statement.
 
 Minimum trust boundary wording intent:
@@ -166,7 +180,8 @@ Every first-run surface is a projection from ReviewCard.
 - Agent packets: card-scoped, readiness-classified, bounded context, allowed
   repairs, do-not-do list, verify commands, and stop conditions.
 - Badges: repo posture only; `unsafe-review` means open gaps and
-  `unsafe-review+` means contract/guard/witness mix.
+  `unsafe-review+` means open gaps plus contract/guard/witness evidence-quality
+  findings.
 
 These surfaces MUST NOT create alternate analyzer truth.
 

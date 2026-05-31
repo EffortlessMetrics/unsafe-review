@@ -1,0 +1,1520 @@
+schema_version = "1.0"
+status = "experimental"
+
+trust_boundary = """
+Accuracy calibration describes ReviewCard evidence quality for scoped static
+unsafe exposure analysis. It is not a proof of memory safety, not UB-free status,
+not Miri-clean status, and not policy readiness unless a separate policy spec
+promotes it.
+"""
+
+[claim_levels]
+fixture_pinned = "Fixture/golden-backed behavior only."
+dogfood_measured = "Measured on selected real repositories or PR diffs; no rate claim."
+labeled_calibrated = "Measured on an adjudicated labeled corpus with denominator."
+policy_eligible = "Labeled-calibrated plus stability, drift, and support-tier review."
+
+[kinds]
+allowed = [
+  "inventory",
+  "operation_family",
+  "hazard",
+  "obligation",
+  "evidence_precision",
+  "false_positive_control",
+  "false_negative_probe",
+  "route_quality",
+  "identity_stability",
+  "artifact_honesty",
+]
+
+[[claim]]
+id = "box-from-raw-ownership-evidence"
+status = "fixture_pinned"
+kind = "evidence_precision"
+owner = "calibration"
+operation_family = "box_from_raw"
+hazard = "drop_or_deallocation"
+support_tier = "Core operation smoke slice"
+fixtures = [
+  "box_from_raw",
+  "box_from_raw_box_origin",
+  "box_from_raw_reassigned_origin_not_guard",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/box-from-raw-ownership.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned Box::from_raw ownership evidence distinguishes same-pointer
+Box::into_raw origin evidence from bare and reassigned-origin controls in the
+listed fixtures.
+"""
+forbidden_claims = [
+  "broad Box::from_raw soundness",
+  "allocator proof",
+  "pointer validity proof",
+  "deallocation proof",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "drop-in-place-box-origin-evidence"
+status = "fixture_pinned"
+kind = "evidence_precision"
+owner = "calibration"
+operation_family = "drop_in_place"
+hazard = "drop_or_deallocation"
+support_tier = "Core operation smoke slice"
+fixtures = [
+  "drop_in_place_deallocation",
+  "drop_in_place_box_origin",
+  "drop_in_place_reassigned_origin_not_guard",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/drop-in-place-box-origin.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned ptr::drop_in_place Box-origin evidence distinguishes
+same-pointer Box::into_raw origin evidence from bare and reassigned-origin
+controls in the listed fixtures.
+"""
+forbidden_claims = [
+  "broad ptr::drop_in_place soundness",
+  "allocator proof",
+  "pointer validity proof",
+  "drop correctness proof",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "drop-in-place-witness-routes"
+status = "fixture_pinned"
+kind = "route_quality"
+owner = "calibration"
+operation_family = "drop_in_place"
+hazard = "drop_or_deallocation"
+support_tier = "Witness routing"
+fixtures = [
+  "drop_in_place_deallocation",
+  "drop_in_place_box_origin",
+  "drop_in_place_reassigned_origin_not_guard",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/drop-in-place-witness-routes.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned ptr::drop_in_place witness routing sends drop/deallocation
+hazards to Miri/cargo-careful route suggestions in the listed fixtures.
+"""
+forbidden_claims = [
+  "ptr::drop_in_place soundness proof",
+  "witness execution proof",
+  "Miri-clean",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "raw-pointer-read-alignment-evidence"
+status = "fixture_pinned"
+kind = "evidence_precision"
+owner = "calibration"
+operation_family = "raw_pointer_read"
+hazard = "alignment"
+support_tier = "Guard evidence mining"
+fixtures = [
+  "raw_pointer_alignment",
+  "raw_pointer_alignment_receipted",
+  "align_of_only_not_guard",
+  "alignment_other_pointer_not_guard",
+  "raw_pointer_alignment_post_check_not_guard",
+  "raw_pointer_alignment_is_aligned_guard",
+  "raw_pointer_alignment_observed_not_guard",
+  "raw_pointer_alignment_closed_branch_not_guard",
+  "raw_pointer_alignment_reassigned_pointer_not_guard",
+  "raw_pointer_alignment_modulo_guard",
+  "raw_pointer_alignment_modulo_observed_not_guard",
+  "raw_pointer_alignment_modulo_closed_branch_not_guard",
+  "raw_pointer_alignment_modulo_reassigned_pointer_not_guard",
+  "comment_alignment_not_guard",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/raw-pointer-read-alignment.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned alignment guard evidence for raw pointer reads rejects observed,
+closed-branch, stale-pointer, comment-only, post-check, other-pointer, and
+wrong-shape evidence in the listed fixtures.
+"""
+forbidden_claims = [
+  "broad raw pointer safety",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "raw-pointer-read-bounds-evidence"
+status = "fixture_pinned"
+kind = "evidence_precision"
+owner = "calibration"
+operation_family = "raw_pointer_read"
+hazard = "pointer_validity"
+support_tier = "Raw pointer card slice"
+fixtures = [
+  "raw_pointer_read_len_capacity_assert",
+  "raw_pointer_read_assert_shadowed_origin_not_guard",
+  "raw_pointer_read_len_capacity_assert_shadowed_origin_not_guard",
+  "raw_pointer_read_bounds_observed_not_guard",
+  "raw_pointer_read_len_capacity_observed_not_guard",
+  "raw_pointer_read_as_cast_origin_bounds_guard",
+  "raw_pointer_read_cast_origin_bounds_guard",
+  "raw_pointer_read_open_branch_bounds_guard",
+  "raw_pointer_read_open_branch_shadowed_origin_not_guard",
+  "raw_pointer_read_typed_shadowed_origin_not_guard",
+  "raw_pointer_read_other_len_not_guard",
+  "raw_pointer_read_reassigned_origin_not_guard",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/raw-pointer-read-bounds.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned raw pointer read bounds evidence distinguishes same-origin
+len/capacity assertions, typed casts, and open length branches from observed
+branches, shadowed origins, unrelated lengths, and reassigned origins in the
+listed fixtures.
+"""
+forbidden_claims = [
+  "broad raw pointer read soundness",
+  "pointer liveness proof",
+  "alignment proof",
+  "initialized-memory proof",
+  "same-allocation proof",
+  "witness execution proof",
+  "Miri-clean",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "raw-pointer-operation-family-smoke"
+status = "fixture_pinned"
+kind = "operation_family"
+owner = "calibration"
+support_tier = "Raw pointer card slice"
+fixtures = [
+  "raw_pointer_deref",
+  "raw_pointer_read_unaligned",
+  "raw_pointer_write_assignment",
+  "raw_pointer_write_unaligned",
+  "raw_pointer_read_volatile",
+  "raw_pointer_write_volatile",
+  "ptr_replace_value",
+  "split_raw_pointer_read_call",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/raw-pointer-operation-family-smoke.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned raw pointer operation-family smoke keeps deref, unaligned
+read/write, volatile read/write, pointer replacement, assignment syntax, and
+split read-call syntax mapped to concrete ReviewCards in the listed fixtures.
+"""
+forbidden_claims = [
+  "complete raw pointer operation coverage",
+  "broad raw pointer soundness",
+  "pointer validity proof",
+  "alignment proof",
+  "initialized-memory proof",
+  "witness execution proof",
+  "Miri-clean",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "public-unsafe-api-safety-docs-contract-evidence"
+status = "fixture_pinned"
+kind = "evidence_precision"
+owner = "calibration"
+operation_family = "unknown"
+hazard = "unknown"
+support_tier = "Contract evidence mining"
+fixtures = [
+  "public_unsafe_fn_missing_safety",
+  "public_unsafe_trait_missing_safety",
+  "public_unsafe_fn_safety_comment_not_docs",
+  "split_public_unsafe_fn_missing_safety",
+  "public_unsafe_fn_with_safety_docs",
+  "public_unsafe_fn_safety_colon_docs",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/public-unsafe-api-safety-docs.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned public unsafe API contract evidence distinguishes missing `# Safety`
+docs from accepted `# Safety` / documented `Safety:` prose in the listed fixtures,
+and keeps local `SAFETY:` comments from satisfying public API documentation.
+"""
+forbidden_claims = [
+  "complete public API documentation audit",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "local-unsafe-contract-evidence"
+status = "fixture_pinned"
+kind = "evidence_precision"
+owner = "calibration"
+support_tier = "Contract evidence mining"
+fixtures = [
+  "documented_private_unsafe_fn",
+  "private_unsafe_helper_safety_comment",
+  "local_safety_colon_comment",
+  "unsafe_impl_custom_trait_not_send_sync",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/local-unsafe-contract-evidence.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned private/local unsafe contract evidence distinguishes documented
+private unsafe contracts, custom unsafe trait impl contracts, and local
+SAFETY/Safety prose from actual guard discharge evidence in the listed fixtures.
+"""
+forbidden_claims = [
+  "complete unsafe contract audit",
+  "comment proves safety",
+  "guard proof from comments",
+  "witness execution proof",
+  "Miri-clean",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "raw-pointer-write-initialized-evidence"
+status = "fixture_pinned"
+kind = "evidence_precision"
+owner = "calibration"
+operation_family = "raw_pointer_write"
+hazard = "initialized_memory"
+support_tier = "Raw pointer card slice"
+fixtures = [
+  "raw_pointer_write_bytes",
+  "raw_pointer_write_bool_bytes_guard",
+  "raw_pointer_write_bool_conjunct_branch_guard",
+  "raw_pointer_write_bool_disjunct_return_guard",
+  "raw_pointer_write_bool_reassigned_byte_not_guard",
+  "raw_pointer_write_bool_closed_branch_not_guard",
+  "raw_pointer_write_bool_disjunct_branch_not_guard",
+  "raw_pointer_write_bool_conjunct_return_not_guard",
+  "raw_pointer_write_previous_u8_not_guard",
+  "raw_pointer_write_previous_bool_not_guard",
+  "raw_pointer_write_previous_maybeuninit_not_guard",
+  "raw_pointer_write_previous_slice_not_guard",
+  "raw_pointer_write_other_u8_not_guard",
+  "raw_pointer_write_maybeuninit",
+  "raw_pointer_write_other_maybeuninit_not_guard",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/raw-pointer-write-initialized-evidence.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned raw pointer write initialized evidence distinguishes u8, guarded
+bool, and MaybeUninit target evidence from stale, closed-branch, wrong-target,
+and previous-operation controls, including stale slice writes, in the listed
+fixtures.
+"""
+forbidden_claims = [
+  "broad raw pointer write safety",
+  "pointer validity proof",
+  "bounds proof",
+  "allocation proof",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "slice-from-raw-parts-mut-initialized-evidence"
+status = "fixture_pinned"
+kind = "evidence_precision"
+owner = "calibration"
+operation_family = "slice_from_raw_parts"
+hazard = "initialized_memory"
+support_tier = "Core operation smoke slice"
+fixtures = [
+  "slice_from_raw_parts_mut",
+  "slice_from_raw_parts_mut_maybeuninit",
+  "slice_from_raw_parts_mut_other_maybeuninit_not_guard",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/slice-from-raw-parts-mut-initialized.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned slice::from_raw_parts_mut initialized-memory evidence
+distinguishes MaybeUninit element slices from bare and unrelated MaybeUninit
+controls in the listed fixtures.
+"""
+forbidden_claims = [
+  "broad slice::from_raw_parts_mut soundness",
+  "pointer validity proof",
+  "alignment proof",
+  "allocation proof",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "copy-nonoverlapping-valid-range-evidence"
+status = "fixture_pinned"
+kind = "evidence_precision"
+owner = "calibration"
+operation_family = "copy_nonoverlapping"
+hazard = "aliasing_or_provenance"
+support_tier = "Core operation smoke slice"
+fixtures = [
+  "copy_nonoverlapping",
+  "copy_nonoverlapping_slice_range_guard",
+  "copy_nonoverlapping_slice_range_conjunctive_assert_guard",
+  "copy_nonoverlapping_slice_range_early_return_guard",
+  "copy_nonoverlapping_slice_range_disjunctive_early_return_guard",
+  "copy_nonoverlapping_slice_range_open_branch_guard",
+  "copy_nonoverlapping_slice_range_conjunctive_open_branch_guard",
+  "copy_nonoverlapping_slice_range_closed_branch_not_guard",
+  "copy_nonoverlapping_slice_range_or_branch_not_guard",
+  "copy_nonoverlapping_slice_range_disjunctive_early_return_block_comment_not_guard",
+  "copy_nonoverlapping_slice_range_disjunctive_early_return_reassigned_count_not_guard",
+  "copy_nonoverlapping_slice_range_disjunctive_early_return_compound_reassigned_count_not_guard",
+  "copy_nonoverlapping_slice_range_disjunctive_early_return_shadowed_count_not_guard",
+  "copy_nonoverlapping_slice_range_disjunctive_early_return_reassigned_src_not_guard",
+  "copy_nonoverlapping_slice_range_disjunctive_early_return_reassigned_src_path_not_guard",
+  "copy_nonoverlapping_slice_range_disjunctive_early_return_shadowed_src_path_not_guard",
+  "copy_nonoverlapping_slice_range_disjunctive_early_return_shadowed_src_not_guard",
+  "copy_nonoverlapping_slice_range_disjunctive_early_return_reassigned_dst_not_guard",
+  "copy_nonoverlapping_slice_range_disjunctive_early_return_reassigned_dst_path_not_guard",
+  "copy_nonoverlapping_slice_range_disjunctive_early_return_shadowed_dst_path_not_guard",
+  "copy_nonoverlapping_slice_range_disjunctive_early_return_shadowed_dst_not_guard",
+  "copy_nonoverlapping_slice_range_open_branch_reassigned_count_not_guard",
+  "copy_nonoverlapping_slice_range_open_branch_compound_reassigned_count_not_guard",
+  "copy_nonoverlapping_slice_range_open_branch_shadowed_count_not_guard",
+  "copy_nonoverlapping_slice_range_open_branch_reassigned_src_not_guard",
+  "copy_nonoverlapping_slice_range_open_branch_reassigned_src_path_not_guard",
+  "copy_nonoverlapping_slice_range_open_branch_shadowed_src_path_not_guard",
+  "copy_nonoverlapping_slice_range_open_branch_shadowed_src_not_guard",
+  "copy_nonoverlapping_slice_range_open_branch_reassigned_dst_not_guard",
+  "copy_nonoverlapping_slice_range_open_branch_reassigned_dst_path_not_guard",
+  "copy_nonoverlapping_slice_range_open_branch_shadowed_dst_path_not_guard",
+  "copy_nonoverlapping_slice_range_open_branch_shadowed_dst_not_guard",
+  "copy_nonoverlapping_slice_range_src_only_not_guard",
+  "copy_nonoverlapping_slice_range_dst_only_not_guard",
+  "copy_nonoverlapping_slice_range_reassigned_count_not_guard",
+  "copy_nonoverlapping_slice_range_shadowed_count_not_guard",
+  "copy_nonoverlapping_slice_range_reassigned_src_not_guard",
+  "copy_nonoverlapping_slice_range_reassigned_src_path_not_guard",
+  "copy_nonoverlapping_slice_range_shadowed_src_path_not_guard",
+  "copy_nonoverlapping_slice_range_shadowed_src_not_guard",
+  "copy_nonoverlapping_slice_range_reassigned_dst_not_guard",
+  "copy_nonoverlapping_slice_range_reassigned_dst_path_not_guard",
+  "copy_nonoverlapping_slice_range_shadowed_dst_path_not_guard",
+  "copy_nonoverlapping_slice_range_shadowed_dst_not_guard",
+  "copy_nonoverlapping_other_len_not_guard",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/copy-nonoverlapping-valid-range.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned copy_nonoverlapping valid-range evidence distinguishes same-call
+source and destination length evidence from stale, partial, closed-branch,
+comment-only, compound-stale-count, shadowed-count, shadowed-receiver, and unrelated-length controls in the listed
+fixtures, while non-overlap remains a separate missing obligation.
+"""
+forbidden_claims = [
+  "broad copy_nonoverlapping soundness",
+  "non-overlap proof",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "vec-set-len-initialized-range-evidence"
+status = "fixture_pinned"
+kind = "evidence_precision"
+owner = "calibration"
+operation_family = "vec_set_len"
+hazard = "initialized_memory"
+support_tier = "Core operation smoke slice"
+fixtures = [
+  "vec_set_len",
+  "vec_set_len_comment_not_guard",
+  "vec_set_len_initialized_loop",
+  "vec_set_len_self_new_const_cap_not_guard",
+  "vec_set_len_slice_binding_initialized_loop",
+  "vec_set_len_other_slice_binding_not_guard",
+  "vec_set_len_partial_slice_binding_not_guard",
+  "vec_set_len_stale_slice_binding_not_guard",
+  "vec_set_len_single_index_init_not_guard",
+  "vec_set_len_capacity_observed_not_guard",
+  "vec_set_len_unrelated_capacity_comparison_not_guard",
+  "vec_set_len_capacity_binding",
+  "vec_set_len_stale_capacity_binding_not_guard",
+  "vec_set_len_cap_argument_not_guard",
+  "vec_set_len_unrelated_const_cap_not_guard",
+  "vec_set_len_reassigned_receiver_not_guard",
+  "vec_set_len_reassigned_new_len_not_guard",
+  "vec_set_len_compound_reassigned_new_len_not_guard",
+  "vec_set_len_shadowed_new_len_not_guard",
+  "vec_set_len_call_result_init",
+  "vec_set_len_shrink",
+  "vec_set_len_last_index_shrink",
+  "vec_set_len_stale_last_index_shrink_not_guard",
+  "vec_set_len_other_last_index_shrink_not_guard",
+  "vec_set_len_start_bound_shrink",
+  "vec_set_len_stale_start_bound_shrink_not_guard",
+  "vec_set_len_zero_clear",
+  "vec_set_len_with_capacity",
+  "vec_set_len_stale_with_capacity_not_guard",
+  "vec_set_len_stale_with_capacity_len_not_guard",
+  "vec_set_len_reserve_capacity",
+  "vec_set_len_reserve_reassigned_additional_not_guard",
+  "vec_set_len_try_reserve_capacity",
+  "vec_set_len_try_reserve_reassigned_additional_not_guard",
+  "vec_set_len_post_init_not_guard",
+  "vec_set_len_unrelated_initialization_not_guard",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/vec-set-len-initialized-range.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned Vec::set_len initialized-range evidence distinguishes initialized
+loop, same-vector slice-binding loop, call-result, same-vector shrink,
+zero-clear, and capacity-only reserve/try_reserve evidence from comment-only,
+opaque-constructor capacity, post-init, unrelated-initialization, other-slice, partial-slice,
+stale-slice-binding, single-index initialization, unrelated-capacity,
+capacity-binding staleness, unrelated-const-cap, other-receiver shrink, stale-last-index shrink,
+stale-receiver, stale-start-bound shrink, stale-with-capacity receiver, stale-with-capacity new length, stale-new-len,
+compound-stale-new-len, stale-additional, and cap-name-only controls in the
+listed fixtures.
+"""
+forbidden_claims = [
+  "broad Vec soundness",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "vec-from-raw-parts-capacity-evidence"
+status = "fixture_pinned"
+kind = "evidence_precision"
+owner = "calibration"
+operation_family = "vec_from_raw_parts"
+hazard = "bounds"
+support_tier = "Core operation smoke slice"
+fixtures = [
+  "vec_from_raw_parts",
+  "vec_from_raw_parts_capacity_guard",
+  "vec_from_raw_parts_capacity_assert_guard",
+  "vec_from_raw_parts_capacity_observed_not_guard",
+  "vec_from_raw_parts_capacity_value_observed_not_guard",
+  "vec_from_raw_parts_capacity_closed_branch_not_guard",
+  "vec_from_raw_parts_capacity_return_comment_not_guard",
+  "vec_from_raw_parts_capacity_reassigned_not_guard",
+  "vec_from_raw_parts_manuallydrop_origin",
+  "vec_from_raw_parts_stale_pointer_origin_not_guard",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/vec-from-raw-parts-capacity.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned Vec::from_raw_parts capacity and same-origin evidence
+distinguishes same-call len/cap guards, assertions, and same-origin
+ManuallyDrop raw-parts capacity from observed, closed-branch, comment-only
+early-return, wrong-capacity, stale-cap, and stale-pointer-origin controls in
+the listed fixtures.
+"""
+forbidden_claims = [
+  "broad Vec::from_raw_parts soundness",
+  "allocator proof",
+  "ownership proof",
+  "alignment proof",
+  "initialized-memory proof",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "ptr-copy-valid-range-evidence"
+status = "fixture_pinned"
+kind = "evidence_precision"
+owner = "calibration"
+operation_family = "ptr_copy"
+hazard = "pointer_validity"
+support_tier = "Core operation smoke slice"
+fixtures = [
+  "ptr_copy_overlapping",
+  "ptr_copy_slice_range_guard",
+  "ptr_copy_slice_range_conjunctive_assert_guard",
+  "ptr_copy_slice_range_early_return_guard",
+  "ptr_copy_slice_range_disjunctive_early_return_guard",
+  "ptr_copy_slice_range_open_branch_guard",
+  "ptr_copy_slice_range_conjunctive_open_branch_guard",
+  "ptr_copy_slice_range_closed_branch_not_guard",
+  "ptr_copy_slice_range_or_branch_not_guard",
+  "ptr_copy_slice_range_disjunctive_early_return_block_comment_not_guard",
+  "ptr_copy_slice_range_disjunctive_early_return_reassigned_count_not_guard",
+  "ptr_copy_slice_range_disjunctive_early_return_compound_reassigned_count_not_guard",
+  "ptr_copy_slice_range_disjunctive_early_return_shadowed_count_not_guard",
+  "ptr_copy_slice_range_disjunctive_early_return_reassigned_src_not_guard",
+  "ptr_copy_slice_range_disjunctive_early_return_reassigned_src_path_not_guard",
+  "ptr_copy_slice_range_disjunctive_early_return_shadowed_src_not_guard",
+  "ptr_copy_slice_range_disjunctive_early_return_reassigned_dst_not_guard",
+  "ptr_copy_slice_range_disjunctive_early_return_shadowed_dst_not_guard",
+  "ptr_copy_slice_range_open_branch_reassigned_count_not_guard",
+  "ptr_copy_slice_range_open_branch_compound_reassigned_count_not_guard",
+  "ptr_copy_slice_range_open_branch_shadowed_count_not_guard",
+  "ptr_copy_slice_range_open_branch_shadowed_src_not_guard",
+  "ptr_copy_slice_range_open_branch_shadowed_dst_not_guard",
+  "ptr_copy_slice_range_open_branch_reassigned_src_not_guard",
+  "ptr_copy_slice_range_open_branch_reassigned_src_path_not_guard",
+  "ptr_copy_slice_range_open_branch_reassigned_dst_path_not_guard",
+  "ptr_copy_slice_range_open_branch_shadowed_src_path_not_guard",
+  "ptr_copy_slice_range_open_branch_shadowed_dst_path_not_guard",
+  "ptr_copy_slice_range_open_branch_reassigned_dst_not_guard",
+  "ptr_copy_slice_range_src_only_not_guard",
+  "ptr_copy_slice_range_dst_only_not_guard",
+  "ptr_copy_slice_range_reassigned_count_not_guard",
+  "ptr_copy_slice_range_shadowed_count_not_guard",
+  "ptr_copy_slice_range_reassigned_src_not_guard",
+  "ptr_copy_slice_range_reassigned_src_path_not_guard",
+  "ptr_copy_slice_range_shadowed_src_path_not_guard",
+  "ptr_copy_slice_range_shadowed_src_not_guard",
+  "ptr_copy_slice_range_reassigned_dst_not_guard",
+  "ptr_copy_slice_range_reassigned_dst_path_not_guard",
+  "ptr_copy_slice_range_shadowed_dst_path_not_guard",
+  "ptr_copy_slice_range_shadowed_dst_not_guard",
+  "ptr_copy_other_len_not_guard",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/ptr-copy-valid-range.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned ptr::copy valid-range evidence distinguishes same-call source and
+destination length evidence from stale, partial, closed-branch, comment-only,
+compound-stale-count, shadowed-count, shadowed-receiver, and unrelated-length
+controls in the listed fixtures, while initialized-memory remains a separate
+missing obligation.
+"""
+forbidden_claims = [
+  "broad ptr::copy soundness",
+  "initialized-memory proof",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "nonnull-new-unchecked-nullability-evidence"
+status = "fixture_pinned"
+kind = "evidence_precision"
+owner = "calibration"
+operation_family = "nonnull_unchecked"
+hazard = "pointer_validity"
+support_tier = "Core operation smoke slice"
+fixtures = [
+  "nonnull_new_guard",
+  "nonnull_new_reassigned_ptr_not_guard",
+  "nonnull_new_shadowed_ptr_not_guard",
+  "nonnull_cast_checked_pointer_not_guard",
+  "nonnull_method_receiver_reassigned_not_guard",
+  "nonnull_if_let_new_guard",
+  "nonnull_let_else_new_guard",
+  "nonnull_match_new_guard",
+  "nonnull_other_guard_not_evidence",
+  "nonnull_is_null_nonreturning_not_guard",
+  "nonnull_is_null_return_comment_not_guard",
+  "nonnull_is_null_disjunct_return_guard",
+  "nonnull_is_null_conjunct_return_not_guard",
+  "nonnull_is_null_reassigned_ptr_not_guard",
+  "nonnull_is_null_shadowed_ptr_not_guard",
+  "nonnull_is_null_open_branch_guard",
+  "nonnull_is_null_conjunct_open_branch_guard",
+  "nonnull_is_null_disjunct_open_branch_not_guard",
+  "nonnull_is_null_open_branch_reassigned_ptr_not_guard",
+  "nonnull_is_null_open_branch_shadowed_ptr_not_guard",
+  "nonnull_observed_not_guard",
+  "nonnull_post_check_not_guard",
+  "nonnull_if_let_new_reassigned_ptr_not_guard",
+  "nonnull_if_let_new_shadowed_ptr_not_guard",
+  "nonnull_let_else_new_reassigned_ptr_not_guard",
+  "nonnull_let_else_new_shadowed_ptr_not_guard",
+  "nonnull_match_new_reassigned_ptr_not_guard",
+  "nonnull_match_new_shadowed_ptr_not_guard",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/nonnull-new-unchecked-nullability.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned NonNull::new_unchecked nullability evidence distinguishes a
+same-pointer NonNull::new guard, including if-let, let-else, and match Some-arm
+forms, plus same-pointer non-null open branches, top-level conjunctive non-null
+open branches, and null early-return branches including top-level disjunctive
+null branches, from conjunctive null-return, disjunctive non-null-branch,
+wrong-pointer, observed-only, non-returning is_null, post-check, and stale
+or shadowed pointer controls, including stale method-receiver nullability
+evidence, in the listed fixtures.
+"""
+forbidden_claims = [
+  "broad NonNull soundness",
+  "pointer validity proof",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "maybeuninit-assume-init-initialized-evidence"
+status = "fixture_pinned"
+kind = "evidence_precision"
+owner = "calibration"
+operation_family = "maybe_uninit_assume_init"
+hazard = "initialized_memory"
+support_tier = "Core operation smoke slice"
+fixtures = [
+  "maybeuninit_assume_init",
+  "maybeuninit_assume_init_comment_not_guard",
+  "maybeuninit_assume_init_write_guard",
+  "maybeuninit_assume_init_read_write_guard",
+  "maybeuninit_assume_init_open_branch_write_guard",
+  "maybeuninit_assume_init_open_branch_new_guard",
+  "maybeuninit_assume_init_closed_branch_write_not_guard",
+  "maybeuninit_assume_init_closed_branch_new_not_guard",
+  "maybeuninit_assume_init_new_guard",
+  "maybeuninit_assume_init_mut_new_guard",
+  "maybeuninit_assume_init_other_slot_write_not_guard",
+  "maybeuninit_assume_init_stale_write_not_guard",
+  "maybeuninit_assume_init_read_stale_write_not_guard",
+  "maybeuninit_assume_init_stale_field_write_not_guard",
+  "maybeuninit_assume_init_stale_new_not_guard",
+  "maybeuninit_assume_init_shadowed_slot_not_guard",
+  "maybeuninit_assume_init_mutslot_new_not_guard",
+  "maybeuninit_assume_init_partial_field_not_guard",
+  "maybeuninit_assume_init_partial_array_not_guard",
+  "maybeuninit_assume_init_read",
+  "maybeuninit_assume_init_ref",
+  "maybeuninit_assume_init_mut",
+  "maybeuninit_assume_init_drop",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/maybeuninit-assume-init-initialized.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned MaybeUninit::assume_init family evidence reports missing
+initialized-memory discharge, recognizes narrow same-slot write and
+MaybeUninit::new evidence including assume_init_read same-slot writes and
+open-branch forms, rejects comment-only, closed-branch write/new, other-slot
+writes, stale write/new including stale assume_init_read writes, stale
+field-slot writes, and partial field or array-element initialization evidence,
+and routes the listed fixtures to Miri/cargo-careful witness suggestions.
+"""
+forbidden_claims = [
+  "broad MaybeUninit soundness",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+  "Miri-clean",
+]
+
+[[claim]]
+id = "transmute-bool-valid-value-evidence"
+status = "fixture_pinned"
+kind = "evidence_precision"
+owner = "calibration"
+operation_family = "transmute"
+hazard = "invalid_value"
+support_tier = "Core operation smoke slice"
+fixtures = [
+  "transmute_invalid_value",
+  "transmute_layout_size_guard",
+  "transmute_layout_conjunct_branch_guard",
+  "transmute_layout_disjunct_branch_not_guard",
+  "transmute_layout_mismatch_return_guard",
+  "transmute_layout_mismatch_return_comment_not_guard",
+  "transmute_layout_conjunct_return_not_guard",
+  "transmute_layout_closed_branch_not_guard",
+  "transmute_layout_observed_not_guard",
+  "transmute_bool_comment_not_guard",
+  "transmute_bool_valid_value_guard",
+  "transmute_bool_conjunct_branch_guard",
+  "transmute_bool_disjunct_branch_not_guard",
+  "transmute_bool_invalid_return_guard",
+  "transmute_bool_invalid_return_comment_not_guard",
+  "transmute_bool_disjunct_return_guard",
+  "transmute_bool_conjunct_return_not_guard",
+  "transmute_bool_other_value_not_guard",
+  "transmute_bool_prior_guarded_call_not_guard",
+  "transmute_bool_value_observed_not_guard",
+  "transmute_bool_closed_if_observed_not_guard",
+  "transmute_bool_guard_then_reassigned_not_guard",
+  "transmute_bool_guard_then_compound_reassigned_not_guard",
+  "transmute_bool_guard_then_shadowed_not_guard",
+  "transmute_copy_invalid_value",
+  "transmute_copy_layout_size_guard",
+  "transmute_copy_layout_conjunct_branch_guard",
+  "transmute_copy_layout_disjunct_branch_not_guard",
+  "transmute_copy_layout_mismatch_return_guard",
+  "transmute_copy_layout_mismatch_return_comment_not_guard",
+  "transmute_copy_layout_conjunct_return_not_guard",
+  "transmute_copy_bool_comment_not_guard",
+  "transmute_copy_bool_other_value_not_guard",
+  "transmute_copy_bool_prior_guarded_call_not_guard",
+  "transmute_copy_bool_valid_value_guard",
+  "transmute_copy_bool_conjunct_branch_guard",
+  "transmute_copy_bool_disjunct_branch_not_guard",
+  "transmute_copy_bool_invalid_return_guard",
+  "transmute_copy_bool_invalid_return_comment_not_guard",
+  "transmute_copy_bool_disjunct_return_guard",
+  "transmute_copy_bool_conjunct_return_not_guard",
+  "transmute_copy_bool_value_observed_not_guard",
+  "transmute_copy_bool_closed_if_observed_not_guard",
+  "transmute_copy_bool_guard_then_reassigned_not_guard",
+  "transmute_copy_bool_guard_then_compound_reassigned_not_guard",
+  "transmute_copy_bool_guard_then_shadowed_not_guard",
+  "multiline_transmute_copy_invalid_value",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/transmute-bool-valid-value.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned transmute bool valid-value evidence distinguishes dominating
+layout and bool-domain guards, including top-level conjunctive layout and
+bool-domain open branches, transmute_copy top-level conjunctive layout branches,
+transmute_copy top-level conjunctive bool-domain branches, layout mismatch
+early-return guards, and top-level disjunctive invalid-byte early-return guards,
+transmute_copy top-level disjunctive invalid-byte early-return guards, from
+layout-only, disjunctive-layout, transmute_copy disjunctive-layout,
+transmute_copy disjunctive bool-domain branches, conjunctive-layout-return,
+transmute_copy conjunctive layout-return, transmute_copy conjunctive
+invalid-byte return, comment-only layout-return, transmute_copy comment-only layout-return, closed-layout, observed-layout, comment-only,
+transmute_copy comment-only, comment-only invalid-byte return, transmute_copy
+comment-only invalid-byte return, disjunctive-branch, conjunctive-return, other-value, prior-operation, observed, closed-branch,
+stale-byte, compound-stale-byte, shadowed-byte, transmute_copy
+compound-stale-byte, transmute_copy shadowed-byte, and multiline transmute_copy
+controls in the listed fixtures.
+"""
+forbidden_claims = [
+  "broad transmute soundness",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "str-from-utf8-unchecked-validation-evidence"
+status = "fixture_pinned"
+kind = "evidence_precision"
+owner = "calibration"
+operation_family = "str_from_utf8_unchecked"
+hazard = "invalid_value"
+support_tier = "Core operation smoke slice"
+fixtures = [
+  "str_from_utf8_unchecked",
+  "str_from_utf8_unchecked_comment_not_guard",
+  "str_from_utf8_unchecked_is_ok_guard",
+  "str_from_utf8_unchecked_if_let_ok_guard",
+  "str_from_utf8_unchecked_if_let_err_return_guard",
+  "str_from_utf8_unchecked_is_err_return_guard",
+  "str_from_utf8_unchecked_is_err_return_comment_not_guard",
+  "str_from_utf8_unchecked_question_mark_guard",
+  "str_from_utf8_unchecked_match_return_guard",
+  "str_from_utf8_unchecked_let_else_ok_guard",
+  "str_from_utf8_unchecked_match_ok_guard",
+  "str_from_utf8_unchecked_post_validation_not_guard",
+  "str_from_utf8_unchecked_other_buffer_not_guard",
+  "str_from_utf8_unchecked_prefix_validation_not_guard",
+  "str_from_utf8_unchecked_suffix_validation_not_guard",
+  "str_from_utf8_unchecked_is_ok_observed_not_guard",
+  "str_from_utf8_unchecked_guard_then_reassigned_not_guard",
+  "str_from_utf8_unchecked_guard_then_mutated_not_guard",
+  "str_from_utf8_unchecked_guard_then_shadowed_not_guard",
+  "str_from_utf8_unchecked_if_let_ok_shadowed_not_guard",
+  "str_from_utf8_unchecked_if_let_err_reassigned_not_guard",
+  "str_from_utf8_unchecked_let_else_ok_reassigned_not_guard",
+  "str_from_utf8_unchecked_match_ok_reassigned_not_guard",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/str-from-utf8-unchecked-validation.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned str::from_utf8_unchecked UTF-8 validation evidence distinguishes
+same-buffer validation before conversion, including if-let Ok branch validation
+if-let Err early-return validation, and let-else or match Ok-arm validation,
+from comment-only, post-validation, wrong-buffer, prefix-only, suffix-only,
+observed-only, reassigned-buffer, shadowed-buffer, and branch-scoped shadowed
+buffer stale controls, plus direct buffer mutation stale controls, in the listed
+fixtures.
+"""
+forbidden_claims = [
+  "broad UTF-8 safety",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+  "UB-free",
+]
+
+[[claim]]
+id = "zeroed-valid-zero-evidence"
+status = "fixture_pinned"
+kind = "evidence_precision"
+owner = "calibration"
+operation_family = "zeroed"
+hazard = "invalid_value"
+support_tier = "Core operation smoke slice"
+fixtures = [
+  "zeroed_invalid_value",
+  "zeroed_valid_u32",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/zeroed-valid-zero-evidence.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned mem::zeroed valid-zero evidence distinguishes invalid all-zero
+target types from narrow known primitive valid-zero targets in the listed fixtures.
+"""
+forbidden_claims = [
+  "broad mem::zeroed soundness",
+  "type validity proof",
+  "layout proof",
+  "witness execution proof",
+  "Miri-clean",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "unreachable-unchecked-infallible-path-evidence"
+status = "fixture_pinned"
+kind = "evidence_precision"
+owner = "calibration"
+operation_family = "unreachable_unchecked"
+hazard = "invalid_value"
+support_tier = "Core operation smoke slice"
+fixtures = [
+  "unreachable_unchecked_path",
+  "unreachable_unchecked_infallible_path",
+  "unreachable_unchecked_other_infallible_not_guard",
+  "unreachable_unchecked_post_infallible_not_guard",
+  "unreachable_unchecked_closed_infallible_match_not_guard",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/unreachable-unchecked-infallible-path.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned unreachable_unchecked infallible-path evidence distinguishes
+local open infallible error-path evidence from missing, wrong-context,
+post-operation, and closed-prior-match controls in the listed fixtures.
+"""
+forbidden_claims = [
+  "broad unreachable_unchecked soundness",
+  "path reachability proof",
+  "caller proof",
+  "witness execution proof",
+  "Miri-clean",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "unwrap-unchecked-valid-value-evidence"
+status = "fixture_pinned"
+kind = "evidence_precision"
+owner = "calibration"
+operation_family = "unwrap_unchecked"
+hazard = "invalid_value"
+support_tier = "Core operation smoke slice"
+fixtures = [
+  "unwrap_unchecked_result",
+  "unwrap_unchecked_infallible_result",
+  "unwrap_unchecked_other_infallible_not_guard",
+  "unwrap_unchecked_is_some_guard",
+  "unwrap_unchecked_is_some_reassigned_not_guard",
+  "unwrap_unchecked_is_ok_guard",
+  "unwrap_unchecked_is_ok_reassigned_not_guard",
+  "unwrap_unchecked_is_some_observed_not_guard",
+  "unwrap_unchecked_is_ok_observed_not_guard",
+  "unwrap_unchecked_if_let_some_guard",
+  "unwrap_unchecked_if_let_ok_guard",
+  "unwrap_unchecked_let_else_some_guard",
+  "unwrap_unchecked_let_else_some_reassigned_not_guard",
+  "unwrap_unchecked_let_else_ok_guard",
+  "unwrap_unchecked_let_else_ok_reassigned_not_guard",
+  "unwrap_unchecked_match_some_guard",
+  "unwrap_unchecked_match_some_reassigned_not_guard",
+  "unwrap_unchecked_match_ok_guard",
+  "unwrap_unchecked_match_ok_reassigned_not_guard",
+  "unwrap_unchecked_other_if_let_not_guard",
+  "unwrap_unchecked_other_if_let_ok_not_guard",
+  "unwrap_unchecked_post_check_not_guard",
+  "unwrap_unchecked_guard_then_reassigned_not_guard",
+  "unwrap_unchecked_is_none_return_guard",
+  "unwrap_unchecked_is_none_return_comment_not_guard",
+  "unwrap_unchecked_is_err_return_guard",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/unwrap-unchecked-valid-value-evidence.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned unwrap_unchecked valid-value evidence distinguishes
+same-receiver Option/Result state, local infallible results, if-let guards,
+let-else early-return guards, match-arm guards, and early-return guards from
+bare observations, wrong receivers, post-checks, comment-only early-return text,
+and stale guards in the listed fixtures.
+"""
+forbidden_claims = [
+  "broad unwrap_unchecked soundness",
+  "Option/Result validity proof",
+  "caller proof",
+  "witness execution proof",
+  "Miri-clean",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "unsafe-impl-send-sync-witness-routes"
+status = "fixture_pinned"
+kind = "route_quality"
+owner = "calibration"
+operation_family = "unsafe_impl_send_sync"
+hazard = "send_sync_invariant"
+support_tier = "Witness routing"
+fixtures = [
+  "unsafe_impl_send",
+  "unsafe_impl_send_generic_owner",
+  "unsafe_impl_sync_generic_bound",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/unsafe-impl-send-sync-witness-routes.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned unsafe impl Send/Sync witness routing sends thread-safety
+invariants to Loom/Shuttle route suggestions in the listed fixtures.
+"""
+forbidden_claims = [
+  "concurrency correctness proof",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "unsafe-fn-call-callee-contract-evidence"
+status = "fixture_pinned"
+kind = "evidence_precision"
+owner = "calibration"
+operation_family = "unsafe_fn_call"
+hazard = "unknown"
+support_tier = "Core operation smoke slice"
+fixtures = [
+  "unsafe_fn_call_wrapper",
+  "multiline_unsafe_fn_call_wrapper",
+  "unsafe_fn_call_encode_utf8_remaining_cap",
+  "ffi_non_libc_wrapper_call_not_route",
+  "ffi_local_libc_module_call_not_route",
+  "unchecked_constructor_availability_guard",
+  "unchecked_constructor_availability_assert_guard",
+  "unchecked_constructor_unavailable_return_guard",
+  "unchecked_constructor_unavailable_return_comment_not_guard",
+  "unchecked_constructor_other_availability_not_guard",
+  "unchecked_constructor_availability_observed_not_guard",
+  "unchecked_constructor_availability_closed_branch_not_guard",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/unsafe-fn-call-callee-contract.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned generic unsafe function call callee-contract evidence
+distinguishes remaining-capacity and availability guards from missing,
+wrong-receiver, observed-only, closed-branch, comment-only return, and
+FFI-looking local-wrapper controls in the listed fixtures.
+"""
+forbidden_claims = [
+  "callee contract soundness proof",
+  "broad unsafe function call soundness",
+  "witness execution proof",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "ffi-sanitizer-witness-routes"
+status = "fixture_pinned"
+kind = "route_quality"
+owner = "calibration"
+operation_family = "ffi"
+hazard = "ffi_abi"
+support_tier = "Witness routing"
+fixtures = [
+  "ffi_sanitizer_route",
+  "ffi_missing_boundary_contract",
+  "ffi_call_sanitizer_route",
+  "ffi_qualified_call_sanitizer_route",
+  "ffi_libc_call_sanitizer_route",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/ffi-sanitizer-witness-routes.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned FFI witness routing sends unsafe extern C boundaries to
+sanitizer/cargo-careful route suggestions in the listed fixtures, including
+owner-scoped documented and missing-contract extern block declarations, unsafe
+unqualified and qualified calls to same-file extern C declarations, and libc
+path calls.
+"""
+forbidden_claims = [
+  "FFI ABI correctness proof",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "ffi-boundary-obligation-evidence"
+status = "fixture_pinned"
+kind = "evidence_precision"
+owner = "calibration"
+operation_family = "ffi"
+hazard = "ffi_abi"
+support_tier = "Core operation smoke slice"
+fixtures = [
+  "ffi_sanitizer_route",
+  "ffi_missing_boundary_contract",
+  "ffi_call_sanitizer_route",
+  "ffi_qualified_call_sanitizer_route",
+  "ffi_libc_call_sanitizer_route",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/ffi-boundary-obligations.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned FFI boundary evidence records ABI/layout and ownership/lifetime/
+nullability obligations separately for the listed unsafe extern C fixtures, with
+documented and missing-contract extern block cards scoped to the declared
+foreign function owner and qualified same-file extern calls kept on the FFI
+boundary route.
+"""
+forbidden_claims = [
+  "FFI ABI correctness proof",
+  "FFI ownership correctness proof",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "inline-asm-human-review-routes"
+status = "fixture_pinned"
+kind = "route_quality"
+owner = "calibration"
+operation_family = "inline_asm"
+hazard = "inline_asm"
+support_tier = "Witness routing"
+fixtures = [
+  "inline_asm_human_review",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/inline-asm-human-review-routes.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned inline assembly witness routing sends asm register, memory,
+clobber, and target invariants to human deep review in the listed fixture.
+"""
+forbidden_claims = [
+  "inline assembly correctness proof",
+  "register allocation proof",
+  "target-feature proof",
+  "witness execution proof",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "static-mut-witness-routes"
+status = "fixture_pinned"
+kind = "route_quality"
+owner = "calibration"
+operation_family = "static_mut"
+hazard = "static_mut_global_state"
+support_tier = "Witness routing"
+fixtures = [
+  "static_mut_global_state",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/static-mut-witness-routes.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned static mutable global-state witness routing keeps the declared
+global owner and sends synchronization and aliasing invariants to Loom/Shuttle
+route suggestions in the listed fixture.
+"""
+forbidden_claims = [
+  "static mutable state soundness proof",
+  "synchronization proof",
+  "aliasing proof",
+  "witness execution proof",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "atomic-pointer-state-witness-routes"
+status = "fixture_pinned"
+kind = "route_quality"
+owner = "calibration"
+operation_family = "atomic_pointer_state"
+hazard = "atomic_ordering"
+support_tier = "Witness routing"
+fixtures = [
+  "atomic_pointer_state_swap",
+  "atomic_pointer_state_fetch_ops",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/atomic-pointer-state-witness-routes.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned atomic pointer state witness routing sends pointer state
+transition, ownership, and ordering invariants to Loom/Shuttle route
+suggestions in the listed fixtures.
+"""
+forbidden_claims = [
+  "atomic ordering correctness proof",
+  "ownership proof",
+  "witness execution proof",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "pin-unchecked-human-review-routes"
+status = "fixture_pinned"
+kind = "route_quality"
+owner = "calibration"
+operation_family = "pin_unchecked"
+hazard = "pin_invariant"
+support_tier = "Witness routing"
+fixtures = [
+  "pin_new_unchecked",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/pin-unchecked-human-review-routes.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned Pin::new_unchecked witness routing sends pinning
+move-prevention and projection invariants to human deep review in the listed fixture.
+"""
+forbidden_claims = [
+  "pinning soundness proof",
+  "move-prevention proof",
+  "projection invariant proof",
+  "witness execution proof",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "target-feature-human-review-routes"
+status = "fixture_pinned"
+kind = "route_quality"
+owner = "calibration"
+operation_family = "target_feature"
+hazard = "target_feature"
+support_tier = "Witness routing"
+fixtures = [
+  "target_feature_safety_docs",
+  "target_feature_missing_safety_docs",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/target-feature-human-review-routes.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned target-feature witness routing sends documented and missing-contract
+hardware availability and dispatch correctness obligations to human deep review
+in the listed fixtures.
+"""
+forbidden_claims = [
+  "target-feature correctness proof",
+  "hardware availability proof",
+  "dispatch correctness proof",
+  "witness execution proof",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "get-unchecked-mut-bounds-evidence"
+status = "fixture_pinned"
+kind = "evidence_precision"
+owner = "calibration"
+operation_family = "get_unchecked"
+hazard = "bounds"
+support_tier = "Core operation smoke slice"
+fixtures = [
+  "get_unchecked_mut_bounds",
+  "get_unchecked_mut_len_guard",
+  "get_unchecked_mut_conjunct_len_guard",
+  "get_unchecked_mut_get_probe_guard",
+  "get_unchecked_mut_get_probe_early_return_guard",
+  "get_unchecked_mut_get_probe_other_slice_not_guard",
+  "get_unchecked_mut_if_let_get_guard",
+  "get_unchecked_mut_let_else_get_guard",
+  "get_unchecked_mut_match_get_guard",
+  "get_unchecked_mut_other_len_not_guard",
+  "get_unchecked_mut_disjunct_len_not_guard",
+  "get_unchecked_mut_post_check_not_guard",
+  "get_unchecked_mut_bounds_observed_not_guard",
+  "get_unchecked_mut_closed_bounds_not_guard",
+  "get_unchecked_mut_return_comment_not_guard",
+  "get_unchecked_mut_reassigned_index_not_guard",
+  "get_unchecked_mut_compound_reassigned_index_not_guard",
+  "get_unchecked_mut_shadowed_index_not_guard",
+  "get_unchecked_mut_reassigned_receiver_not_guard",
+  "get_unchecked_mut_shadowed_receiver_not_guard",
+  "get_unchecked_mut_get_probe_reassigned_index_not_guard",
+  "get_unchecked_mut_get_probe_shadowed_index_not_guard",
+  "get_unchecked_mut_get_probe_reassigned_receiver_not_guard",
+  "get_unchecked_mut_get_probe_shadowed_receiver_not_guard",
+  "get_unchecked_mut_get_probe_early_return_reassigned_index_not_guard",
+  "get_unchecked_mut_get_probe_early_return_shadowed_index_not_guard",
+  "get_unchecked_mut_get_probe_early_return_reassigned_receiver_not_guard",
+  "get_unchecked_mut_get_probe_early_return_shadowed_receiver_not_guard",
+  "get_unchecked_mut_if_let_get_reassigned_index_not_guard",
+  "get_unchecked_mut_if_let_get_shadowed_index_not_guard",
+  "get_unchecked_mut_if_let_get_reassigned_receiver_not_guard",
+  "get_unchecked_mut_if_let_get_shadowed_receiver_not_guard",
+  "get_unchecked_mut_let_else_get_reassigned_index_not_guard",
+  "get_unchecked_mut_let_else_get_shadowed_index_not_guard",
+  "get_unchecked_mut_let_else_get_reassigned_receiver_not_guard",
+  "get_unchecked_mut_let_else_get_shadowed_receiver_not_guard",
+  "get_unchecked_mut_match_get_reassigned_index_not_guard",
+  "get_unchecked_mut_match_get_shadowed_index_not_guard",
+  "get_unchecked_mut_match_get_reassigned_receiver_not_guard",
+  "get_unchecked_mut_match_get_shadowed_receiver_not_guard",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/get-unchecked-mut-bounds.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned get_unchecked_mut bounds evidence distinguishes same-receiver
+len guards, top-level conjunctive len guards, and same-receiver get-probe guards,
+including if-let, let-else, and match Some-arm forms, from missing,
+other-receiver, other-slice get-probe, disjunctive branch, post-check,
+observed-only, closed-branch, comment-only early-return, stale-index,
+stale-receiver, and open-branch, early-return, if-let, let-else, or match stale
+get-probe index or receiver controls, including compound stale-index mutation,
+open-branch shadowed index or receiver targets, early-return shadowed receiver
+targets, and if-let, let-else, or match shadowed index targets, in the listed
+fixtures.
+"""
+forbidden_claims = [
+  "broad get_unchecked soundness",
+  "slice bounds proof",
+  "witness execution proof",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "pointer-arithmetic-bounds-evidence"
+status = "fixture_pinned"
+kind = "evidence_precision"
+owner = "calibration"
+operation_family = "pointer_arithmetic"
+hazard = "bounds"
+support_tier = "Core operation smoke slice"
+fixtures = [
+  "pointer_arithmetic_num_ctrl_bytes_guard",
+  "pointer_arithmetic_other_offset_not_guard",
+  "pointer_arithmetic_reassigned_offset_not_guard",
+  "pointer_arithmetic_shadowed_offset_not_guard",
+  "pointer_arithmetic_compound_offset_not_guard",
+  "pointer_arithmetic_stale_bound_not_guard",
+  "pointer_arithmetic_disjunct_bounds_not_guard",
+  "pointer_arithmetic_closed_branch_not_guard",
+  "pointer_arithmetic_slice_end",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/pointer-arithmetic-bounds.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned pointer arithmetic bounds evidence recognizes index <
+num_ctrl_bytes and same-slice end-pointer patterns in the listed fixtures,
+and rejects bounds guards for a different pointer offset or a stale reassigned
+or shadowed or compound-mutated offset, stale local bound identifiers, plus
+disjunctive or closed positive branches that may bypass or fail to dominate the
+pointer arithmetic.
+"""
+forbidden_claims = [
+  "broad pointer arithmetic soundness",
+  "pointer provenance proof",
+  "same-allocation proof",
+  "witness execution proof",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "no-card-artifact-honesty"
+status = "fixture_pinned"
+kind = "artifact_honesty"
+owner = "calibration"
+support_tier = "Diff unsafe site inventory"
+fixtures = [
+  "safe_code_no_cards",
+  "safe_reference_deref_no_cards",
+  "imports_not_unsafe_operations",
+  "cfg_target_feature_not_operation",
+  "static_lifetime_mut_ref_not_static_mut",
+  "adjacent_unchanged_unsafe_fn_no_card",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/no-card-artifact-honesty.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned no-card behavior for the listed safe, import-only, cfg-only,
+reference-type, and unchanged-adjacent fixtures emits zero ReviewCards without
+saying the repo is safe.
+"""
+forbidden_claims = [
+  "all clear",
+  "repo safe",
+  "UB-free",
+  "Miri-clean",
+  "site-execution proof",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "diff-site-inventory-identity"
+status = "fixture_pinned"
+kind = "identity_stability"
+owner = "calibration"
+support_tier = "Diff unsafe site inventory"
+fixtures = [
+  "split_unsafe_block",
+  "attributed_unsafe_fn_no_duplicate",
+  "inline_unsafe_raw_pointer_deref_no_duplicate",
+  "impl_trait_bound_owner_inference",
+  "long_unsafe_fn_owner_inference",
+  "macro_rules_owner_inference",
+  "nested_unsafe_operation_call_dedupe",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/diff-site-inventory-identity.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned diff unsafe site inventory identity keeps owner, site-kind,
+operation family, and dedupe behavior stable for split unsafe blocks,
+attributed declarations, inline operations, long functions, macro bodies, impl
+trait bounds, and nested unsafe calls in the listed fixtures.
+"""
+forbidden_claims = [
+  "complete changed unsafe inventory",
+  "global identity stability",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]

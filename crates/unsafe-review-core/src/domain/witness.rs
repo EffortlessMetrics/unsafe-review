@@ -55,10 +55,59 @@ impl WitnessEvidence {
         }
     }
 
+    pub fn missing_with(summary: impl Into<String>) -> Self {
+        Self {
+            present: false,
+            summary: summary.into(),
+        }
+    }
+
     pub fn present(summary: impl Into<String>) -> Self {
         Self {
             present: true,
             summary: summary.into(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn witness_kind_strings_cover_every_variant() {
+        let cases = [
+            (WitnessKind::Miri, "miri"),
+            (WitnessKind::CargoCareful, "cargo-careful"),
+            (WitnessKind::AddressSanitizer, "asan"),
+            (WitnessKind::MemorySanitizer, "msan"),
+            (WitnessKind::ThreadSanitizer, "tsan"),
+            (WitnessKind::LeakSanitizer, "lsan"),
+            (WitnessKind::Loom, "loom"),
+            (WitnessKind::Shuttle, "shuttle"),
+            (WitnessKind::Kani, "kani"),
+            (WitnessKind::Crux, "crux"),
+            (WitnessKind::HumanDeepReview, "human-deep-review"),
+            (WitnessKind::Unsupported, "unsupported"),
+        ];
+
+        for (kind, expected) in cases {
+            assert_eq!(kind.as_str(), expected);
+        }
+    }
+
+    #[test]
+    fn witness_evidence_constructors_preserve_presence_and_summary() {
+        let missing = WitnessEvidence::missing();
+        assert!(!missing.present);
+        assert_eq!(missing.summary, "No imported witness receipt was found");
+
+        let missing_with = WitnessEvidence::missing_with("receipt expired");
+        assert!(!missing_with.present);
+        assert_eq!(missing_with.summary, "receipt expired");
+
+        let present = WitnessEvidence::present("miri receipt imported");
+        assert!(present.present);
+        assert_eq!(present.summary, "miri receipt imported");
     }
 }

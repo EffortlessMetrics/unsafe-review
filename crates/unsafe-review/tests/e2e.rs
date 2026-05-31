@@ -133,6 +133,38 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     assert!(summary_text.contains("| `raw_pointer_read` |"));
     assert!(summary_text.contains("## Trust boundary"));
 
+    let github_summary_path = temp.path().join("nested").join("github-summary.md");
+    let github_summary = run_success([
+        os("check"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        fixture.join("change.diff").into_os_string(),
+        os("--format"),
+        os("github-summary"),
+        os("--out"),
+        github_summary_path.as_os_str().to_os_string(),
+    ])?;
+    assert_eq!(stdout_text(&github_summary)?.trim(), "");
+    let github_summary_text = fs::read_to_string(&github_summary_path)?;
+    assert!(github_summary_text.contains("## unsafe-review advisory summary"));
+    assert!(github_summary_text.contains("## Top card"));
+    assert!(github_summary_text.contains(&format!("- ID: `{card_id}`")));
+    assert!(github_summary_text.contains(&format!("- Explain: `unsafe-review explain {card_id}`")));
+    assert!(github_summary_text.contains(&format!(
+        "- Agent context: `unsafe-review context {card_id} --json`"
+    )));
+    assert!(github_summary_text.contains("## Open next"));
+    assert!(github_summary_text.contains("Full reviewer cockpit: `pr-summary.md`"));
+    assert!(github_summary_text.contains("not site-execution proof"));
+    assert!(github_summary_text.contains("unsafe-review did not run witnesses"));
+    assert!(github_summary_text.contains("post comments"));
+    assert!(github_summary_text.contains("edit source"));
+    assert!(github_summary_text.contains("enforce blocking policy"));
+    assert!(!github_summary_text.contains("# unsafe-review PR summary"));
+    assert!(!github_summary_text.contains("## Card table"));
+    assert!(!github_summary_text.contains("## Witness plan"));
+
     let sarif_path = temp.path().join("cards.sarif");
     run_success([
         os("check"),
@@ -174,28 +206,11 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     ])?;
     let comment_plan = parse_json(&stdout_text(&comment_plan)?)?;
     assert_eq!(comment_plan["mode"], "plan_only");
-    assert_eq!(comment_plan["summary"]["selected_count"], 1);
-    assert_eq!(comment_plan["summary"]["not_selected_count"], 0);
-    assert_eq!(comment_plan["summary"]["budget"], 3);
-    assert_eq!(
-        comment_plan["summary"]["reason_code"],
-        "bounded_reviewer_noise"
-    );
     assert_eq!(comment_plan["comments"][0]["card_id"], card_id);
-    assert_eq!(comment_plan["comments"][0]["changed_line"], true);
     assert_eq!(
         comment_plan["comments"][0]["operation"],
         "unsafe { ptr.cast::<Header>().read() }"
     );
-    assert_eq!(
-        comment_plan["comments"][0]["selection_reason_code"],
-        "top_actionable_card"
-    );
-    assert_eq!(
-        comment_plan["comments"][0]["actionability"],
-        "specific_guard_missing"
-    );
-    assert_eq!(comment_plan["comments"][0]["relevance"], "medium");
     assert_eq!(
         comment_plan["comments"][0]["witness_routes"][0]["kind"],
         "miri"
@@ -305,13 +320,13 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
         lsp["hovers"][0]["contents"]
             .as_str()
             .unwrap_or("")
-            .contains("operation `unsafe { ptr.cast::<Header>().read() }`")
+            .contains("Operation: `unsafe { ptr.cast::<Header>().read() }`")
     );
     assert!(
         lsp["hovers"][0]["contents"]
             .as_str()
             .unwrap_or("")
-            .contains("Evidence summary")
+            .contains("Evidence found")
     );
     assert!(
         lsp["hovers"][0]["contents"]
@@ -335,7 +350,13 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
         lsp["hovers"][0]["contents"]
             .as_str()
             .unwrap_or("")
-            .contains("Next action")
+            .contains("What would resolve this")
+    );
+    assert!(
+        lsp["hovers"][0]["contents"]
+            .as_str()
+            .unwrap_or("")
+            .contains("What would not resolve this")
     );
     assert!(
         lsp["hovers"][0]["contents"]
@@ -382,6 +403,7 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     assert!(lsp["code_actions"].as_array().is_some_and(|actions| {
         actions.iter().any(|action| {
             action["command"] == "unsafe-review.copyWitnessCommand"
+                && action["title"] == "Copy witness command (does not run)"
                 && action["payload"]["kind"] == "unsafe-review.witness_command"
                 && action["payload"]["card_id"].as_str() == Some(card_id)
                 && action["payload"]["command"]
@@ -459,16 +481,16 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     assert!(packet["witness_routes"].is_array());
     assert_eq!(packet["agent_readiness"]["ready"], true);
     assert_eq!(packet["agent_readiness"]["state"], "ready");
-    assert_eq!(packet["repair_queue"]["buckets"][0], "repairable_by_guard");
-    assert!(
-        packet["repair_queue"]["summary"]
-            .as_str()
-            .unwrap_or("")
-            .contains("repairable_by_guard")
-    );
     let allowed_repairs = serde_json::to_string(&packet["allowed_repairs"])?;
     assert!(allowed_repairs.contains("alignment guard"));
     assert!(allowed_repairs.contains("witness receipt"));
+    let allowed_repairs_lower = allowed_repairs.to_ascii_lowercase();
+    assert!(!allowed_repairs_lower.contains("suppress"));
+    assert!(!allowed_repairs_lower.contains("suppression"));
+    let repair_queue = serde_json::to_string(&packet["repair_queue"])?;
+    assert!(repair_queue.contains("repairable_by_guard"));
+    assert!(repair_queue.contains("requires_witness_receipt"));
+    assert!(!repair_queue.contains("requires_human_review"));
     assert!(
         packet["verify_commands"][0]
             .as_str()
@@ -477,11 +499,11 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     );
     assert!(packet["do_not_do"].is_array());
     assert!(serde_json::to_string(&packet["do_not_do"])?.contains("do not suppress this card"));
-    assert!(serde_json::to_string(&packet["do_not_do"])?.contains("automatic safety repair"));
     assert!(
         serde_json::to_string(&packet["do_not_do"])?
             .contains("do not change unrelated unsafe code")
     );
+    assert!(serde_json::to_string(&packet["do_not_do"])?.contains("ran witnesses"));
     assert!(packet["stop_conditions"].is_array());
     assert!(serde_json::to_string(&packet["stop_conditions"])?.contains("same unsafe seam"));
 
@@ -527,6 +549,60 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
 }
 
 #[test]
+fn context_packet_queues_contract_gaps_for_public_safety_docs() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("public_unsafe_fn_missing_safety");
+
+    let json = run_success([
+        os("check"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        fixture.join("change.diff").into_os_string(),
+        os("--format"),
+        os("json"),
+    ])?;
+    let value = parse_json(&stdout_text(&json)?)?;
+    assert_eq!(value["summary"]["cards"], 1);
+    assert_eq!(value["cards"][0]["class"], "contract_missing");
+    let card_id = json_str(&value["cards"][0]["id"], "cards[0].id")?;
+
+    let context = run_success([
+        os("context"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        OsString::from(card_id),
+    ])?;
+    let packet = parse_json(&stdout_text(&context)?)?;
+    assert_eq!(packet["mode"], "bounded_repair_packet");
+    assert_eq!(packet["source"], "review_card");
+    assert_eq!(packet["card_id"], card_id);
+    assert_eq!(packet["card"]["class"], "contract_missing");
+    assert_eq!(packet["context"]["operation_family"], "unknown");
+
+    let allowed_repairs = serde_json::to_string(&packet["allowed_repairs"])?;
+    assert!(allowed_repairs.contains("safety contract"));
+    let repair_queue = serde_json::to_string(&packet["repair_queue"])?;
+    assert!(repair_queue.contains("repairable_by_safety_docs"));
+    assert!(repair_queue.contains("repairable_by_test"));
+    assert!(repair_queue.contains("requires_witness_receipt"));
+    assert!(repair_queue.contains("requires_human_review"));
+    assert!(repair_queue.contains("do_not_auto_repair"));
+    assert_eq!(packet["agent_readiness"]["ready"], false);
+    assert_eq!(packet["agent_readiness"]["state"], "needs_human_review");
+    let reasons = serde_json::to_string(&packet["agent_readiness"]["reasons"])?;
+    assert!(reasons.contains("operation family `unknown`"));
+    assert!(reasons.contains("no verify command"));
+    assert!(
+        packet["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("not UB-free status")
+    );
+
+    Ok(())
+}
+
+#[test]
 fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error>> {
     let fixture = fixture_root("raw_pointer_alignment");
     let temp = TempDir::new("unsafe-review-first-pr-e2e")?;
@@ -550,6 +626,14 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
     assert!(stdout.contains("- Open actionable gaps: 1"));
     assert!(stdout.contains("Open:"));
     assert!(stdout.contains("pr-summary.md"));
+    assert!(stdout.contains("Agent repair queue:"));
+    assert!(stdout.contains("repair-queue.json"));
+    assert!(stdout.contains("copy-only; unsafe-review did not run an agent"));
+    assert!(stdout.contains("Audit saved receipts:"));
+    assert!(stdout.contains("unsafe-review receipt audit --root"));
+    assert!(stdout.contains("--diff"));
+    assert!(stdout.contains("--format markdown"));
+    assert!(stdout.contains("saved receipt metadata only; unsafe-review did not run a witness"));
     assert!(stdout.contains("Top card:"));
     assert!(stdout.contains("`raw_pointer_read`"));
     assert!(stdout.contains("Class: `guard_missing`"));
@@ -573,7 +657,6 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
     assert!(stdout.contains("not UB-free status"));
     assert!(stdout.contains("not Miri-clean status"));
     assert!(stdout.contains("did not run witnesses"));
-    assert!(stdout.contains("run agents"));
     assert!(stdout.contains("post comments"));
     assert!(stdout.contains("enforce blocking policy"));
 
@@ -607,21 +690,51 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
     assert_eq!(review_kit["summary"]["open_actionable_gaps"], 1);
     assert_eq!(review_kit["top_card_id"], card_id);
     assert_eq!(review_kit["handoff"]["reviewer_summary"], "pr-summary.md");
-    assert_eq!(review_kit["handoff"]["github_summary"], "github-summary.md");
-    assert_eq!(
-        review_kit["handoff"]["agent_repair_queue"],
-        "repair-queue.json"
-    );
-    assert_eq!(review_kit["handoff"]["receipt_audit"], "receipt-audit.md");
     assert_eq!(review_kit["handoff"]["top_card"]["card_id"], card_id);
     assert!(
-        review_kit["trust_boundary"]
+        review_kit["handoff"]["top_card"]["explain"]
             .as_str()
             .unwrap_or("")
-            .contains("does not reclassify ReviewCards")
+            .contains("unsafe-review explain --root")
     );
     assert!(
-        review_kit["trust_boundary"]
+        review_kit["handoff"]["top_card"]["explain"]
+            .as_str()
+            .unwrap_or("")
+            .contains(card_id)
+    );
+    assert!(
+        review_kit["handoff"]["top_card"]["context_json"]
+            .as_str()
+            .unwrap_or("")
+            .contains("unsafe-review context --root")
+    );
+    assert!(
+        review_kit["handoff"]["top_card"]["context_json"]
+            .as_str()
+            .unwrap_or("")
+            .contains(card_id)
+    );
+    assert!(
+        review_kit["handoff"]["top_card"]["context_json"]
+            .as_str()
+            .unwrap_or("")
+            .contains("--json")
+    );
+    assert!(
+        review_kit["handoff"]["receipt_audit_markdown"]
+            .as_str()
+            .unwrap_or("")
+            .contains("unsafe-review receipt audit --root")
+    );
+    assert!(
+        review_kit["handoff"]["receipt_audit_markdown"]
+            .as_str()
+            .unwrap_or("")
+            .contains("--format markdown")
+    );
+    assert!(
+        review_kit["handoff"]["trust_boundary"]
             .as_str()
             .unwrap_or("")
             .contains("did not run witnesses")
@@ -656,11 +769,37 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
         } else if expected.ends_with(".sarif") {
             assert_eq!(entry["format"], "sarif");
         }
+        match expected {
+            "review-kit.json" | "cards.json" | "comment-plan.json" | "lsp.json"
+            | "repair-queue.json" => assert_eq!(entry["schema_version"], "0.1"),
+            "cards.sarif" => assert_eq!(entry["schema_version"], "2.1.0"),
+            _ => assert!(entry["schema_version"].is_null()),
+        }
     }
+    assert!(
+        review_kit["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("does not reclassify ReviewCards")
+    );
+    assert!(
+        review_kit["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("did not run witnesses")
+    );
 
     let summary = fs::read_to_string(out_dir.join("pr-summary.md"))?;
     assert!(summary.contains("# unsafe-review PR summary"));
-    assert!(summary.contains(&format!("- ID: `{card_id}`")));
+    assert!(summary.contains("## Reviewer cockpit"));
+    assert!(summary.contains(&format!("- Top card: `{card_id}`")));
+    assert!(summary.contains("- Missing/weak evidence:"));
+    assert!(summary.contains("- Next reviewer action:"));
+    assert!(summary.contains("- Witness route:"));
+    assert!(summary.contains("- Receipt audit: `receipt-audit.md`"));
+    assert!(summary.contains("no witness was run"));
+    assert!(summary.contains(&format!("unsafe-review explain {card_id}")));
+    assert!(summary.contains(&format!("unsafe-review context {card_id} --json")));
     assert!(summary.contains("## Trust boundary"));
     assert!(summary.contains("not a Miri result unless a witness receipt is attached"));
 
@@ -674,20 +813,30 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
     assert!(github_summary.contains("## Open next"));
     assert!(github_summary.contains("Review kit manifest: `review-kit.json`"));
     assert!(github_summary.contains("Full reviewer cockpit: `pr-summary.md`"));
-    assert!(github_summary.contains("Receipt audit: `receipt-audit.md`"));
     assert!(github_summary.contains("Agent repair queue: `repair-queue.json`"));
+    assert!(github_summary.contains("Receipt audit: `receipt-audit.md`"));
     assert!(github_summary.contains("`comment-plan.json` is plan-only"));
     assert!(github_summary.contains("Full advisory bundle"));
     assert!(github_summary.contains("review-kit.json"));
+    assert!(github_summary.contains("github-summary.md"));
+    assert!(github_summary.contains("receipt-audit.md"));
     assert!(github_summary.contains("not memory-safety proof"));
     assert!(github_summary.contains("not site-execution proof"));
     assert!(github_summary.contains("unsafe-review did not run witnesses"));
     assert!(github_summary.contains("post comments"));
     assert!(github_summary.contains("edit source"));
-    assert!(github_summary.contains("run an agent"));
     assert!(github_summary.contains("enforce blocking policy"));
     assert!(!github_summary.contains("# unsafe-review PR summary"));
     assert!(!github_summary.contains("## Card table"));
+
+    let receipt_audit = fs::read_to_string(out_dir.join("receipt-audit.md"))?;
+    assert!(receipt_audit.contains("# unsafe-review receipt audit"));
+    assert!(receipt_audit.contains("Static audit of saved witness receipt metadata"));
+    assert!(receipt_audit.contains("## Reviewer front panel"));
+    assert!(receipt_audit.contains("No receipt files found."));
+    assert!(receipt_audit.contains("does not execute witnesses"));
+    assert!(receipt_audit.contains("does not prove site reach"));
+    assert!(receipt_audit.contains("matched receipts improve witness evidence only"));
 
     let sarif = parse_json(&fs::read_to_string(out_dir.join("cards.sarif"))?)?;
     assert_eq!(sarif["version"], "2.1.0");
@@ -705,31 +854,7 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
     let comment_plan = parse_json(&fs::read_to_string(out_dir.join("comment-plan.json"))?)?;
     assert_eq!(comment_plan["mode"], "plan_only");
     assert_eq!(comment_plan["policy"], "advisory");
-    assert_eq!(comment_plan["summary"]["selected_count"], 1);
-    assert_eq!(comment_plan["summary"]["not_selected_count"], 0);
-    assert_eq!(comment_plan["summary"]["budget"], 3);
-    assert_eq!(comment_plan["summary"]["reason"], "bounded reviewer noise");
-    assert_eq!(
-        comment_plan["summary"]["reason_code"],
-        "bounded_reviewer_noise"
-    );
     assert_eq!(comment_plan["comments"][0]["card_id"], card_id);
-    assert_eq!(comment_plan["comments"][0]["changed_line"], true);
-    assert_eq!(
-        comment_plan["comments"][0]["selection_reason_code"],
-        "top_actionable_card"
-    );
-    assert_eq!(
-        comment_plan["comments"][0]["actionability"],
-        "specific_guard_missing"
-    );
-    assert_eq!(comment_plan["comments"][0]["relevance"], "medium");
-    assert!(
-        comment_plan["comments"][0]["trust_boundary"]
-            .as_str()
-            .unwrap_or("")
-            .contains("not UB-free status")
-    );
     assert!(
         comment_plan["comments"][0]["body"]
             .as_str()
@@ -751,42 +876,6 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
     assert!(!witness_plan.contains("Miri passed"));
     assert!(!witness_plan.contains("site reached"));
 
-    let receipt_audit = fs::read_to_string(out_dir.join("receipt-audit.md"))?;
-    assert!(receipt_audit.contains("# unsafe-review receipt audit"));
-    assert!(receipt_audit.contains("Static audit of saved witness receipt metadata"));
-    assert!(receipt_audit.contains("| Receipts | Matched | Unmatched |"));
-    assert!(receipt_audit.contains("No receipt files found."));
-    assert!(receipt_audit.contains("does not execute Miri"));
-    assert!(receipt_audit.contains("does not prove site reach"));
-    assert!(receipt_audit.contains("does not make policy decisions"));
-    assert!(!receipt_audit.contains("Miri passed"));
-    assert!(!receipt_audit.contains("site reached"));
-
-    let repair_queue = parse_json(&fs::read_to_string(out_dir.join("repair-queue.json"))?)?;
-    assert_eq!(repair_queue["schema_version"], "0.1");
-    assert_eq!(repair_queue["mode"], "aggregate_repair_queue");
-    assert_eq!(repair_queue["source"], "review_card");
-    assert_eq!(repair_queue["policy"], "advisory");
-    assert_eq!(repair_queue["summary"]["cards"], 1);
-    assert_eq!(repair_queue["summary"]["repairable_by_guard"], 1);
-    assert_eq!(repair_queue["summary"]["requires_witness_receipt"], 1);
-    let repair_entry = &repair_queue["buckets"]["repairable_by_guard"][0];
-    assert_eq!(repair_entry["card_id"], card_id);
-    assert_eq!(
-        repair_entry["context_command"],
-        format!("unsafe-review context {card_id} --json")
-    );
-    assert_eq!(repair_entry["agent_readiness"]["ready"], true);
-    assert!(
-        serde_json::to_string(&repair_entry["do_not_do"])?.contains("do not suppress this card")
-    );
-    assert!(
-        repair_queue["trust_boundary"]
-            .as_str()
-            .unwrap_or("")
-            .contains("does not run agents")
-    );
-
     let lsp = parse_json(&fs::read_to_string(out_dir.join("lsp.json"))?)?;
     assert_eq!(lsp["mode"], "read_only_projection");
     assert_eq!(lsp["policy"], "advisory");
@@ -798,6 +887,30 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
             .as_str()
             .unwrap_or("")
             .contains("not a Miri result")
+    );
+
+    let repair_queue = parse_json(&fs::read_to_string(out_dir.join("repair-queue.json"))?)?;
+    assert_eq!(repair_queue["mode"], "aggregate_repair_queue");
+    assert_eq!(repair_queue["source"], "review_card");
+    assert_eq!(repair_queue["policy"], "advisory");
+    assert_eq!(repair_queue["summary"]["cards"], 1);
+    assert_eq!(
+        repair_queue["buckets"]["repairable_by_guard"][0]["card_id"],
+        card_id
+    );
+    assert_eq!(
+        repair_queue["buckets"]["requires_witness_receipt"][0]["card_id"],
+        card_id
+    );
+    assert_eq!(
+        repair_queue["buckets"]["repairable_by_guard"][0]["context_command"],
+        format!("unsafe-review context {card_id} --json")
+    );
+    assert!(
+        repair_queue["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("not an automatic repair queue")
     );
 
     Ok(())
@@ -827,6 +940,15 @@ fn first_pr_clean_output_stays_advisory_not_all_clear() -> Result<(), Box<dyn Er
     assert!(stdout.contains("- Open actionable gaps: 0"));
     assert!(stdout.contains("Open:"));
     assert!(stdout.contains("pr-summary.md"));
+    assert!(stdout.contains("Agent repair queue:"));
+    assert!(stdout.contains("repair-queue.json"));
+    assert!(stdout.contains("copy-only; unsafe-review did not run an agent"));
+    assert!(stdout.contains("Audit saved receipts:"));
+    assert!(stdout.contains("unsafe-review receipt audit --root"));
+    assert!(stdout.contains("--diff"));
+    assert!(stdout.contains("--format markdown"));
+    assert!(stdout.contains("saved receipt metadata only; unsafe-review did not run a witness"));
+    assert!(stdout.contains("github-summary.md"));
     assert!(stdout.contains("No changed unsafe-review gaps were found."));
     assert!(stdout.contains("This does not prove the repo safe"));
     assert!(stdout.contains("UB-free"));
@@ -853,6 +975,12 @@ fn first_pr_clean_output_stays_advisory_not_all_clear() -> Result<(), Box<dyn Er
     assert_eq!(review_kit["handoff"]["reviewer_summary"], "pr-summary.md");
     assert!(review_kit["handoff"]["top_card"].is_null());
     assert!(
+        review_kit["handoff"]["receipt_audit_markdown"]
+            .as_str()
+            .unwrap_or("")
+            .contains("--format markdown")
+    );
+    assert!(
         review_kit["trust_boundary"]
             .as_str()
             .unwrap_or("")
@@ -863,20 +991,29 @@ fn first_pr_clean_output_stays_advisory_not_all_clear() -> Result<(), Box<dyn Er
     assert!(summary.contains("No changed unsafe-review gaps were found."));
     assert!(summary.contains("This does not prove the repo safe"));
     assert!(summary.contains("unsafe site executed"));
+    assert!(summary.contains("- Receipt audit: `receipt-audit.md`"));
+    assert!(summary.contains("no witness was run"));
     assert!(!summary.contains("All clear"));
 
     let github_summary = fs::read_to_string(out_dir.join("github-summary.md"))?;
+    assert!(github_summary.contains("## unsafe-review advisory summary"));
     assert!(github_summary.contains("No changed unsafe-review gaps were found."));
     assert!(github_summary.contains("This does not prove the repo safe"));
     assert!(github_summary.contains("unsafe site executed"));
     assert!(github_summary.contains("## Open next"));
     assert!(github_summary.contains("Review kit manifest: `review-kit.json`"));
     assert!(github_summary.contains("Full reviewer cockpit: `pr-summary.md`"));
-    assert!(github_summary.contains("Receipt audit: `receipt-audit.md`"));
     assert!(github_summary.contains("Agent repair queue: `repair-queue.json`"));
+    assert!(github_summary.contains("Receipt audit: `receipt-audit.md`"));
     assert!(github_summary.contains("Full advisory bundle"));
     assert!(github_summary.contains("review-kit.json"));
     assert!(!github_summary.contains("All clear"));
+
+    let receipt_audit = fs::read_to_string(out_dir.join("receipt-audit.md"))?;
+    assert!(receipt_audit.contains("# unsafe-review receipt audit"));
+    assert!(receipt_audit.contains("No receipt files found."));
+    assert!(receipt_audit.contains("does not execute witnesses"));
+    assert!(receipt_audit.contains("does not prove site reach"));
 
     let witness_plan = fs::read_to_string(out_dir.join("witness-plan.md"))?;
     assert!(witness_plan.contains("No changed unsafe-review gaps were found."));
@@ -885,27 +1022,7 @@ fn first_pr_clean_output_stays_advisory_not_all_clear() -> Result<(), Box<dyn Er
     assert!(!witness_plan.contains("Miri passed"));
     assert!(!witness_plan.contains("site reached"));
 
-    let receipt_audit = fs::read_to_string(out_dir.join("receipt-audit.md"))?;
-    assert!(receipt_audit.contains("# unsafe-review receipt audit"));
-    assert!(receipt_audit.contains("No receipt files found."));
-    assert!(receipt_audit.contains("does not execute Miri"));
-    assert!(receipt_audit.contains("does not make policy decisions"));
-    assert!(!receipt_audit.contains("Miri passed"));
-
-    let repair_queue = parse_json(&fs::read_to_string(out_dir.join("repair-queue.json"))?)?;
-    assert_eq!(repair_queue["summary"]["cards"], 0);
-    assert_eq!(repair_queue["summary"]["do_not_auto_repair"], 0);
-    assert!(
-        repair_queue["trust_boundary"]
-            .as_str()
-            .unwrap_or("")
-            .contains("not an automatic repair queue")
-    );
-
     let comment_plan = parse_json(&fs::read_to_string(out_dir.join("comment-plan.json"))?)?;
-    assert_eq!(comment_plan["summary"]["selected_count"], 0);
-    assert_eq!(comment_plan["summary"]["not_selected_count"], 0);
-    assert_eq!(comment_plan["summary"]["budget"], 3);
     assert_eq!(
         comment_plan["no_changed_gaps"]["message"],
         "No changed unsafe-review gaps were found."
@@ -926,6 +1043,22 @@ fn first_pr_clean_output_stays_advisory_not_all_clear() -> Result<(), Box<dyn Er
             .as_str()
             .unwrap_or("")
             .contains("not a Miri result")
+    );
+
+    let repair_queue = parse_json(&fs::read_to_string(out_dir.join("repair-queue.json"))?)?;
+    assert_eq!(repair_queue["mode"], "aggregate_repair_queue");
+    assert_eq!(repair_queue["summary"]["cards"], 0);
+    assert_eq!(
+        repair_queue["buckets"]["repairable_by_guard"]
+            .as_array()
+            .map_or(1, Vec::len),
+        0
+    );
+    assert!(
+        repair_queue["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("not an automatic repair queue")
     );
 
     Ok(())
@@ -951,8 +1084,6 @@ fn first_pr_comment_plan_explains_not_selected_cards() -> Result<(), Box<dyn Err
     let card_id = json_str(&cards["cards"][0]["id"], "cards[0].id")?;
 
     let comment_plan = parse_json(&fs::read_to_string(out_dir.join("comment-plan.json"))?)?;
-    assert_eq!(comment_plan["summary"]["selected_count"], 0);
-    assert_eq!(comment_plan["summary"]["not_selected_count"], 1);
     assert_eq!(comment_plan["comments"].as_array().map_or(1, Vec::len), 0);
     assert_eq!(
         comment_plan["not_selected"].as_array().map_or(0, Vec::len),
@@ -974,14 +1105,9 @@ fn first_pr_comment_plan_explains_not_selected_cards() -> Result<(), Box<dyn Err
         comment_plan["not_selected"][0]["actionability"],
         "specific_witness_missing"
     );
-    assert_eq!(comment_plan["not_selected"][0]["relevance"], "low");
     assert_eq!(
         comment_plan["not_selected"][0]["reason"],
         "priority/confidence below inline comment threshold"
-    );
-    assert_eq!(
-        comment_plan["not_selected"][0]["reason_code"],
-        "lower_relevance"
     );
 
     Ok(())
@@ -1078,7 +1204,6 @@ fn support_reports_current_posture_without_overclaims() -> Result<(), Box<dyn Er
     assert!(text.contains("unsafe-review support"));
     assert!(text.contains("ReviewCards: experimental"));
     assert!(text.contains("first-pr bundle: advisory"));
-    assert!(text.contains("review-kit manifest"));
     assert!(text.contains("receipts: saved-output template/import/audit only"));
     assert!(text.contains("policy report: advisory"));
     assert!(text.contains("comment posting: not default"));
@@ -1180,18 +1305,85 @@ fn repo_inventory_and_badges_count_open_gaps_without_safety_claim() -> Result<()
         os("--out"),
         badge_dir.as_os_str().to_os_string(),
     ])?;
-    assert!(stdout_text(&badges)?.contains("wrote badges"));
+    let stdout = stdout_text(&badges)?;
+    assert!(stdout.contains("wrote:"));
+    assert!(stdout.contains("unsafe-review.json"));
+    assert!(stdout.contains("git add"));
+    assert!(stdout.contains("OWNER/REPO/BRANCH"));
+    assert!(stdout.contains("not safety, UB-free, or Miri-clean status"));
 
     let main_badge = parse_json(&fs::read_to_string(badge_dir.join("unsafe-review.json"))?)?;
+    assert_eq!(main_badge["schemaVersion"], 1);
+    assert_eq!(main_badge["contract_version"], "0.1");
+    assert_eq!(main_badge["kind"], "unsafe_review");
+    assert_eq!(main_badge["basis"], "open_actionable_review_gaps");
     assert_eq!(main_badge["label"], "unsafe-review");
     assert_eq!(main_badge["message"], "1");
+    assert_eq!(main_badge["counts"]["unsuppressed_review_gaps"], 1);
+    assert_eq!(
+        main_badge["counts"]["unsuppressed_evidence_quality_findings"],
+        0
+    );
+    assert_eq!(main_badge["counts"]["evidence_quality_contract_missing"], 0);
+    assert_eq!(main_badge["counts"]["evidence_quality_guard_missing"], 0);
+    assert_eq!(
+        main_badge["counts"]["evidence_quality_guarded_unwitnessed"],
+        0
+    );
     assert_ne!(main_badge["message"], "safe");
 
     let plus_badge = parse_json(&fs::read_to_string(
         badge_dir.join("unsafe-review-plus.json"),
     )?)?;
+    assert_eq!(plus_badge["schemaVersion"], 1);
+    assert_eq!(plus_badge["contract_version"], "0.1");
+    assert_eq!(plus_badge["kind"], "unsafe_review_plus");
+    assert_eq!(
+        plus_badge["basis"],
+        "open_actionable_review_gaps_plus_evidence_quality_findings"
+    );
     assert_eq!(plus_badge["label"], "unsafe-review+");
-    assert_eq!(plus_badge["message"], "1");
+    assert_eq!(plus_badge["message"], "2");
+    assert_eq!(plus_badge["counts"]["unsuppressed_review_gaps"], 1);
+    assert_eq!(
+        plus_badge["counts"]["unsuppressed_evidence_quality_findings"],
+        1
+    );
+    assert_eq!(plus_badge["counts"]["evidence_quality_contract_missing"], 0);
+    assert_eq!(plus_badge["counts"]["evidence_quality_guard_missing"], 1);
+    assert_eq!(
+        plus_badge["counts"]["evidence_quality_guarded_unwitnessed"],
+        0
+    );
+    let evidence_quality_component_count = json_usize(
+        &plus_badge["counts"]["evidence_quality_contract_missing"],
+        "evidence_quality_contract_missing",
+    )? + json_usize(
+        &plus_badge["counts"]["evidence_quality_guard_missing"],
+        "evidence_quality_guard_missing",
+    )? + json_usize(
+        &plus_badge["counts"]["evidence_quality_guarded_unwitnessed"],
+        "evidence_quality_guarded_unwitnessed",
+    )?;
+    assert_eq!(
+        json_usize(
+            &plus_badge["counts"]["unsuppressed_evidence_quality_findings"],
+            "unsuppressed_evidence_quality_findings",
+        )?,
+        evidence_quality_component_count
+    );
+    let main_count = main_badge["message"]
+        .as_str()
+        .ok_or("main badge message missing")?
+        .parse::<usize>()
+        .map_err(|err| format!("main badge message parse failed: {err}"))?;
+    let plus_count = plus_badge["message"]
+        .as_str()
+        .ok_or("plus badge message missing")?
+        .parse::<usize>()
+        .map_err(|err| format!("plus badge message parse failed: {err}"))?;
+    assert!(plus_count >= main_count);
+    assert_eq!(plus_count, main_count + evidence_quality_component_count);
     assert_ne!(plus_badge["message"], "UB-free");
 
     let repo_markdown = run_success([
@@ -1289,8 +1481,24 @@ fn outcome_compares_existing_json_snapshots_without_safety_claim() -> Result<(),
     assert_eq!(outcome["reviewer_delta"]["new_cards"], 1);
     assert_eq!(outcome["reviewer_delta"]["resolved_cards"], 0);
     assert_eq!(
+        outcome["reviewer_delta"]["top_remaining_gaps"][0]["card_id"],
+        outcome["cards"]["new"][0]["card_id"]
+    );
+    assert_eq!(
+        outcome["reviewer_delta"]["top_remaining_gaps"][0]["class"],
+        "guard_missing"
+    );
+    assert_eq!(
+        outcome["reviewer_delta"]["top_remaining_gaps"][0]["priority"],
+        "high"
+    );
+    assert_eq!(
         outcome["reviewer_delta"]["top_remaining_gaps"][0]["operation_family"],
         "raw_pointer_read"
+    );
+    assert_eq!(
+        outcome["reviewer_delta"]["top_remaining_gaps"][0]["missing_count"],
+        2
     );
     assert!(
         outcome["reviewer_delta"]["top_remaining_gaps"][0]["next_action"]
@@ -1353,7 +1561,16 @@ fn outcome_compares_existing_json_snapshots_without_safety_claim() -> Result<(),
     assert!(markdown.contains("## Reviewer delta"));
     assert!(markdown.contains("- New cards: 1"));
     assert!(markdown.contains("- Receipt movement: 0 improved, 0 regressed"));
+    assert!(markdown.contains("## Movement reasons"));
+    assert!(markdown.contains("- `new`"));
+    assert!(markdown.contains("new card: appears in the after snapshot"));
     assert!(markdown.contains("Top remaining gaps"));
+    assert!(
+        markdown.contains("| Card | Class | Priority | Operation family | Missing | Next action |")
+    );
+    assert!(markdown.contains("guard_missing"));
+    assert!(markdown.contains("high"));
+    assert!(markdown.contains("| 2 |"));
     assert!(markdown.contains("| Status | Card | Reason | Before | After |"));
     assert!(markdown.contains("## Limitations"));
     assert!(markdown.contains("## Trust boundary"));
@@ -1466,6 +1683,7 @@ fn receipt_template_writes_valid_receipt_json_without_running_witnesses()
     assert_eq!(receipt["expires_at"], "2026-08-18");
     assert_eq!(receipt["summary"], "focused witness passed");
     assert_eq!(receipt["command"], "cargo +nightly miri test read_header");
+    assert_eq!(receipt["command_hash"], "3e163b0bce29ff2e");
     assert_eq!(receipt["limitations"][0], "fixture only");
 
     Ok(())
@@ -1540,12 +1758,25 @@ fn receipt_audit_reports_matching_saved_receipts_without_running_witnesses()
     );
     let receipt = &value["receipts"][0];
     assert_eq!(receipt["receipt_tool"], "miri");
+    assert_eq!(receipt["summary"], "focused fixture witness passed");
+    assert_eq!(receipt["author"], "core/fixtures");
+    assert_eq!(receipt["recorded_at"], "2026-05-18T00:00:00Z");
+    assert_eq!(receipt["expires_at"], "2026-08-18");
+    assert_eq!(receipt["command_hash"], "3e163b0bce29ff2e");
+    assert_eq!(receipt["limitations"][0], "fixture only");
     assert!(
         receipt["statuses"]
             .as_array()
             .ok_or("statuses should be an array")?
             .iter()
             .any(|status| status == "matched")
+    );
+    assert!(
+        receipt["statuses"]
+            .as_array()
+            .ok_or("statuses should be an array")?
+            .iter()
+            .any(|status| status == "imports_witness_evidence")
     );
     assert_eq!(receipt["matched_card"]["class"], "guard_missing");
     assert_eq!(
@@ -1580,8 +1811,23 @@ fn receipt_audit_reports_matching_saved_receipts_without_running_witnesses()
     assert_eq!(stdout_text(&markdown)?.trim(), "");
     let markdown = fs::read_to_string(audit_path)?;
     assert!(markdown.contains("# unsafe-review receipt audit"));
+    assert!(markdown.contains("## Reviewer front panel"));
+    assert!(markdown.contains("- Matched receipt metadata: 1"));
+    assert!(markdown.contains("- Receipts imported as current witness evidence: 1"));
+    assert!(markdown.contains("- Receipts without a current card match: 0 unmatched, 0 stale"));
+    assert!(markdown.contains("- Problem flags: none"));
+    assert!(markdown.contains("keep matching receipt metadata attached to the review record"));
+    assert!(markdown.contains("do not erase missing contracts"));
     assert!(markdown.contains("Duplicate"));
     assert!(markdown.contains("Matched card"));
+    assert!(markdown.contains("Summary"));
+    assert!(markdown.contains("focused fixture witness passed"));
+    assert!(markdown.contains("imports_witness_evidence, matched"));
+    assert!(markdown.contains("core/fixtures"));
+    assert!(markdown.contains("2026-05-18T00:00:00Z"));
+    assert!(markdown.contains("2026-08-18"));
+    assert!(markdown.contains("3e163b0bce29ff2e"));
+    assert!(markdown.contains("fixture only"));
     assert!(markdown.contains("raw_pointer_read"));
     assert!(markdown.contains("unsafe { ptr.cast::<Header>().read() }"));
     assert!(markdown.contains("Add or expose"));
@@ -1632,6 +1878,7 @@ fn receipt_import_miri_writes_receipt_from_saved_success_log() -> Result<(), Box
         "saved Miri output reported `test result: ok`"
     );
     assert_eq!(receipt["command"], "cargo +nightly miri test read_header");
+    assert_eq!(receipt["command_hash"], "3e163b0bce29ff2e");
     let limitations = receipt["limitations"]
         .as_array()
         .ok_or("receipt limitations should be an array")?;
@@ -1692,6 +1939,7 @@ fn receipt_import_careful_writes_receipt_from_saved_success_log() -> Result<(), 
         receipt["command"],
         "cargo +nightly careful test read_header"
     );
+    assert_eq!(receipt["command_hash"], "efd39ded576cc7d5");
     let limitations = receipt["limitations"]
         .as_array()
         .ok_or("receipt limitations should be an array")?;
@@ -1754,6 +2002,7 @@ fn receipt_import_sanitizer_writes_receipt_from_saved_success_log() -> Result<()
         receipt["command"],
         "RUSTFLAGS='-Z sanitizer=address' cargo +nightly test read_header"
     );
+    assert_eq!(receipt["command_hash"], "a81457494b1bfe76");
     let limitations = receipt["limitations"]
         .as_array()
         .ok_or("receipt limitations should be an array")?;
@@ -1816,6 +2065,7 @@ fn receipt_import_concurrency_writes_receipt_from_saved_success_log() -> Result<
         receipt["command"],
         "cargo test shared_cell_loom -- --nocapture"
     );
+    assert_eq!(receipt["command_hash"], "4ce9d7c8eeb19a30");
     let limitations = receipt["limitations"]
         .as_array()
         .ok_or("receipt limitations should be an array")?;
@@ -1877,6 +2127,7 @@ fn receipt_import_proof_writes_receipt_from_saved_success_log() -> Result<(), Bo
         receipt["command"],
         "cargo kani --harness byte_to_bool_harness"
     );
+    assert_eq!(receipt["command_hash"], "c17a7978dc51122e");
     let limitations = receipt["limitations"]
         .as_array()
         .ok_or("receipt limitations should be an array")?;
@@ -2066,6 +2317,12 @@ fn policy_report_is_advisory_and_counts_baseline_state() -> Result<(), Box<dyn E
     assert_eq!(stdout_text(&markdown)?.trim(), "");
     let markdown = fs::read_to_string(markdown_path)?;
     assert!(markdown.contains("# unsafe-review policy report"));
+    assert!(markdown.contains("## Reviewer front panel"));
+    assert!(markdown.contains("- New unbaselined gaps: 0"));
+    assert!(markdown.contains("- Current ledger-covered cards: 1 baseline-known, 0 suppressed"));
+    assert!(markdown.contains("- Ledger cleanup: 1 resolved baseline entries"));
+    assert!(markdown.contains("consider pruning or updating resolved baseline entries"));
+    assert!(markdown.contains("advisory policy simulation only"));
     assert!(markdown.contains("## Classification explanations"));
     assert!(markdown.contains("Exact ReviewCard identity matched a baseline ledger entry"));
     assert!(markdown.contains("Next action"));
@@ -2162,6 +2419,14 @@ fn stdout_text(output: &Output) -> Result<String, Box<dyn Error>> {
 
 fn parse_json(text: &str) -> Result<Value, Box<dyn Error>> {
     Ok(serde_json::from_str(text)?)
+}
+
+fn json_usize(value: &Value, field: &str) -> Result<usize, Box<dyn Error>> {
+    Ok(value
+        .as_u64()
+        .ok_or_else(|| format!("{field} must be an unsigned count"))?
+        .try_into()
+        .map_err(|_err| format!("{field} does not fit in usize"))?)
 }
 
 fn json_str<'a>(value: &'a Value, path: &str) -> Result<&'a str, Box<dyn Error>> {

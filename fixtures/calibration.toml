@@ -31,41 +31,96 @@ required_core_fixtures = [
   "private_unsafe_helper_safety_comment",
   "local_safety_colon_comment",
   "maybeuninit_assume_init",
+  "maybeuninit_assume_init_comment_not_guard",
+  "maybeuninit_assume_init_write_guard",
+  "maybeuninit_assume_init_read_write_guard",
+  "maybeuninit_assume_init_open_branch_write_guard",
+  "maybeuninit_assume_init_open_branch_new_guard",
+  "maybeuninit_assume_init_closed_branch_write_not_guard",
+  "maybeuninit_assume_init_closed_branch_new_not_guard",
+  "maybeuninit_assume_init_new_guard",
+  "maybeuninit_assume_init_mut_new_guard",
+  "maybeuninit_assume_init_other_slot_write_not_guard",
+  "maybeuninit_assume_init_stale_write_not_guard",
+  "maybeuninit_assume_init_read_stale_write_not_guard",
+  "maybeuninit_assume_init_stale_field_write_not_guard",
+  "maybeuninit_assume_init_stale_new_not_guard",
+  "maybeuninit_assume_init_shadowed_slot_not_guard",
+  "maybeuninit_assume_init_mutslot_new_not_guard",
+  "maybeuninit_assume_init_partial_field_not_guard",
+  "maybeuninit_assume_init_partial_array_not_guard",
   "maybeuninit_assume_init_read",
   "maybeuninit_assume_init_ref",
   "maybeuninit_assume_init_mut",
   "maybeuninit_assume_init_drop",
   "vec_set_len",
+  "vec_set_len_comment_not_guard",
   "vec_set_len_initialized_loop",
+  "vec_set_len_self_new_const_cap_not_guard",
+  "vec_set_len_slice_binding_initialized_loop",
+  "vec_set_len_other_slice_binding_not_guard",
+  "vec_set_len_partial_slice_binding_not_guard",
+  "vec_set_len_stale_slice_binding_not_guard",
+  "vec_set_len_single_index_init_not_guard",
   "vec_set_len_capacity_observed_not_guard",
   "vec_set_len_unrelated_capacity_comparison_not_guard",
+  "vec_set_len_capacity_binding",
+  "vec_set_len_stale_capacity_binding_not_guard",
+  "vec_set_len_remaining_capacity_guard",
+  "vec_set_len_other_remaining_capacity_not_guard",
   "vec_set_len_cap_argument_not_guard",
+  "vec_set_len_unrelated_const_cap_not_guard",
   "vec_set_len_reassigned_receiver_not_guard",
+  "vec_set_len_reassigned_new_len_not_guard",
+  "vec_set_len_compound_reassigned_new_len_not_guard",
+  "vec_set_len_shadowed_new_len_not_guard",
   "vec_set_len_with_capacity",
+  "vec_set_len_stale_with_capacity_not_guard",
+  "vec_set_len_stale_with_capacity_len_not_guard",
+  "vec_set_len_reserve_capacity",
+  "vec_set_len_reserve_reassigned_additional_not_guard",
+  "vec_set_len_try_reserve_capacity",
+  "vec_set_len_try_reserve_reassigned_additional_not_guard",
   "vec_set_len_call_result_init",
   "vec_set_len_shrink",
   "vec_set_len_last_index_shrink",
+  "vec_set_len_stale_last_index_shrink_not_guard",
+  "vec_set_len_other_last_index_shrink_not_guard",
   "vec_set_len_start_bound_shrink",
+  "vec_set_len_stale_start_bound_shrink_not_guard",
   "vec_set_len_zero_clear",
   "vec_set_len_post_init_not_guard",
+  "vec_set_len_unrelated_initialization_not_guard",
   "drop_in_place_deallocation",
   "drop_in_place_box_origin",
   "drop_in_place_reassigned_origin_not_guard",
   "atomic_pointer_state_swap",
+  "atomic_pointer_state_fetch_ops",
   "unwrap_unchecked_result",
   "unwrap_unchecked_infallible_result",
   "unwrap_unchecked_other_infallible_not_guard",
   "unwrap_unchecked_is_some_guard",
+  "unwrap_unchecked_is_some_reassigned_not_guard",
   "unwrap_unchecked_is_ok_guard",
+  "unwrap_unchecked_is_ok_reassigned_not_guard",
   "unwrap_unchecked_is_some_observed_not_guard",
   "unwrap_unchecked_is_ok_observed_not_guard",
   "unwrap_unchecked_if_let_some_guard",
   "unwrap_unchecked_if_let_ok_guard",
+  "unwrap_unchecked_let_else_some_guard",
+  "unwrap_unchecked_let_else_some_reassigned_not_guard",
+  "unwrap_unchecked_let_else_ok_guard",
+  "unwrap_unchecked_let_else_ok_reassigned_not_guard",
+  "unwrap_unchecked_match_some_guard",
+  "unwrap_unchecked_match_some_reassigned_not_guard",
+  "unwrap_unchecked_match_ok_guard",
+  "unwrap_unchecked_match_ok_reassigned_not_guard",
   "unwrap_unchecked_other_if_let_not_guard",
   "unwrap_unchecked_other_if_let_ok_not_guard",
   "unwrap_unchecked_post_check_not_guard",
   "unwrap_unchecked_guard_then_reassigned_not_guard",
   "unwrap_unchecked_is_none_return_guard",
+  "unwrap_unchecked_is_none_return_comment_not_guard",
   "unwrap_unchecked_is_err_return_guard",
   "unreachable_unchecked_path",
   "unreachable_unchecked_infallible_path",
@@ -74,16 +129,53 @@ required_core_fixtures = [
   "unreachable_unchecked_closed_infallible_match_not_guard",
   "get_unchecked_mut_bounds",
   "get_unchecked_mut_len_guard",
+  "get_unchecked_mut_conjunct_len_guard",
+  "get_unchecked_mut_get_probe_guard",
+  "get_unchecked_mut_get_probe_early_return_guard",
+  "get_unchecked_mut_get_probe_other_slice_not_guard",
+  "get_unchecked_mut_if_let_get_guard",
+  "get_unchecked_mut_let_else_get_guard",
+  "get_unchecked_mut_match_get_guard",
   "get_unchecked_mut_other_len_not_guard",
+  "get_unchecked_mut_disjunct_len_not_guard",
   "get_unchecked_mut_post_check_not_guard",
   "get_unchecked_mut_bounds_observed_not_guard",
   "get_unchecked_mut_closed_bounds_not_guard",
+  "get_unchecked_mut_return_comment_not_guard",
   "get_unchecked_mut_reassigned_index_not_guard",
+  "get_unchecked_mut_compound_reassigned_index_not_guard",
+  "get_unchecked_mut_shadowed_index_not_guard",
+  "get_unchecked_mut_reassigned_receiver_not_guard",
+  "get_unchecked_mut_shadowed_receiver_not_guard",
+  "get_unchecked_mut_get_probe_reassigned_index_not_guard",
+  "get_unchecked_mut_get_probe_shadowed_index_not_guard",
+  "get_unchecked_mut_get_probe_reassigned_receiver_not_guard",
+  "get_unchecked_mut_get_probe_shadowed_receiver_not_guard",
+  "get_unchecked_mut_get_probe_early_return_reassigned_index_not_guard",
+  "get_unchecked_mut_get_probe_early_return_shadowed_index_not_guard",
+  "get_unchecked_mut_get_probe_early_return_reassigned_receiver_not_guard",
+  "get_unchecked_mut_get_probe_early_return_shadowed_receiver_not_guard",
+  "get_unchecked_mut_if_let_get_reassigned_index_not_guard",
+  "get_unchecked_mut_if_let_get_shadowed_index_not_guard",
+  "get_unchecked_mut_if_let_get_reassigned_receiver_not_guard",
+  "get_unchecked_mut_if_let_get_shadowed_receiver_not_guard",
+  "get_unchecked_mut_let_else_get_reassigned_index_not_guard",
+  "get_unchecked_mut_let_else_get_shadowed_index_not_guard",
+  "get_unchecked_mut_let_else_get_reassigned_receiver_not_guard",
+  "get_unchecked_mut_let_else_get_shadowed_receiver_not_guard",
+  "get_unchecked_mut_match_get_reassigned_index_not_guard",
+  "get_unchecked_mut_match_get_shadowed_index_not_guard",
+  "get_unchecked_mut_match_get_reassigned_receiver_not_guard",
+  "get_unchecked_mut_match_get_shadowed_receiver_not_guard",
   "pin_new_unchecked",
   "raw_pointer_write_bytes",
   "raw_pointer_write_bool_bytes_guard",
+  "raw_pointer_write_bool_conjunct_branch_guard",
+  "raw_pointer_write_bool_disjunct_return_guard",
   "raw_pointer_write_bool_reassigned_byte_not_guard",
   "raw_pointer_write_bool_closed_branch_not_guard",
+  "raw_pointer_write_bool_disjunct_branch_not_guard",
+  "raw_pointer_write_bool_conjunct_return_not_guard",
   "raw_pointer_write_previous_slice_not_guard",
   "raw_pointer_write_previous_u8_not_guard",
   "raw_pointer_write_previous_bool_not_guard",
@@ -103,12 +195,36 @@ required_core_fixtures = [
   "ptr_copy_slice_range_or_branch_not_guard",
   "ptr_copy_slice_range_disjunctive_early_return_block_comment_not_guard",
   "ptr_copy_slice_range_disjunctive_early_return_reassigned_count_not_guard",
+  "ptr_copy_slice_range_disjunctive_early_return_compound_reassigned_count_not_guard",
+  "ptr_copy_slice_range_disjunctive_early_return_shadowed_count_not_guard",
+  "ptr_copy_slice_range_disjunctive_early_return_reassigned_src_not_guard",
+  "ptr_copy_slice_range_disjunctive_early_return_reassigned_src_path_not_guard",
+  "ptr_copy_slice_range_disjunctive_early_return_shadowed_src_not_guard",
+  "ptr_copy_slice_range_disjunctive_early_return_reassigned_dst_not_guard",
+  "ptr_copy_slice_range_disjunctive_early_return_shadowed_dst_not_guard",
   "ptr_copy_slice_range_open_branch_reassigned_count_not_guard",
+  "ptr_copy_slice_range_open_branch_compound_reassigned_count_not_guard",
+  "ptr_copy_slice_range_open_branch_shadowed_count_not_guard",
+  "ptr_copy_slice_range_open_branch_shadowed_src_not_guard",
+  "ptr_copy_slice_range_open_branch_shadowed_dst_not_guard",
+  "ptr_copy_slice_range_open_branch_reassigned_src_not_guard",
+  "ptr_copy_slice_range_open_branch_reassigned_src_path_not_guard",
+  "ptr_copy_slice_range_open_branch_reassigned_dst_path_not_guard",
+  "ptr_copy_slice_range_open_branch_shadowed_src_path_not_guard",
+  "ptr_copy_slice_range_open_branch_shadowed_dst_path_not_guard",
   "ptr_copy_slice_range_open_branch_reassigned_dst_not_guard",
   "ptr_copy_slice_range_src_only_not_guard",
   "ptr_copy_slice_range_dst_only_not_guard",
   "ptr_copy_slice_range_reassigned_count_not_guard",
+  "ptr_copy_slice_range_shadowed_count_not_guard",
+  "ptr_copy_slice_range_reassigned_src_not_guard",
+  "ptr_copy_slice_range_reassigned_src_path_not_guard",
+  "ptr_copy_slice_range_shadowed_src_path_not_guard",
+  "ptr_copy_slice_range_shadowed_src_not_guard",
   "ptr_copy_slice_range_reassigned_dst_not_guard",
+  "ptr_copy_slice_range_reassigned_dst_path_not_guard",
+  "ptr_copy_slice_range_shadowed_dst_path_not_guard",
+  "ptr_copy_slice_range_shadowed_dst_not_guard",
   "ptr_copy_other_len_not_guard",
   "ptr_replace_value",
   "copy_nonoverlapping",
@@ -122,22 +238,63 @@ required_core_fixtures = [
   "copy_nonoverlapping_slice_range_or_branch_not_guard",
   "copy_nonoverlapping_slice_range_disjunctive_early_return_block_comment_not_guard",
   "copy_nonoverlapping_slice_range_disjunctive_early_return_reassigned_count_not_guard",
+  "copy_nonoverlapping_slice_range_disjunctive_early_return_compound_reassigned_count_not_guard",
+  "copy_nonoverlapping_slice_range_disjunctive_early_return_shadowed_count_not_guard",
+  "copy_nonoverlapping_slice_range_disjunctive_early_return_reassigned_src_not_guard",
+  "copy_nonoverlapping_slice_range_disjunctive_early_return_reassigned_src_path_not_guard",
+  "copy_nonoverlapping_slice_range_disjunctive_early_return_shadowed_src_path_not_guard",
+  "copy_nonoverlapping_slice_range_disjunctive_early_return_shadowed_src_not_guard",
+  "copy_nonoverlapping_slice_range_disjunctive_early_return_reassigned_dst_not_guard",
+  "copy_nonoverlapping_slice_range_disjunctive_early_return_reassigned_dst_path_not_guard",
+  "copy_nonoverlapping_slice_range_disjunctive_early_return_shadowed_dst_path_not_guard",
+  "copy_nonoverlapping_slice_range_disjunctive_early_return_shadowed_dst_not_guard",
   "copy_nonoverlapping_slice_range_open_branch_reassigned_count_not_guard",
+  "copy_nonoverlapping_slice_range_open_branch_compound_reassigned_count_not_guard",
+  "copy_nonoverlapping_slice_range_open_branch_shadowed_count_not_guard",
   "copy_nonoverlapping_slice_range_open_branch_reassigned_src_not_guard",
+  "copy_nonoverlapping_slice_range_open_branch_reassigned_src_path_not_guard",
+  "copy_nonoverlapping_slice_range_open_branch_shadowed_src_path_not_guard",
+  "copy_nonoverlapping_slice_range_open_branch_shadowed_src_not_guard",
+  "copy_nonoverlapping_slice_range_open_branch_reassigned_dst_not_guard",
+  "copy_nonoverlapping_slice_range_open_branch_reassigned_dst_path_not_guard",
+  "copy_nonoverlapping_slice_range_open_branch_shadowed_dst_path_not_guard",
+  "copy_nonoverlapping_slice_range_open_branch_shadowed_dst_not_guard",
   "copy_nonoverlapping_slice_range_src_only_not_guard",
   "copy_nonoverlapping_slice_range_dst_only_not_guard",
   "copy_nonoverlapping_slice_range_reassigned_count_not_guard",
+  "copy_nonoverlapping_slice_range_shadowed_count_not_guard",
   "copy_nonoverlapping_slice_range_reassigned_src_not_guard",
+  "copy_nonoverlapping_slice_range_reassigned_src_path_not_guard",
+  "copy_nonoverlapping_slice_range_shadowed_src_path_not_guard",
+  "copy_nonoverlapping_slice_range_shadowed_src_not_guard",
+  "copy_nonoverlapping_slice_range_reassigned_dst_not_guard",
+  "copy_nonoverlapping_slice_range_reassigned_dst_path_not_guard",
+  "copy_nonoverlapping_slice_range_shadowed_dst_path_not_guard",
+  "copy_nonoverlapping_slice_range_shadowed_dst_not_guard",
   "copy_nonoverlapping_other_len_not_guard",
   "str_from_utf8_unchecked",
+  "str_from_utf8_unchecked_comment_not_guard",
   "str_from_utf8_unchecked_is_ok_guard",
+  "str_from_utf8_unchecked_if_let_ok_guard",
+  "str_from_utf8_unchecked_if_let_err_return_guard",
   "str_from_utf8_unchecked_is_err_return_guard",
+  "str_from_utf8_unchecked_is_err_return_comment_not_guard",
   "str_from_utf8_unchecked_question_mark_guard",
   "str_from_utf8_unchecked_match_return_guard",
+  "str_from_utf8_unchecked_let_else_ok_guard",
+  "str_from_utf8_unchecked_match_ok_guard",
   "str_from_utf8_unchecked_post_validation_not_guard",
   "str_from_utf8_unchecked_other_buffer_not_guard",
+  "str_from_utf8_unchecked_prefix_validation_not_guard",
+  "str_from_utf8_unchecked_suffix_validation_not_guard",
   "str_from_utf8_unchecked_is_ok_observed_not_guard",
   "str_from_utf8_unchecked_guard_then_reassigned_not_guard",
+  "str_from_utf8_unchecked_guard_then_mutated_not_guard",
+  "str_from_utf8_unchecked_guard_then_shadowed_not_guard",
+  "str_from_utf8_unchecked_if_let_ok_shadowed_not_guard",
+  "str_from_utf8_unchecked_if_let_err_reassigned_not_guard",
+  "str_from_utf8_unchecked_let_else_ok_reassigned_not_guard",
+  "str_from_utf8_unchecked_match_ok_reassigned_not_guard",
   "zeroed_invalid_value",
   "zeroed_valid_u32",
   "inline_asm_human_review",
@@ -155,6 +312,13 @@ required_core_fixtures = [
   "raw_pointer_read_other_len_not_guard",
   "raw_pointer_read_reassigned_origin_not_guard",
   "pointer_arithmetic_num_ctrl_bytes_guard",
+  "pointer_arithmetic_other_offset_not_guard",
+  "pointer_arithmetic_reassigned_offset_not_guard",
+  "pointer_arithmetic_shadowed_offset_not_guard",
+  "pointer_arithmetic_compound_offset_not_guard",
+  "pointer_arithmetic_stale_bound_not_guard",
+  "pointer_arithmetic_disjunct_bounds_not_guard",
+  "pointer_arithmetic_closed_branch_not_guard",
   "pointer_arithmetic_slice_end",
   "slice_from_raw_parts_mut",
   "slice_from_raw_parts_mut_maybeuninit",
@@ -165,36 +329,79 @@ required_core_fixtures = [
   "vec_from_raw_parts_capacity_observed_not_guard",
   "vec_from_raw_parts_capacity_value_observed_not_guard",
   "vec_from_raw_parts_capacity_closed_branch_not_guard",
+  "vec_from_raw_parts_capacity_return_comment_not_guard",
   "vec_from_raw_parts_capacity_reassigned_not_guard",
   "vec_from_raw_parts_manuallydrop_origin",
+  "vec_from_raw_parts_stale_pointer_origin_not_guard",
   "box_from_raw",
   "box_from_raw_box_origin",
   "box_from_raw_reassigned_origin_not_guard",
   "static_mut_global_state",
   "transmute_invalid_value",
   "transmute_layout_size_guard",
+  "transmute_layout_conjunct_branch_guard",
+  "transmute_layout_disjunct_branch_not_guard",
+  "transmute_layout_mismatch_return_guard",
+  "transmute_layout_mismatch_return_comment_not_guard",
+  "transmute_layout_conjunct_return_not_guard",
+  "transmute_layout_closed_branch_not_guard",
+  "transmute_layout_observed_not_guard",
+  "transmute_bool_comment_not_guard",
   "transmute_bool_valid_value_guard",
+  "transmute_bool_conjunct_branch_guard",
+  "transmute_bool_disjunct_branch_not_guard",
   "transmute_bool_invalid_return_guard",
+  "transmute_bool_invalid_return_comment_not_guard",
+  "transmute_bool_disjunct_return_guard",
+  "transmute_bool_conjunct_return_not_guard",
+  "transmute_bool_other_value_not_guard",
+  "transmute_bool_prior_guarded_call_not_guard",
   "transmute_bool_value_observed_not_guard",
   "transmute_bool_closed_if_observed_not_guard",
   "transmute_bool_guard_then_reassigned_not_guard",
+  "transmute_bool_guard_then_compound_reassigned_not_guard",
+  "transmute_bool_guard_then_shadowed_not_guard",
   "transmute_copy_invalid_value",
   "transmute_copy_layout_size_guard",
+  "transmute_copy_layout_conjunct_branch_guard",
+  "transmute_copy_layout_disjunct_branch_not_guard",
+  "transmute_copy_layout_mismatch_return_guard",
+  "transmute_copy_layout_mismatch_return_comment_not_guard",
+  "transmute_copy_layout_conjunct_return_not_guard",
+  "transmute_copy_bool_comment_not_guard",
+  "transmute_copy_bool_other_value_not_guard",
+  "transmute_copy_bool_prior_guarded_call_not_guard",
   "transmute_copy_bool_valid_value_guard",
+  "transmute_copy_bool_conjunct_branch_guard",
+  "transmute_copy_bool_disjunct_branch_not_guard",
   "transmute_copy_bool_invalid_return_guard",
+  "transmute_copy_bool_invalid_return_comment_not_guard",
+  "transmute_copy_bool_disjunct_return_guard",
+  "transmute_copy_bool_conjunct_return_not_guard",
   "transmute_copy_bool_value_observed_not_guard",
   "transmute_copy_bool_closed_if_observed_not_guard",
   "transmute_copy_bool_guard_then_reassigned_not_guard",
+  "transmute_copy_bool_guard_then_compound_reassigned_not_guard",
+  "transmute_copy_bool_guard_then_shadowed_not_guard",
   "multiline_transmute_copy_invalid_value",
   "unsafe_impl_send",
   "unsafe_impl_send_generic_owner",
   "unsafe_impl_sync_generic_bound",
+  "unsafe_impl_custom_trait_not_send_sync",
   "ffi_sanitizer_route",
+  "ffi_missing_boundary_contract",
+  "ffi_call_sanitizer_route",
+  "ffi_qualified_call_sanitizer_route",
+  "ffi_libc_call_sanitizer_route",
+  "ffi_non_libc_wrapper_call_not_route",
+  "ffi_local_libc_module_call_not_route",
   "safe_code_no_cards",
   "safe_reference_deref_no_cards",
   "imports_not_unsafe_operations",
   "cfg_target_feature_not_operation",
+  "static_lifetime_mut_ref_not_static_mut",
   "target_feature_safety_docs",
+  "target_feature_missing_safety_docs",
   "attributed_unsafe_fn_no_duplicate",
   "inline_unsafe_raw_pointer_deref_no_duplicate",
   "unsafe_fn_call_wrapper",
@@ -203,14 +410,38 @@ required_core_fixtures = [
   "unchecked_constructor_availability_guard",
   "unchecked_constructor_availability_assert_guard",
   "unchecked_constructor_unavailable_return_guard",
+  "unchecked_constructor_unavailable_return_comment_not_guard",
   "unchecked_constructor_other_availability_not_guard",
   "unchecked_constructor_availability_observed_not_guard",
   "unchecked_constructor_availability_closed_branch_not_guard",
   "nonnull_new_guard",
+  "nonnull_new_reassigned_ptr_not_guard",
+  "nonnull_new_shadowed_ptr_not_guard",
+  "nonnull_cast_checked_pointer_not_guard",
+  "nonnull_method_receiver_reassigned_not_guard",
+  "nonnull_if_let_new_guard",
+  "nonnull_let_else_new_guard",
+  "nonnull_match_new_guard",
   "nonnull_other_guard_not_evidence",
   "nonnull_is_null_nonreturning_not_guard",
+  "nonnull_is_null_return_comment_not_guard",
+  "nonnull_is_null_disjunct_return_guard",
+  "nonnull_is_null_conjunct_return_not_guard",
+  "nonnull_is_null_reassigned_ptr_not_guard",
+  "nonnull_is_null_shadowed_ptr_not_guard",
+  "nonnull_is_null_open_branch_guard",
+  "nonnull_is_null_conjunct_open_branch_guard",
+  "nonnull_is_null_disjunct_open_branch_not_guard",
+  "nonnull_is_null_open_branch_reassigned_ptr_not_guard",
+  "nonnull_is_null_open_branch_shadowed_ptr_not_guard",
   "nonnull_observed_not_guard",
   "nonnull_post_check_not_guard",
+  "nonnull_if_let_new_reassigned_ptr_not_guard",
+  "nonnull_if_let_new_shadowed_ptr_not_guard",
+  "nonnull_let_else_new_reassigned_ptr_not_guard",
+  "nonnull_let_else_new_shadowed_ptr_not_guard",
+  "nonnull_match_new_reassigned_ptr_not_guard",
+  "nonnull_match_new_shadowed_ptr_not_guard",
   "impl_trait_bound_owner_inference",
   "long_unsafe_fn_owner_inference",
   "macro_rules_owner_inference",
@@ -416,6 +647,8 @@ claim = "public unsafe function without a # Safety contract reports contract_mis
 support_tier = "Contract evidence mining"
 expected_cards = 1
 expected_class = "contract_missing"
+expected_operation_family = "unknown"
+expected_hazard = "unknown"
 
 [[cases]]
 fixture = "public_unsafe_trait_missing_safety"
@@ -429,7 +662,7 @@ expected_hazard = "unknown"
 
 [[cases]]
 fixture = "public_unsafe_fn_safety_comment_not_docs"
-kind = "positive"
+kind = "false_positive_control"
 claim = "public unsafe function requires # Safety docs and does not accept a local SAFETY comment as public API docs"
 support_tier = "Contract evidence mining"
 expected_cards = 1
@@ -508,6 +741,186 @@ expected_operation_family = "maybe_uninit_assume_init"
 expected_hazard = "initialized_memory"
 
 [[cases]]
+fixture = "maybeuninit_assume_init_comment_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init treats SAFETY prose as contract evidence only, not initialized-memory discharge evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_write_guard"
+kind = "positive"
+claim = "MaybeUninit::assume_init recognizes same-slot write initialization evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_read_write_guard"
+kind = "positive"
+claim = "MaybeUninit::assume_init_read recognizes same-slot write initialization evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_open_branch_write_guard"
+kind = "positive"
+claim = "MaybeUninit::assume_init recognizes same-slot write evidence in an open branch containing the assume_init operation"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_open_branch_new_guard"
+kind = "positive"
+claim = "MaybeUninit::assume_init recognizes same-slot MaybeUninit::new evidence in an open branch containing the assume_init operation"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_closed_branch_write_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init rejects closed conditional write evidence before the assume_init operation"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_closed_branch_new_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init rejects closed conditional MaybeUninit::new evidence before the assume_init operation"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_new_guard"
+kind = "positive"
+claim = "MaybeUninit::assume_init recognizes same-slot MaybeUninit::new initialization evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_mut_new_guard"
+kind = "positive"
+claim = "MaybeUninit::assume_init recognizes same-slot mutable MaybeUninit::new initialization evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_other_slot_write_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init rejects write evidence for a different slot"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_stale_write_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init rejects stale same-slot write evidence after reassignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_read_stale_write_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init_read rejects stale same-slot write evidence after reassignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_stale_field_write_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init rejects stale field-slot write evidence after reassignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_stale_new_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init rejects stale same-slot MaybeUninit::new evidence after reassignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_shadowed_slot_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init rejects same-slot write evidence after the initialized slot is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_mutslot_new_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init rejects MaybeUninit::new evidence for a prefixed slot name"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_partial_field_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init does not treat partial field initialization as full initialized-memory evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_partial_array_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init does not treat partial array-element initialization as full initialized-memory evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
 fixture = "maybeuninit_assume_init_read"
 kind = "positive"
 claim = "MaybeUninit::assume_init_read reports missing initialization evidence instead of a generic unsafe function call"
@@ -558,12 +971,72 @@ expected_operation_family = "vec_set_len"
 expected_hazard = "initialized_memory"
 
 [[cases]]
+fixture = "vec_set_len_comment_not_guard"
+kind = "false_positive_control"
+claim = "Vec::set_len treats SAFETY prose as contract evidence only, not initialized-range discharge evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
 fixture = "vec_set_len_initialized_loop"
 kind = "positive"
 claim = "Vec::set_len recognizes visible MaybeUninit::new initialization and const CAP capacity evidence"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guarded_unwitnessed"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_slice_binding_initialized_loop"
+kind = "positive"
+claim = "Vec::set_len recognizes same-vector slice-binding initialization loops before set_len"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_other_slice_binding_not_guard"
+kind = "false_positive_control"
+claim = "Vec::set_len does not accept initialization through an unrelated slice binding as initialized-range evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_partial_slice_binding_not_guard"
+kind = "false_positive_control"
+claim = "Vec::set_len does not accept partial same-vector slice-binding initialization as full initialized-range evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_stale_slice_binding_not_guard"
+kind = "false_positive_control"
+claim = "Vec::set_len does not accept stale same-vector slice bindings as initialized-range evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_single_index_init_not_guard"
+kind = "false_positive_control"
+claim = "Vec::set_len does not accept single-index initialization as full initialized-range evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
 expected_operation_family = "vec_set_len"
 expected_hazard = "initialized_memory"
 
@@ -588,9 +1061,69 @@ expected_operation_family = "vec_set_len"
 expected_hazard = "initialized_memory"
 
 [[cases]]
+fixture = "vec_set_len_capacity_binding"
+kind = "positive"
+claim = "Vec::set_len recognizes a fresh same-vector capacity binding used in a new-length bound"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_stale_capacity_binding_not_guard"
+kind = "false_positive_control"
+claim = "Vec::set_len does not accept a capacity binding after the checked vector receiver is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_remaining_capacity_guard"
+kind = "positive"
+claim = "Vec::set_len recognizes remaining-capacity early-return guards for len plus added bytes"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_other_remaining_capacity_not_guard"
+kind = "false_positive_control"
+claim = "Vec::set_len does not accept another vector's remaining-capacity guard for the target vector"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
 fixture = "vec_set_len_cap_argument_not_guard"
 kind = "false_positive_control"
 claim = "Vec::set_len does not accept a local argument named cap as capacity evidence without a const-capacity context"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_unrelated_const_cap_not_guard"
+kind = "false_positive_control"
+claim = "Vec::set_len does not accept an unrelated const-CAP MaybeUninit buffer as capacity evidence for the target vector"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_self_new_const_cap_not_guard"
+kind = "false_positive_control"
+claim = "Vec::set_len does not infer const-CAP capacity evidence through an opaque Self::new constructor"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"
@@ -608,9 +1141,99 @@ expected_operation_family = "vec_set_len"
 expected_hazard = "initialized_memory"
 
 [[cases]]
+fixture = "vec_set_len_reassigned_new_len_not_guard"
+kind = "false_positive_control"
+claim = "Vec::set_len capacity evidence is stale when the checked new length is reassigned before set_len"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_compound_reassigned_new_len_not_guard"
+kind = "false_positive_control"
+claim = "Vec::set_len capacity evidence is stale when compound assignment mutates the checked new length before set_len"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_shadowed_new_len_not_guard"
+kind = "false_positive_control"
+claim = "Vec::set_len capacity evidence is stale when the checked new length is shadowed before set_len"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
 fixture = "vec_set_len_with_capacity"
 kind = "positive"
 claim = "Vec::set_len recognizes same-vector Vec::with_capacity(new_len) as capacity evidence without discharging initialization"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_stale_with_capacity_not_guard"
+kind = "false_positive_control"
+claim = "Vec::set_len does not accept Vec::with_capacity(new_len) as capacity evidence after the vector is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_stale_with_capacity_len_not_guard"
+kind = "false_positive_control"
+claim = "Vec::set_len does not accept Vec::with_capacity(new_len) as capacity evidence after the new length is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_reserve_capacity"
+kind = "positive"
+claim = "Vec::set_len recognizes same-vector Vec::reserve(additional) as capacity evidence for len + additional without discharging initialization"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_reserve_reassigned_additional_not_guard"
+kind = "false_positive_control"
+claim = "Vec::set_len does not accept Vec::reserve(additional) as capacity evidence when additional is reassigned after computing the new length"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_try_reserve_capacity"
+kind = "positive"
+claim = "Vec::set_len recognizes same-vector Vec::try_reserve(additional)? as capacity evidence for len + additional without discharging initialization"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_try_reserve_reassigned_additional_not_guard"
+kind = "false_positive_control"
+claim = "Vec::set_len does not accept Vec::try_reserve(additional)? as capacity evidence when additional is reassigned after computing the new length"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"
@@ -648,12 +1271,42 @@ expected_operation_family = "vec_set_len"
 expected_hazard = "initialized_memory"
 
 [[cases]]
+fixture = "vec_set_len_stale_last_index_shrink_not_guard"
+kind = "false_positive_control"
+claim = "Vec::set_len does not accept last_index shrink evidence after the checked vector receiver is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_other_last_index_shrink_not_guard"
+kind = "false_positive_control"
+claim = "Vec::set_len does not accept another Vec receiver's last_index shrink proof as same-vector shrink evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
 fixture = "vec_set_len_start_bound_shrink"
 kind = "positive"
 claim = "Vec::set_len recognizes start <= end <= len as shrink evidence"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guarded_unwitnessed"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_stale_start_bound_shrink_not_guard"
+kind = "false_positive_control"
+claim = "Vec::set_len does not accept start <= end <= len as shrink evidence after the checked vector is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
 expected_operation_family = "vec_set_len"
 expected_hazard = "initialized_memory"
 
@@ -671,6 +1324,16 @@ expected_hazard = "initialized_memory"
 fixture = "vec_set_len_post_init_not_guard"
 kind = "false_positive_control"
 claim = "Vec::set_len does not accept initialization evidence that appears only after the set_len call"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_unrelated_initialization_not_guard"
+kind = "false_positive_control"
+claim = "Vec::set_len does not accept unrelated MaybeUninit initialization as evidence for the vector's extended range"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"
@@ -718,6 +1381,16 @@ expected_operation_family = "atomic_pointer_state"
 expected_hazard = "atomic_ordering"
 
 [[cases]]
+fixture = "atomic_pointer_state_fetch_ops"
+kind = "positive"
+claim = "atomic pointer fetch-and/or/xor state transitions from crossbeam dogfood are classified as unsafe-adjacent review cards"
+support_tier = "Core operation smoke slice"
+expected_cards = 3
+expected_class = "requires_loom"
+expected_operation_family = "atomic_pointer_state"
+expected_hazard = "atomic_ordering"
+
+[[cases]]
 fixture = "unwrap_unchecked_result"
 kind = "positive"
 claim = "unwrap_unchecked reports invalid-value obligations instead of a generic unsafe function call"
@@ -758,12 +1431,32 @@ expected_operation_family = "unwrap_unchecked"
 expected_hazard = "invalid_value"
 
 [[cases]]
+fixture = "unwrap_unchecked_is_some_reassigned_not_guard"
+kind = "false_positive_control"
+claim = "unwrap_unchecked does not accept stale is_some branch evidence after receiver reassignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
 fixture = "unwrap_unchecked_is_ok_guard"
 kind = "positive"
 claim = "unwrap_unchecked recognizes same-receiver is_ok guard evidence"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guarded_unwitnessed"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_is_ok_reassigned_not_guard"
+kind = "false_positive_control"
+claim = "unwrap_unchecked does not accept stale is_ok branch evidence after receiver reassignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
 expected_operation_family = "unwrap_unchecked"
 expected_hazard = "invalid_value"
 
@@ -804,6 +1497,86 @@ claim = "unwrap_unchecked recognizes same-receiver if-let Ok as_ref guard eviden
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guarded_unwitnessed"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_let_else_some_guard"
+kind = "positive"
+claim = "unwrap_unchecked recognizes same-receiver let-else Some as_ref early-return guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_let_else_some_reassigned_not_guard"
+kind = "false_positive_control"
+claim = "unwrap_unchecked does not accept let-else Some as_ref evidence after receiver reassignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_let_else_ok_guard"
+kind = "positive"
+claim = "unwrap_unchecked recognizes same-receiver let-else Ok as_ref early-return guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_let_else_ok_reassigned_not_guard"
+kind = "false_positive_control"
+claim = "unwrap_unchecked does not accept let-else Ok as_ref evidence after receiver reassignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_match_some_guard"
+kind = "positive"
+claim = "unwrap_unchecked recognizes same-receiver match Some as_ref arm evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_match_some_reassigned_not_guard"
+kind = "false_positive_control"
+claim = "unwrap_unchecked does not accept match Some as_ref arm evidence after receiver reassignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_match_ok_guard"
+kind = "positive"
+claim = "unwrap_unchecked recognizes same-receiver match Ok as_ref arm evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_match_ok_reassigned_not_guard"
+kind = "false_positive_control"
+claim = "unwrap_unchecked does not accept match Ok as_ref arm evidence after receiver reassignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
 expected_operation_family = "unwrap_unchecked"
 expected_hazard = "invalid_value"
 
@@ -854,6 +1627,16 @@ claim = "unwrap_unchecked recognizes same-receiver is_none early-return guard ev
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guarded_unwitnessed"
+expected_operation_family = "unwrap_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "unwrap_unchecked_is_none_return_comment_not_guard"
+kind = "false_positive_control"
+claim = "unwrap_unchecked does not accept return text inside comments as valid-value evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
 expected_operation_family = "unwrap_unchecked"
 expected_hazard = "invalid_value"
 
@@ -938,9 +1721,89 @@ expected_operation_family = "get_unchecked"
 expected_hazard = "bounds"
 
 [[cases]]
+fixture = "get_unchecked_mut_conjunct_len_guard"
+kind = "positive"
+claim = "get_unchecked_mut recognizes same-receiver len guard evidence inside a conjunctive open branch"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_get_probe_guard"
+kind = "positive"
+claim = "get_unchecked_mut recognizes same-receiver get probe is_some branch evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_get_probe_early_return_guard"
+kind = "positive"
+claim = "get_unchecked_mut recognizes same-receiver get probe is_none early-return evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_get_probe_other_slice_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept get probe bounds evidence from another slice"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_if_let_get_guard"
+kind = "positive"
+claim = "get_unchecked_mut recognizes same-receiver if-let get probe evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_let_else_get_guard"
+kind = "positive"
+claim = "get_unchecked_mut recognizes same-receiver let-else get probe evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_match_get_guard"
+kind = "positive"
+claim = "get_unchecked_mut recognizes same-receiver match get probe evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
 fixture = "get_unchecked_mut_other_len_not_guard"
 kind = "false_positive_control"
 claim = "get_unchecked_mut does not accept len guard evidence from another receiver"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_disjunct_len_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept disjunctive len branch evidence because the unsafe access can run without the bounds predicate"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"
@@ -978,9 +1841,259 @@ expected_operation_family = "get_unchecked"
 expected_hazard = "bounds"
 
 [[cases]]
+fixture = "get_unchecked_mut_return_comment_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept return text inside comments as bounds evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
 fixture = "get_unchecked_mut_reassigned_index_not_guard"
 kind = "false_positive_control"
 claim = "get_unchecked_mut does not accept bounds evidence after the checked index is reassigned before use"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_compound_reassigned_index_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept bounds evidence after compound assignment mutates the checked index before use"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_shadowed_index_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept bounds evidence after a later let binding shadows the checked index"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_reassigned_receiver_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept bounds evidence after the checked receiver is reassigned before use"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_shadowed_receiver_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept bounds evidence after a later let binding shadows the checked receiver"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_get_probe_reassigned_index_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept get probe bounds evidence after the checked index is reassigned before use"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_get_probe_shadowed_index_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept get probe bounds evidence after the checked index is shadowed before use"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_get_probe_reassigned_receiver_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept get probe bounds evidence after the checked receiver is reassigned before use"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_get_probe_shadowed_receiver_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept get probe bounds evidence after the checked receiver is shadowed before use"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_get_probe_early_return_reassigned_index_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept get probe early-return evidence after the checked index is reassigned before use"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_get_probe_early_return_shadowed_index_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept get probe early-return evidence after the checked index is shadowed before use"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_get_probe_early_return_reassigned_receiver_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept get probe early-return evidence after the checked receiver is reassigned before use"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_get_probe_early_return_shadowed_receiver_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept get probe early-return evidence after the checked receiver is shadowed before use"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_if_let_get_reassigned_index_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept if-let get probe evidence after the checked index is reassigned before use"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_if_let_get_shadowed_index_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept if-let get probe evidence after the checked index is shadowed before use"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_if_let_get_reassigned_receiver_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept if-let get probe evidence after the checked receiver is reassigned before use"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_if_let_get_shadowed_receiver_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept if-let get probe evidence after the checked receiver is shadowed before use"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_let_else_get_reassigned_index_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept let-else get probe evidence after the checked index is reassigned before use"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_let_else_get_shadowed_index_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept let-else get probe evidence after the checked index is shadowed before use"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_let_else_get_reassigned_receiver_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept let-else get probe evidence after the checked receiver is reassigned before use"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_let_else_get_shadowed_receiver_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept let-else get probe evidence after the checked receiver is shadowed before use"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_match_get_reassigned_index_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept match get probe evidence after the checked index is reassigned before use"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_match_get_shadowed_index_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept match get probe evidence after the checked index is shadowed before use"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_match_get_reassigned_receiver_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept match get probe evidence after the checked receiver is reassigned before use"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_match_get_shadowed_receiver_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept match get probe evidence after the checked receiver is shadowed before use"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"
@@ -1018,6 +2131,26 @@ expected_operation_family = "raw_pointer_write"
 expected_hazard = "pointer_validity"
 
 [[cases]]
+fixture = "raw_pointer_write_bool_conjunct_branch_guard"
+kind = "positive"
+claim = "raw pointer write_bytes to *mut bool recognizes a top-level conjunctive open branch byte-domain guard as bool value evidence"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_write"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "raw_pointer_write_bool_disjunct_return_guard"
+kind = "positive"
+claim = "raw pointer write_bytes to *mut bool recognizes a top-level disjunctive invalid-byte early return as bool value evidence"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_write"
+expected_hazard = "pointer_validity"
+
+[[cases]]
 fixture = "raw_pointer_write_bool_reassigned_byte_not_guard"
 kind = "false_positive_control"
 claim = "raw pointer write_bytes to *mut bool does not treat a stale byte-domain guard as value evidence after byte reassignment"
@@ -1031,6 +2164,26 @@ expected_hazard = "pointer_validity"
 fixture = "raw_pointer_write_bool_closed_branch_not_guard"
 kind = "false_positive_control"
 claim = "raw pointer write_bytes to *mut bool does not treat a closed positive byte-domain branch as value evidence"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_write"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "raw_pointer_write_bool_disjunct_branch_not_guard"
+kind = "false_positive_control"
+claim = "raw pointer write_bytes to *mut bool does not treat a disjunctive positive byte-domain branch as value evidence"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_write"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "raw_pointer_write_bool_conjunct_return_not_guard"
+kind = "false_positive_control"
+claim = "raw pointer write_bytes to *mut bool does not treat a conjunctive invalid-byte early return as value evidence"
 support_tier = "Raw pointer card slice"
 expected_cards = 1
 expected_class = "guard_missing"
@@ -1228,6 +2381,106 @@ expected_operation_family = "copy_nonoverlapping"
 expected_hazard = "aliasing_or_provenance"
 
 [[cases]]
+fixture = "copy_nonoverlapping_slice_range_disjunctive_early_return_compound_reassigned_count_not_guard"
+kind = "false_positive_control"
+claim = "copy_nonoverlapping rejects stale disjunctive invalid-range early-return evidence after compound assignment mutates the checked count"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "copy_nonoverlapping"
+expected_hazard = "aliasing_or_provenance"
+
+[[cases]]
+fixture = "copy_nonoverlapping_slice_range_disjunctive_early_return_shadowed_count_not_guard"
+kind = "false_positive_control"
+claim = "copy_nonoverlapping rejects stale disjunctive invalid-range early-return evidence after the checked count is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "copy_nonoverlapping"
+expected_hazard = "aliasing_or_provenance"
+
+[[cases]]
+fixture = "copy_nonoverlapping_slice_range_disjunctive_early_return_reassigned_src_not_guard"
+kind = "false_positive_control"
+claim = "copy_nonoverlapping rejects stale disjunctive invalid-range early-return source evidence after the source receiver is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "copy_nonoverlapping"
+expected_hazard = "aliasing_or_provenance"
+
+[[cases]]
+fixture = "copy_nonoverlapping_slice_range_disjunctive_early_return_reassigned_src_path_not_guard"
+kind = "false_positive_control"
+claim = "copy_nonoverlapping rejects stale disjunctive invalid-range early-return source path evidence after the source receiver path is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "copy_nonoverlapping"
+expected_hazard = "aliasing_or_provenance"
+
+[[cases]]
+fixture = "copy_nonoverlapping_slice_range_disjunctive_early_return_shadowed_src_path_not_guard"
+kind = "false_positive_control"
+claim = "copy_nonoverlapping rejects stale disjunctive invalid-range early-return source path evidence after the source receiver path is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "copy_nonoverlapping"
+expected_hazard = "aliasing_or_provenance"
+
+[[cases]]
+fixture = "copy_nonoverlapping_slice_range_disjunctive_early_return_shadowed_src_not_guard"
+kind = "false_positive_control"
+claim = "copy_nonoverlapping rejects stale disjunctive invalid-range early-return source evidence after the source receiver is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "copy_nonoverlapping"
+expected_hazard = "aliasing_or_provenance"
+
+[[cases]]
+fixture = "copy_nonoverlapping_slice_range_disjunctive_early_return_reassigned_dst_not_guard"
+kind = "false_positive_control"
+claim = "copy_nonoverlapping rejects stale disjunctive invalid-range early-return destination evidence after the destination receiver is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "copy_nonoverlapping"
+expected_hazard = "aliasing_or_provenance"
+
+[[cases]]
+fixture = "copy_nonoverlapping_slice_range_disjunctive_early_return_reassigned_dst_path_not_guard"
+kind = "false_positive_control"
+claim = "copy_nonoverlapping rejects stale disjunctive invalid-range early-return destination path evidence after the destination receiver path is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "copy_nonoverlapping"
+expected_hazard = "aliasing_or_provenance"
+
+[[cases]]
+fixture = "copy_nonoverlapping_slice_range_disjunctive_early_return_shadowed_dst_path_not_guard"
+kind = "false_positive_control"
+claim = "copy_nonoverlapping rejects stale disjunctive invalid-range early-return destination path evidence after the destination receiver path is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "copy_nonoverlapping"
+expected_hazard = "aliasing_or_provenance"
+
+[[cases]]
+fixture = "copy_nonoverlapping_slice_range_disjunctive_early_return_shadowed_dst_not_guard"
+kind = "false_positive_control"
+claim = "copy_nonoverlapping rejects stale disjunctive invalid-range early-return destination evidence after the destination receiver is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "copy_nonoverlapping"
+expected_hazard = "aliasing_or_provenance"
+
+[[cases]]
 fixture = "copy_nonoverlapping_slice_range_open_branch_reassigned_count_not_guard"
 kind = "false_positive_control"
 claim = "copy_nonoverlapping rejects stale open-branch slice range evidence after the checked count is reassigned"
@@ -1238,9 +2491,99 @@ expected_operation_family = "copy_nonoverlapping"
 expected_hazard = "aliasing_or_provenance"
 
 [[cases]]
+fixture = "copy_nonoverlapping_slice_range_open_branch_compound_reassigned_count_not_guard"
+kind = "false_positive_control"
+claim = "copy_nonoverlapping rejects stale open-branch slice range evidence after the checked count is compound-reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "copy_nonoverlapping"
+expected_hazard = "aliasing_or_provenance"
+
+[[cases]]
+fixture = "copy_nonoverlapping_slice_range_open_branch_shadowed_count_not_guard"
+kind = "false_positive_control"
+claim = "copy_nonoverlapping rejects stale open-branch slice range evidence after the checked count is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "copy_nonoverlapping"
+expected_hazard = "aliasing_or_provenance"
+
+[[cases]]
 fixture = "copy_nonoverlapping_slice_range_open_branch_reassigned_src_not_guard"
 kind = "false_positive_control"
 claim = "copy_nonoverlapping rejects stale open-branch source slice range evidence after the source receiver is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "copy_nonoverlapping"
+expected_hazard = "aliasing_or_provenance"
+
+[[cases]]
+fixture = "copy_nonoverlapping_slice_range_open_branch_reassigned_src_path_not_guard"
+kind = "false_positive_control"
+claim = "copy_nonoverlapping rejects stale open-branch source path range evidence after the source receiver path is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "copy_nonoverlapping"
+expected_hazard = "aliasing_or_provenance"
+
+[[cases]]
+fixture = "copy_nonoverlapping_slice_range_open_branch_shadowed_src_path_not_guard"
+kind = "false_positive_control"
+claim = "copy_nonoverlapping rejects stale open-branch source path range evidence after the source receiver path is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "copy_nonoverlapping"
+expected_hazard = "aliasing_or_provenance"
+
+[[cases]]
+fixture = "copy_nonoverlapping_slice_range_open_branch_shadowed_src_not_guard"
+kind = "false_positive_control"
+claim = "copy_nonoverlapping rejects stale open-branch source slice range evidence after the source receiver is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "copy_nonoverlapping"
+expected_hazard = "aliasing_or_provenance"
+
+[[cases]]
+fixture = "copy_nonoverlapping_slice_range_open_branch_reassigned_dst_not_guard"
+kind = "false_positive_control"
+claim = "copy_nonoverlapping rejects stale open-branch destination slice range evidence after the destination receiver is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "copy_nonoverlapping"
+expected_hazard = "aliasing_or_provenance"
+
+[[cases]]
+fixture = "copy_nonoverlapping_slice_range_open_branch_reassigned_dst_path_not_guard"
+kind = "false_positive_control"
+claim = "copy_nonoverlapping rejects stale open-branch destination path range evidence after the destination receiver path is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "copy_nonoverlapping"
+expected_hazard = "aliasing_or_provenance"
+
+[[cases]]
+fixture = "copy_nonoverlapping_slice_range_open_branch_shadowed_dst_path_not_guard"
+kind = "false_positive_control"
+claim = "copy_nonoverlapping rejects stale open-branch destination path range evidence after the destination receiver path is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "copy_nonoverlapping"
+expected_hazard = "aliasing_or_provenance"
+
+[[cases]]
+fixture = "copy_nonoverlapping_slice_range_open_branch_shadowed_dst_not_guard"
+kind = "false_positive_control"
+claim = "copy_nonoverlapping rejects stale open-branch destination slice range evidence after the destination receiver is shadowed"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"
@@ -1278,9 +2621,89 @@ expected_operation_family = "copy_nonoverlapping"
 expected_hazard = "aliasing_or_provenance"
 
 [[cases]]
+fixture = "copy_nonoverlapping_slice_range_shadowed_count_not_guard"
+kind = "false_positive_control"
+claim = "copy_nonoverlapping rejects stale slice range evidence after the checked count is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "copy_nonoverlapping"
+expected_hazard = "aliasing_or_provenance"
+
+[[cases]]
 fixture = "copy_nonoverlapping_slice_range_reassigned_src_not_guard"
 kind = "false_positive_control"
 claim = "copy_nonoverlapping rejects stale source slice length evidence after the source receiver is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "copy_nonoverlapping"
+expected_hazard = "aliasing_or_provenance"
+
+[[cases]]
+fixture = "copy_nonoverlapping_slice_range_reassigned_src_path_not_guard"
+kind = "false_positive_control"
+claim = "copy_nonoverlapping rejects stale source path length evidence after the source receiver path is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "copy_nonoverlapping"
+expected_hazard = "aliasing_or_provenance"
+
+[[cases]]
+fixture = "copy_nonoverlapping_slice_range_shadowed_src_path_not_guard"
+kind = "false_positive_control"
+claim = "copy_nonoverlapping rejects stale source path length evidence after the source receiver path is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "copy_nonoverlapping"
+expected_hazard = "aliasing_or_provenance"
+
+[[cases]]
+fixture = "copy_nonoverlapping_slice_range_shadowed_src_not_guard"
+kind = "false_positive_control"
+claim = "copy_nonoverlapping rejects stale source slice length evidence after the source receiver is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "copy_nonoverlapping"
+expected_hazard = "aliasing_or_provenance"
+
+[[cases]]
+fixture = "copy_nonoverlapping_slice_range_reassigned_dst_not_guard"
+kind = "false_positive_control"
+claim = "copy_nonoverlapping rejects stale destination slice length evidence after the destination receiver is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "copy_nonoverlapping"
+expected_hazard = "aliasing_or_provenance"
+
+[[cases]]
+fixture = "copy_nonoverlapping_slice_range_reassigned_dst_path_not_guard"
+kind = "false_positive_control"
+claim = "copy_nonoverlapping rejects stale destination path length evidence after the destination receiver path is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "copy_nonoverlapping"
+expected_hazard = "aliasing_or_provenance"
+
+[[cases]]
+fixture = "copy_nonoverlapping_slice_range_shadowed_dst_path_not_guard"
+kind = "false_positive_control"
+claim = "copy_nonoverlapping rejects stale destination path length evidence after the destination receiver path is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "copy_nonoverlapping"
+expected_hazard = "aliasing_or_provenance"
+
+[[cases]]
+fixture = "copy_nonoverlapping_slice_range_shadowed_dst_not_guard"
+kind = "false_positive_control"
+claim = "copy_nonoverlapping rejects stale destination slice length evidence after the destination receiver is shadowed"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"
@@ -1408,9 +2831,119 @@ expected_operation_family = "ptr_copy"
 expected_hazard = "pointer_validity"
 
 [[cases]]
+fixture = "ptr_copy_slice_range_disjunctive_early_return_compound_reassigned_count_not_guard"
+kind = "false_positive_control"
+claim = "ptr::copy rejects stale disjunctive invalid-range early-return evidence after the checked count is compound-reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "ptr_copy"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "ptr_copy_slice_range_disjunctive_early_return_shadowed_count_not_guard"
+kind = "false_positive_control"
+claim = "ptr::copy rejects stale disjunctive invalid-range early-return evidence after the checked count is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "ptr_copy"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "ptr_copy_slice_range_disjunctive_early_return_reassigned_src_not_guard"
+kind = "false_positive_control"
+claim = "ptr::copy rejects stale disjunctive invalid-range early-return source evidence after the source receiver is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "ptr_copy"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "ptr_copy_slice_range_disjunctive_early_return_reassigned_src_path_not_guard"
+kind = "false_positive_control"
+claim = "ptr::copy rejects stale disjunctive invalid-range early-return source path evidence after the source receiver path is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "ptr_copy"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "ptr_copy_slice_range_disjunctive_early_return_shadowed_src_not_guard"
+kind = "false_positive_control"
+claim = "ptr::copy rejects stale disjunctive invalid-range early-return source evidence after the source receiver is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "ptr_copy"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "ptr_copy_slice_range_disjunctive_early_return_reassigned_dst_not_guard"
+kind = "false_positive_control"
+claim = "ptr::copy rejects stale disjunctive invalid-range early-return destination evidence after the destination receiver is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "ptr_copy"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "ptr_copy_slice_range_disjunctive_early_return_shadowed_dst_not_guard"
+kind = "false_positive_control"
+claim = "ptr::copy rejects stale disjunctive invalid-range early-return destination evidence after the destination receiver is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "ptr_copy"
+expected_hazard = "pointer_validity"
+
+[[cases]]
 fixture = "ptr_copy_slice_range_open_branch_reassigned_count_not_guard"
 kind = "false_positive_control"
 claim = "ptr::copy rejects stale open-branch slice range evidence after the checked count is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "ptr_copy"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "ptr_copy_slice_range_open_branch_compound_reassigned_count_not_guard"
+kind = "false_positive_control"
+claim = "ptr::copy rejects stale open-branch slice range evidence after the checked count is compound-reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "ptr_copy"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "ptr_copy_slice_range_open_branch_shadowed_count_not_guard"
+kind = "false_positive_control"
+claim = "ptr::copy rejects stale open-branch slice range evidence after the checked count is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "ptr_copy"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "ptr_copy_slice_range_open_branch_shadowed_src_not_guard"
+kind = "false_positive_control"
+claim = "ptr::copy rejects stale open-branch source slice range evidence after the source receiver is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "ptr_copy"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "ptr_copy_slice_range_open_branch_shadowed_dst_not_guard"
+kind = "false_positive_control"
+claim = "ptr::copy rejects stale open-branch destination slice range evidence after the destination receiver is shadowed"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"
@@ -1458,9 +2991,139 @@ expected_operation_family = "ptr_copy"
 expected_hazard = "pointer_validity"
 
 [[cases]]
+fixture = "ptr_copy_slice_range_shadowed_count_not_guard"
+kind = "false_positive_control"
+claim = "ptr::copy rejects stale slice range evidence after the checked count is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "ptr_copy"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "ptr_copy_slice_range_open_branch_reassigned_src_not_guard"
+kind = "false_positive_control"
+claim = "ptr::copy rejects stale open-branch source slice evidence after the source receiver is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "ptr_copy"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "ptr_copy_slice_range_open_branch_reassigned_src_path_not_guard"
+kind = "false_positive_control"
+claim = "ptr::copy rejects stale open-branch source path range evidence after the source receiver path is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "ptr_copy"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "ptr_copy_slice_range_open_branch_reassigned_dst_path_not_guard"
+kind = "false_positive_control"
+claim = "ptr::copy rejects stale open-branch destination path range evidence after the destination receiver path is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "ptr_copy"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "ptr_copy_slice_range_open_branch_shadowed_src_path_not_guard"
+kind = "false_positive_control"
+claim = "ptr::copy rejects stale open-branch source path range evidence after the source receiver path is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "ptr_copy"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "ptr_copy_slice_range_open_branch_shadowed_dst_path_not_guard"
+kind = "false_positive_control"
+claim = "ptr::copy rejects stale open-branch destination path range evidence after the destination receiver path is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "ptr_copy"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "ptr_copy_slice_range_reassigned_src_not_guard"
+kind = "false_positive_control"
+claim = "ptr::copy rejects stale source slice length evidence after the source receiver is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "ptr_copy"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "ptr_copy_slice_range_reassigned_src_path_not_guard"
+kind = "false_positive_control"
+claim = "ptr::copy rejects stale source path length evidence after the source receiver path is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "ptr_copy"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "ptr_copy_slice_range_shadowed_src_path_not_guard"
+kind = "false_positive_control"
+claim = "ptr::copy rejects stale source path length evidence after the source receiver path is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "ptr_copy"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "ptr_copy_slice_range_shadowed_src_not_guard"
+kind = "false_positive_control"
+claim = "ptr::copy rejects stale source slice length evidence after the source receiver is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "ptr_copy"
+expected_hazard = "pointer_validity"
+
+[[cases]]
 fixture = "ptr_copy_slice_range_reassigned_dst_not_guard"
 kind = "false_positive_control"
 claim = "ptr::copy rejects stale destination slice length evidence after the destination receiver is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "ptr_copy"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "ptr_copy_slice_range_reassigned_dst_path_not_guard"
+kind = "false_positive_control"
+claim = "ptr::copy rejects stale destination path length evidence after the destination receiver path is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "ptr_copy"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "ptr_copy_slice_range_shadowed_dst_path_not_guard"
+kind = "false_positive_control"
+claim = "ptr::copy rejects stale destination path length evidence after the destination receiver path is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "ptr_copy"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "ptr_copy_slice_range_shadowed_dst_not_guard"
+kind = "false_positive_control"
+claim = "ptr::copy rejects stale destination slice length evidence after the destination receiver is shadowed"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"
@@ -1498,9 +3161,39 @@ expected_operation_family = "str_from_utf8_unchecked"
 expected_hazard = "invalid_value"
 
 [[cases]]
+fixture = "str_from_utf8_unchecked_comment_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked treats SAFETY prose as contract evidence only, not UTF-8 validation evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
 fixture = "str_from_utf8_unchecked_is_ok_guard"
 kind = "positive"
 claim = "str::from_utf8_unchecked recognizes same-buffer from_utf8 is_ok guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_if_let_ok_guard"
+kind = "positive"
+claim = "str::from_utf8_unchecked recognizes same-buffer from_utf8 if-let Ok branch evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_if_let_err_return_guard"
+kind = "positive"
+claim = "str::from_utf8_unchecked recognizes same-buffer from_utf8 if-let Err early-return evidence"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guarded_unwitnessed"
@@ -1518,6 +3211,16 @@ expected_operation_family = "str_from_utf8_unchecked"
 expected_hazard = "invalid_value"
 
 [[cases]]
+fixture = "str_from_utf8_unchecked_is_err_return_comment_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not treat comment-only return text in an is_err branch as UTF-8 validation evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
 fixture = "str_from_utf8_unchecked_question_mark_guard"
 kind = "positive"
 claim = "str::from_utf8_unchecked recognizes same-buffer from_utf8 question-mark propagation evidence"
@@ -1531,6 +3234,26 @@ expected_hazard = "invalid_value"
 fixture = "str_from_utf8_unchecked_match_return_guard"
 kind = "positive"
 claim = "str::from_utf8_unchecked recognizes same-buffer from_utf8 match-return evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_let_else_ok_guard"
+kind = "positive"
+claim = "str::from_utf8_unchecked recognizes same-buffer from_utf8 let-else Ok evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_match_ok_guard"
+kind = "positive"
+claim = "str::from_utf8_unchecked recognizes same-buffer from_utf8 match Ok-arm evidence"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guarded_unwitnessed"
@@ -1558,6 +3281,26 @@ expected_operation_family = "str_from_utf8_unchecked"
 expected_hazard = "invalid_value"
 
 [[cases]]
+fixture = "str_from_utf8_unchecked_prefix_validation_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not accept prefix-only validation as full-buffer UTF-8 evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_suffix_validation_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not accept suffix-only validation as full-buffer UTF-8 evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
 fixture = "str_from_utf8_unchecked_is_ok_observed_not_guard"
 kind = "false_positive_control"
 claim = "str::from_utf8_unchecked does not accept a bare is_ok observation as UTF-8 validation evidence"
@@ -1571,6 +3314,66 @@ expected_hazard = "invalid_value"
 fixture = "str_from_utf8_unchecked_guard_then_reassigned_not_guard"
 kind = "false_positive_control"
 claim = "str::from_utf8_unchecked does not accept UTF-8 validation evidence that is stale after buffer reassignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_guard_then_mutated_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not accept UTF-8 validation evidence that is stale after direct buffer mutation"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_guard_then_shadowed_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not accept UTF-8 validation evidence that is stale after buffer shadowing"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_if_let_ok_shadowed_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not accept if-let Ok branch validation evidence after buffer shadowing"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_if_let_err_reassigned_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not accept if-let Err early-return evidence after buffer reassignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_let_else_ok_reassigned_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not accept let-else Ok UTF-8 evidence after buffer reassignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_match_ok_reassigned_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not accept match Ok-arm UTF-8 evidence after buffer reassignment"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"
@@ -1748,6 +3551,76 @@ expected_operation_family = "pointer_arithmetic"
 expected_hazard = "bounds"
 
 [[cases]]
+fixture = "pointer_arithmetic_other_offset_not_guard"
+kind = "false_positive_control"
+claim = "pointer arithmetic rejects bounds checks for a different offset"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "pointer_arithmetic"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "pointer_arithmetic_reassigned_offset_not_guard"
+kind = "false_positive_control"
+claim = "pointer arithmetic rejects stale offset bounds checks after reassignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "pointer_arithmetic"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "pointer_arithmetic_shadowed_offset_not_guard"
+kind = "false_positive_control"
+claim = "pointer arithmetic rejects stale offset bounds checks after shadowing"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "pointer_arithmetic"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "pointer_arithmetic_compound_offset_not_guard"
+kind = "false_positive_control"
+claim = "pointer arithmetic rejects stale offset bounds checks after compound assignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "pointer_arithmetic"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "pointer_arithmetic_stale_bound_not_guard"
+kind = "false_positive_control"
+claim = "pointer arithmetic rejects stale local bound checks after reassignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "pointer_arithmetic"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "pointer_arithmetic_disjunct_bounds_not_guard"
+kind = "false_positive_control"
+claim = "pointer arithmetic rejects disjunctive positive bounds branches"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "pointer_arithmetic"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "pointer_arithmetic_closed_branch_not_guard"
+kind = "false_positive_control"
+claim = "pointer arithmetic rejects closed positive bounds branches"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "pointer_arithmetic"
+expected_hazard = "bounds"
+
+[[cases]]
 fixture = "pointer_arithmetic_slice_end"
 kind = "positive"
 claim = "pointer arithmetic recognizes slice start plus same-slice len end-pointer evidence"
@@ -1848,6 +3721,16 @@ expected_operation_family = "vec_from_raw_parts"
 expected_hazard = "bounds"
 
 [[cases]]
+fixture = "vec_from_raw_parts_capacity_return_comment_not_guard"
+kind = "false_positive_control"
+claim = "Vec::from_raw_parts does not accept return text inside comments as capacity evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_from_raw_parts"
+expected_hazard = "bounds"
+
+[[cases]]
 fixture = "vec_from_raw_parts_capacity_reassigned_not_guard"
 kind = "false_positive_control"
 claim = "Vec::from_raw_parts does not accept len/cap evidence after the checked cap argument is reassigned"
@@ -1861,6 +3744,16 @@ expected_hazard = "bounds"
 fixture = "vec_from_raw_parts_manuallydrop_origin"
 kind = "positive"
 claim = "Vec::from_raw_parts recognizes same-pointer ManuallyDrop raw-parts pointer/capacity, ownership, initialized-range, and len/capacity evidence without discharging alignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_from_raw_parts"
+expected_hazard = "leak_or_ownership_transfer"
+
+[[cases]]
+fixture = "vec_from_raw_parts_stale_pointer_origin_not_guard"
+kind = "false_positive_control"
+claim = "Vec::from_raw_parts does not accept ManuallyDrop raw-parts origin evidence after the pointer argument is reassigned"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"
@@ -1928,6 +3821,86 @@ expected_operation_family = "transmute"
 expected_hazard = "invalid_value"
 
 [[cases]]
+fixture = "transmute_layout_conjunct_branch_guard"
+kind = "positive"
+claim = "transmute::<u8, bool> recognizes size_of layout evidence as a top-level conjunct in an open branch"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_layout_disjunct_branch_not_guard"
+kind = "false_positive_control"
+claim = "transmute::<u8, bool> rejects size_of layout evidence that appears only in a disjunctive open branch"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_layout_mismatch_return_guard"
+kind = "positive"
+claim = "transmute::<u8, bool> recognizes size_of layout mismatch early-return evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_layout_mismatch_return_comment_not_guard"
+kind = "false_positive_control"
+claim = "transmute::<u8, bool> rejects comment-only layout mismatch return text as layout guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_layout_conjunct_return_not_guard"
+kind = "false_positive_control"
+claim = "transmute::<u8, bool> rejects size_of layout mismatch evidence that appears only in a conjunctive early-return branch"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_layout_closed_branch_not_guard"
+kind = "false_positive_control"
+claim = "transmute::<u8, bool> does not accept closed-branch size_of layout assertions as active layout evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_layout_observed_not_guard"
+kind = "false_positive_control"
+claim = "transmute::<u8, bool> does not accept observed size_of layout equality as active layout evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_bool_comment_not_guard"
+kind = "false_positive_control"
+claim = "transmute::<u8, bool> rejects SAFETY prose that claims bool-byte validity as valid-value evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
 fixture = "transmute_bool_valid_value_guard"
 kind = "positive"
 claim = "transmute::<u8, bool> recognizes explicit size_of layout evidence and u8 bool-domain evidence while keeping witness evidence missing"
@@ -1938,12 +3911,82 @@ expected_operation_family = "transmute"
 expected_hazard = "invalid_value"
 
 [[cases]]
+fixture = "transmute_bool_conjunct_branch_guard"
+kind = "positive"
+claim = "transmute::<u8, bool> recognizes a same-value bool-domain predicate as a top-level conjunct in an open branch"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_bool_disjunct_branch_not_guard"
+kind = "false_positive_control"
+claim = "transmute::<u8, bool> rejects same-value bool-domain predicates that appear only in a disjunctive open branch"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
 fixture = "transmute_bool_invalid_return_guard"
 kind = "positive"
 claim = "transmute::<u8, bool> recognizes explicit size_of layout evidence and u8 invalid-byte early-return evidence while keeping witness evidence missing"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guarded_unwitnessed"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_bool_invalid_return_comment_not_guard"
+kind = "false_positive_control"
+claim = "transmute::<u8, bool> rejects comment-only invalid-byte return text as valid-value guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_bool_disjunct_return_guard"
+kind = "positive"
+claim = "transmute::<u8, bool> recognizes an invalid-byte predicate as a top-level disjunct in an early-return branch"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_bool_conjunct_return_not_guard"
+kind = "false_positive_control"
+claim = "transmute::<u8, bool> rejects invalid-byte predicates that appear only in a conjunctive early-return branch"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_bool_other_value_not_guard"
+kind = "false_positive_control"
+claim = "transmute::<u8, bool> does not accept bool-domain evidence for another source value"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_bool_prior_guarded_call_not_guard"
+kind = "false_positive_control"
+claim = "transmute::<u8, bool> applies bool-domain evidence to the current operation, not a prior guarded transmute"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
 expected_operation_family = "transmute"
 expected_hazard = "invalid_value"
 
@@ -1978,6 +4021,26 @@ expected_operation_family = "transmute"
 expected_hazard = "invalid_value"
 
 [[cases]]
+fixture = "transmute_bool_guard_then_compound_reassigned_not_guard"
+kind = "false_positive_control"
+claim = "transmute::<u8, bool> does not accept bool-domain evidence that is stale after compound reassignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_bool_guard_then_shadowed_not_guard"
+kind = "false_positive_control"
+claim = "transmute::<u8, bool> does not accept bool-domain evidence that is stale after source value shadowing"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
 fixture = "transmute_copy_invalid_value"
 kind = "positive"
 claim = "transmute_copy::<u8, bool> reports invalid-value/layout obligations instead of a generic unsafe function call"
@@ -1998,6 +4061,56 @@ expected_operation_family = "transmute"
 expected_hazard = "invalid_value"
 
 [[cases]]
+fixture = "transmute_copy_layout_conjunct_branch_guard"
+kind = "positive"
+claim = "transmute_copy::<u8, bool> recognizes size_of layout evidence as a top-level conjunct in an open branch"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_copy_layout_disjunct_branch_not_guard"
+kind = "false_positive_control"
+claim = "transmute_copy::<u8, bool> rejects size_of layout evidence that appears only in a disjunctive open branch"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_copy_layout_mismatch_return_guard"
+kind = "positive"
+claim = "transmute_copy::<u8, bool> recognizes size_of layout mismatch early-return evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_copy_layout_mismatch_return_comment_not_guard"
+kind = "false_positive_control"
+claim = "transmute_copy::<u8, bool> rejects comment-only layout mismatch return text as layout guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_copy_layout_conjunct_return_not_guard"
+kind = "false_positive_control"
+claim = "transmute_copy::<u8, bool> rejects size_of layout mismatch evidence that appears only in a conjunctive early-return branch"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
 fixture = "transmute_copy_bool_valid_value_guard"
 kind = "positive"
 claim = "transmute_copy::<u8, bool> recognizes explicit size_of layout evidence and referenced u8 bool-domain evidence while keeping witness evidence missing"
@@ -2008,12 +4121,92 @@ expected_operation_family = "transmute"
 expected_hazard = "invalid_value"
 
 [[cases]]
+fixture = "transmute_copy_bool_comment_not_guard"
+kind = "false_positive_control"
+claim = "transmute_copy::<u8, bool> treats referenced-byte bool-domain SAFETY comments as contract prose, not executable valid-value evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_copy_bool_other_value_not_guard"
+kind = "false_positive_control"
+claim = "transmute_copy::<u8, bool> rejects bool-domain evidence for a different referenced byte"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_copy_bool_prior_guarded_call_not_guard"
+kind = "false_positive_control"
+claim = "transmute_copy::<u8, bool> applies bool-domain evidence to the current operation, not a prior guarded transmute_copy"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_copy_bool_conjunct_branch_guard"
+kind = "positive"
+claim = "transmute_copy::<u8, bool> recognizes a referenced-byte bool-domain predicate as a top-level conjunct in an open branch"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_copy_bool_disjunct_branch_not_guard"
+kind = "false_positive_control"
+claim = "transmute_copy::<u8, bool> rejects referenced-byte bool-domain predicates that appear only in a disjunctive open branch"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
 fixture = "transmute_copy_bool_invalid_return_guard"
 kind = "positive"
 claim = "transmute_copy::<u8, bool> recognizes explicit size_of layout evidence and referenced u8 invalid-byte early-return evidence while keeping witness evidence missing"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guarded_unwitnessed"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_copy_bool_invalid_return_comment_not_guard"
+kind = "false_positive_control"
+claim = "transmute_copy::<u8, bool> rejects comment-only invalid-byte return text as valid-value guard evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_copy_bool_disjunct_return_guard"
+kind = "positive"
+claim = "transmute_copy::<u8, bool> recognizes referenced-byte invalid-domain predicates that appear as a top-level disjunct in an early-return branch"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_copy_bool_conjunct_return_not_guard"
+kind = "false_positive_control"
+claim = "transmute_copy::<u8, bool> rejects referenced-byte invalid-domain predicates that appear only in a conjunctive early-return branch"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
 expected_operation_family = "transmute"
 expected_hazard = "invalid_value"
 
@@ -2041,6 +4234,26 @@ expected_hazard = "invalid_value"
 fixture = "transmute_copy_bool_guard_then_reassigned_not_guard"
 kind = "false_positive_control"
 claim = "transmute_copy::<u8, bool> does not accept referenced-byte bool-domain evidence that is stale after reassignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_copy_bool_guard_then_compound_reassigned_not_guard"
+kind = "false_positive_control"
+claim = "transmute_copy::<u8, bool> does not accept referenced-byte bool-domain evidence that is stale after compound reassignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_copy_bool_guard_then_shadowed_not_guard"
+kind = "false_positive_control"
+claim = "transmute_copy::<u8, bool> does not accept referenced-byte bool-domain evidence that is stale after shadowing"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"
@@ -2088,6 +4301,16 @@ expected_operation_family = "unsafe_impl_send_sync"
 expected_hazard = "send_sync_invariant"
 
 [[cases]]
+fixture = "unsafe_impl_custom_trait_not_send_sync"
+kind = "false_positive_control"
+claim = "custom unsafe trait impls do not receive Send/Sync concurrency witness routing"
+support_tier = "Witness routing"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unknown"
+expected_hazard = "unknown"
+
+[[cases]]
 fixture = "ffi_sanitizer_route"
 kind = "positive"
 claim = "unsafe extern C boundary routes away from Miri-first review"
@@ -2096,6 +4319,66 @@ expected_cards = 1
 expected_class = "miri_unsupported"
 expected_operation_family = "ffi"
 expected_hazard = "ffi_abi"
+
+[[cases]]
+fixture = "ffi_missing_boundary_contract"
+kind = "positive"
+claim = "unsafe extern C boundary without contract evidence still routes to sanitizer/cargo-careful"
+support_tier = "Witness routing"
+expected_cards = 1
+expected_class = "miri_unsupported"
+expected_operation_family = "ffi"
+expected_hazard = "ffi_abi"
+
+[[cases]]
+fixture = "ffi_call_sanitizer_route"
+kind = "positive"
+claim = "unsafe call to a same-file extern C declaration routes away from Miri-first review"
+support_tier = "Witness routing"
+expected_cards = 1
+expected_class = "miri_unsupported"
+expected_operation_family = "ffi"
+expected_hazard = "ffi_abi"
+
+[[cases]]
+fixture = "ffi_qualified_call_sanitizer_route"
+kind = "positive"
+claim = "qualified unsafe call to a same-file extern C declaration routes away from Miri-first review"
+support_tier = "Witness routing"
+expected_cards = 1
+expected_class = "miri_unsupported"
+expected_operation_family = "ffi"
+expected_hazard = "ffi_abi"
+
+[[cases]]
+fixture = "ffi_libc_call_sanitizer_route"
+kind = "positive"
+claim = "unsafe libc path call routes away from Miri-first review"
+support_tier = "Witness routing"
+expected_cards = 1
+expected_class = "miri_unsupported"
+expected_operation_family = "ffi"
+expected_hazard = "ffi_abi"
+
+[[cases]]
+fixture = "ffi_non_libc_wrapper_call_not_route"
+kind = "false_positive_control"
+claim = "local Rust wrapper calls whose module names only resemble libc remain generic unsafe function calls even when a same-named extern declaration exists"
+support_tier = "Witness routing"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unsafe_fn_call"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "ffi_local_libc_module_call_not_route"
+kind = "false_positive_control"
+claim = "local Rust wrapper calls from a same-file module named libc remain generic unsafe function calls instead of known foreign paths"
+support_tier = "Witness routing"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unsafe_fn_call"
+expected_hazard = "unknown"
 
 [[cases]]
 fixture = "safe_code_no_cards"
@@ -2119,12 +4402,29 @@ support_tier = "Diff unsafe site inventory"
 expected_cards = 0
 
 [[cases]]
+fixture = "static_lifetime_mut_ref_not_static_mut"
+kind = "false_positive_control"
+claim = "`'static mut` reference type text emits no static_mut review card"
+support_tier = "Diff unsafe site inventory"
+expected_cards = 0
+
+[[cases]]
 fixture = "target_feature_safety_docs"
 kind = "positive"
 claim = "documented target-feature declarations are caller-contract sites and do not require local attribute guard evidence"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guarded_unwitnessed"
+expected_operation_family = "target_feature"
+expected_hazard = "target_feature"
+
+[[cases]]
+fixture = "target_feature_missing_safety_docs"
+kind = "positive"
+claim = "target-feature declarations without safety docs report missing caller-contract evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "contract_missing"
 expected_operation_family = "target_feature"
 expected_hazard = "target_feature"
 
@@ -2209,6 +4509,16 @@ expected_operation_family = "unsafe_fn_call"
 expected_hazard = "unknown"
 
 [[cases]]
+fixture = "unchecked_constructor_unavailable_return_comment_not_guard"
+kind = "false_positive_control"
+claim = "new_unchecked constructor unavailable-path return comments do not discharge callee-contract evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unsafe_fn_call"
+expected_hazard = "unknown"
+
+[[cases]]
 fixture = "unchecked_constructor_other_availability_not_guard"
 kind = "false_positive_control"
 claim = "new_unchecked constructor availability evidence must come from the same receiver before the call"
@@ -2249,6 +4559,86 @@ expected_operation_family = "nonnull_unchecked"
 expected_hazard = "pointer_validity"
 
 [[cases]]
+fixture = "nonnull_new_reassigned_ptr_not_guard"
+kind = "false_positive_control"
+claim = "NonNull::new question-mark evidence does not discharge the non-null obligation after the checked pointer is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "nonnull_new_shadowed_ptr_not_guard"
+kind = "false_positive_control"
+claim = "NonNull::new question-mark evidence does not discharge the non-null obligation after the checked pointer is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "nonnull_cast_checked_pointer_not_guard"
+kind = "false_positive_control"
+claim = "NonNull::new evidence for a pre-cast pointer does not discharge the non-null obligation for a cast expression passed to NonNull::new_unchecked"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "nonnull_method_receiver_reassigned_not_guard"
+kind = "false_positive_control"
+claim = "NonNull::new_unchecked does not accept method-receiver nullability evidence after the checked receiver is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "nonnull_if_let_new_guard"
+kind = "positive"
+claim = "if-let NonNull::new evidence discharges the non-null obligation for NonNull::new_unchecked"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "nonnull_if_let_new_shadowed_ptr_not_guard"
+kind = "false_positive_control"
+claim = "if-let NonNull::new evidence does not discharge the non-null obligation after the checked pointer is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "nonnull_let_else_new_guard"
+kind = "positive"
+claim = "let-else NonNull::new evidence discharges the non-null obligation for NonNull::new_unchecked"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "nonnull_match_new_guard"
+kind = "positive"
+claim = "match NonNull::new Some-arm evidence discharges the non-null obligation for NonNull::new_unchecked"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+
+[[cases]]
 fixture = "nonnull_other_guard_not_evidence"
 kind = "false_positive_control"
 claim = "NonNull::new evidence for a different pointer does not discharge the non-null obligation"
@@ -2269,6 +4659,106 @@ expected_operation_family = "nonnull_unchecked"
 expected_hazard = "pointer_validity"
 
 [[cases]]
+fixture = "nonnull_is_null_return_comment_not_guard"
+kind = "false_positive_control"
+claim = "comment-only return text in a same-pointer is_null branch does not discharge the non-null obligation"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "nonnull_is_null_disjunct_return_guard"
+kind = "positive"
+claim = "same-pointer is_null evidence in a top-level disjunction with an early return discharges the non-null obligation after the guard"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "nonnull_is_null_conjunct_return_not_guard"
+kind = "false_positive_control"
+claim = "same-pointer is_null evidence in a conjunction with an early return does not discharge the non-null obligation after the guard"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "nonnull_is_null_reassigned_ptr_not_guard"
+kind = "false_positive_control"
+claim = "same-pointer is_null early-return evidence does not discharge the non-null obligation after the checked pointer is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "nonnull_is_null_shadowed_ptr_not_guard"
+kind = "false_positive_control"
+claim = "same-pointer is_null early-return evidence does not discharge the non-null obligation after the checked pointer is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "nonnull_is_null_open_branch_guard"
+kind = "positive"
+claim = "same-pointer non-null open-branch evidence discharges the non-null obligation for NonNull::new_unchecked"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "nonnull_is_null_conjunct_open_branch_guard"
+kind = "positive"
+claim = "same-pointer non-null evidence in a top-level conjunction discharges the non-null obligation inside the open branch"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "nonnull_is_null_disjunct_open_branch_not_guard"
+kind = "false_positive_control"
+claim = "same-pointer non-null evidence in a disjunction does not discharge the non-null obligation inside the branch"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "nonnull_is_null_open_branch_reassigned_ptr_not_guard"
+kind = "false_positive_control"
+claim = "same-pointer non-null open-branch evidence does not discharge the non-null obligation after the checked pointer is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "nonnull_is_null_open_branch_shadowed_ptr_not_guard"
+kind = "false_positive_control"
+claim = "same-pointer non-null open-branch evidence does not discharge the non-null obligation after the checked pointer is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+
+[[cases]]
 fixture = "nonnull_observed_not_guard"
 kind = "false_positive_control"
 claim = "bare same-pointer NonNull::new observation does not discharge the non-null obligation"
@@ -2282,6 +4772,56 @@ expected_hazard = "pointer_validity"
 fixture = "nonnull_post_check_not_guard"
 kind = "false_positive_control"
 claim = "same-pointer nullability evidence after NonNull::new_unchecked does not discharge the non-null obligation"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "nonnull_if_let_new_reassigned_ptr_not_guard"
+kind = "false_positive_control"
+claim = "if-let NonNull::new evidence does not discharge the non-null obligation after the checked pointer is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "nonnull_let_else_new_reassigned_ptr_not_guard"
+kind = "false_positive_control"
+claim = "let-else NonNull::new evidence does not discharge the non-null obligation after the checked pointer is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "nonnull_let_else_new_shadowed_ptr_not_guard"
+kind = "false_positive_control"
+claim = "let-else NonNull::new evidence does not discharge the non-null obligation after the checked pointer is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "nonnull_match_new_reassigned_ptr_not_guard"
+kind = "false_positive_control"
+claim = "match NonNull::new Some-arm evidence does not discharge the non-null obligation after the checked pointer is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "nonnull_match_new_shadowed_ptr_not_guard"
+kind = "false_positive_control"
+claim = "match NonNull::new Some-arm evidence does not discharge the non-null obligation after the checked pointer is shadowed"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"

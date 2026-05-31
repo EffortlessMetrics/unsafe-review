@@ -12,7 +12,7 @@ Linked plan: ../../plans/0.1.0/implementation-plan.md
 
 ## Behavior
 
-LSP v1 is read-only: diagnostics, hover, status, copy agent packet, copy witness command, open related test.
+LSP v1 is read-only: diagnostics, hover, status, copy agent packet, copy witness command without running it, open related test.
 The first supported surface is a saved JSON projection rendered with
 `unsafe-review check --format lsp`. It is not an LSP server and it does not
 edit source. The projection derives diagnostics, hovers, and command-style
@@ -22,9 +22,13 @@ safety conditions, obligation-level evidence states, and the static-review
 trust boundary. Diagnostics also include the concrete operation expression from
 the `ReviewCard`, so editor consumers do not need to parse hover text or
 reclassify findings. Hover text is a compact reviewer view: card identity,
-required safety conditions, ReviewCard evidence summaries, missing evidence,
-next action, verify commands when available, witness route, and the
-static-review trust boundary. Code actions include stable object `payload`
+human-readable location, relevant hazard families, required safety conditions,
+ReviewCard evidence summaries, missing evidence, next action, what would not
+resolve the card,
+including that widening unsafe scope, suppressing the card, or changing
+unrelated unsafe code is not a resolution; verify commands when available;
+witness route; card-scoped `explain` and `context --json` handoff commands; and
+the static-review trust boundary. Code actions include stable object `payload`
 fields with `card_id` plus action-specific details so editor adapters do not
 need to parse positional legacy arguments.
 
@@ -39,9 +43,13 @@ not reclassify cards, invent separate evidence, or parse prose to recover
 machine fields.
 
 Code actions are command-only. They may copy a bounded agent packet, copy a
-witness command, explain a witness route, or open a statically related test.
+witness command without running it, explain a witness route, or open a
+statically related test.
 They must not contain `WorkspaceEdit`, apply patches, insert SAFETY comments,
-execute witnesses, post comments, or enforce policy.
+execute witnesses, post comments, or enforce policy. This applies to both the
+top-level action object and nested command payloads.
+Witness-command actions must copy only commands already projected from the same
+ReviewCard's verify commands.
 
 Every diagnostic and card-scoped action must carry the relevant `card_id` and
 the static-review trust boundary. Diagnostic data must include the operation

@@ -1,4 +1,22 @@
+use super::atomic_pointer_state::is_atomic_pointer_state_transition;
+use super::copy_operation::copy_operation_family;
+use super::ffi_boundary::ffi_boundary_applicability;
+use super::maybeuninit_operation::maybeuninit_operation_family;
+use super::nonnull_operation::nonnull_operation_family;
+use super::slice_operation::slice_operation_family;
+use super::static_mut::{is_static_mut_item, parse_static_mut_name};
 use super::syntax::{ParsedSource, SyntaxNodeFact};
+use super::target_feature::is_target_feature_attribute;
+use super::transmute_operation::{
+    is_incomplete_multiline_transmute_copy, transmute_operation_family,
+};
+use super::unsafe_impl::{
+    is_impl_declaration_line, parse_impl_declaration_owner, parse_impl_owner, parse_impl_trait_name,
+};
+use super::unwrap_operation::unwrap_operation_family;
+use super::utf8_operation::utf8_operation_family;
+use super::vec_operation::vec_operation_family;
+use super::zeroed_operation::zeroed_operation_family;
 use crate::domain::{OperationFamily, SourceLocation, UnsafeOperation, UnsafeSite, UnsafeSiteKind};
 use crate::input::diff::DiffIndex;
 use std::collections::BTreeSet;
@@ -26,7 +44,9 @@ pub(crate) fn scan_file(
         fs::read_to_string(&abs).map_err(|err| format!("read {} failed: {err}", abs.display()))?;
     let lines: Vec<&str> = text.lines().collect();
     let parsed = super::syntax::parse_source(text.as_str());
-    let syntax_sites = detect_syntax_sites(&parsed);
+    let extern_names = extern_fn_names(&lines);
+    let local_modules = local_module_names(&lines);
+    let syntax_sites = detect_syntax_sites(&parsed, &extern_names, &local_modules);
     let syntax_operation_lines = syntax_sites
         .iter()
         .filter(|site| site.kind == UnsafeSiteKind::Operation)
@@ -60,7 +80,8 @@ pub(crate) fn scan_file(
         if kind == UnsafeSiteKind::UnsafeBlock
             && family == OperationFamily::Unknown
             && (syntax_operation_lines.contains(&line_no)
-                || syntax_operation_block_lines.contains(&line_no))
+                || syntax_operation_block_lines.contains(&line_no)
+                || fallback_unsafe_block_contains_specific_operation(&lines, idx))
         {
             continue;
         }
@@ -76,7 +97,19 @@ pub(crate) fn scan_file(
         if !changed && !repo_mode {
             continue;
         }
-        let owner = find_owner(&lines, idx);
+        let owner = match (&kind, &family) {
+            (UnsafeSiteKind::ExternBlock, OperationFamily::Ffi) => {
+                find_extern_block_owner(&lines, idx)
+            }
+            (UnsafeSiteKind::Operation, OperationFamily::TargetFeature) => {
+                find_following_fn_owner(&lines, idx)
+            }
+            (UnsafeSiteKind::StaticMut, OperationFamily::StaticMut) => {
+                parse_static_mut_name(detection_trimmed)
+            }
+            _ => None,
+        }
+        .or_else(|| find_owner(&lines, idx));
         let visibility = visibility_for_snippet(trimmed).to_string();
         let public_api_surface = is_public_api_surface(&kind, trimmed);
         let context_before = context_before_site(&lines, idx);
@@ -172,17 +205,21 @@ fn context_slice(lines: &[&str], start: usize, end: usize) -> Vec<String> {
         .collect()
 }
 
+#[derive(Clone, Debug)]
+struct StringDetectionState {
+    raw_hashes: Option<usize>,
+    escaped: bool,
+}
+
 #[derive(Default)]
 struct LineCommentState {
     block_depth: usize,
+    string: Option<StringDetectionState>,
 }
 
 fn line_for_text_detection(line: &str, state: &mut LineCommentState) -> String {
     let mut out = String::with_capacity(line.len());
     let mut chars = line.chars().peekable();
-    let mut in_string = false;
-    let mut string_hashes = 0usize;
-    let mut escaped = false;
 
     while let Some(ch) = chars.next() {
         if state.block_depth > 0 {
@@ -196,21 +233,22 @@ fn line_for_text_detection(line: &str, state: &mut LineCommentState) -> String {
             continue;
         }
 
-        if in_string {
-            if string_hashes == 0 {
-                if escaped {
-                    escaped = false;
-                } else if ch == '\\' {
-                    escaped = true;
-                } else if ch == '"' {
-                    in_string = false;
-                    out.push('"');
+        if let Some(string) = &mut state.string {
+            let mut closed = false;
+            if let Some(raw_hashes) = string.raw_hashes {
+                if ch == '"' && raw_string_hashes_at_end(&mut chars, raw_hashes) {
+                    closed = true;
                 }
-                continue;
+            } else if string.escaped {
+                string.escaped = false;
+            } else if ch == '\\' {
+                string.escaped = true;
+            } else if ch == '"' {
+                closed = true;
             }
 
-            if ch == '"' && raw_string_hashes_at_end(&mut chars, string_hashes) {
-                in_string = false;
+            if closed {
+                state.string = None;
                 out.push('"');
             }
             continue;
@@ -224,6 +262,10 @@ fn line_for_text_detection(line: &str, state: &mut LineCommentState) -> String {
             let _ = chars.next();
             continue;
         }
+        if ch == '\'' && consume_char_literal(&mut chars) {
+            out.push('\'');
+            continue;
+        }
         if ch == 'r'
             && let Some(hashes) = raw_string_hashes_at_start(&mut chars)
         {
@@ -231,15 +273,18 @@ fn line_for_text_detection(line: &str, state: &mut LineCommentState) -> String {
                 let _ = chars.next();
             }
             let _ = chars.next();
-            in_string = true;
-            string_hashes = hashes;
+            state.string = Some(StringDetectionState {
+                raw_hashes: Some(hashes),
+                escaped: false,
+            });
             out.push('"');
             continue;
         }
         if ch == '"' {
-            in_string = true;
-            string_hashes = 0;
-            escaped = false;
+            state.string = Some(StringDetectionState {
+                raw_hashes: None,
+                escaped: false,
+            });
             out.push('"');
             continue;
         }
@@ -247,6 +292,33 @@ fn line_for_text_detection(line: &str, state: &mut LineCommentState) -> String {
     }
 
     out
+}
+
+fn consume_char_literal<I>(chars: &mut std::iter::Peekable<I>) -> bool
+where
+    I: Iterator<Item = char> + Clone,
+{
+    let mut clone = chars.clone();
+    let Some(first) = clone.next() else {
+        return false;
+    };
+    if first == '\n' || first == '\r' {
+        return false;
+    }
+    if first == '\\' {
+        let Some(escaped) = clone.next() else {
+            return false;
+        };
+        if escaped == '\n' || escaped == '\r' {
+            return false;
+        }
+    }
+    if clone.next() != Some('\'') {
+        return false;
+    }
+
+    while chars.next() != Some('\'') {}
+    true
 }
 
 fn raw_string_hashes_at_start<I>(chars: &mut std::iter::Peekable<I>) -> Option<usize>
@@ -307,48 +379,20 @@ fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
     if is_import_item(line) {
         return None;
     }
-    if contains_call_name(line, "copy_nonoverlapping") {
-        return Some((
-            UnsafeSiteKind::Operation,
-            OperationFamily::CopyNonOverlapping,
-        ));
+    if let Some(family) = detect_operation_family(line) {
+        return Some((UnsafeSiteKind::Operation, family));
     }
-    if is_ptr_copy_call(line) {
-        return Some((UnsafeSiteKind::Operation, OperationFamily::PtrCopy));
+    if let Some(family) = utf8_operation_family(line) {
+        return Some((UnsafeSiteKind::Operation, family));
     }
-    if is_ptr_replace_call(line) {
-        return Some((UnsafeSiteKind::Operation, OperationFamily::PtrReplace));
+    if let Some(family) = maybeuninit_operation_family(line) {
+        return Some((UnsafeSiteKind::Operation, family));
     }
-    if is_vec_from_raw_parts_call(line) {
-        return Some((UnsafeSiteKind::Operation, OperationFamily::VecFromRawParts));
+    if let Some(family) = transmute_operation_family(line) {
+        return Some((UnsafeSiteKind::Operation, family));
     }
-    if contains_call_name(line, "from_raw_parts") || contains_call_name(line, "from_raw_parts_mut")
-    {
-        return Some((
-            UnsafeSiteKind::Operation,
-            OperationFamily::SliceFromRawParts,
-        ));
-    }
-    if contains_call_name(line, "from_utf8_unchecked") {
-        return Some((
-            UnsafeSiteKind::Operation,
-            OperationFamily::StrFromUtf8Unchecked,
-        ));
-    }
-    if is_maybeuninit_assume_init_call(line) {
-        return Some((
-            UnsafeSiteKind::Operation,
-            OperationFamily::MaybeUninitAssumeInit,
-        ));
-    }
-    if contains_call_name(line, "set_len") {
-        return Some((UnsafeSiteKind::Operation, OperationFamily::VecSetLen));
-    }
-    if contains_call_name(line, "transmute") || contains_call_name(line, "transmute_copy") {
-        return Some((UnsafeSiteKind::Operation, OperationFamily::Transmute));
-    }
-    if contains_call_name(line, "zeroed") {
-        return Some((UnsafeSiteKind::Operation, OperationFamily::Zeroed));
+    if let Some(family) = zeroed_operation_family(line) {
+        return Some((UnsafeSiteKind::Operation, family));
     }
     if contains_call_name(line, "drop_in_place") {
         return Some((UnsafeSiteKind::Operation, OperationFamily::DropInPlace));
@@ -365,8 +409,8 @@ fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
             OperationFamily::UnreachableUnchecked,
         ));
     }
-    if contains_call_name(line, "unwrap_unchecked") {
-        return Some((UnsafeSiteKind::Operation, OperationFamily::UnwrapUnchecked));
+    if let Some(family) = unwrap_operation_family(line) {
+        return Some((UnsafeSiteKind::Operation, family));
     }
     if contains_call_name(line, "from_raw") {
         return Some((UnsafeSiteKind::Operation, OperationFamily::BoxFromRaw));
@@ -377,8 +421,8 @@ fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
     if contains_call_name(line, "get_unchecked") || contains_call_name(line, "get_unchecked_mut") {
         return Some((UnsafeSiteKind::Operation, OperationFamily::GetUnchecked));
     }
-    if contains_call_name(line, "new_unchecked") && is_nonnull_new_unchecked_call(line) {
-        return Some((UnsafeSiteKind::Operation, OperationFamily::NonNullUnchecked));
+    if let Some(family) = nonnull_operation_family(line) {
+        return Some((UnsafeSiteKind::Operation, family));
     }
     if contains_call_name(line, "new_unchecked") {
         return Some((UnsafeSiteKind::Operation, OperationFamily::UnsafeFnCall));
@@ -432,6 +476,89 @@ fn is_extern_boundary(line: &str) -> bool {
         || trimmed.starts_with("extern {")
 }
 
+fn extern_fn_names(lines: &[&str]) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    let mut in_extern = false;
+    let mut module_stack: Vec<(String, usize)> = Vec::new();
+    let mut brace_depth = 0usize;
+    let mut state = LineCommentState::default();
+    for raw in lines {
+        let detection_line = line_for_text_detection(raw, &mut state);
+        let trimmed = detection_line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        while module_stack
+            .last()
+            .is_some_and(|(_name, depth)| brace_depth < *depth)
+        {
+            module_stack.pop();
+        }
+        if trimmed.contains('{')
+            && let Some(module_name) = parse_mod_name(trimmed)
+        {
+            module_stack.push((module_name, brace_depth + 1));
+        }
+        if is_extern_boundary(trimmed) {
+            in_extern = true;
+        }
+        if in_extern {
+            if let Some(name) = parse_fn_name(trimmed) {
+                insert_extern_call_paths(&mut names, &module_stack, &name);
+            }
+            if trimmed.contains('}') {
+                in_extern = false;
+            }
+        }
+        brace_depth = update_brace_depth(trimmed, brace_depth);
+    }
+    names
+}
+
+fn local_module_names(lines: &[&str]) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    let mut state = LineCommentState::default();
+    for raw in lines {
+        let detection_line = line_for_text_detection(raw, &mut state);
+        let trimmed = detection_line.trim();
+        if let Some(name) = parse_mod_name(trimmed) {
+            names.insert(name);
+        }
+    }
+    names
+}
+
+fn insert_extern_call_paths(
+    names: &mut BTreeSet<String>,
+    module_stack: &[(String, usize)],
+    name: &str,
+) {
+    if module_stack.is_empty() {
+        names.insert(name.to_string());
+        return;
+    }
+    let module_path = module_stack
+        .iter()
+        .map(|(module, _depth)| module.as_str())
+        .collect::<Vec<_>>()
+        .join("::");
+    let qualified = format!("{module_path}::{name}");
+    names.insert(qualified.clone());
+    names.insert(format!("crate::{qualified}"));
+    names.insert(format!("self::{qualified}"));
+}
+
+fn update_brace_depth(line: &str, mut depth: usize) -> usize {
+    for ch in line.chars() {
+        match ch {
+            '{' => depth += 1,
+            '}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    depth
+}
+
 fn is_import_item(line: &str) -> bool {
     let trimmed = line.trim_start();
     trimmed.starts_with("use ")
@@ -439,20 +566,17 @@ fn is_import_item(line: &str) -> bool {
         || (trimmed.starts_with("pub(") && trimmed.contains(" use "))
 }
 
-fn is_static_mut_item(line: &str) -> bool {
-    let trimmed = line.trim_start();
-    if trimmed.starts_with("static mut ") {
-        return true;
+fn detect_operation_family(line: &str) -> Option<OperationFamily> {
+    if let Some(family) = copy_operation_family(line) {
+        return Some(family);
     }
-    if let Some(rest) = trimmed.strip_prefix("pub ") {
-        return rest.trim_start().starts_with("static mut ");
+    if let Some(family) = vec_operation_family(line) {
+        return Some(family);
     }
-    if trimmed.starts_with("pub(") {
-        return trimmed
-            .split_once(')')
-            .is_some_and(|(_visibility, rest)| rest.trim_start().starts_with("static mut "));
+    if let Some(family) = slice_operation_family(line) {
+        return Some(family);
     }
-    false
+    None
 }
 
 fn contains_call_name(line: &str, name: &str) -> bool {
@@ -473,13 +597,31 @@ fn contains_call_name(line: &str, name: &str) -> bool {
 }
 
 fn unsafe_block_contains_call(line: &str) -> bool {
-    let Some((_before, after_unsafe)) = line.split_once("unsafe") else {
+    let Some(after_unsafe) = unsafe_keyword_tail(line) else {
         return false;
     };
     let Some((_before_block, after_open)) = after_unsafe.split_once('{') else {
         return false;
     };
     after_open.contains('(') && after_open.contains(')')
+}
+
+fn unsafe_keyword_tail(line: &str) -> Option<&str> {
+    let mut cursor = line;
+    while let Some(pos) = cursor.find("unsafe") {
+        let before = cursor[..pos].chars().next_back();
+        let after = &cursor[pos + "unsafe".len()..];
+        let starts_on_boundary = before.is_none_or(|ch| !is_ident_continue(ch));
+        let ends_on_boundary = after.chars().next().is_none_or(|ch| !is_ident_continue(ch));
+        if starts_on_boundary && ends_on_boundary {
+            return Some(after);
+        }
+        cursor = &after[after
+            .char_indices()
+            .next()
+            .map_or(after.len(), |(idx, ch)| idx + ch.len_utf8())..];
+    }
+    None
 }
 
 fn call_suffix(after_name: &str) -> bool {
@@ -495,54 +637,6 @@ fn is_ident_continue(ch: char) -> bool {
     ch == '_' || ch.is_ascii_alphanumeric()
 }
 
-fn is_target_feature_attribute(line: &str) -> bool {
-    let trimmed = line.trim_start();
-    trimmed.starts_with("#[target_feature") || contains_call_name(trimmed, "target_feature")
-}
-
-fn is_nonnull_new_unchecked_call(line: &str) -> bool {
-    compact_whitespace(line).contains("NonNull::new_unchecked")
-}
-
-fn is_vec_from_raw_parts_call(line: &str) -> bool {
-    let compact = compact_whitespace(line);
-    compact.contains("Vec::from_raw_parts") || compact.contains("vec::Vec::from_raw_parts")
-}
-
-fn is_maybeuninit_assume_init_call(line: &str) -> bool {
-    contains_call_name(line, "assume_init")
-        || contains_call_name(line, "assume_init_read")
-        || contains_call_name(line, "assume_init_ref")
-        || contains_call_name(line, "assume_init_mut")
-        || contains_call_name(line, "assume_init_drop")
-}
-
-fn is_ptr_copy_call(line: &str) -> bool {
-    let compact = compact_whitespace(line);
-    !compact.contains("copy_nonoverlapping")
-        && (compact.contains("ptr::copy(")
-            || compact.contains("core::ptr::copy(")
-            || compact.contains("std::ptr::copy("))
-}
-
-fn is_ptr_replace_call(line: &str) -> bool {
-    let compact = compact_whitespace(line);
-    compact.contains("ptr::replace(")
-        || compact.contains("core::ptr::replace(")
-        || compact.contains("std::ptr::replace(")
-}
-
-fn is_atomic_pointer_state_transition(line: &str) -> bool {
-    contains_call_name(line, "swap")
-        && line.contains("ptr::null_mut")
-        && line.contains("Ordering::")
-}
-
-fn is_incomplete_multiline_transmute_copy(line: &str) -> bool {
-    let compact = compact_whitespace(line);
-    compact.ends_with("transmute_copy::<")
-}
-
 #[derive(Clone, Debug)]
 struct DetectedSyntaxSite {
     line: usize,
@@ -556,7 +650,11 @@ struct DetectedSyntaxSite {
     source_snippet: String,
 }
 
-fn detect_syntax_sites(parsed: &ParsedSource) -> Vec<DetectedSyntaxSite> {
+fn detect_syntax_sites(
+    parsed: &ParsedSource,
+    extern_names: &BTreeSet<String>,
+    local_modules: &BTreeSet<String>,
+) -> Vec<DetectedSyntaxSite> {
     let mut sites = Vec::new();
     let unsafe_block_ranges = unsafe_block_ranges(parsed);
     let operation_block_ranges = operation_block_ranges(parsed, &unsafe_block_ranges);
@@ -566,6 +664,8 @@ fn detect_syntax_sites(parsed: &ParsedSource) -> Vec<DetectedSyntaxSite> {
             &parsed.text,
             &unsafe_block_ranges,
             &operation_block_ranges,
+            extern_names,
+            local_modules,
         ) else {
             continue;
         };
@@ -593,29 +693,47 @@ fn detect_syntax_sites(parsed: &ParsedSource) -> Vec<DetectedSyntaxSite> {
 }
 
 fn without_parent_duplicate_operations(sites: Vec<DetectedSyntaxSite>) -> Vec<DetectedSyntaxSite> {
-    sites
+    let mut operation_indices: Vec<usize> = sites
         .iter()
         .enumerate()
-        .filter(|(idx, site)| {
-            !is_parent_duplicate_operation(
-                site,
-                sites[..*idx].iter().chain(sites[*idx + 1..].iter()),
-            )
-        })
-        .map(|(_idx, site)| site.clone())
-        .collect()
-}
+        .filter_map(|(index, site)| (site.kind == UnsafeSiteKind::Operation).then_some(index))
+        .collect();
+    operation_indices.sort_by(|left, right| {
+        sites[*left]
+            .family
+            .as_str()
+            .cmp(sites[*right].family.as_str())
+            .then(sites[*left].start.cmp(&sites[*right].start))
+            .then(sites[*right].end.cmp(&sites[*left].end))
+    });
 
-fn is_parent_duplicate_operation<'a>(
-    site: &DetectedSyntaxSite,
-    others: impl Iterator<Item = &'a DetectedSyntaxSite>,
-) -> bool {
-    site.kind == UnsafeSiteKind::Operation
-        && others
-            .filter(|other| other.kind == UnsafeSiteKind::Operation)
-            .any(|other| {
-                site.family == other.family && site.start < other.start && other.end < site.end
-            })
+    let mut parent_duplicate = vec![false; sites.len()];
+    let mut active_ranges: Vec<(usize, OperationFamily, usize, usize)> = Vec::new();
+
+    for index in operation_indices {
+        let site = &sites[index];
+        while let Some((_index, family, _start, end)) = active_ranges.last() {
+            if *family != site.family || *end <= site.start {
+                active_ranges.pop();
+                continue;
+            }
+            break;
+        }
+
+        for (parent_index, family, start, end) in &active_ranges {
+            if *family == site.family && *start < site.start && site.end < *end {
+                parent_duplicate[*parent_index] = true;
+            }
+        }
+
+        active_ranges.push((index, site.family.clone(), site.start, site.end));
+    }
+
+    sites
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, site)| (!parent_duplicate[index]).then_some(site))
+        .collect()
 }
 
 fn syntax_owner(site: &DetectedSyntaxSite, lines: &[&str], idx: usize) -> Option<String> {
@@ -625,6 +743,13 @@ fn syntax_owner(site: &DetectedSyntaxSite, lines: &[&str], idx: usize) -> Option
         UnsafeSiteKind::UnsafeImpl
         | UnsafeSiteKind::UnsafeImplSend
         | UnsafeSiteKind::UnsafeImplSync => parse_impl_owner(&site.source_snippet),
+        UnsafeSiteKind::ExternBlock => {
+            parse_fn_name(&site.source_snippet).or_else(|| find_extern_block_owner(lines, idx))
+        }
+        UnsafeSiteKind::StaticMut => parse_static_mut_name(&site.source_snippet),
+        UnsafeSiteKind::Operation if site.family == OperationFamily::TargetFeature => {
+            find_following_fn_owner(lines, idx)
+        }
         _ => None,
     }
     .or_else(|| find_owner(lines, idx))
@@ -636,6 +761,14 @@ fn syntax_site_covers_fallback(
     kind: &UnsafeSiteKind,
     family: &OperationFamily,
 ) -> bool {
+    if *kind == UnsafeSiteKind::Operation && *family == OperationFamily::UnsafeFnCall {
+        return syntax_sites.iter().any(|site| {
+            site.kind == UnsafeSiteKind::FfiCall
+                && site.family == OperationFamily::Ffi
+                && site.line <= line
+                && line <= site.end_line
+        });
+    }
     if !matches!(
         kind,
         UnsafeSiteKind::UnsafeFn
@@ -666,6 +799,63 @@ fn syntax_operation_covers_fallback(
     })
 }
 
+fn fallback_unsafe_block_contains_specific_operation(lines: &[&str], start_idx: usize) -> bool {
+    let mut line_comment_state = LineCommentState::default();
+    let mut entered = false;
+    let mut saw_open = false;
+    let mut depth = 0usize;
+    let mut block_text = String::new();
+
+    for (idx, raw) in lines.iter().enumerate().skip(start_idx).take(80) {
+        let detection_line = line_for_text_detection(raw, &mut line_comment_state);
+        let trimmed = detection_line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if !entered {
+            if trimmed.contains("unsafe {") || trimmed == "unsafe" {
+                entered = true;
+            } else {
+                continue;
+            }
+        } else if fallback_line_is_specific_operation(trimmed) {
+            return true;
+        } else {
+            if !block_text.is_empty() {
+                block_text.push(' ');
+            }
+            block_text.push_str(trimmed);
+            if fallback_line_is_specific_operation(&block_text) {
+                return true;
+            }
+        }
+
+        for ch in trimmed.chars() {
+            match ch {
+                '{' => {
+                    saw_open = true;
+                    depth += 1;
+                }
+                '}' => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+        }
+        if idx > start_idx && saw_open && depth == 0 {
+            return false;
+        }
+    }
+    false
+}
+
+fn fallback_line_is_specific_operation(trimmed: &str) -> bool {
+    matches!(
+        detect_site(trimmed),
+        Some((UnsafeSiteKind::Operation, family))
+            if !matches!(family, OperationFamily::Unknown | OperationFamily::UnsafeFnCall)
+    )
+}
+
 fn syntax_site_uses_exact_range(kind: &UnsafeSiteKind) -> bool {
     matches!(
         kind,
@@ -684,6 +874,8 @@ fn detect_syntax_site(
     source: &str,
     unsafe_block_ranges: &[(usize, usize)],
     operation_block_ranges: &BTreeSet<(usize, usize)>,
+    extern_names: &BTreeSet<String>,
+    local_modules: &BTreeSet<String>,
 ) -> Option<(UnsafeSiteKind, OperationFamily)> {
     if !syntax_kind_can_be_unsafe_site(&fact.kind) {
         return None;
@@ -726,6 +918,13 @@ fn detect_syntax_site(
         }
         "STATIC" if compact.contains("static mut") => {
             Some((UnsafeSiteKind::StaticMut, OperationFamily::StaticMut))
+        }
+        "BLOCK_EXPR"
+            if compact.starts_with("unsafe {")
+                && !operation_block_ranges.contains(&(fact.start, fact.end))
+                && ffi_boundary_applicability(&compact, extern_names, local_modules) =>
+        {
+            Some((UnsafeSiteKind::FfiCall, OperationFamily::Ffi))
         }
         "BLOCK_EXPR"
             if compact.starts_with("unsafe {")
@@ -803,6 +1002,7 @@ fn card_snippet_for(
                 .filter(|line| !line.is_empty())
                 .unwrap_or_else(|| normalize_call_spacing(&compact))
         }
+        UnsafeSiteKind::FfiCall => normalize_call_spacing(&compact),
         UnsafeSiteKind::Operation => normalize_call_spacing(&compact),
         _ => compact,
     }
@@ -1047,6 +1247,41 @@ fn find_owner(lines: &[&str], idx: usize) -> Option<String> {
     None
 }
 
+fn find_following_fn_owner(lines: &[&str], idx: usize) -> Option<String> {
+    for line in lines.iter().skip(idx + 1).take(8) {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty()
+            || trimmed.starts_with("#[")
+            || trimmed.starts_with("///")
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+        return parse_fn_name(trimmed);
+    }
+    None
+}
+
+fn find_extern_block_owner(lines: &[&str], idx: usize) -> Option<String> {
+    for line in lines.iter().skip(idx).take(16) {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty()
+            || trimmed.starts_with("#[")
+            || trimmed.starts_with("///")
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+        if let Some(name) = parse_fn_name(trimmed) {
+            return Some(name);
+        }
+        if trimmed.contains('}') {
+            break;
+        }
+    }
+    None
+}
+
 fn context_before_site(lines: &[&str], idx: usize) -> Vec<String> {
     let mut start = idx.saturating_sub(8);
     if let Some(owner_idx) = find_owner_declaration_index(lines, idx) {
@@ -1137,34 +1372,14 @@ fn owner_doc_start(lines: &[&str], decl_idx: usize) -> usize {
     start
 }
 
-fn parse_impl_owner(line: &str) -> Option<String> {
-    let rest = strip_impl_declaration_prefixes(line);
-    if !starts_with_impl_keyword(rest) {
-        return None;
-    }
-    let owner_start = rest
-        .find(" for ")
-        .map(|pos| pos + " for ".len())
-        .or_else(|| impl_self_type_start(rest))?;
-    parse_ident(&rest[owner_start..])
+fn parse_fn_name(line: &str) -> Option<String> {
+    let marker = "fn ";
+    let pos = line.find(marker)?;
+    let rest = &line[pos + marker.len()..];
+    parse_ident(rest)
 }
 
-fn parse_impl_declaration_owner(line: &str) -> Option<String> {
-    is_impl_declaration_line(line).then(|| parse_impl_owner(line))?
-}
-
-fn parse_impl_trait_name(line: &str) -> Option<String> {
-    let rest = impl_after_keyword(line)?;
-    let (trait_path, _self_type) = rest.split_once(" for ")?;
-    let trait_name = trait_path.trim().rsplit("::").next()?.trim();
-    parse_ident(trait_name)
-}
-
-fn is_impl_declaration_line(line: &str) -> bool {
-    starts_with_impl_keyword(strip_impl_declaration_prefixes(line))
-}
-
-fn strip_impl_declaration_prefixes(line: &str) -> &str {
+fn parse_mod_name(line: &str) -> Option<String> {
     let mut rest = line.trim_start();
     if let Some(after_pub) = rest.strip_prefix("pub ") {
         rest = after_pub.trim_start();
@@ -1174,58 +1389,7 @@ fn strip_impl_declaration_prefixes(line: &str) -> &str {
             rest = after_visibility.trim_start();
         }
     }
-    if let Some(after_unsafe) = rest.strip_prefix("unsafe ") {
-        rest = after_unsafe.trim_start();
-    }
-    rest
-}
-
-fn starts_with_impl_keyword(line: &str) -> bool {
-    let Some(rest) = line.strip_prefix("impl") else {
-        return false;
-    };
-    rest.chars()
-        .next()
-        .is_some_and(|ch| ch == '<' || ch.is_whitespace())
-}
-
-fn impl_self_type_start(line: &str) -> Option<usize> {
-    let rest = impl_after_keyword(line)?;
-    let offset = line.len().saturating_sub(rest.len());
-    Some(offset)
-}
-
-fn impl_after_keyword(line: &str) -> Option<&str> {
-    let mut rest = strip_impl_declaration_prefixes(line)
-        .strip_prefix("impl")?
-        .trim_start();
-    if rest.starts_with('<') {
-        rest = rest.get(generic_param_list_len(rest)?..)?.trim_start();
-    }
-    Some(rest)
-}
-
-fn generic_param_list_len(text: &str) -> Option<usize> {
-    let mut depth = 0usize;
-    for (idx, ch) in text.char_indices() {
-        match ch {
-            '<' => depth += 1,
-            '>' => {
-                depth = depth.checked_sub(1)?;
-                if depth == 0 {
-                    return Some(idx + ch.len_utf8());
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
-fn parse_fn_name(line: &str) -> Option<String> {
-    let marker = "fn ";
-    let pos = line.find(marker)?;
-    let rest = &line[pos + marker.len()..];
+    let rest = rest.strip_prefix("mod ")?.trim_start();
     parse_ident(rest)
 }
 
@@ -1257,6 +1421,37 @@ fn parse_ident(rest: &str) -> Option<String> {
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn duplicate_operation_pruning_removes_containing_parent_operation() {
+        let parent = DetectedSyntaxSite {
+            line: 1,
+            end_line: 1,
+            column: 1,
+            start: 10,
+            end: 100,
+            kind: UnsafeSiteKind::Operation,
+            family: OperationFamily::RawPointerRead,
+            card_snippet: "unsafe { ptr.read() }".to_string(),
+            source_snippet: "unsafe { ptr.read() }".to_string(),
+        };
+        let child = DetectedSyntaxSite {
+            line: 1,
+            end_line: 1,
+            column: 10,
+            start: 25,
+            end: 45,
+            kind: UnsafeSiteKind::Operation,
+            family: OperationFamily::RawPointerRead,
+            card_snippet: "ptr.read()".to_string(),
+            source_snippet: "ptr.read()".to_string(),
+        };
+
+        let sites = without_parent_duplicate_operations(vec![parent, child]);
+
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].card_snippet, "ptr.read()");
+    }
 
     #[test]
     fn text_detection_ignores_comment_only_unsafe_tokens() {
@@ -1298,6 +1493,22 @@ mod tests {
     }
 
     #[test]
+    fn text_detection_ignores_unsafe_substrings_in_safe_identifiers() {
+        assert_eq!(
+            detect_site("let output = unsafe_review_core::analyze(AnalyzeInput { root, scope })?;"),
+            None
+        );
+        assert_eq!(
+            detect_site("after_unsafe.split_once('{').map(|(_open, after)| after)"),
+            None
+        );
+        assert_eq!(
+            detect_site("unsafe { ffi::call(ptr) }"),
+            Some((UnsafeSiteKind::Operation, OperationFamily::UnsafeFnCall))
+        );
+    }
+
+    #[test]
     fn text_detection_does_not_classify_extern_crate_as_ffi() {
         assert_eq!(detect_site("extern crate std;"), None);
         assert_eq!(detect_site("pub extern crate alloc;"), None);
@@ -1305,6 +1516,137 @@ mod tests {
             detect_site("unsafe extern \"C\" {"),
             Some((UnsafeSiteKind::ExternBlock, OperationFamily::Ffi))
         );
+    }
+
+    #[test]
+    fn syntax_detection_classifies_known_extern_calls_as_ffi_calls() -> Result<(), String> {
+        let root = unique_temp_dir()?;
+        fs::create_dir_all(root.join("src"))
+            .map_err(|err| format!("create temp src failed: {err}"))?;
+        fs::write(
+            root.join("src/lib.rs"),
+            "unsafe extern \"C\" {\n    fn strlen(ptr: *const u8) -> usize;\n}\n\npub fn len(ptr: *const u8) -> usize {\n    // SAFETY: caller provides a C string pointer.\n    unsafe { strlen(ptr) }\n}\n",
+        )
+        .map_err(|err| format!("write temp source failed: {err}"))?;
+        let diff = crate::input::diff::parse_unified_diff(
+            "diff --git a/src/lib.rs b/src/lib.rs\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -7,1 +7,1 @@\n+    unsafe { strlen(ptr) }\n",
+        );
+
+        let rel = PathBuf::from("src/lib.rs");
+        let sites = scan_file(&root, &rel, Some(&diff), false)?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        assert_eq!(sites.len(), 1, "unexpected sites: {sites:#?}");
+        assert_eq!(sites[0].site.kind, UnsafeSiteKind::FfiCall);
+        assert_eq!(sites[0].operation.family, OperationFamily::Ffi);
+        assert_eq!(sites[0].site.owner, Some("len".to_string()));
+        assert_eq!(sites[0].site.snippet, "unsafe { strlen(ptr) }");
+        Ok(())
+    }
+
+    #[test]
+    fn syntax_detection_classifies_qualified_same_file_extern_calls_as_ffi_calls()
+    -> Result<(), String> {
+        let root = unique_temp_dir()?;
+        fs::create_dir_all(root.join("src"))
+            .map_err(|err| format!("create temp src failed: {err}"))?;
+        fs::write(
+            root.join("src/lib.rs"),
+            "mod ffi {\n    unsafe extern \"C\" {\n        pub(super) fn strlen(ptr: *const u8) -> usize;\n    }\n}\n\npub fn len(ptr: *const u8) -> usize {\n    // SAFETY: caller provides a C string pointer.\n    unsafe { ffi::strlen(ptr) }\n}\n",
+        )
+        .map_err(|err| format!("write temp source failed: {err}"))?;
+        let diff = crate::input::diff::parse_unified_diff(
+            "diff --git a/src/lib.rs b/src/lib.rs\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -9,1 +9,1 @@\n+    unsafe { ffi::strlen(ptr) }\n",
+        );
+
+        let rel = PathBuf::from("src/lib.rs");
+        let sites = scan_file(&root, &rel, Some(&diff), false)?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        assert_eq!(sites.len(), 1, "unexpected sites: {sites:#?}");
+        assert_eq!(sites[0].site.kind, UnsafeSiteKind::FfiCall);
+        assert_eq!(sites[0].operation.family, OperationFamily::Ffi);
+        assert_eq!(sites[0].site.owner, Some("len".to_string()));
+        assert_eq!(sites[0].site.snippet, "unsafe { ffi::strlen(ptr) }");
+        Ok(())
+    }
+
+    #[test]
+    fn syntax_detection_classifies_libc_path_calls_as_ffi_calls() -> Result<(), String> {
+        let root = unique_temp_dir()?;
+        fs::create_dir_all(root.join("src"))
+            .map_err(|err| format!("create temp src failed: {err}"))?;
+        fs::write(
+            root.join("src/lib.rs"),
+            "pub fn len(ptr: *const i8) -> usize {\n    // SAFETY: caller provides a C string pointer.\n    unsafe { libc::strlen(ptr) }\n}\n",
+        )
+        .map_err(|err| format!("write temp source failed: {err}"))?;
+        let diff = crate::input::diff::parse_unified_diff(
+            "diff --git a/src/lib.rs b/src/lib.rs\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -3,1 +3,1 @@\n+    unsafe { libc::strlen(ptr) }\n",
+        );
+
+        let rel = PathBuf::from("src/lib.rs");
+        let sites = scan_file(&root, &rel, Some(&diff), false)?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        assert_eq!(sites.len(), 1, "unexpected sites: {sites:#?}");
+        assert_eq!(sites[0].site.kind, UnsafeSiteKind::FfiCall);
+        assert_eq!(sites[0].operation.family, OperationFamily::Ffi);
+        assert_eq!(sites[0].site.owner, Some("len".to_string()));
+        assert_eq!(sites[0].site.snippet, "unsafe { libc::strlen(ptr) }");
+        Ok(())
+    }
+
+    #[test]
+    fn syntax_detection_keeps_local_libc_module_calls_generic() -> Result<(), String> {
+        let root = unique_temp_dir()?;
+        fs::create_dir_all(root.join("src"))
+            .map_err(|err| format!("create temp src failed: {err}"))?;
+        fs::write(
+            root.join("src/lib.rs"),
+            "mod libc {\n    pub unsafe fn strlen(_ptr: *const i8) -> usize { 0 }\n}\n\npub fn len(ptr: *const i8) -> usize {\n    // SAFETY: fixture exercises a local module named libc, not a foreign call.\n    unsafe { libc::strlen(ptr) }\n}\n",
+        )
+        .map_err(|err| format!("write temp source failed: {err}"))?;
+        let diff = crate::input::diff::parse_unified_diff(
+            "diff --git a/src/lib.rs b/src/lib.rs\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -7,1 +7,1 @@\n+    unsafe { libc::strlen(ptr) }\n",
+        );
+
+        let rel = PathBuf::from("src/lib.rs");
+        let sites = scan_file(&root, &rel, Some(&diff), false)?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        assert_eq!(sites.len(), 1, "unexpected sites: {sites:#?}");
+        assert_eq!(sites[0].site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(sites[0].operation.family, OperationFamily::UnsafeFnCall);
+        assert_eq!(sites[0].site.owner, Some("len".to_string()));
+        assert_eq!(sites[0].site.snippet, "unsafe { libc::strlen(ptr) }");
+        Ok(())
+    }
+
+    #[test]
+    fn syntax_detection_keeps_non_boundary_libc_text_as_generic_unsafe_call() -> Result<(), String>
+    {
+        let root = unique_temp_dir()?;
+        fs::create_dir_all(root.join("src"))
+            .map_err(|err| format!("create temp src failed: {err}"))?;
+        fs::write(
+            root.join("src/lib.rs"),
+            "unsafe extern \"C\" {\n    fn strlen(ptr: *const i8) -> usize;\n}\n\nmod mylibc {\n    pub unsafe fn strlen(_ptr: *const i8) -> usize { 0 }\n}\n\npub fn len(ptr: *const i8) -> usize {\n    // SAFETY: fixture exercises a local module whose name merely contains libc.\n    unsafe { mylibc::strlen(ptr) }\n}\n",
+        )
+        .map_err(|err| format!("write temp source failed: {err}"))?;
+        let diff = crate::input::diff::parse_unified_diff(
+            "diff --git a/src/lib.rs b/src/lib.rs\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -11,1 +11,1 @@\n+    unsafe { mylibc::strlen(ptr) }\n",
+        );
+
+        let rel = PathBuf::from("src/lib.rs");
+        let sites = scan_file(&root, &rel, Some(&diff), false)?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        assert_eq!(sites.len(), 1, "unexpected sites: {sites:#?}");
+        assert_eq!(sites[0].site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(sites[0].operation.family, OperationFamily::UnsafeFnCall);
+        assert_eq!(sites[0].site.owner, Some("len".to_string()));
+        Ok(())
     }
 
     #[test]
@@ -1408,6 +1750,34 @@ mod tests {
             ),
             Some((UnsafeSiteKind::Operation, OperationFamily::TargetFeature))
         );
+    }
+
+    #[test]
+    fn target_feature_owner_inference_uses_following_function() {
+        let site = DetectedSyntaxSite {
+            line: 5,
+            end_line: 5,
+            column: 1,
+            kind: UnsafeSiteKind::Operation,
+            family: OperationFamily::TargetFeature,
+            source_snippet: "#[target_feature(enable = \"sse2\")]".to_string(),
+            card_snippet: "#[target_feature(enable = \"sse2\")]".to_string(),
+            start: 0,
+            end: 0,
+        };
+        let lines = [
+            "/// Runs a target-feature-specific path.",
+            "///",
+            "/// # Safety",
+            "/// Callers must check SSE2.",
+            "#[target_feature(enable = \"sse2\")]",
+            "#[inline]",
+            "pub unsafe fn find_raw(data: &[u8]) -> usize {",
+            "    data.len()",
+            "}",
+        ];
+
+        assert_eq!(syntax_owner(&site, &lines, 4), Some("find_raw".to_string()));
     }
 
     #[test]
@@ -1588,6 +1958,25 @@ mod tests {
     }
 
     #[test]
+    fn text_detection_classifies_atomic_pointer_fetch_state_transitions() {
+        for line in [
+            "Shared::from_ptr(self.data.fetch_and(val, order))",
+            "Shared::from_ptr(self.data.fetch_or(val, order))",
+            "Shared::from_ptr(self.data.fetch_xor(val, order) as *mut ())",
+        ] {
+            assert_eq!(
+                detect_site(line),
+                Some((
+                    UnsafeSiteKind::Operation,
+                    OperationFamily::AtomicPointerState
+                )),
+                "{line} should be classified as an atomic pointer state transition"
+            );
+        }
+        assert_eq!(detect_site("bits.fetch_and(mask, Ordering::AcqRel);"), None);
+    }
+
+    #[test]
     fn text_detection_prefers_inline_asm_over_generic_unsafe_call_wrapper() {
         assert_eq!(
             detect_site("unsafe { core::arch::asm!(\"nop\") }"),
@@ -1715,6 +2104,29 @@ mod tests {
     }
 
     #[test]
+    fn scan_file_infers_extern_block_owner_from_declared_function() -> Result<(), String> {
+        let root = unique_temp_dir()?;
+        fs::create_dir_all(root.join("src"))
+            .map_err(|err| format!("create temp src failed: {err}"))?;
+        fs::write(
+            root.join("src/lib.rs"),
+            "unsafe extern \"C\" {\n    fn strlen(ptr: *const u8) -> usize;\n}\n",
+        )
+        .map_err(|err| format!("write temp source failed: {err}"))?;
+
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        let extern_block = sites
+            .iter()
+            .find(|site| site.site.kind == UnsafeSiteKind::ExternBlock)
+            .ok_or_else(|| format!("expected extern block site: {sites:#?}"))?;
+        assert_eq!(extern_block.operation.family, OperationFamily::Ffi);
+        assert_eq!(extern_block.site.owner.as_deref(), Some("strlen"));
+        Ok(())
+    }
+
+    #[test]
     fn scan_file_does_not_classify_static_lifetime_mut_reference_as_static_mut()
     -> Result<(), String> {
         let root = unique_temp_dir()?;
@@ -1774,6 +2186,12 @@ mod tests {
                 .iter()
                 .all(|site| site.operation.family == OperationFamily::StaticMut),
             "static mut sites should keep the static_mut operation family: {sites:#?}"
+        );
+        assert_eq!(static_mut_sites[0].site.owner.as_deref(), Some("ROOT"));
+        assert_eq!(static_mut_sites[1].site.owner.as_deref(), Some("PUBLIC"));
+        assert_eq!(
+            static_mut_sites[2].site.owner.as_deref(),
+            Some("RESTRICTED")
         );
         Ok(())
     }
@@ -1847,6 +2265,49 @@ mod tests {
         assert_eq!(sites[0].site.kind, UnsafeSiteKind::Operation);
         assert_eq!(sites[0].operation.family, OperationFamily::RawPointerDeref);
         assert_eq!(sites[0].site.owner, Some("read_byte".to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn scan_file_suppresses_multiline_unknown_wrapper_when_specific_operation_exists()
+    -> Result<(), String> {
+        let root = unique_temp_dir()?;
+        fs::create_dir_all(root.join("src"))
+            .map_err(|err| format!("create temp src failed: {err}"))?;
+        fs::write(
+            root.join("src/lib.rs"),
+            "use core::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};\n\
+pub struct Shared<T>(*mut T);\n\
+impl<T> Shared<T> { fn from_ptr(ptr: *mut T) -> Self { Self(ptr) } }\n\
+pub struct Tagged<T> { data: AtomicPtr<T> }\n\
+impl<T> Tagged<T> {\n\
+    pub fn fetch_and_tag(&self, val: usize, order: Ordering) -> Shared<T> {\n\
+        unsafe {\n\
+            Shared::from_ptr(\n\
+                (*(&self.data as *const AtomicPtr<_> as *const AtomicUsize))\n\
+                    .fetch_and(val, order) as *mut T,\n\
+            )\n\
+        }\n\
+    }\n\
+}\n",
+        )
+        .map_err(|err| format!("write temp source failed: {err}"))?;
+
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        let atomic_sites = sites
+            .iter()
+            .filter(|site| site.operation.family == OperationFamily::AtomicPointerState)
+            .collect::<Vec<_>>();
+        assert_eq!(atomic_sites.len(), 1, "unexpected sites: {sites:#?}");
+        assert!(
+            sites.iter().all(|site| {
+                !(site.site.kind == UnsafeSiteKind::UnsafeBlock
+                    && site.operation.family == OperationFamily::Unknown)
+            }),
+            "specific operation should suppress wrapper unknown unsafe block"
+        );
         Ok(())
     }
 
@@ -1988,6 +2449,71 @@ mod tests {
         fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
         assert!(sites.is_empty(), "unexpected sites: {sites:#?}");
         Ok(())
+    }
+
+    #[test]
+    fn scan_file_ignores_multiline_string_literal_unsafe_text() -> Result<(), String> {
+        let root = unique_temp_dir()?;
+        fs::create_dir_all(root.join("src"))
+            .map_err(|err| format!("create temp src failed: {err}"))?;
+        fs::write(
+            root.join("src/lib.rs"),
+            "pub fn fixture_text() -> (&'static str, &'static str) {\n    let raw = r#\"\n        pub unsafe fn fake_api(ptr: *const u8) -> u8 {\n            unsafe { core::ptr::read(ptr) }\n        }\n    \"#;\n    let cooked = \"\n        unsafe { core::mem::transmute::<u32, i32>(value) }\n    \";\n    (raw, cooked)\n}\n",
+        )
+        .map_err(|err| format!("write temp source failed: {err}"))?;
+
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        assert!(sites.is_empty(), "unexpected sites: {sites:#?}");
+        Ok(())
+    }
+
+    #[test]
+    fn scan_file_does_not_report_detector_literal_matchers() -> Result<(), String> {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let sites = scan_file(&root, &PathBuf::from("src/analysis/scanner.rs"), None, true)?;
+
+        assert!(
+            sites.iter().all(|site| {
+                !(site.site.owner.as_deref() == Some("detect_site")
+                    && site.site.snippet.starts_with("if line.contains("))
+            }),
+            "detector literal matchers should not be reported: {sites:#?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn scan_file_ignores_unsafe_words_inside_contains_string_literals() -> Result<(), String> {
+        let root = unique_temp_dir()?;
+        fs::create_dir_all(root.join("src"))
+            .map_err(|err| format!("create temp src failed: {err}"))?;
+        fs::write(
+            root.join("src/lib.rs"),
+            "pub fn detector(line: &str) -> bool {\n    if line.contains(\"unsafe impl\") { return true; }\n    line.contains(\"ptr::read\")\n}\n",
+        )
+        .map_err(|err| format!("write temp source failed: {err}"))?;
+
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        assert!(sites.is_empty(), "unexpected sites: {sites:#?}");
+        Ok(())
+    }
+
+    #[test]
+    fn text_detection_strips_inline_string_literals() {
+        let mut state = LineCommentState::default();
+
+        assert_eq!(
+            line_for_text_detection("if line.contains(\"unsafe impl\") {", &mut state),
+            "if line.contains(\"\") {"
+        );
+        assert_eq!(
+            syntax_detection_text("line.contains ( \"ptr::read\" )"),
+            "line.contains( \"\" )"
+        );
     }
 
     #[test]

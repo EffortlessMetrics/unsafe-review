@@ -2,7 +2,7 @@ name: unsafe-review
 
 on:
   pull_request:
-    types: [opened, reopened, synchronize, ready_for_review]
+    types: [opened, reopened, synchronize, ready_for_review, labeled]
     paths-ignore:
       - "docs/**"
       - "**/*.md"
@@ -17,34 +17,47 @@ concurrency:
 
 jobs:
   advisory:
-    name: unsafe-review advisory
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false }}
+    name: unsafe-review advisory packet
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'full-ci')) }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
         with:
-          fetch-depth: 0
+          fetch-depth: 100
           persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Fetch base ref
+        env:
+          BASE_REF: ${{ github.base_ref || github.event.repository.default_branch }}
+        run: git fetch --no-tags --depth=100 origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
 
       - name: Build unsafe-review
         run: cargo build --locked -p unsafe-review
 
-      - name: Render unsafe-review artifacts
+      - name: Render first-pr advisory bundle
         env:
           BASE_REF: ${{ github.base_ref || github.event.repository.default_branch }}
         run: |
-          ./target/debug/unsafe-review first-pr --base "origin/${BASE_REF}" --out-dir target/unsafe-review
+          mkdir -p target/unsafe-review
+          ./target/debug/unsafe-review first-pr \
+            --base "origin/${BASE_REF}" \
+            --out-dir target/unsafe-review
 
-      - name: Verify unsafe-review artifacts
-        run: cargo run --locked -p xtask -- check-advisory-artifacts target/unsafe-review
+      - name: Verify first-pr artifact contract
+        run: cargo run --locked -p xtask -- check-first-pr-artifacts target/unsafe-review
+
+      - name: Write GitHub summary
+        run: cat target/unsafe-review/github-summary.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload unsafe-review artifacts
         uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: unsafe-review
+          name: unsafe-review-first-pr
           path: |
             target/unsafe-review/review-kit.json
             target/unsafe-review/cards.json

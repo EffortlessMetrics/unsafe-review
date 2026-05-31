@@ -110,22 +110,10 @@ The command analyzes once and renders every artifact from the same
 `ReviewCard`s. It stays advisory-only: it does not execute witness tools, post
 comments, edit source, or enforce blocking policy.
 
-`review-kit.json` is the manifest for the bundle. It lists emitted artifacts,
-the top card when one exists, summary counts, handoff commands, and the trust
-boundary. `github-summary.md` is a bounded CI doorway; keep the full reviewer
-cockpit in `pr-summary.md`.
-
-`repair-queue.json` groups cards by card-sized handoff shape, such as
-`repairable_by_guard`, `repairable_by_safety_docs`,
-`requires_witness_receipt`, `requires_human_review`, and
-`do_not_auto_repair`. It is copy-only ReviewCard projection data for humans or
-agents; `unsafe-review` does not run an agent, edit source, suppress cards, or
-claim repair success.
-
-`receipt-audit.md` summarizes saved witness receipt metadata against the
-current ReviewCards. It is an audit surface only: `unsafe-review first-pr` does
-not run Miri, cargo-careful, sanitizers, Loom, Shuttle, Kani, or Crux, and a
-matching receipt does not prove site reach or memory safety.
+The bundle also includes `receipt-audit.md`, and the terminal handoff prints the
+matching `unsafe-review receipt audit` command so reviewers can check whether
+saved witness receipt metadata still matches the current first-pr cards. The
+audit is metadata-only and does not run the witness.
 
 ## Output Formats
 
@@ -138,22 +126,28 @@ findings independently.
 | `json` | `unsafe-review check --base origin/main --format json` | canonical machine-readable cards with operation, evidence, routes, and next action |
 | `markdown` | `unsafe-review check --diff change.diff --format markdown` | local report with operation and next-action context |
 | `pr-summary` | `unsafe-review check --base origin/main --format pr-summary --out target/unsafe-review/pr-summary.md` | sparse reviewer-facing PR artifact |
+| `github-summary` | `unsafe-review check --base origin/main --format github-summary --out target/unsafe-review/github-summary.md` | bounded `GITHUB_STEP_SUMMARY` doorway that points to the full artifact bundle |
 | `sarif` | `unsafe-review check --base origin/main --format sarif --out target/unsafe-review/cards.sarif` | code-scanning-compatible artifact |
-| `comment-plan` | `unsafe-review check --base origin/main --format comment-plan --out target/unsafe-review/comment-plan.json` | artifact-only review budget with selected comments, non-selected card reasons, card ID, operation, routes, and verify commands |
+| `comment-plan` | `unsafe-review check --base origin/main --format comment-plan --out target/unsafe-review/comment-plan.json` | artifact-only inline comment candidates with card ID, operation, next action, actionability, routes, and verify commands |
 | `lsp` | `unsafe-review check --base origin/main --format lsp --out target/unsafe-review/lsp.json` | saved editor diagnostics and hovers |
 | `witness-plan` | `unsafe-review check --base origin/main --format witness-plan --out target/unsafe-review/witness-plan.md` | reviewer-facing witness route plan |
+
+`repair-queue.json` is currently emitted by `first-pr`. It groups ReviewCards
+into copy-only guard, contract, test, witness, human-review, and
+do-not-auto-repair buckets, each pointing back to
+`unsafe-review context <card-id> --json`. It is not a standalone `--format`
+yet, and it does not run agents.
 
 The default human output is for terminal review. It names the card identity,
 operation family, operation expression, obligation evidence, witness route, next
 action, verify commands, and trust boundary without executing witnesses.
 
-`comment-plan` is plan-only. It carries a review-budget summary, the concrete
-ReviewCard operation expression for each planned comment, selected-card reason
-codes, and `not_selected` entries explaining why other cards stayed in the
-artifact instead of becoming inline-comment candidates. It does not post
-comments. When no changed unsafe-review gaps are found, `comments` is empty and
-the artifact includes a `no_changed_gaps` message with the same no-proof
-limitation used by the terminal and Markdown surfaces.
+`comment-plan` is plan-only. It carries the concrete ReviewCard operation
+expression, next action, actionability, routes, and verify commands for each
+planned comment and does not post comments. When no changed
+unsafe-review gaps are found, `comments` is empty and the artifact includes a
+`no_changed_gaps` message with the same no-proof limitation used by the terminal
+and Markdown surfaces.
 
 `lsp` writes saved JSON only. It includes a read-only status object,
 diagnostics, hovers, and command data for copying packets, copying witness
@@ -171,16 +165,10 @@ is available, and a receipt import hint. It does not run those commands.
 The advisory workflow renders:
 
 ```text
-target/unsafe-review/review-kit.json
 target/unsafe-review/cards.json
 target/unsafe-review/pr-summary.md
-target/unsafe-review/github-summary.md
 target/unsafe-review/cards.sarif
 target/unsafe-review/comment-plan.json
-target/unsafe-review/witness-plan.md
-target/unsafe-review/receipt-audit.md
-target/unsafe-review/lsp.json
-target/unsafe-review/repair-queue.json
 ```
 
 Verify a local or downloaded artifact set with:
@@ -190,24 +178,22 @@ cargo xtask check-advisory-artifacts target/unsafe-review
 ```
 
 That verifier checks parseability, advisory policy, plan-only comment mode,
-projected card identity consistency, result counts, and trust-boundary text. It
-does not prove the analyzer found every unsafe issue.
+projected card identity consistency, result counts, trust-boundary text, and
+absence of positive safety/proof overclaims. It does not prove the analyzer
+found every unsafe issue.
 
-For the full `first-pr` bundle, including `witness-plan.md`,
-`receipt-audit.md`, saved `lsp.json`, and `repair-queue.json`, use:
+For the full `first-pr` bundle, including `witness-plan.md` and saved
+`lsp.json`, use:
 
 ```bash
 cargo xtask check-first-pr-artifacts target/unsafe-review
 ```
 
-That verifier keeps the bundle advisory: it checks the review-kit manifest,
-bounded GitHub summary, route limitations, comment-plan review-budget counts,
-selected/not-selected reason vocabulary, renderable inline fields, saved LSP
-diagnostic evidence and action payloads, receipt-audit boundary text,
-repair-queue bucket names and
-do-not-do boundaries, zero-gap wording, card identity consistency, and absence
-of positive safety/proof wording. It does not run witnesses, run agents, post
-comments, edit source, or make a policy decision.
+That verifier keeps the bundle advisory: it checks route limitations,
+comment-plan caps and renderable inline fields, saved LSP diagnostic evidence
+and action payloads, zero-gap wording, card identity consistency, and absence
+of positive safety/proof wording. It does not run witnesses, post comments,
+edit source, or make a policy decision.
 
 ## Explain And Context
 
@@ -282,8 +268,11 @@ identities:
 
 A receipt must include exact counted `card_id`, `tool`, `strength`, `author`,
 `recorded_at`, `expires_at`, and optional command/limitations details. Matching
-receipts mark witness evidence present, but they do not discharge missing
-contracts, guards, or reach evidence.
+receipts whose `tool` matches the card's routed witness tools and whose
+`strength` is `ran`, `test_targeted`, or `site_reached` mark witness evidence
+present, but they do not discharge missing contracts, guards, or reach evidence.
+A `configured` receipt or a receipt whose tool is not routed for the current
+card remains valid audit metadata and does not remove the missing witness gap.
 
 The receipt JSON shape is backed by `unsafe_review_core::WitnessReceipt`, so SDK
 consumers and future native adapters should produce that same schema rather than
@@ -306,7 +295,9 @@ unsafe-review receipt template <card-id> \
 ```
 
 The template command validates the receipt shape and writes JSON. It still does
-not run the witness command.
+not run the witness command. When `--command` is present, the generated JSON also
+includes a stable `command_hash` for drift checks; the hash is not proof that the
+command ran.
 
 Import a receipt from saved Miri output after Miri has been run outside
 `unsafe-review`:
@@ -430,12 +421,21 @@ unsafe-review receipt audit \
 ```
 
 The audit reports matched, unmatched, stale, expired, wrong-identity,
-wrong-tool, weaker-than-required, duplicate, and invalid receipt metadata.
-Matched receipts include current ReviewCard operation expression, operation
-family, missing-count, and next-action context so receipt evidence does not hide
-remaining gaps. It is advisory only: it does not execute witness commands, infer
-site reach, make policy decisions, or claim safety. JSON and Markdown output
-include limitations that keep the saved-metadata boundary explicit.
+wrong-tool, weaker-than-required, command-hash-mismatch, duplicate, and invalid
+receipt metadata. Matched receipts include current ReviewCard operation
+expression, operation family, missing-count, next-action context, routed witness
+tools, saved `summary`, saved `author`, saved `recorded_at` timestamp, and the
+saved `command_hash` and per-receipt limitations when present so receipt
+evidence does not hide remaining gaps or saved scope limits. The summary,
+author, command hash, and limitations are saved metadata only, not proof that
+the command ran or covered the unsafe site. It is advisory only: it does not
+execute witness commands, infer site reach, make policy decisions, or claim
+safety. A receipt entry gets `imports_witness_evidence` only when it is a
+current-card match with a routed tool, saved-run strength, no expiry, no
+validation error, and no duplicate for that card. JSON and Markdown output
+include report-level limitations that keep the saved-metadata boundary explicit.
+When a receipt matches a card, the ReviewCard witness evidence summary also
+keeps the saved command hash visible when present.
 
 `unsafe-review` imports receipts. It does not run Miri, `cargo-careful`,
 sanitizers, Loom, Shuttle, Kani, or Crux by default.

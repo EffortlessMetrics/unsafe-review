@@ -2,6 +2,11 @@
 
 Specs define behavior. They do not carry the PR queue.
 
+## Operator control panel
+
+- [Spec system start-here](UNSAFE-REVIEW-SPEC-START-HERE.md)
+- [Spec lifecycle status dashboard](UNSAFE-REVIEW-SPEC-STATUS.md)
+
 ## Index
 
 1. [Product contract](UNSAFE-REVIEW-SPEC-0001-product-contract.md)
@@ -21,8 +26,15 @@ Specs define behavior. They do not carry the PR queue.
 15. [Public API and crate surface](UNSAFE-REVIEW-SPEC-0015-public-api-crate-surface.md)
 16. [Fixtures, calibration, support tiers](UNSAFE-REVIEW-SPEC-0016-fixtures-calibration-support.md)
 17. [Security and file policy](UNSAFE-REVIEW-SPEC-0017-security-file-policy.md)
-18. [First-run cockpit (0.2.0 lane)](UNSAFE-REVIEW-SPEC-0019-first-run-cockpit.md)
-19. [Source-of-truth stack](UNSAFE-REVIEW-SPEC-0020-source-of-truth-stack.md)
+18. [Live LSP server](UNSAFE-REVIEW-SPEC-0018-live-lsp-server.md)
+19. [First-run cockpit (0.2.0 lane)](UNSAFE-REVIEW-SPEC-0019-first-run-cockpit.md)
+20. [Source-of-truth stack](UNSAFE-REVIEW-SPEC-0020-source-of-truth-stack.md)
+21. [VS Code and Open VSX editor extension](UNSAFE-REVIEW-SPEC-0021-vscode-openvsx-extension.md)
+22. [PR commenting experience](UNSAFE-REVIEW-SPEC-0022-pr-commenting-experience.md)
+23. [First-hour experience](UNSAFE-REVIEW-SPEC-0023-first-hour-experience.md)
+24. [CI design](UNSAFE-REVIEW-SPEC-0024-ci-design.md)
+25. [Docs automation](UNSAFE-REVIEW-SPEC-0025-docs-automation.md)
+26. [Accuracy validation and calibration](UNSAFE-REVIEW-SPEC-0026-accuracy-validation-and-calibration.md)
 
 
 ## Appendices

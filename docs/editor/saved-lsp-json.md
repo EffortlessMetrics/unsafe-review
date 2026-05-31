@@ -25,12 +25,16 @@ unsafe-review first-pr --base origin/main
 That writes the full advisory bundle, including:
 
 ```text
+target/unsafe-review/review-kit.json
 target/unsafe-review/cards.json
 target/unsafe-review/pr-summary.md
+target/unsafe-review/github-summary.md
 target/unsafe-review/cards.sarif
 target/unsafe-review/comment-plan.json
 target/unsafe-review/witness-plan.md
+target/unsafe-review/receipt-audit.md
 target/unsafe-review/lsp.json
+target/unsafe-review/repair-queue.json
 ```
 
 For only the saved editor projection, run:
@@ -108,3 +112,8 @@ A future editor adapter should consume this same artifact shape first:
 The adapter must stay read-only in v0.x. It must not apply patches, insert
 SAFETY comments, run Miri, run sanitizers, create receipts, or post PR
 comments.
+
+The first publishable adapter is scoped in
+[docs/editor/extension-mvp.md](extension-mvp.md). It is a saved-`lsp.json`
+viewer with command-only actions; it explicitly does not start an LSP server
+and does not run any subprocess.

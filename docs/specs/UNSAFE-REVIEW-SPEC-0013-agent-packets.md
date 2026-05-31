@@ -37,8 +37,9 @@ source of analyzer truth. It carries:
   operation family and missing obligation evidence
 - `agent_readiness`, an advisory classification of whether this card is a
   bounded repair-delegation candidate
-- `repair_queue`, the same card's queue buckets and summary used by the
-  aggregate `repair-queue.json` artifact
+- `repair_queue`, a compact card-scoped grouping such as
+  `repairable_by_safety_docs`, `repairable_by_guard`, `repairable_by_test`,
+  `requires_witness_receipt`, `requires_human_review`, or `do_not_auto_repair`
 - witness routes and verify commands from the card
 - do-not-do rules
 - stop conditions
@@ -63,25 +64,84 @@ are marked not ready with reasons. This classification does not execute an
 agent, apply edits, run witnesses, or resolve the card.
 
 Packets constrain LLMs with task, contract, missing evidence, allowed repairs,
-repair queue buckets, do-not-do list, verify commands, and stop conditions.
-They are copy-only in v0.x; `unsafe-review` does not run an agent, edit source,
-post comments, suppress cards, or claim that the packet resolves the card.
+do-not-do list, verify commands, and stop conditions. They are copy-only in
+v0.x; `unsafe-review` does not run an agent, edit source, post comments, or
+claim that the packet resolves the card.
+The do-not-do list must make that automation boundary visible to packet
+consumers: a packet must not let downstream tooling claim `unsafe-review` ran
+an agent, ran witnesses, applied source edits, or posted comments, and it must
+not let comments or docs substitute for executable guard or discharge evidence.
+It also must not present suppression of the current card as an agent repair in
+place of adding, exposing, or explicitly waiving evidence, and must not present
+the packet as an automatic safety repair.
 
 ## Projection contract
 
 Agent packets are card-scoped handoffs, not autonomous repair authority. Each
 packet must name one ReviewCard, the exact missing obligation evidence, allowed
-repair shapes, repair-queue bucket projection, do-not-do rules, verify
-commands, and stop conditions.
+repair shapes, do-not-do rules, verify commands, and stop conditions.
 
 The packet may classify whether the card is ready for bounded repair delegation,
 but that classification is advisory metadata. It must not hide the ReviewCard,
 weaken missing evidence, or promote human-deep-review, ambiguous macro-heavy,
 unsupported provenance, or FFI ownership cards into automatic repair tasks.
+Repair queue buckets are handoff labels for sorting cards into small work items.
+They are not policy decisions and do not mean `unsafe-review` applied a repair.
 
 Bounded source context must stay small: unsafe site, nearby contract/guard
 summaries, related test mentions, witness route, and explicit trust boundary.
 Whole-file dumps are out of scope by default.
+
+## Aggregate repair queue artifact
+
+The first-pr cockpit renders an aggregate repair queue artifact:
+
+```text
+target/unsafe-review/repair-queue.json
+```
+
+That artifact must be a checked projection of the same ReviewCards and
+card-scoped agent packet metadata. It must not reclassify cards, invent new
+repairs, or become a second source of analyzer truth.
+Its schema version is currently `0.1` and is part of the artifact verifier
+contract.
+
+The aggregate queue may group cards into bounded work buckets:
+
+- `repairable_by_guard`
+- `repairable_by_safety_docs`
+- `repairable_by_test`
+- `requires_witness_receipt`
+- `requires_human_review`
+- `do_not_auto_repair`
+
+Each entry must include the card ID, operation family, missing evidence summary,
+agent-readiness state, bucket reason, do-not-do rules, and a copyable
+`unsafe-review context <card-id> --json` command. Cards may appear in more than
+one bucket only when the reasons are distinct and card-scoped, such as a card
+that is repairable by guard evidence but still requires a witness receipt for a
+stronger review signal. A card must not repeat within the same bucket.
+
+`pr-summary.md` may repeat the top card's agent-readiness state, queue buckets,
+and readiness reasons as a reviewer cockpit cue. That summary is not a separate
+classification path; it must project the checked aggregate `repair-queue.json`
+state for the same ReviewCard.
+
+The aggregate artifact is still copy-only. It must not run an agent, edit
+source, post comments, execute witnesses, suppress cards, resolve cards, or
+claim proof, UB-free status, Miri-clean status, site execution, calibrated
+precision/recall, or policy readiness.
+
+The artifact verifier must check that every bucket name is from the closed
+repair-queue vocabulary, every queue entry references a known ReviewCard, every
+bucket reason is from a closed vocabulary, do-not-do boundaries are present, and
+no queue entry weakens the source card's missing evidence or trust boundary.
+Each queue entry's `agent_readiness.reasons` must explain why the packet is or
+is not ready for bounded agent work. `agent_readiness.state` must be `ready`,
+`needs_human_review`, or `not_recommended`, and must agree with
+`agent_readiness.ready`.
+Entries in `requires_human_review` or `do_not_auto_repair` must not be marked
+agent-ready.
 
 ## Non-goals
 
@@ -109,15 +169,31 @@ Whole-file dumps are out of scope by default.
   contract/guard summaries, related test mentions, and explicit limits against
   whole-file dumps and site-execution claims.
 - The packet includes obligation-level evidence, missing evidence, witness
-  routes, repair-queue buckets, do-not-do rules, stop conditions, and the trust
-  boundary.
+  routes, do-not-do rules, stop conditions, and the trust boundary.
+- The do-not-do rules explicitly preserve the copy-only boundary: do not claim
+  `unsafe-review` ran an agent, ran witnesses, applied source edits, or posted
+  comments.
+- The do-not-do rules explicitly preserve the evidence boundary: do not replace
+  executable guard or discharge evidence with comments or docs.
+- The do-not-do rules explicitly reject suppressing the current card as a repair
+  substitute for evidence.
+- The do-not-do rules explicitly reject presenting the packet as an automatic
+  safety repair.
 - Allowed repairs name the current card's missing obligation shape. For
   example, raw-pointer read packets may name same-pointer alignment or
   initialization evidence, while copy packets may name range and non-overlap
   evidence. They must not suggest an obligation the ReviewCard does not carry.
+- If the ReviewCard carries a static reach gap, allowed repairs may name a
+  focused test for the owner or seam, but the packet must preserve that a test
+  mention is reach evidence only and not site-execution proof.
 - Agent readiness is `ready` for a high-confidence, card-scoped repair packet
   with a verify command, and is not ready for human-review or unsupported
   operation families such as inline assembly and FFI ownership boundaries.
+- Repair queue buckets reflect missing ReviewCard evidence: safety-doc gaps can
+  enter `repairable_by_safety_docs`, guard gaps can enter `repairable_by_guard`,
+  static reach gaps can enter `repairable_by_test`, missing receipts can enter
+  `requires_witness_receipt`, and not-ready packets can enter
+  `requires_human_review` and `do_not_auto_repair`.
 - If evidence is not knowable statically, the packet names the limitation
   instead of overclaiming.
 

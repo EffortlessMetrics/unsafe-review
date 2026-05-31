@@ -12,11 +12,12 @@
 
 <p align="center">
   <a href="https://github.com/EffortlessMetrics/unsafe-review/actions/workflows/ci.yml"><img src="https://github.com/EffortlessMetrics/unsafe-review/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
+  <a href="docs/ci/coverage.md"><img src="https://img.shields.io/codecov/c/github/EffortlessMetrics/unsafe-review-swarm?label=coverage" alt="coverage (advisory execution-surface telemetry; not memory-safety, UB-free, Miri-clean, or site-execution evidence)" /></a>
 </p>
 
 <p align="center">
   <a href="docs/BADGE_POLICY.md"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FEffortlessMetrics%2Funsafe-review%2Fmain%2Fbadges%2Funsafe-review.json" alt="unsafe-review open actionable gap count" /></a>
-  <a href="docs/BADGE_POLICY.md"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FEffortlessMetrics%2Funsafe-review%2Fmain%2Fbadges%2Funsafe-review-plus.json" alt="unsafe-review missing or weak evidence count" /></a>
+  <a href="docs/BADGE_POLICY.md"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FEffortlessMetrics%2Funsafe-review%2Fmain%2Fbadges%2Funsafe-review-plus.json" alt="unsafe-review repair plus evidence-quality count" /></a>
 </p>
 
 <p align="center">
@@ -91,13 +92,33 @@ unsafe-review first-pr --base origin/main
 
 # Explain one card
 unsafe-review explain <card-id>
+
+# Confirm support posture and limits
+unsafe-review support
 ```
 
-`first-pr` writes a standard advisory review kit under
-`target/unsafe-review/`: `review-kit.json`, `cards.json`, `pr-summary.md`,
-`github-summary.md`, `cards.sarif`, `comment-plan.json`, `witness-plan.md`, and
-`lsp.json`. It is advisory-only: it does not run witnesses, post comments, edit
-source, or enforce blocking policy.
+`first-pr` writes `cards.json`, `pr-summary.md`, `github-summary.md`,
+`cards.sarif`, `comment-plan.json`, `witness-plan.md`, and `lsp.json` under
+`target/unsafe-review/`. It is advisory-only: it does not run witnesses, post
+comments, edit source, or enforce blocking policy.
+
+## Add badges to your repo
+
+```bash
+cargo install unsafe-review --locked
+unsafe-review badges --out badges/
+git add badges/
+```
+
+Then add Shields endpoint badges that point at your own repository and policy
+document.
+
+> Do not copy this repository’s badge URLs. Badge endpoints are repo-scoped
+> static evidence projections and must point at your own `OWNER/REPO/BRANCH`
+> `badges/*.json` paths.
+> `unsafe-review` reports open review gaps; `unsafe-review+` reports open review
+> gaps plus missing-or-weak evidence findings. Both are advisory evidence
+> indicators only.
 
 Try the bundled smoke fixture:
 
@@ -111,10 +132,9 @@ unsafe-review first-pr \
 
 | Surface | Output | Use |
 |---|---|---|
-| Review kit manifest | `review-kit.json` | Artifact index, top card handoff, and trust boundary |
 | Review cards | JSON / human / Markdown | The canonical evidence object |
 | PR summary | `pr-summary.md` | Reviewer first screen |
-| GitHub summary | `github-summary.md` | Bounded CI doorway into the review kit |
+| GitHub job summary fragment | `github-summary.md` | Bounded slice for `GITHUB_STEP_SUMMARY` |
 | SARIF | `cards.sarif` | Code scanning / CI artifact |
 | Comment plan | `comment-plan.json` | Proposed comments, not posted |
 | Saved LSP projection | `lsp.json` | Read-only editor diagnostics and hovers |
@@ -142,8 +162,7 @@ unsafe-review first-pr \
 
 - **Fixture-backed ReviewCards** for many core unsafe operation families.
 - **Dogfood-backed evidence rules** across selected real Rust crates and PR diffs.
-- **Advisory PR artifacts**: review-kit manifest, cards JSON, PR summary,
-  bounded GitHub summary, SARIF, comment-plan, witness-plan, and saved LSP JSON.
+- **Advisory PR artifacts**: cards JSON, PR summary, SARIF, and comment-plan.
 - **Read-only projections** for saved LSP/editor output and bounded agent packets.
 - **Saved receipt audit** for imported witness metadata.
 - **Outcome and repo posture reports** for before/after movement and open gaps.
@@ -162,6 +181,7 @@ posture live in the status docs.
 | Support posture | [Support summary](docs/status/SUPPORT_SUMMARY.md) |
 | Claim-to-proof ledger | [Support tiers](docs/status/SUPPORT_TIERS.md) |
 | First-use guide | [First-use guide](docs/FIRST_USE.md) |
+| First-hour guide | [First-hour guide](docs/FIRST_HOUR.md) |
 | ReviewCard trust boundary | [ReviewCard explanation](docs/explanation/review-cards-and-trust-boundary.md) |
 | Explain examples | [Reviewer examples](docs/explanation/explain-examples.md) |
 | Dogfood evidence | [Dogfood index](docs/dogfood/index.md) |
@@ -194,6 +214,7 @@ cargo run --locked -p xtask -- check-dogfood
 ## Documentation map
 
 - [First-use guide](docs/FIRST_USE.md)
+- [First-hour guide](docs/FIRST_HOUR.md)
 - [Mission and vision](docs/MISSION.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Architecture](docs/ARCHITECTURE.md)

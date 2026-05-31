@@ -51,12 +51,16 @@ The `cards` array must reuse the canonical `ReviewCard` JSON shape. Repo JSON
 must not reclassify cards, invent a separate evidence model, or summarize raw
 unsafe usage as safety posture.
 
-Badge JSON is a small serde-backed open-gap summary for shields-compatible
-consumers:
+Badge JSON is a small serde-backed open-gap summary for Shields-compatible
+consumers. Endpoint JSON must keep `schemaVersion = 1` for Shields while any
+additional repo-contract fields remain advisory projection metadata:
 
 - `unsafe-review.json` reports the numeric open-gap count as `<n>`
-- `unsafe-review-plus.json` reports the numeric missing-or-weak evidence count
-  as `<contract_missing + guard_missing + guarded_unwitnessed>`
+- `unsafe-review-plus.json` reports the numeric repair-plus-quality count as
+  `<open_actionable_gaps + contract_missing + guard_missing + guarded_unwitnessed>`
+  and exposes the `contract_missing`, `guard_missing`, and
+  `guarded_unwitnessed` components in its `counts` object so the aggregate is
+  auditable without re-running analysis.
 
 Badges count unresolved review evidence. They never claim the repository is
 safe, UB-free, Miri-clean, or policy-compliant.
@@ -92,12 +96,16 @@ posture and do not certify repository safety.
 Badge meanings are fixed:
 
 - `unsafe-review`: open unsafe-review gap count
-- `unsafe-review+`: missing-or-weak evidence count
+- `unsafe-review+`: open unsafe-review gap count plus missing-or-weak evidence
+  findings, with component counts for contract-missing, guard-missing, and
+  guarded-unwitnessed evidence quality signals
 
 Badges must never imply that the repo is sound, memory-safe, UB-free,
 Miri-clean, verified, all clear, policy-ready, or that any unsafe site executed.
 If a badge endpoint cannot be generated or verified, the public badge row must
 be withheld or marked planned rather than inferred from another surface.
+Repository checks must reject checked-in endpoint JSON that no longer matches
+the current `unsafe-review badges` repo projection.
 
 ## Non-goals
 
@@ -125,6 +133,9 @@ be withheld or marked planned rather than inferred from another surface.
   expressions and next actions, and the trust boundary.
 - Badge JSON for a fixture reports open unsafe-review gaps rather than raw
   unsafe count or safe/unsafe status.
+- The `unsafe-review+` badge message equals `unsuppressed_review_gaps` plus the
+  `evidence_quality_contract_missing`, `evidence_quality_guard_missing`, and
+  `evidence_quality_guarded_unwitnessed` component counts.
 - Outcome comparison between a no-card snapshot and a one-card snapshot reports
   one `new` card and preserves the static-review trust boundary.
 - Outcome JSON includes `schema_version`, deterministic `before_id` and
