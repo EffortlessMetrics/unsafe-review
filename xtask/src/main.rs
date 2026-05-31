@@ -1509,6 +1509,12 @@ const REPAIR_QUEUE_TRUST_BOUNDARY_LIMITS: &[&str] = &[
     "does not suppress cards",
     "does not resolve cards",
 ];
+const RECEIPT_AUDIT_TRUST_BOUNDARY_LIMITS: &[&str] = &[
+    "saved receipt metadata",
+    "does not execute witnesses",
+    "does not prove site reach",
+    "does not make policy decisions",
+];
 
 fn check_advisory_artifacts(dir: &Path) -> Result<(), String> {
     check_advisory_artifact_set(dir)?;
@@ -1624,6 +1630,7 @@ fn check_advisory_artifact_set(dir: &Path) -> Result<AdvisoryArtifactSummary, St
     let comment_plan = parse_json_file(&dir.join("comment-plan.json"))?;
     check_comment_plan_artifact(&comment_plan, &card_ids, card_count)?;
     check_repair_queue_artifact(dir, card_count, &card_ids)?;
+    check_receipt_audit_artifact(dir)?;
 
     Ok(AdvisoryArtifactSummary {
         card_ids,
@@ -1989,6 +1996,33 @@ fn check_repair_queue_artifact(
     Ok(())
 }
 
+fn check_receipt_audit_artifact(dir: &Path) -> Result<(), String> {
+    let path = dir.join("receipt-audit.md");
+    let text = read_to_string(&path)?;
+    require_text_contains(&text, "# unsafe-review receipt audit", &path)?;
+    require_text_contains(
+        &text,
+        "Static audit of saved witness receipt metadata",
+        &path,
+    )?;
+    require_text_contains(&text, "## Summary", &path)?;
+    require_text_contains(&text, "| Receipts | Matched | Unmatched |", &path)?;
+    require_text_contains(&text, "## Limitations", &path)?;
+    require_text_contains(&text, "does not execute Miri", &path)?;
+    require_text_contains(&text, "does not prove site reach", &path)?;
+    require_text_contains(&text, "## Trust boundary", &path)?;
+    for expected in RECEIPT_AUDIT_TRUST_BOUNDARY_LIMITS {
+        if !text_contains_ignore_ascii_case(&text, expected) {
+            return Err(format!(
+                "{} must include receipt audit boundary `{expected}`",
+                path.display()
+            ));
+        }
+    }
+    reject_positive_overclaims(&path, &text)?;
+    Ok(())
+}
+
 fn check_repair_queue_entry<'a>(
     entry: &'a serde_json::Value,
     bucket: &str,
@@ -2269,6 +2303,7 @@ fn check_review_kit_manifest(dir: &Path, summary: &AdvisoryArtifactSummary) -> R
         "cards.sarif",
         "comment-plan.json",
         "witness-plan.md",
+        "receipt-audit.md",
         "lsp.json",
         "repair-queue.json",
     ] {
@@ -2291,6 +2326,7 @@ fn expected_review_kit_artifact_kind(path: &str) -> &'static str {
         "cards.sarif" => "sarif",
         "comment-plan.json" => "comment_plan",
         "witness-plan.md" => "witness_plan",
+        "receipt-audit.md" => "receipt_audit",
         "lsp.json" => "saved_lsp",
         "repair-queue.json" => "repair_queue",
         _ => "unknown",
@@ -2329,6 +2365,11 @@ fn check_github_summary_artifact(dir: &Path, card_count: usize) -> Result<(), St
     require_text_contains(&text, "## Top card", &path)?;
     require_text_contains(&text, "- Review kit manifest: `review-kit.json`", &path)?;
     require_text_contains(&text, "- Full reviewer cockpit: `pr-summary.md`", &path)?;
+    require_text_contains(
+        &text,
+        "- Receipt audit: `receipt-audit.md` is metadata-only; no witness was run.",
+        &path,
+    )?;
     require_text_contains(
         &text,
         "- Agent repair queue: `repair-queue.json` is copy-only; no agent was run.",
@@ -2646,6 +2687,7 @@ fn check_first_pr_artifact_overclaims(dir: &Path) -> Result<(), String> {
         "pr-summary.md",
         "comment-plan.json",
         "witness-plan.md",
+        "receipt-audit.md",
         "lsp.json",
         "repair-queue.json",
     ] {
@@ -6182,6 +6224,8 @@ review_after = "2026-08-01"
             valid_repair_queue_json("card-1"),
         )
         .map_err(|err| format!("write repair queue failed: {err}"))?;
+        fs::write(dir.join("receipt-audit.md"), valid_receipt_audit_markdown())
+            .map_err(|err| format!("write receipt audit failed: {err}"))?;
         Ok(())
     }
 
@@ -6189,12 +6233,12 @@ review_after = "2026-08-01"
         write_valid_artifacts(dir)?;
         fs::write(
             dir.join("review-kit.json"),
-            r#"{"schema_version":"0.1","tool":"unsafe-review","tool_version":"0.3.0-test","mode":"review_kit_manifest","source":"first_pr","policy":"advisory","scope":"diff","base_ref":null,"head_commit":null,"summary":{"cards":1,"open_actionable_gaps":1},"top_card_id":"card-1","artifacts":[{"path":"review-kit.json","kind":"review_kit_manifest","format":"json","schema_version":"0.1"},{"path":"cards.json","kind":"review_cards","format":"json","schema_version":"0.1"},{"path":"pr-summary.md","kind":"reviewer_summary","format":"markdown","schema_version":null},{"path":"github-summary.md","kind":"github_summary","format":"markdown","schema_version":null},{"path":"cards.sarif","kind":"sarif","format":"sarif","schema_version":"2.1.0"},{"path":"comment-plan.json","kind":"comment_plan","format":"json","schema_version":"0.1"},{"path":"witness-plan.md","kind":"witness_plan","format":"markdown","schema_version":null},{"path":"lsp.json","kind":"saved_lsp","format":"json","schema_version":"0.1"},{"path":"repair-queue.json","kind":"repair_queue","format":"json","schema_version":"0.1"}],"trust_boundary":"Static unsafe contract review kit manifest only; this indexes first-pr artifacts and does not reclassify ReviewCards. It is not a proof of memory safety, not UB-free status, not a Miri result, not Miri-clean status, and not site-execution proof. unsafe-review did not run witnesses, post comments, edit source, run an agent, or enforce blocking policy."}"#,
+            r#"{"schema_version":"0.1","tool":"unsafe-review","tool_version":"0.3.0-test","mode":"review_kit_manifest","source":"first_pr","policy":"advisory","scope":"diff","base_ref":null,"head_commit":null,"summary":{"cards":1,"open_actionable_gaps":1},"top_card_id":"card-1","artifacts":[{"path":"review-kit.json","kind":"review_kit_manifest","format":"json","schema_version":"0.1"},{"path":"cards.json","kind":"review_cards","format":"json","schema_version":"0.1"},{"path":"pr-summary.md","kind":"reviewer_summary","format":"markdown","schema_version":null},{"path":"github-summary.md","kind":"github_summary","format":"markdown","schema_version":null},{"path":"cards.sarif","kind":"sarif","format":"sarif","schema_version":"2.1.0"},{"path":"comment-plan.json","kind":"comment_plan","format":"json","schema_version":"0.1"},{"path":"witness-plan.md","kind":"witness_plan","format":"markdown","schema_version":null},{"path":"receipt-audit.md","kind":"receipt_audit","format":"markdown","schema_version":null},{"path":"lsp.json","kind":"saved_lsp","format":"json","schema_version":"0.1"},{"path":"repair-queue.json","kind":"repair_queue","format":"json","schema_version":"0.1"}],"trust_boundary":"Static unsafe contract review kit manifest only; this indexes first-pr artifacts and does not reclassify ReviewCards. It is not a proof of memory safety, not UB-free status, not a Miri result, not Miri-clean status, and not site-execution proof. unsafe-review did not run witnesses, post comments, edit source, run an agent, or enforce blocking policy."}"#,
         )
         .map_err(|err| format!("write review kit failed: {err}"))?;
         fs::write(
             dir.join("github-summary.md"),
-            "## unsafe-review advisory summary\n\n- Scope: `diff`\n- Review cards: 1\n- Open actionable gaps: 1\n- Policy mode: `advisory`\n\n## Top card\n\n- ID: `card-1`\n- Class: `guard_missing`\n- Operation family: `raw_pointer_read`\n- Missing evidence: Missing visible local guard\n- Next action: add an alignment guard\n- Witness route: `miri`\n- Explain: `unsafe-review explain card-1`\n- Agent context: `unsafe-review context card-1 --json`\n\n## Open next\n\n- Review kit manifest: `review-kit.json`\n- Full reviewer cockpit: `pr-summary.md`\n- Machine-readable ReviewCards: `cards.json`\n- Witness routes: `witness-plan.md`\n- Agent repair queue: `repair-queue.json` is copy-only; no agent was run.\n- Comment budget: `comment-plan.json` is plan-only; no comments were posted.\n\n---\n\nFull advisory bundle (review-kit.json, cards.json, pr-summary.md, github-summary.md, cards.sarif, comment-plan.json, witness-plan.md, lsp.json, repair-queue.json) is attached as the workflow artifact.\n\n> Trust boundary: static unsafe contract review only; not memory-safety proof, not UB-free status, not Miri-clean status, and not site-execution proof.\n> Execution boundary: unsafe-review did not run witnesses, post comments, edit source, run an agent, or enforce blocking policy.\n",
+            "## unsafe-review advisory summary\n\n- Scope: `diff`\n- Review cards: 1\n- Open actionable gaps: 1\n- Policy mode: `advisory`\n\n## Top card\n\n- ID: `card-1`\n- Class: `guard_missing`\n- Operation family: `raw_pointer_read`\n- Missing evidence: Missing visible local guard\n- Next action: add an alignment guard\n- Witness route: `miri`\n- Explain: `unsafe-review explain card-1`\n- Agent context: `unsafe-review context card-1 --json`\n\n## Open next\n\n- Review kit manifest: `review-kit.json`\n- Full reviewer cockpit: `pr-summary.md`\n- Machine-readable ReviewCards: `cards.json`\n- Witness routes: `witness-plan.md`\n- Receipt audit: `receipt-audit.md` is metadata-only; no witness was run.\n- Agent repair queue: `repair-queue.json` is copy-only; no agent was run.\n- Comment budget: `comment-plan.json` is plan-only; no comments were posted.\n\n---\n\nFull advisory bundle (review-kit.json, cards.json, pr-summary.md, github-summary.md, cards.sarif, comment-plan.json, witness-plan.md, receipt-audit.md, lsp.json, repair-queue.json) is attached as the workflow artifact.\n\n> Trust boundary: static unsafe contract review only; not memory-safety proof, not UB-free status, not Miri-clean status, and not site-execution proof.\n> Execution boundary: unsafe-review did not run witnesses, post comments, edit source, run an agent, or enforce blocking policy.\n",
         )
         .map_err(|err| format!("write github summary failed: {err}"))?;
         fs::write(
@@ -6202,6 +6246,8 @@ review_after = "2026-08-01"
             "# unsafe-review witness plan\n\n- Review cards: 1\n- Open actionable gaps: 1\n- Policy mode: `advisory`\n\n## Route groups\n\n### Miri / cargo-careful\n\n- Limit: Concrete runtime evidence is path-specific. It can support the exercised route, but it does not prove arbitrary callers, repo safety, UB-free status, or site execution unless a matching receipt records the run.\n\n#### `card-1`\n\n- Route: `miri`\n  - Reason: route\n  - What it can show: a focused run\n  - What it cannot prove: arbitrary callers\n  - Command:\n\n```bash\ncargo +nightly miri test card\n```\n  - Receipt hint: unsafe-review receipt import-miri card-1\n\n## Trust boundary\n\nThis artifact is static unsafe contract review. It routes reviewers to credible witnesses but does not run Miri, cargo-careful, sanitizers, Loom, Shuttle, Kani, or Crux. It is not a proof of memory safety, not UB-free status, and not a Miri result unless a witness receipt is attached.\n",
         )
         .map_err(|err| format!("write witness plan failed: {err}"))?;
+        fs::write(dir.join("receipt-audit.md"), valid_receipt_audit_markdown())
+            .map_err(|err| format!("write receipt audit failed: {err}"))?;
         fs::write(
             dir.join("lsp.json"),
             valid_lsp_json(
@@ -6226,7 +6272,7 @@ review_after = "2026-08-01"
         .map_err(|err| format!("write cards failed: {err}"))?;
         fs::write(
             dir.join("review-kit.json"),
-            r#"{"schema_version":"0.1","tool":"unsafe-review","tool_version":"0.3.0-test","mode":"review_kit_manifest","source":"first_pr","policy":"advisory","scope":"diff","base_ref":null,"head_commit":null,"summary":{"cards":0,"open_actionable_gaps":0},"top_card_id":null,"artifacts":[{"path":"review-kit.json","kind":"review_kit_manifest","format":"json","schema_version":"0.1"},{"path":"cards.json","kind":"review_cards","format":"json","schema_version":"0.1"},{"path":"pr-summary.md","kind":"reviewer_summary","format":"markdown","schema_version":null},{"path":"github-summary.md","kind":"github_summary","format":"markdown","schema_version":null},{"path":"cards.sarif","kind":"sarif","format":"sarif","schema_version":"2.1.0"},{"path":"comment-plan.json","kind":"comment_plan","format":"json","schema_version":"0.1"},{"path":"witness-plan.md","kind":"witness_plan","format":"markdown","schema_version":null},{"path":"lsp.json","kind":"saved_lsp","format":"json","schema_version":"0.1"},{"path":"repair-queue.json","kind":"repair_queue","format":"json","schema_version":"0.1"}],"trust_boundary":"Static unsafe contract review kit manifest only; this indexes first-pr artifacts and does not reclassify ReviewCards. It is not a proof of memory safety, not UB-free status, not a Miri result, not Miri-clean status, and not site-execution proof. unsafe-review did not run witnesses, post comments, edit source, run an agent, or enforce blocking policy."}"#,
+            r#"{"schema_version":"0.1","tool":"unsafe-review","tool_version":"0.3.0-test","mode":"review_kit_manifest","source":"first_pr","policy":"advisory","scope":"diff","base_ref":null,"head_commit":null,"summary":{"cards":0,"open_actionable_gaps":0},"top_card_id":null,"artifacts":[{"path":"review-kit.json","kind":"review_kit_manifest","format":"json","schema_version":"0.1"},{"path":"cards.json","kind":"review_cards","format":"json","schema_version":"0.1"},{"path":"pr-summary.md","kind":"reviewer_summary","format":"markdown","schema_version":null},{"path":"github-summary.md","kind":"github_summary","format":"markdown","schema_version":null},{"path":"cards.sarif","kind":"sarif","format":"sarif","schema_version":"2.1.0"},{"path":"comment-plan.json","kind":"comment_plan","format":"json","schema_version":"0.1"},{"path":"witness-plan.md","kind":"witness_plan","format":"markdown","schema_version":null},{"path":"receipt-audit.md","kind":"receipt_audit","format":"markdown","schema_version":null},{"path":"lsp.json","kind":"saved_lsp","format":"json","schema_version":"0.1"},{"path":"repair-queue.json","kind":"repair_queue","format":"json","schema_version":"0.1"}],"trust_boundary":"Static unsafe contract review kit manifest only; this indexes first-pr artifacts and does not reclassify ReviewCards. It is not a proof of memory safety, not UB-free status, not a Miri result, not Miri-clean status, and not site-execution proof. unsafe-review did not run witnesses, post comments, edit source, run an agent, or enforce blocking policy."}"#,
         )
         .map_err(|err| format!("write review kit failed: {err}"))?;
         fs::write(
@@ -6236,7 +6282,7 @@ review_after = "2026-08-01"
         .map_err(|err| format!("write pr summary failed: {err}"))?;
         fs::write(
             dir.join("github-summary.md"),
-            "## unsafe-review advisory summary\n\n- Scope: `diff`\n- Review cards: 0\n- Open actionable gaps: 0\n- Policy mode: `advisory`\n\n## Top card\n\nNo changed unsafe-review gaps were found.\nThis does not prove the repo safe, UB-free, Miri-clean, or that any unsafe site executed.\n\n## Open next\n\n- Review kit manifest: `review-kit.json`\n- Full reviewer cockpit: `pr-summary.md`\n- Machine-readable ReviewCards: `cards.json`\n- Witness routes: `witness-plan.md`\n- Agent repair queue: `repair-queue.json` is copy-only; no agent was run.\n- Comment budget: `comment-plan.json` is plan-only; no comments were posted.\n\n---\n\nFull advisory bundle (review-kit.json, cards.json, pr-summary.md, github-summary.md, cards.sarif, comment-plan.json, witness-plan.md, lsp.json, repair-queue.json) is attached as the workflow artifact.\n\n> Trust boundary: static unsafe contract review only; not memory-safety proof, not UB-free status, not Miri-clean status, and not site-execution proof.\n> Execution boundary: unsafe-review did not run witnesses, post comments, edit source, run an agent, or enforce blocking policy.\n",
+            "## unsafe-review advisory summary\n\n- Scope: `diff`\n- Review cards: 0\n- Open actionable gaps: 0\n- Policy mode: `advisory`\n\n## Top card\n\nNo changed unsafe-review gaps were found.\nThis does not prove the repo safe, UB-free, Miri-clean, or that any unsafe site executed.\n\n## Open next\n\n- Review kit manifest: `review-kit.json`\n- Full reviewer cockpit: `pr-summary.md`\n- Machine-readable ReviewCards: `cards.json`\n- Witness routes: `witness-plan.md`\n- Receipt audit: `receipt-audit.md` is metadata-only; no witness was run.\n- Agent repair queue: `repair-queue.json` is copy-only; no agent was run.\n- Comment budget: `comment-plan.json` is plan-only; no comments were posted.\n\n---\n\nFull advisory bundle (review-kit.json, cards.json, pr-summary.md, github-summary.md, cards.sarif, comment-plan.json, witness-plan.md, receipt-audit.md, lsp.json, repair-queue.json) is attached as the workflow artifact.\n\n> Trust boundary: static unsafe contract review only; not memory-safety proof, not UB-free status, not Miri-clean status, and not site-execution proof.\n> Execution boundary: unsafe-review did not run witnesses, post comments, edit source, run an agent, or enforce blocking policy.\n",
         )
         .map_err(|err| format!("write github summary failed: {err}"))?;
         fs::write(
@@ -6258,7 +6304,13 @@ review_after = "2026-08-01"
         .map_err(|err| format!("write lsp failed: {err}"))?;
         fs::write(dir.join("repair-queue.json"), zero_card_repair_queue_json())
             .map_err(|err| format!("write repair queue failed: {err}"))?;
+        fs::write(dir.join("receipt-audit.md"), valid_receipt_audit_markdown())
+            .map_err(|err| format!("write receipt audit failed: {err}"))?;
         Ok(())
+    }
+
+    fn valid_receipt_audit_markdown() -> &'static str {
+        "# unsafe-review receipt audit\n\nStatic audit of saved witness receipt metadata against current ReviewCards.\n\n## Summary\n\n| Receipts | Matched | Unmatched | Expired | Stale | Wrong identity | Wrong tool | Weak strength | Duplicate | Invalid |\n|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n| 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |\n\n## Receipts\n\nNo receipt files found.\n\n## Limitations\n\n- audits saved witness receipt metadata only\n- does not execute Miri, cargo-careful, sanitizers, Loom, Shuttle, Kani, or Crux\n- does not prove site reach, memory safety, UB-free status, or repo safety\n- matched receipts improve witness evidence only and do not erase missing contracts, guards, or reach evidence\n\n## Trust boundary\n\nStatic witness receipt audit only; this checks saved receipt metadata against current ReviewCards, does not execute witnesses, does not prove site reach, and does not make policy decisions.\n"
     }
 
     fn unique_temp_dir(prefix: &str) -> Result<PathBuf, String> {

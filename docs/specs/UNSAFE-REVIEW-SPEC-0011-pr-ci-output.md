@@ -89,8 +89,8 @@ execution, source edits, comments, suppression, or card resolution.
   without posting comments.
 - `unsafe-review first-pr --base origin/main` writes `review-kit.json`,
   `cards.json`, `pr-summary.md`, `github-summary.md`, `cards.sarif`,
-  `comment-plan.json`, `witness-plan.md`, `lsp.json`, and
-  `repair-queue.json`.
+  `comment-plan.json`, `witness-plan.md`, `receipt-audit.md`, `lsp.json`,
+  and `repair-queue.json`.
 - The advisory workflow uploads those artifacts without running Miri, posting
   comments, or enabling blocking policy.
 - The advisory workflow runs `cargo xtask check-advisory-artifacts` before

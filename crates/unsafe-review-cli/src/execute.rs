@@ -22,7 +22,7 @@ const NO_CHANGED_GAPS_MESSAGE: &str = "No changed unsafe-review gaps were found.
 const NO_CHANGED_GAPS_LIMITATION: &str =
     "This does not prove the repo safe, UB-free, Miri-clean, or that any unsafe site executed.";
 const REVIEW_KIT_ARTIFACT: &str = "review-kit.json";
-const FIRST_PR_ARTIFACTS: [&str; 9] = [
+const FIRST_PR_ARTIFACTS: [&str; 10] = [
     REVIEW_KIT_ARTIFACT,
     "cards.json",
     "pr-summary.md",
@@ -30,6 +30,7 @@ const FIRST_PR_ARTIFACTS: [&str; 9] = [
     "cards.sarif",
     "comment-plan.json",
     "witness-plan.md",
+    "receipt-audit.md",
     "lsp.json",
     "repair-queue.json",
 ];
@@ -75,7 +76,7 @@ fn print_support() {
     println!("Current posture:");
     println!("- ReviewCards: experimental; selected slices are fixture-backed or dogfood-backed.");
     println!(
-        "- first-pr bundle: advisory; projects the review-kit manifest, summaries, cards, SARIF, comment plans, witness plans, saved LSP JSON, and repair queue from ReviewCards."
+        "- first-pr bundle: advisory; projects the review-kit manifest, summaries, cards, SARIF, comment plans, witness plans, receipt audit, saved LSP JSON, and repair queue from ReviewCards."
     );
     println!(
         "- receipts: saved-output template/import/audit only; receipts attach external evidence to exact card identities."
@@ -132,6 +133,15 @@ fn first_pr(options: FirstPrOptions) -> Result<(), String> {
     let output = analyze(AnalyzeInput {
         root: root.clone(),
         scope: Scope::Diff,
+        diff: diff.clone(),
+        mode: AnalysisMode::Draft,
+        policy: PolicyMode::Advisory,
+        include_unchanged_tests: true,
+        max_cards: check.max_cards,
+    })?;
+    let receipt_audit = audit_witness_receipts(AnalyzeInput {
+        root: root.clone(),
+        scope: Scope::Diff,
         diff,
         mode: AnalysisMode::Draft,
         policy: PolicyMode::Advisory,
@@ -159,6 +169,10 @@ fn first_pr(options: FirstPrOptions) -> Result<(), String> {
         &options.out_dir.join("witness-plan.md"),
         render_witness_plan(&output),
     )?;
+    write_artifact(
+        &options.out_dir.join("receipt-audit.md"),
+        render_receipt_audit_markdown(&receipt_audit),
+    )?;
     write_artifact(&options.out_dir.join("lsp.json"), render_lsp(&output))?;
     write_artifact(
         &options.out_dir.join("repair-queue.json"),
@@ -183,6 +197,11 @@ fn first_pr(options: FirstPrOptions) -> Result<(), String> {
     println!(
         "  {} (copy-only; unsafe-review did not run an agent)",
         options.out_dir.join("repair-queue.json").display()
+    );
+    println!("Receipt audit:");
+    println!(
+        "  {} (metadata-only; unsafe-review did not run witnesses)",
+        options.out_dir.join("receipt-audit.md").display()
     );
     if output.summary.open_actionable_gaps == 0 {
         println!("{NO_CHANGED_GAPS_MESSAGE}");
@@ -262,6 +281,7 @@ fn render_review_kit_manifest(
             "reviewer_summary": "pr-summary.md",
             "github_summary": "github-summary.md",
             "agent_repair_queue": "repair-queue.json",
+            "receipt_audit": "receipt-audit.md",
             "top_card": output.cards.first().map(|card| serde_json::json!({
                 "card_id": card.id.to_string(),
                 "explain": format!("unsafe-review explain {}", card.id),
@@ -320,6 +340,7 @@ fn artifact_kind(path: &str) -> &'static str {
         "cards.sarif" => "sarif",
         "comment-plan.json" => "comment_plan",
         "witness-plan.md" => "witness_plan",
+        "receipt-audit.md" => "receipt_audit",
         "lsp.json" => "saved_lsp",
         "repair-queue.json" => "repair_queue",
         _ => "unknown",
