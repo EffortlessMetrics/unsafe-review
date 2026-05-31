@@ -14,15 +14,15 @@ use unsafe_review_core::{
     render_badge_jsons, render_comment_plan, render_github_summary, render_human, render_json,
     render_lsp, render_markdown, render_outcome_json, render_outcome_markdown,
     render_policy_report_json, render_policy_report_markdown, render_pr_summary,
-    render_receipt_audit_json, render_receipt_audit_markdown, render_sarif, render_witness_plan,
-    validate_witness_receipts,
+    render_receipt_audit_json, render_receipt_audit_markdown, render_repair_queue, render_sarif,
+    render_witness_plan, validate_witness_receipts,
 };
 
 const NO_CHANGED_GAPS_MESSAGE: &str = "No changed unsafe-review gaps were found.";
 const NO_CHANGED_GAPS_LIMITATION: &str =
     "This does not prove the repo safe, UB-free, Miri-clean, or that any unsafe site executed.";
 const REVIEW_KIT_ARTIFACT: &str = "review-kit.json";
-const FIRST_PR_ARTIFACTS: [&str; 8] = [
+const FIRST_PR_ARTIFACTS: [&str; 9] = [
     REVIEW_KIT_ARTIFACT,
     "cards.json",
     "pr-summary.md",
@@ -31,6 +31,7 @@ const FIRST_PR_ARTIFACTS: [&str; 8] = [
     "comment-plan.json",
     "witness-plan.md",
     "lsp.json",
+    "repair-queue.json",
 ];
 
 pub(crate) fn execute(command: Command) -> Result<(), String> {
@@ -74,7 +75,7 @@ fn print_support() {
     println!("Current posture:");
     println!("- ReviewCards: experimental; selected slices are fixture-backed or dogfood-backed.");
     println!(
-        "- first-pr bundle: advisory; projects the review-kit manifest, summaries, cards, SARIF, comment plans, witness plans, and saved LSP JSON from ReviewCards."
+        "- first-pr bundle: advisory; projects the review-kit manifest, summaries, cards, SARIF, comment plans, witness plans, saved LSP JSON, and repair queue from ReviewCards."
     );
     println!(
         "- receipts: saved-output template/import/audit only; receipts attach external evidence to exact card identities."
@@ -160,6 +161,10 @@ fn first_pr(options: FirstPrOptions) -> Result<(), String> {
     )?;
     write_artifact(&options.out_dir.join("lsp.json"), render_lsp(&output))?;
     write_artifact(
+        &options.out_dir.join("repair-queue.json"),
+        render_repair_queue(&output),
+    )?;
+    write_artifact(
         &options.out_dir.join(REVIEW_KIT_ARTIFACT),
         render_review_kit_manifest(&output, &root, &check, &FIRST_PR_ARTIFACTS),
     )?;
@@ -174,6 +179,11 @@ fn first_pr(options: FirstPrOptions) -> Result<(), String> {
     );
     println!("Open:");
     println!("  {}", options.out_dir.join("pr-summary.md").display());
+    println!("Agent repair queue:");
+    println!(
+        "  {} (copy-only; unsafe-review did not run an agent)",
+        options.out_dir.join("repair-queue.json").display()
+    );
     if output.summary.open_actionable_gaps == 0 {
         println!("{NO_CHANGED_GAPS_MESSAGE}");
         println!("{NO_CHANGED_GAPS_LIMITATION}");
@@ -221,7 +231,7 @@ fn first_pr(options: FirstPrOptions) -> Result<(), String> {
         "  static unsafe contract review only; not memory-safety proof, not UB-free status, and not Miri-clean status."
     );
     println!(
-        "  unsafe-review did not run witnesses, post comments, edit source, or enforce blocking policy."
+        "  unsafe-review did not run witnesses, run agents, post comments, edit source, or enforce blocking policy."
     );
 
     Ok(())
@@ -251,6 +261,7 @@ fn render_review_kit_manifest(
         "handoff": {
             "reviewer_summary": "pr-summary.md",
             "github_summary": "github-summary.md",
+            "agent_repair_queue": "repair-queue.json",
             "top_card": output.cards.first().map(|card| serde_json::json!({
                 "card_id": card.id.to_string(),
                 "explain": format!("unsafe-review explain {}", card.id),
@@ -310,6 +321,7 @@ fn artifact_kind(path: &str) -> &'static str {
         "comment-plan.json" => "comment_plan",
         "witness-plan.md" => "witness_plan",
         "lsp.json" => "saved_lsp",
+        "repair-queue.json" => "repair_queue",
         _ => "unknown",
     }
 }
@@ -328,7 +340,8 @@ fn artifact_format(path: &str) -> &'static str {
 
 fn artifact_schema_version(path: &str) -> Option<&'static str> {
     match path {
-        "review-kit.json" | "cards.json" | "comment-plan.json" | "lsp.json" => Some("0.1"),
+        "review-kit.json" | "cards.json" | "comment-plan.json" | "lsp.json"
+        | "repair-queue.json" => Some("0.1"),
         "cards.sarif" => Some("2.1.0"),
         _ => None,
     }

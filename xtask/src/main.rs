@@ -1492,6 +1492,23 @@ const COMMENT_PLAN_ACTIONABILITY: &[&str] = &[
     "human_review_only",
     "not_actionable",
 ];
+const REPAIR_QUEUE_BUCKETS: &[&str] = &[
+    "repairable_by_guard",
+    "repairable_by_safety_docs",
+    "repairable_by_test",
+    "requires_witness_receipt",
+    "requires_human_review",
+    "do_not_auto_repair",
+];
+const REPAIR_QUEUE_TRUST_BOUNDARY_LIMITS: &[&str] = &[
+    "not an automatic repair queue",
+    "does not run agents",
+    "does not run witnesses",
+    "does not edit source",
+    "does not post comments",
+    "does not suppress cards",
+    "does not resolve cards",
+];
 
 fn check_advisory_artifacts(dir: &Path) -> Result<(), String> {
     check_advisory_artifact_set(dir)?;
@@ -1503,6 +1520,7 @@ fn check_first_pr_artifacts(dir: &Path) -> Result<(), String> {
     let summary = check_advisory_artifact_set(dir)?;
     check_review_kit_manifest(dir, &summary)?;
     check_github_summary_artifact(dir, summary.card_count)?;
+    check_repair_queue_artifact(dir, summary.card_count, &summary.card_ids)?;
     check_witness_plan_artifact(dir, summary.card_count)?;
     check_lsp_artifact(dir, &summary.card_ids)?;
     check_first_pr_artifact_overclaims(dir)?;
@@ -1605,6 +1623,7 @@ fn check_advisory_artifact_set(dir: &Path) -> Result<AdvisoryArtifactSummary, St
 
     let comment_plan = parse_json_file(&dir.join("comment-plan.json"))?;
     check_comment_plan_artifact(&comment_plan, &card_ids, card_count)?;
+    check_repair_queue_artifact(dir, card_count, &card_ids)?;
 
     Ok(AdvisoryArtifactSummary {
         card_ids,
@@ -1882,6 +1901,239 @@ fn require_json_bool_present(
         .ok_or_else(|| format!("{path} is missing boolean key `{key}`"))
 }
 
+fn check_repair_queue_artifact(
+    dir: &Path,
+    card_count: usize,
+    card_ids: &BTreeSet<String>,
+) -> Result<(), String> {
+    let repair_queue = parse_json_file(&dir.join("repair-queue.json"))?;
+    require_json_str(&repair_queue, "schema_version", "0.1", "repair-queue.json")?;
+    require_json_str(&repair_queue, "tool", "unsafe-review", "repair-queue.json")?;
+    require_json_str(
+        &repair_queue,
+        "mode",
+        "aggregate_repair_queue",
+        "repair-queue.json",
+    )?;
+    require_json_str(&repair_queue, "source", "review_card", "repair-queue.json")?;
+    require_json_str(&repair_queue, "policy", "advisory", "repair-queue.json")?;
+    let boundary = repair_queue
+        .get("trust_boundary")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "repair-queue.json is missing trust_boundary".to_string())?;
+    check_repair_queue_trust_boundary(boundary, "repair-queue.json")?;
+
+    let summary_cards = json_usize_at(&repair_queue, "/summary/cards", "repair-queue.json")?;
+    if summary_cards != card_count {
+        return Err(format!(
+            "repair-queue.json summary.cards is {summary_cards}, but cards.json has {card_count}"
+        ));
+    }
+
+    let buckets = repair_queue
+        .get("buckets")
+        .ok_or_else(|| "repair-queue.json is missing buckets".to_string())?;
+    let Some(bucket_object) = buckets.as_object() else {
+        return Err("repair-queue.json buckets must be an object".to_string());
+    };
+    for bucket in bucket_object.keys() {
+        if !REPAIR_QUEUE_BUCKETS.contains(&bucket.as_str()) {
+            return Err(format!(
+                "repair-queue.json buckets contain unknown bucket `{bucket}`"
+            ));
+        }
+    }
+
+    let mut queued_card_ids = BTreeSet::new();
+    for bucket in REPAIR_QUEUE_BUCKETS {
+        let entries = json_array_at(
+            &repair_queue,
+            &format!("/buckets/{bucket}"),
+            "repair-queue.json",
+        )?;
+        let summary_count = json_usize_at(
+            &repair_queue,
+            &format!("/summary/{bucket}"),
+            "repair-queue.json",
+        )?;
+        if summary_count != entries.len() {
+            return Err(format!(
+                "repair-queue.json summary.{bucket} is {summary_count}, but bucket has {} entrie(s)",
+                entries.len()
+            ));
+        }
+        let mut bucket_card_ids = BTreeSet::new();
+        for entry in entries {
+            let card_id = check_repair_queue_entry(entry, bucket, card_ids)?;
+            if !bucket_card_ids.insert(card_id.to_string()) {
+                return Err(format!(
+                    "repair-queue.json bucket `{bucket}` repeats card id `{card_id}`"
+                ));
+            }
+            queued_card_ids.insert(card_id.to_string());
+        }
+    }
+    if queued_card_ids.len() != card_count {
+        return Err(format!(
+            "repair-queue.json accounts for {} card(s), but cards.json has {card_count}",
+            queued_card_ids.len()
+        ));
+    }
+    for card_id in card_ids {
+        if !queued_card_ids.contains(card_id) {
+            return Err(format!(
+                "repair-queue.json does not account for ReviewCard id `{card_id}`"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn check_repair_queue_entry<'a>(
+    entry: &'a serde_json::Value,
+    bucket: &str,
+    card_ids: &BTreeSet<String>,
+) -> Result<&'a str, String> {
+    let card_id = require_known_card_id(entry, "repair-queue.json entry", card_ids)?;
+    require_non_empty_json_str(entry, "class", "repair-queue.json entry")?;
+    require_non_empty_json_str(entry, "priority", "repair-queue.json entry")?;
+    require_non_empty_json_str(entry, "confidence", "repair-queue.json entry")?;
+    require_non_empty_json_str(entry, "operation_family", "repair-queue.json entry")?;
+    require_non_empty_json_str(entry, "operation", "repair-queue.json entry")?;
+    require_non_empty_json_str(entry, "path", "repair-queue.json entry")?;
+    json_usize_at(entry, "/line", "repair-queue.json entry")?;
+    json_array_at(entry, "/missing_evidence", "repair-queue.json entry")?;
+
+    let reason = require_non_empty_json_str(entry, "bucket_reason", "repair-queue.json entry")?;
+    let expected_reason = expected_repair_queue_bucket_reason(bucket);
+    if reason != expected_reason {
+        return Err(format!(
+            "repair-queue.json bucket_reason must be `{expected_reason}`; got `{reason}`"
+        ));
+    }
+    let context_command =
+        require_non_empty_json_str(entry, "context_command", "repair-queue.json entry")?;
+    let expected_command = format!("unsafe-review context {card_id} --json");
+    if context_command != expected_command {
+        return Err(format!(
+            "repair-queue.json context_command must be `{expected_command}`"
+        ));
+    }
+    check_repair_queue_do_not_do(entry)?;
+    let boundary = entry
+        .get("trust_boundary")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "repair-queue.json entry is missing trust_boundary".to_string())?;
+    check_repair_queue_trust_boundary(boundary, "repair-queue.json entry")?;
+    let readiness = entry
+        .get("agent_readiness")
+        .ok_or_else(|| "repair-queue.json entry is missing agent_readiness".to_string())?;
+    check_repair_queue_readiness(readiness, bucket)?;
+    Ok(card_id)
+}
+
+fn check_repair_queue_do_not_do(entry: &serde_json::Value) -> Result<(), String> {
+    let rules = json_array_at(entry, "/do_not_do", "repair-queue.json entry")?;
+    for rule in rules {
+        let Some(text) = rule.as_str() else {
+            return Err("repair-queue.json entry do_not_do entries must be strings".to_string());
+        };
+        if !text.starts_with("do not ") {
+            return Err(format!(
+                "repair-queue.json entry do_not_do rule must start with `do not`: {text}"
+            ));
+        }
+    }
+    let rendered =
+        serde_json::to_string(rules).map_err(|err| format!("render do_not_do failed: {err}"))?;
+    for expected in [
+        "suppress this card",
+        "broad suppression",
+        "executable guard or discharge evidence",
+        "comments or docs",
+        "Miri proof",
+        "automatic safety repair",
+        "ran an agent, ran witnesses, applied source edits, or posted comments",
+        "unrelated unsafe code",
+        "test mention as proof that the unsafe site executed",
+    ] {
+        if !rendered.contains(expected) {
+            return Err(format!(
+                "repair-queue.json entry do_not_do must include boundary `{expected}`"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn check_repair_queue_trust_boundary(text: &str, context: &str) -> Result<(), String> {
+    require_boundary_text(text, context)?;
+    for expected in REPAIR_QUEUE_TRUST_BOUNDARY_LIMITS {
+        if !text_contains_ignore_ascii_case(text, expected) {
+            return Err(format!(
+                "{context} trust_boundary must include `{expected}`"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn check_repair_queue_readiness(readiness: &serde_json::Value, bucket: &str) -> Result<(), String> {
+    let Some(ready) = readiness.get("ready").and_then(serde_json::Value::as_bool) else {
+        return Err("repair-queue.json agent_readiness.ready must be a boolean".to_string());
+    };
+    let state =
+        require_non_empty_json_str(readiness, "state", "repair-queue.json agent_readiness")?;
+    match state {
+        "ready" | "needs_human_review" | "not_recommended" => {}
+        _ => {
+            return Err(format!(
+                "repair-queue.json agent_readiness.state must be `ready`, `needs_human_review`, or `not_recommended`; got `{state}`"
+            ));
+        }
+    }
+    if ready && state != "ready" {
+        return Err(
+            "repair-queue.json agent_readiness.state must be `ready` when ready is true"
+                .to_string(),
+        );
+    }
+    if !ready && state == "ready" {
+        return Err(
+            "repair-queue.json agent_readiness.state `ready` requires ready = true".to_string(),
+        );
+    }
+    let reasons = json_array_at(readiness, "/reasons", "repair-queue.json agent_readiness")?;
+    if reasons.is_empty() {
+        return Err("repair-queue.json agent_readiness.reasons must not be empty".to_string());
+    }
+    for reason in reasons {
+        if !reason.is_string() {
+            return Err(
+                "repair-queue.json agent_readiness.reasons entries must be strings".to_string(),
+            );
+        }
+    }
+    if matches!(bucket, "requires_human_review" | "do_not_auto_repair") && ready {
+        return Err(format!(
+            "repair-queue.json {bucket} entries must not be agent-ready"
+        ));
+    }
+    Ok(())
+}
+
+fn expected_repair_queue_bucket_reason(bucket: &str) -> &'static str {
+    match bucket {
+        "repairable_by_guard" => "guard_evidence_missing",
+        "repairable_by_safety_docs" => "safety_docs_evidence_missing",
+        "repairable_by_test" => "reach_evidence_missing",
+        "requires_witness_receipt" => "witness_receipt_missing",
+        "requires_human_review" => "human_review_required",
+        "do_not_auto_repair" => "not_ready_for_automatic_repair",
+        _ => "",
+    }
+}
+
 fn check_review_kit_manifest(dir: &Path, summary: &AdvisoryArtifactSummary) -> Result<(), String> {
     let path = dir.join("review-kit.json");
     let review_kit = parse_json_file(&path)?;
@@ -2018,6 +2270,7 @@ fn check_review_kit_manifest(dir: &Path, summary: &AdvisoryArtifactSummary) -> R
         "comment-plan.json",
         "witness-plan.md",
         "lsp.json",
+        "repair-queue.json",
     ] {
         if !seen.contains(expected) {
             return Err(format!(
@@ -2039,6 +2292,7 @@ fn expected_review_kit_artifact_kind(path: &str) -> &'static str {
         "comment-plan.json" => "comment_plan",
         "witness-plan.md" => "witness_plan",
         "lsp.json" => "saved_lsp",
+        "repair-queue.json" => "repair_queue",
         _ => "unknown",
     }
 }
@@ -2057,7 +2311,8 @@ fn expected_review_kit_artifact_format(path: &str) -> &'static str {
 
 fn expected_review_kit_artifact_schema(path: &str) -> Option<&'static str> {
     match path {
-        "review-kit.json" | "cards.json" | "comment-plan.json" | "lsp.json" => Some("0.1"),
+        "review-kit.json" | "cards.json" | "comment-plan.json" | "lsp.json"
+        | "repair-queue.json" => Some("0.1"),
         "cards.sarif" => Some("2.1.0"),
         _ => None,
     }
@@ -2074,6 +2329,11 @@ fn check_github_summary_artifact(dir: &Path, card_count: usize) -> Result<(), St
     require_text_contains(&text, "## Top card", &path)?;
     require_text_contains(&text, "- Review kit manifest: `review-kit.json`", &path)?;
     require_text_contains(&text, "- Full reviewer cockpit: `pr-summary.md`", &path)?;
+    require_text_contains(
+        &text,
+        "- Agent repair queue: `repair-queue.json` is copy-only; no agent was run.",
+        &path,
+    )?;
     require_text_contains(&text, "`comment-plan.json` is plan-only", &path)?;
     require_text_contains(&text, "Full advisory bundle", &path)?;
     require_text_contains(&text, "review-kit.json", &path)?;
@@ -2387,6 +2647,7 @@ fn check_first_pr_artifact_overclaims(dir: &Path) -> Result<(), String> {
         "comment-plan.json",
         "witness-plan.md",
         "lsp.json",
+        "repair-queue.json",
     ] {
         let path = dir.join(name);
         if path.is_file() {
@@ -5794,6 +6055,107 @@ review_after = "2026-08-01"
         r#"{"schema_version":"0.1","tool":"unsafe-review","mode":"plan_only","policy":"advisory","summary":{"selected_count":0,"not_selected_count":0,"budget":3,"reason":"bounded reviewer noise","reason_code":"bounded_reviewer_noise"},"comments":[],"no_changed_gaps":{"message":"No changed unsafe-review gaps were found.","limitation":"This does not prove the repo safe, UB-free, Miri-clean, or that any unsafe site executed."},"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}"#
     }
 
+    fn valid_repair_queue_json(card_id: &str) -> String {
+        let boundary = repair_queue_trust_boundary();
+        let entry = serde_json::json!({
+            "card_id": card_id,
+            "class": "guard_missing",
+            "priority": "high",
+            "confidence": "medium",
+            "operation_family": "raw_pointer_read",
+            "operation": "unsafe { ptr.cast::<Header>().read() }",
+            "path": "src/lib.rs",
+            "line": 7,
+            "missing_evidence": [],
+            "agent_readiness": {
+                "ready": true,
+                "state": "ready",
+                "reasons": ["specific operation family"],
+            },
+            "context_command": format!("unsafe-review context {card_id} --json"),
+            "do_not_do": repair_queue_do_not_do(),
+            "trust_boundary": boundary,
+        });
+        let mut guard = entry.clone();
+        guard["bucket_reason"] = serde_json::json!("guard_evidence_missing");
+        let mut witness = entry;
+        witness["bucket_reason"] = serde_json::json!("witness_receipt_missing");
+        serde_json::json!({
+            "schema_version": "0.1",
+            "tool": "unsafe-review",
+            "mode": "aggregate_repair_queue",
+            "source": "review_card",
+            "policy": "advisory",
+            "trust_boundary": boundary,
+            "summary": {
+                "cards": 1,
+                "repairable_by_guard": 1,
+                "repairable_by_safety_docs": 0,
+                "repairable_by_test": 0,
+                "requires_witness_receipt": 1,
+                "requires_human_review": 0,
+                "do_not_auto_repair": 0,
+            },
+            "buckets": {
+                "repairable_by_guard": [guard],
+                "repairable_by_safety_docs": [],
+                "repairable_by_test": [],
+                "requires_witness_receipt": [witness],
+                "requires_human_review": [],
+                "do_not_auto_repair": [],
+            },
+        })
+        .to_string()
+    }
+
+    fn zero_card_repair_queue_json() -> String {
+        let boundary = repair_queue_trust_boundary();
+        serde_json::json!({
+            "schema_version": "0.1",
+            "tool": "unsafe-review",
+            "mode": "aggregate_repair_queue",
+            "source": "review_card",
+            "policy": "advisory",
+            "trust_boundary": boundary,
+            "summary": {
+                "cards": 0,
+                "repairable_by_guard": 0,
+                "repairable_by_safety_docs": 0,
+                "repairable_by_test": 0,
+                "requires_witness_receipt": 0,
+                "requires_human_review": 0,
+                "do_not_auto_repair": 0,
+            },
+            "buckets": {
+                "repairable_by_guard": [],
+                "repairable_by_safety_docs": [],
+                "repairable_by_test": [],
+                "requires_witness_receipt": [],
+                "requires_human_review": [],
+                "do_not_auto_repair": [],
+            },
+        })
+        .to_string()
+    }
+
+    fn repair_queue_do_not_do() -> &'static [&'static str] {
+        &[
+            "do not widen unsafe code without reducing the missing evidence",
+            "do not suppress this card instead of adding, exposing, or explicitly waiving evidence",
+            "do not add a broad suppression",
+            "do not replace executable guard or discharge evidence with comments or docs",
+            "do not claim Miri proof unless the witness command is run and attached",
+            "do not claim automatic safety repair from this packet",
+            "do not claim unsafe-review ran an agent, ran witnesses, applied source edits, or posted comments",
+            "do not change unrelated unsafe code or public API behavior",
+            "do not treat a test mention as proof that the unsafe site executed",
+        ]
+    }
+
+    fn repair_queue_trust_boundary() -> &'static str {
+        "static unsafe contract review, not a proof of memory safety, not UB-free status, not a Miri result, and not an automatic repair queue. It does not run agents, does not run witnesses, does not edit source, does not post comments, does not suppress cards, and does not resolve cards."
+    }
+
     fn write_valid_artifacts(dir: &Path) -> Result<(), String> {
         fs::write(
             dir.join("cards.json"),
@@ -5815,6 +6177,11 @@ review_after = "2026-08-01"
             valid_comment_plan_json("card-1"),
         )
         .map_err(|err| format!("write comment plan failed: {err}"))?;
+        fs::write(
+            dir.join("repair-queue.json"),
+            valid_repair_queue_json("card-1"),
+        )
+        .map_err(|err| format!("write repair queue failed: {err}"))?;
         Ok(())
     }
 
@@ -5822,12 +6189,12 @@ review_after = "2026-08-01"
         write_valid_artifacts(dir)?;
         fs::write(
             dir.join("review-kit.json"),
-            r#"{"schema_version":"0.1","tool":"unsafe-review","tool_version":"0.3.0-test","mode":"review_kit_manifest","source":"first_pr","policy":"advisory","scope":"diff","base_ref":null,"head_commit":null,"summary":{"cards":1,"open_actionable_gaps":1},"top_card_id":"card-1","artifacts":[{"path":"review-kit.json","kind":"review_kit_manifest","format":"json","schema_version":"0.1"},{"path":"cards.json","kind":"review_cards","format":"json","schema_version":"0.1"},{"path":"pr-summary.md","kind":"reviewer_summary","format":"markdown","schema_version":null},{"path":"github-summary.md","kind":"github_summary","format":"markdown","schema_version":null},{"path":"cards.sarif","kind":"sarif","format":"sarif","schema_version":"2.1.0"},{"path":"comment-plan.json","kind":"comment_plan","format":"json","schema_version":"0.1"},{"path":"witness-plan.md","kind":"witness_plan","format":"markdown","schema_version":null},{"path":"lsp.json","kind":"saved_lsp","format":"json","schema_version":"0.1"}],"trust_boundary":"Static unsafe contract review kit manifest only; this indexes first-pr artifacts and does not reclassify ReviewCards. It is not a proof of memory safety, not UB-free status, not a Miri result, not Miri-clean status, and not site-execution proof. unsafe-review did not run witnesses, post comments, edit source, run an agent, or enforce blocking policy."}"#,
+            r#"{"schema_version":"0.1","tool":"unsafe-review","tool_version":"0.3.0-test","mode":"review_kit_manifest","source":"first_pr","policy":"advisory","scope":"diff","base_ref":null,"head_commit":null,"summary":{"cards":1,"open_actionable_gaps":1},"top_card_id":"card-1","artifacts":[{"path":"review-kit.json","kind":"review_kit_manifest","format":"json","schema_version":"0.1"},{"path":"cards.json","kind":"review_cards","format":"json","schema_version":"0.1"},{"path":"pr-summary.md","kind":"reviewer_summary","format":"markdown","schema_version":null},{"path":"github-summary.md","kind":"github_summary","format":"markdown","schema_version":null},{"path":"cards.sarif","kind":"sarif","format":"sarif","schema_version":"2.1.0"},{"path":"comment-plan.json","kind":"comment_plan","format":"json","schema_version":"0.1"},{"path":"witness-plan.md","kind":"witness_plan","format":"markdown","schema_version":null},{"path":"lsp.json","kind":"saved_lsp","format":"json","schema_version":"0.1"},{"path":"repair-queue.json","kind":"repair_queue","format":"json","schema_version":"0.1"}],"trust_boundary":"Static unsafe contract review kit manifest only; this indexes first-pr artifacts and does not reclassify ReviewCards. It is not a proof of memory safety, not UB-free status, not a Miri result, not Miri-clean status, and not site-execution proof. unsafe-review did not run witnesses, post comments, edit source, run an agent, or enforce blocking policy."}"#,
         )
         .map_err(|err| format!("write review kit failed: {err}"))?;
         fs::write(
             dir.join("github-summary.md"),
-            "## unsafe-review advisory summary\n\n- Scope: `diff`\n- Review cards: 1\n- Open actionable gaps: 1\n- Policy mode: `advisory`\n\n## Top card\n\n- ID: `card-1`\n- Class: `guard_missing`\n- Operation family: `raw_pointer_read`\n- Missing evidence: Missing visible local guard\n- Next action: add an alignment guard\n- Witness route: `miri`\n- Explain: `unsafe-review explain card-1`\n- Agent context: `unsafe-review context card-1 --json`\n\n## Open next\n\n- Review kit manifest: `review-kit.json`\n- Full reviewer cockpit: `pr-summary.md`\n- Machine-readable ReviewCards: `cards.json`\n- Witness routes: `witness-plan.md`\n- Comment budget: `comment-plan.json` is plan-only; no comments were posted.\n\n---\n\nFull advisory bundle (review-kit.json, cards.json, pr-summary.md, github-summary.md, cards.sarif, comment-plan.json, witness-plan.md, lsp.json) is attached as the workflow artifact.\n\n> Trust boundary: static unsafe contract review only; not memory-safety proof, not UB-free status, not Miri-clean status, and not site-execution proof.\n> Execution boundary: unsafe-review did not run witnesses, post comments, edit source, run an agent, or enforce blocking policy.\n",
+            "## unsafe-review advisory summary\n\n- Scope: `diff`\n- Review cards: 1\n- Open actionable gaps: 1\n- Policy mode: `advisory`\n\n## Top card\n\n- ID: `card-1`\n- Class: `guard_missing`\n- Operation family: `raw_pointer_read`\n- Missing evidence: Missing visible local guard\n- Next action: add an alignment guard\n- Witness route: `miri`\n- Explain: `unsafe-review explain card-1`\n- Agent context: `unsafe-review context card-1 --json`\n\n## Open next\n\n- Review kit manifest: `review-kit.json`\n- Full reviewer cockpit: `pr-summary.md`\n- Machine-readable ReviewCards: `cards.json`\n- Witness routes: `witness-plan.md`\n- Agent repair queue: `repair-queue.json` is copy-only; no agent was run.\n- Comment budget: `comment-plan.json` is plan-only; no comments were posted.\n\n---\n\nFull advisory bundle (review-kit.json, cards.json, pr-summary.md, github-summary.md, cards.sarif, comment-plan.json, witness-plan.md, lsp.json, repair-queue.json) is attached as the workflow artifact.\n\n> Trust boundary: static unsafe contract review only; not memory-safety proof, not UB-free status, not Miri-clean status, and not site-execution proof.\n> Execution boundary: unsafe-review did not run witnesses, post comments, edit source, run an agent, or enforce blocking policy.\n",
         )
         .map_err(|err| format!("write github summary failed: {err}"))?;
         fs::write(
@@ -5859,7 +6226,7 @@ review_after = "2026-08-01"
         .map_err(|err| format!("write cards failed: {err}"))?;
         fs::write(
             dir.join("review-kit.json"),
-            r#"{"schema_version":"0.1","tool":"unsafe-review","tool_version":"0.3.0-test","mode":"review_kit_manifest","source":"first_pr","policy":"advisory","scope":"diff","base_ref":null,"head_commit":null,"summary":{"cards":0,"open_actionable_gaps":0},"top_card_id":null,"artifacts":[{"path":"review-kit.json","kind":"review_kit_manifest","format":"json","schema_version":"0.1"},{"path":"cards.json","kind":"review_cards","format":"json","schema_version":"0.1"},{"path":"pr-summary.md","kind":"reviewer_summary","format":"markdown","schema_version":null},{"path":"github-summary.md","kind":"github_summary","format":"markdown","schema_version":null},{"path":"cards.sarif","kind":"sarif","format":"sarif","schema_version":"2.1.0"},{"path":"comment-plan.json","kind":"comment_plan","format":"json","schema_version":"0.1"},{"path":"witness-plan.md","kind":"witness_plan","format":"markdown","schema_version":null},{"path":"lsp.json","kind":"saved_lsp","format":"json","schema_version":"0.1"}],"trust_boundary":"Static unsafe contract review kit manifest only; this indexes first-pr artifacts and does not reclassify ReviewCards. It is not a proof of memory safety, not UB-free status, not a Miri result, not Miri-clean status, and not site-execution proof. unsafe-review did not run witnesses, post comments, edit source, run an agent, or enforce blocking policy."}"#,
+            r#"{"schema_version":"0.1","tool":"unsafe-review","tool_version":"0.3.0-test","mode":"review_kit_manifest","source":"first_pr","policy":"advisory","scope":"diff","base_ref":null,"head_commit":null,"summary":{"cards":0,"open_actionable_gaps":0},"top_card_id":null,"artifacts":[{"path":"review-kit.json","kind":"review_kit_manifest","format":"json","schema_version":"0.1"},{"path":"cards.json","kind":"review_cards","format":"json","schema_version":"0.1"},{"path":"pr-summary.md","kind":"reviewer_summary","format":"markdown","schema_version":null},{"path":"github-summary.md","kind":"github_summary","format":"markdown","schema_version":null},{"path":"cards.sarif","kind":"sarif","format":"sarif","schema_version":"2.1.0"},{"path":"comment-plan.json","kind":"comment_plan","format":"json","schema_version":"0.1"},{"path":"witness-plan.md","kind":"witness_plan","format":"markdown","schema_version":null},{"path":"lsp.json","kind":"saved_lsp","format":"json","schema_version":"0.1"},{"path":"repair-queue.json","kind":"repair_queue","format":"json","schema_version":"0.1"}],"trust_boundary":"Static unsafe contract review kit manifest only; this indexes first-pr artifacts and does not reclassify ReviewCards. It is not a proof of memory safety, not UB-free status, not a Miri result, not Miri-clean status, and not site-execution proof. unsafe-review did not run witnesses, post comments, edit source, run an agent, or enforce blocking policy."}"#,
         )
         .map_err(|err| format!("write review kit failed: {err}"))?;
         fs::write(
@@ -5869,7 +6236,7 @@ review_after = "2026-08-01"
         .map_err(|err| format!("write pr summary failed: {err}"))?;
         fs::write(
             dir.join("github-summary.md"),
-            "## unsafe-review advisory summary\n\n- Scope: `diff`\n- Review cards: 0\n- Open actionable gaps: 0\n- Policy mode: `advisory`\n\n## Top card\n\nNo changed unsafe-review gaps were found.\nThis does not prove the repo safe, UB-free, Miri-clean, or that any unsafe site executed.\n\n## Open next\n\n- Review kit manifest: `review-kit.json`\n- Full reviewer cockpit: `pr-summary.md`\n- Machine-readable ReviewCards: `cards.json`\n- Witness routes: `witness-plan.md`\n- Comment budget: `comment-plan.json` is plan-only; no comments were posted.\n\n---\n\nFull advisory bundle (review-kit.json, cards.json, pr-summary.md, github-summary.md, cards.sarif, comment-plan.json, witness-plan.md, lsp.json) is attached as the workflow artifact.\n\n> Trust boundary: static unsafe contract review only; not memory-safety proof, not UB-free status, not Miri-clean status, and not site-execution proof.\n> Execution boundary: unsafe-review did not run witnesses, post comments, edit source, run an agent, or enforce blocking policy.\n",
+            "## unsafe-review advisory summary\n\n- Scope: `diff`\n- Review cards: 0\n- Open actionable gaps: 0\n- Policy mode: `advisory`\n\n## Top card\n\nNo changed unsafe-review gaps were found.\nThis does not prove the repo safe, UB-free, Miri-clean, or that any unsafe site executed.\n\n## Open next\n\n- Review kit manifest: `review-kit.json`\n- Full reviewer cockpit: `pr-summary.md`\n- Machine-readable ReviewCards: `cards.json`\n- Witness routes: `witness-plan.md`\n- Agent repair queue: `repair-queue.json` is copy-only; no agent was run.\n- Comment budget: `comment-plan.json` is plan-only; no comments were posted.\n\n---\n\nFull advisory bundle (review-kit.json, cards.json, pr-summary.md, github-summary.md, cards.sarif, comment-plan.json, witness-plan.md, lsp.json, repair-queue.json) is attached as the workflow artifact.\n\n> Trust boundary: static unsafe contract review only; not memory-safety proof, not UB-free status, not Miri-clean status, and not site-execution proof.\n> Execution boundary: unsafe-review did not run witnesses, post comments, edit source, run an agent, or enforce blocking policy.\n",
         )
         .map_err(|err| format!("write github summary failed: {err}"))?;
         fs::write(
@@ -5889,6 +6256,8 @@ review_after = "2026-08-01"
             r#"{"tool":"unsafe-review","mode":"read_only_projection","policy":"advisory","status":{"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"},"diagnostics":[],"hovers":[],"code_actions":[],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}"#,
         )
         .map_err(|err| format!("write lsp failed: {err}"))?;
+        fs::write(dir.join("repair-queue.json"), zero_card_repair_queue_json())
+            .map_err(|err| format!("write repair queue failed: {err}"))?;
         Ok(())
     }
 
