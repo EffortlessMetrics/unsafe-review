@@ -11,15 +11,27 @@ use unsafe_review_core::{
     DiffSource, MiriReceiptInput, PolicyMode, ProofReceiptInput, SanitizerReceiptInput, Scope,
     WITNESS_RECEIPT_SCHEMA_VERSION, WitnessReceipt, analyze, audit_witness_receipts,
     collect_context, compare_outcome_json, evaluate_policy_report, explain_card,
-    render_badge_jsons, render_comment_plan, render_human, render_json, render_lsp,
-    render_markdown, render_outcome_json, render_outcome_markdown, render_policy_report_json,
-    render_policy_report_markdown, render_pr_summary, render_receipt_audit_json,
-    render_receipt_audit_markdown, render_sarif, render_witness_plan, validate_witness_receipts,
+    render_badge_jsons, render_comment_plan, render_github_summary, render_human, render_json,
+    render_lsp, render_markdown, render_outcome_json, render_outcome_markdown,
+    render_policy_report_json, render_policy_report_markdown, render_pr_summary,
+    render_receipt_audit_json, render_receipt_audit_markdown, render_sarif, render_witness_plan,
+    validate_witness_receipts,
 };
 
 const NO_CHANGED_GAPS_MESSAGE: &str = "No changed unsafe-review gaps were found.";
 const NO_CHANGED_GAPS_LIMITATION: &str =
     "This does not prove the repo safe, UB-free, Miri-clean, or that any unsafe site executed.";
+const REVIEW_KIT_ARTIFACT: &str = "review-kit.json";
+const FIRST_PR_ARTIFACTS: [&str; 8] = [
+    REVIEW_KIT_ARTIFACT,
+    "cards.json",
+    "pr-summary.md",
+    "github-summary.md",
+    "cards.sarif",
+    "comment-plan.json",
+    "witness-plan.md",
+    "lsp.json",
+];
 
 pub(crate) fn execute(command: Command) -> Result<(), String> {
     match command {
@@ -62,7 +74,7 @@ fn print_support() {
     println!("Current posture:");
     println!("- ReviewCards: experimental; selected slices are fixture-backed or dogfood-backed.");
     println!(
-        "- first-pr bundle: advisory; projects cards, summaries, SARIF, comment plans, witness plans, and saved LSP JSON from ReviewCards."
+        "- first-pr bundle: advisory; projects the review-kit manifest, summaries, cards, SARIF, comment plans, witness plans, and saved LSP JSON from ReviewCards."
     );
     println!(
         "- receipts: saved-output template/import/audit only; receipts attach external evidence to exact card identities."
@@ -117,7 +129,7 @@ fn first_pr(options: FirstPrOptions) -> Result<(), String> {
     let diff = diff_source(&check)?;
     let root = check.root.clone();
     let output = analyze(AnalyzeInput {
-        root: check.root,
+        root: root.clone(),
         scope: Scope::Diff,
         diff,
         mode: AnalysisMode::Draft,
@@ -133,6 +145,10 @@ fn first_pr(options: FirstPrOptions) -> Result<(), String> {
         &options.out_dir.join("pr-summary.md"),
         render_pr_summary(&output),
     )?;
+    write_artifact(
+        &options.out_dir.join("github-summary.md"),
+        render_github_summary(&output),
+    )?;
     write_artifact(&options.out_dir.join("cards.sarif"), render_sarif(&output))?;
     write_artifact(
         &options.out_dir.join("comment-plan.json"),
@@ -143,6 +159,10 @@ fn first_pr(options: FirstPrOptions) -> Result<(), String> {
         render_witness_plan(&output),
     )?;
     write_artifact(&options.out_dir.join("lsp.json"), render_lsp(&output))?;
+    write_artifact(
+        &options.out_dir.join(REVIEW_KIT_ARTIFACT),
+        render_review_kit_manifest(&output, &root, &check, &FIRST_PR_ARTIFACTS),
+    )?;
 
     println!("unsafe-review first-pr");
     println!("unsafe-review wrote an advisory PR bundle.");
@@ -179,22 +199,21 @@ fn first_pr(options: FirstPrOptions) -> Result<(), String> {
             println!("  Route: `{}`", route.kind.as_str());
         }
         println!("  Next: {}", card.next_action.summary);
-        println!("Inspect top card:");
+        println!("Explain top card:");
         println!(
             "  unsafe-review explain --root {} {}",
             root.display(),
             card.id
         );
+        println!("Agent packet:");
+        println!(
+            "  unsafe-review context --root {} {} --json",
+            root.display(),
+            card.id
+        );
     }
     println!("Artifacts:");
-    for name in [
-        "cards.json",
-        "pr-summary.md",
-        "cards.sarif",
-        "comment-plan.json",
-        "witness-plan.md",
-        "lsp.json",
-    ] {
+    for name in FIRST_PR_ARTIFACTS {
         println!("  {}", options.out_dir.join(name).display());
     }
     println!("Trust boundary:");
@@ -206,6 +225,113 @@ fn first_pr(options: FirstPrOptions) -> Result<(), String> {
     );
 
     Ok(())
+}
+
+fn render_review_kit_manifest(
+    output: &unsafe_review_core::AnalyzeOutput,
+    root: &Path,
+    check: &CheckOptions,
+    artifacts: &[&str],
+) -> String {
+    let value = serde_json::json!({
+        "schema_version": "0.1",
+        "tool": "unsafe-review",
+        "tool_version": env!("CARGO_PKG_VERSION"),
+        "mode": "review_kit_manifest",
+        "source": "first_pr",
+        "policy": output.policy.as_str(),
+        "scope": scope_name(&output.scope),
+        "base_ref": check.base.as_deref(),
+        "head_commit": git_head_commit(root),
+        "summary": {
+            "cards": output.summary.cards,
+            "open_actionable_gaps": output.summary.open_actionable_gaps,
+        },
+        "top_card_id": output.cards.first().map(|card| card.id.to_string()),
+        "handoff": {
+            "reviewer_summary": "pr-summary.md",
+            "github_summary": "github-summary.md",
+            "top_card": output.cards.first().map(|card| serde_json::json!({
+                "card_id": card.id.to_string(),
+                "explain": format!("unsafe-review explain {}", card.id),
+                "context": format!("unsafe-review context {} --json", card.id),
+            })),
+        },
+        "artifacts": artifacts
+            .iter()
+            .map(|path| artifact_entry(path))
+            .collect::<Vec<_>>(),
+        "trust_boundary": "Static unsafe contract review kit manifest only; this indexes first-pr artifacts and does not reclassify ReviewCards. It is not a proof of memory safety, not UB-free status, not a Miri result, not Miri-clean status, and not site-execution proof. unsafe-review did not run witnesses, post comments, edit source, run an agent, or enforce blocking policy.",
+    });
+    serde_json::to_string_pretty(&value).unwrap_or_else(|err| {
+        format!("{{\n  \"error\": \"review kit serialization failed: {err}\"\n}}")
+    })
+}
+
+fn scope_name(scope: &Scope) -> &'static str {
+    match scope {
+        Scope::Diff => "diff",
+        Scope::Repo => "repo",
+    }
+}
+
+fn git_head_commit(root: &Path) -> Option<String> {
+    let output = ProcessCommand::new("git")
+        .arg("-C")
+        .arg(root)
+        .arg("rev-parse")
+        .arg("--verify")
+        .arg("HEAD")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!text.is_empty()).then_some(text)
+}
+
+fn artifact_entry(path: &str) -> serde_json::Value {
+    serde_json::json!({
+        "path": path,
+        "kind": artifact_kind(path),
+        "format": artifact_format(path),
+        "schema_version": artifact_schema_version(path),
+    })
+}
+
+fn artifact_kind(path: &str) -> &'static str {
+    match path {
+        "review-kit.json" => "review_kit_manifest",
+        "cards.json" => "review_cards",
+        "pr-summary.md" => "reviewer_summary",
+        "github-summary.md" => "github_summary",
+        "cards.sarif" => "sarif",
+        "comment-plan.json" => "comment_plan",
+        "witness-plan.md" => "witness_plan",
+        "lsp.json" => "saved_lsp",
+        _ => "unknown",
+    }
+}
+
+fn artifact_format(path: &str) -> &'static str {
+    if path.ends_with(".json") {
+        "json"
+    } else if path.ends_with(".md") {
+        "markdown"
+    } else if path.ends_with(".sarif") {
+        "sarif"
+    } else {
+        "unknown"
+    }
+}
+
+fn artifact_schema_version(path: &str) -> Option<&'static str> {
+    match path {
+        "review-kit.json" | "cards.json" | "comment-plan.json" | "lsp.json" => Some("0.1"),
+        "cards.sarif" => Some("2.1.0"),
+        _ => None,
+    }
 }
 
 fn enforce_policy(output: &unsafe_review_core::AnalyzeOutput) -> Result<(), String> {

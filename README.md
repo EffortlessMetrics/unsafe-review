@@ -93,10 +93,11 @@ unsafe-review first-pr --base origin/main
 unsafe-review explain <card-id>
 ```
 
-`first-pr` writes `cards.json`, `pr-summary.md`, `cards.sarif`,
-`comment-plan.json`, and `witness-plan.md` under `target/unsafe-review/`. It is
-advisory-only: it does not run witnesses, post comments, edit source, or enforce
-blocking policy.
+`first-pr` writes a standard advisory review kit under
+`target/unsafe-review/`: `review-kit.json`, `cards.json`, `pr-summary.md`,
+`github-summary.md`, `cards.sarif`, `comment-plan.json`, `witness-plan.md`, and
+`lsp.json`. It is advisory-only: it does not run witnesses, post comments, edit
+source, or enforce blocking policy.
 
 Try the bundled smoke fixture:
 
@@ -110,8 +111,10 @@ unsafe-review first-pr \
 
 | Surface | Output | Use |
 |---|---|---|
+| Review kit manifest | `review-kit.json` | Artifact index, top card handoff, and trust boundary |
 | Review cards | JSON / human / Markdown | The canonical evidence object |
 | PR summary | `pr-summary.md` | Reviewer first screen |
+| GitHub summary | `github-summary.md` | Bounded CI doorway into the review kit |
 | SARIF | `cards.sarif` | Code scanning / CI artifact |
 | Comment plan | `comment-plan.json` | Proposed comments, not posted |
 | Saved LSP projection | `lsp.json` | Read-only editor diagnostics and hovers |
@@ -139,7 +142,8 @@ unsafe-review first-pr \
 
 - **Fixture-backed ReviewCards** for many core unsafe operation families.
 - **Dogfood-backed evidence rules** across selected real Rust crates and PR diffs.
-- **Advisory PR artifacts**: cards JSON, PR summary, SARIF, and comment-plan.
+- **Advisory PR artifacts**: review-kit manifest, cards JSON, PR summary,
+  bounded GitHub summary, SARIF, comment-plan, witness-plan, and saved LSP JSON.
 - **Read-only projections** for saved LSP/editor output and bounded agent packets.
 - **Saved receipt audit** for imported witness metadata.
 - **Outcome and repo posture reports** for before/after movement and open gaps.

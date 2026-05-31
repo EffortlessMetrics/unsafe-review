@@ -271,6 +271,77 @@ pub(crate) fn render_pr_summary(output: &AnalyzeOutput) -> String {
     out
 }
 
+/// Bounded summary fragment suitable for `GITHUB_STEP_SUMMARY`.
+///
+/// This intentionally omits the card table and witness plan. Those remain in
+/// `pr-summary.md` and `witness-plan.md` inside the advisory review kit.
+pub(crate) fn render_github_summary(output: &AnalyzeOutput) -> String {
+    let mut out = String::new();
+    out.push_str("## unsafe-review advisory summary\n\n");
+    out.push_str(&format!(
+        "- Scope: `{}`\n",
+        match output.scope {
+            crate::api::Scope::Diff => "diff",
+            crate::api::Scope::Repo => "repo",
+        }
+    ));
+    out.push_str(&format!("- Review cards: {}\n", output.summary.cards));
+    out.push_str(&format!(
+        "- Open actionable gaps: {}\n",
+        output.summary.open_actionable_gaps
+    ));
+    out.push_str(&format!("- Policy mode: `{}`\n\n", output.policy.as_str()));
+
+    out.push_str("## Top card\n\n");
+    if let Some(card) = output.cards.first() {
+        out.push_str(&format!("- ID: `{}`\n", card.id));
+        out.push_str(&format!("- Class: `{}`\n", card.class.as_str()));
+        out.push_str(&format!(
+            "- Location: {}:{}\n",
+            path_display(&card.site.location.file),
+            card.site.location.line
+        ));
+        out.push_str(&format!(
+            "- Operation family: `{}`\n",
+            card.operation.family.as_str()
+        ));
+        out.push_str(&format!("- Missing evidence: {}\n", missing_summary(card)));
+        out.push_str(&format!("- Next action: {}\n", card.next_action.summary));
+        if let Some(route) = card.routes.first() {
+            out.push_str(&format!("- Witness route: `{}`\n", route.kind.as_str()));
+        } else {
+            out.push_str("- Witness route: human review\n");
+        }
+        out.push_str(&format!("- Explain: `unsafe-review explain {}`\n", card.id));
+        out.push_str(&format!(
+            "- Agent context: `unsafe-review context {} --json`\n\n",
+            card.id
+        ));
+    } else {
+        render_no_changed_gaps(&mut out);
+    }
+
+    out.push_str("## Open next\n\n");
+    out.push_str("- Review kit manifest: `review-kit.json`\n");
+    out.push_str("- Full reviewer cockpit: `pr-summary.md`\n");
+    out.push_str("- Machine-readable ReviewCards: `cards.json`\n");
+    out.push_str("- Witness routes: `witness-plan.md`\n");
+    out.push_str(
+        "- Comment budget: `comment-plan.json` is plan-only; no comments were posted.\n\n",
+    );
+    out.push_str("---\n\n");
+    out.push_str(
+        "Full advisory bundle (review-kit.json, cards.json, pr-summary.md, github-summary.md, cards.sarif, comment-plan.json, witness-plan.md, lsp.json) is attached as the workflow artifact.\n\n",
+    );
+    out.push_str(
+        "> Trust boundary: static unsafe contract review only; not memory-safety proof, not UB-free status, not Miri-clean status, and not site-execution proof.\n",
+    );
+    out.push_str(
+        "> Execution boundary: unsafe-review did not run witnesses, post comments, edit source, run an agent, or enforce blocking policy.\n",
+    );
+    out
+}
+
 fn render_no_changed_gaps(out: &mut String) {
     out.push_str(NO_CHANGED_GAPS_MESSAGE);
     out.push('\n');
@@ -510,6 +581,55 @@ mod tests {
         assert!(rendered.contains(NO_CHANGED_GAPS_MESSAGE));
         assert!(rendered.contains(NO_CHANGED_GAPS_LIMITATION));
         assert!(rendered.contains("No witness route is recommended"));
+        assert!(rendered.contains("not UB-free status"));
+        assert!(!rendered.contains("All clear"));
+        Ok(())
+    }
+
+    #[test]
+    fn github_summary_is_bounded_doorway_not_full_report() -> Result<(), String> {
+        let output = fixture_output("raw_pointer_alignment")?;
+        let rendered = render_github_summary(&output);
+        let card = output
+            .cards
+            .first()
+            .ok_or_else(|| "raw pointer fixture should emit a card".to_string())?;
+
+        assert!(rendered.contains("## unsafe-review advisory summary"));
+        assert!(rendered.contains("## Top card"));
+        assert!(rendered.contains(&format!("- ID: `{}`", card.id)));
+        assert!(rendered.contains("- Operation family: `raw_pointer_read`"));
+        assert!(rendered.contains("- Missing evidence: Missing visible local guard"));
+        assert!(rendered.contains("- Witness route: `miri`"));
+        assert!(rendered.contains(&format!("- Explain: `unsafe-review explain {}`", card.id)));
+        assert!(rendered.contains(&format!(
+            "- Agent context: `unsafe-review context {} --json`",
+            card.id
+        )));
+        assert!(rendered.contains("Review kit manifest: `review-kit.json`"));
+        assert!(rendered.contains("Full reviewer cockpit: `pr-summary.md`"));
+        assert!(rendered.contains("`comment-plan.json` is plan-only"));
+        assert!(rendered.contains("not memory-safety proof"));
+        assert!(rendered.contains("not site-execution proof"));
+        assert!(rendered.contains("unsafe-review did not run witnesses"));
+        assert!(rendered.contains("post comments"));
+        assert!(rendered.contains("edit source"));
+        assert!(rendered.contains("enforce blocking policy"));
+        assert!(!rendered.contains("# unsafe-review PR summary"));
+        assert!(!rendered.contains("## Card table"));
+        Ok(())
+    }
+
+    #[test]
+    fn github_summary_empty_state_stays_advisory() -> Result<(), String> {
+        let output = fixture_output("safe_code_no_cards")?;
+        let rendered = render_github_summary(&output);
+
+        assert!(rendered.contains("Review cards: 0"));
+        assert!(rendered.contains("Open actionable gaps: 0"));
+        assert!(rendered.contains(NO_CHANGED_GAPS_MESSAGE));
+        assert!(rendered.contains(NO_CHANGED_GAPS_LIMITATION));
+        assert!(rendered.contains("Review kit manifest: `review-kit.json`"));
         assert!(rendered.contains("not UB-free status"));
         assert!(!rendered.contains("All clear"));
         Ok(())

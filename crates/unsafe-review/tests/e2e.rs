@@ -528,10 +528,13 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
     assert!(stdout.contains("`raw_pointer_read`"));
     assert!(stdout.contains("Class: `guard_missing`"));
     assert!(stdout.contains("Route: `miri`"));
-    assert!(stdout.contains("Inspect top card:"));
+    assert!(stdout.contains("Explain top card:"));
+    assert!(stdout.contains("Agent packet:"));
     assert!(stdout.contains("Artifacts:"));
+    assert!(stdout.contains("review-kit.json"));
     assert!(stdout.contains("cards.json"));
     assert!(stdout.contains("pr-summary.md"));
+    assert!(stdout.contains("github-summary.md"));
     assert!(stdout.contains("cards.sarif"));
     assert!(stdout.contains("comment-plan.json"));
     assert!(stdout.contains("witness-plan.md"));
@@ -560,13 +563,92 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
     );
     let card_id = json_str(&cards["cards"][0]["id"], "cards[0].id")?;
     assert!(stdout.contains("unsafe-review explain --root"));
+    assert!(stdout.contains("unsafe-review context --root"));
+    assert!(stdout.contains(" --json"));
     assert!(stdout.contains(card_id));
+
+    let review_kit = parse_json(&fs::read_to_string(out_dir.join("review-kit.json"))?)?;
+    assert_eq!(review_kit["schema_version"], "0.1");
+    assert_eq!(review_kit["tool"], "unsafe-review");
+    assert_eq!(review_kit["mode"], "review_kit_manifest");
+    assert_eq!(review_kit["source"], "first_pr");
+    assert_eq!(review_kit["policy"], "advisory");
+    assert_eq!(review_kit["scope"], "diff");
+    assert_eq!(review_kit["summary"]["cards"], 1);
+    assert_eq!(review_kit["summary"]["open_actionable_gaps"], 1);
+    assert_eq!(review_kit["top_card_id"], card_id);
+    assert_eq!(review_kit["handoff"]["reviewer_summary"], "pr-summary.md");
+    assert_eq!(review_kit["handoff"]["github_summary"], "github-summary.md");
+    assert_eq!(review_kit["handoff"]["top_card"]["card_id"], card_id);
+    assert!(
+        review_kit["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("does not reclassify ReviewCards")
+    );
+    assert!(
+        review_kit["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("did not run witnesses")
+    );
+    let artifacts = json_array(&review_kit["artifacts"], "review_kit.artifacts")?;
+    for expected in [
+        "review-kit.json",
+        "cards.json",
+        "pr-summary.md",
+        "github-summary.md",
+        "cards.sarif",
+        "comment-plan.json",
+        "witness-plan.md",
+        "lsp.json",
+    ] {
+        let Some(entry) = artifacts
+            .iter()
+            .find(|artifact| artifact["path"] == expected)
+        else {
+            return Err(format!("review-kit.json is missing artifact entry `{expected}`").into());
+        };
+        assert!(
+            out_dir.join(expected).is_file(),
+            "review-kit.json listed missing artifact `{expected}`"
+        );
+        if expected.ends_with(".json") {
+            assert_eq!(entry["format"], "json");
+        } else if expected.ends_with(".md") {
+            assert_eq!(entry["format"], "markdown");
+        } else if expected.ends_with(".sarif") {
+            assert_eq!(entry["format"], "sarif");
+        }
+    }
 
     let summary = fs::read_to_string(out_dir.join("pr-summary.md"))?;
     assert!(summary.contains("# unsafe-review PR summary"));
     assert!(summary.contains(&format!("- ID: `{card_id}`")));
     assert!(summary.contains("## Trust boundary"));
     assert!(summary.contains("not a Miri result unless a witness receipt is attached"));
+
+    let github_summary = fs::read_to_string(out_dir.join("github-summary.md"))?;
+    assert!(github_summary.contains("## unsafe-review advisory summary"));
+    assert!(github_summary.contains(&format!("- ID: `{card_id}`")));
+    assert!(github_summary.contains(&format!("- Explain: `unsafe-review explain {card_id}`")));
+    assert!(github_summary.contains(&format!(
+        "- Agent context: `unsafe-review context {card_id} --json`"
+    )));
+    assert!(github_summary.contains("## Open next"));
+    assert!(github_summary.contains("Review kit manifest: `review-kit.json`"));
+    assert!(github_summary.contains("Full reviewer cockpit: `pr-summary.md`"));
+    assert!(github_summary.contains("`comment-plan.json` is plan-only"));
+    assert!(github_summary.contains("Full advisory bundle"));
+    assert!(github_summary.contains("review-kit.json"));
+    assert!(github_summary.contains("not memory-safety proof"));
+    assert!(github_summary.contains("not site-execution proof"));
+    assert!(github_summary.contains("unsafe-review did not run witnesses"));
+    assert!(github_summary.contains("post comments"));
+    assert!(github_summary.contains("edit source"));
+    assert!(github_summary.contains("enforce blocking policy"));
+    assert!(!github_summary.contains("# unsafe-review PR summary"));
+    assert!(!github_summary.contains("## Card table"));
 
     let sarif = parse_json(&fs::read_to_string(out_dir.join("cards.sarif"))?)?;
     assert_eq!(sarif["version"], "2.1.0");
@@ -663,11 +745,37 @@ fn first_pr_clean_output_stays_advisory_not_all_clear() -> Result<(), Box<dyn Er
             .contains("not a proof of memory safety")
     );
 
+    let review_kit = parse_json(&fs::read_to_string(out_dir.join("review-kit.json"))?)?;
+    assert_eq!(review_kit["schema_version"], "0.1");
+    assert_eq!(review_kit["mode"], "review_kit_manifest");
+    assert_eq!(review_kit["summary"]["cards"], 0);
+    assert_eq!(review_kit["summary"]["open_actionable_gaps"], 0);
+    assert!(review_kit["top_card_id"].is_null());
+    assert_eq!(review_kit["handoff"]["reviewer_summary"], "pr-summary.md");
+    assert!(review_kit["handoff"]["top_card"].is_null());
+    assert!(
+        review_kit["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("not site-execution proof")
+    );
+
     let summary = fs::read_to_string(out_dir.join("pr-summary.md"))?;
     assert!(summary.contains("No changed unsafe-review gaps were found."));
     assert!(summary.contains("This does not prove the repo safe"));
     assert!(summary.contains("unsafe site executed"));
     assert!(!summary.contains("All clear"));
+
+    let github_summary = fs::read_to_string(out_dir.join("github-summary.md"))?;
+    assert!(github_summary.contains("No changed unsafe-review gaps were found."));
+    assert!(github_summary.contains("This does not prove the repo safe"));
+    assert!(github_summary.contains("unsafe site executed"));
+    assert!(github_summary.contains("## Open next"));
+    assert!(github_summary.contains("Review kit manifest: `review-kit.json`"));
+    assert!(github_summary.contains("Full reviewer cockpit: `pr-summary.md`"));
+    assert!(github_summary.contains("Full advisory bundle"));
+    assert!(github_summary.contains("review-kit.json"));
+    assert!(!github_summary.contains("All clear"));
 
     let witness_plan = fs::read_to_string(out_dir.join("witness-plan.md"))?;
     assert!(witness_plan.contains("No changed unsafe-review gaps were found."));
@@ -793,6 +901,7 @@ fn support_reports_current_posture_without_overclaims() -> Result<(), Box<dyn Er
     assert!(text.contains("unsafe-review support"));
     assert!(text.contains("ReviewCards: experimental"));
     assert!(text.contains("first-pr bundle: advisory"));
+    assert!(text.contains("review-kit manifest"));
     assert!(text.contains("receipts: saved-output template/import/audit only"));
     assert!(text.contains("policy report: advisory"));
     assert!(text.contains("comment posting: not default"));
@@ -1882,6 +1991,12 @@ fn json_str<'a>(value: &'a Value, path: &str) -> Result<&'a str, Box<dyn Error>>
     value
         .as_str()
         .ok_or_else(|| format!("{path} should be a string").into())
+}
+
+fn json_array<'a>(value: &'a Value, path: &str) -> Result<&'a Vec<Value>, Box<dyn Error>> {
+    value
+        .as_array()
+        .ok_or_else(|| format!("{path} should be an array").into())
 }
 
 fn fixture_root(name: &str) -> PathBuf {

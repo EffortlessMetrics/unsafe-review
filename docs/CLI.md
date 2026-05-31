@@ -91,8 +91,10 @@ unsafe-review first-pr --base origin/main
 By default this writes:
 
 ```text
+target/unsafe-review/review-kit.json
 target/unsafe-review/cards.json
 target/unsafe-review/pr-summary.md
+target/unsafe-review/github-summary.md
 target/unsafe-review/cards.sarif
 target/unsafe-review/comment-plan.json
 target/unsafe-review/witness-plan.md
@@ -105,6 +107,11 @@ to review a supplied diff.
 The command analyzes once and renders every artifact from the same
 `ReviewCard`s. It stays advisory-only: it does not execute witness tools, post
 comments, edit source, or enforce blocking policy.
+
+`review-kit.json` is the manifest for the bundle. It lists emitted artifacts,
+the top card when one exists, summary counts, handoff commands, and the trust
+boundary. `github-summary.md` is a bounded CI doorway; keep the full reviewer
+cockpit in `pr-summary.md`.
 
 ## Output Formats
 
@@ -148,10 +155,14 @@ is available, and a receipt import hint. It does not run those commands.
 The advisory workflow renders:
 
 ```text
+target/unsafe-review/review-kit.json
 target/unsafe-review/cards.json
 target/unsafe-review/pr-summary.md
+target/unsafe-review/github-summary.md
 target/unsafe-review/cards.sarif
 target/unsafe-review/comment-plan.json
+target/unsafe-review/witness-plan.md
+target/unsafe-review/lsp.json
 ```
 
 Verify a local or downloaded artifact set with:
@@ -171,11 +182,12 @@ For the full `first-pr` bundle, including `witness-plan.md` and saved
 cargo xtask check-first-pr-artifacts target/unsafe-review
 ```
 
-That verifier keeps the bundle advisory: it checks route limitations,
-comment-plan caps and renderable inline fields, saved LSP diagnostic evidence
-and action payloads, zero-gap wording, card identity consistency, and absence
-of positive safety/proof wording. It does not run witnesses, post comments,
-edit source, or make a policy decision.
+That verifier keeps the bundle advisory: it checks the review-kit manifest,
+bounded GitHub summary, route limitations, comment-plan caps and renderable
+inline fields, saved LSP diagnostic evidence and action payloads, zero-gap
+wording, card identity consistency, and absence of positive safety/proof
+wording. It does not run witnesses, post comments, edit source, or make a
+policy decision.
 
 ## Explain And Context
 
