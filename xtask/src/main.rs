@@ -1456,6 +1456,43 @@ struct AdvisoryArtifactSummary {
     scope: String,
 }
 
+const COMMENT_PLAN_REVIEW_BUDGET: usize = 3;
+const COMMENT_PLAN_REVIEW_BUDGET_REASON: &str = "bounded reviewer noise";
+const COMMENT_PLAN_REVIEW_BUDGET_REASON_CODE: &str = "bounded_reviewer_noise";
+const COMMENT_PLAN_SELECTION_REASONS: &[&str] = &[
+    "actionable high-confidence review card",
+    "actionable high-priority review card",
+];
+const COMMENT_PLAN_SELECTION_REASON_CODES: &[&str] = &["top_actionable_card"];
+const COMMENT_PLAN_NON_SELECTION_REASONS: &[&str] = &[
+    "outside changed hunk",
+    "class not eligible for inline comments",
+    "operation family unknown",
+    "confidence below inline comment threshold",
+    "priority/confidence below inline comment threshold",
+    "covered by selected family/obligation sibling",
+    "comment-plan max of three candidates reached",
+    "not selected by current inline comment policy",
+];
+const COMMENT_PLAN_NON_SELECTION_REASON_CODES: &[&str] = &[
+    "outside_changed_hunk",
+    "human_deep_review_only",
+    "lower_relevance",
+    "covered_by_selected_family_obligation",
+    "budget_exhausted",
+    "not_selected_by_policy",
+];
+const COMMENT_PLAN_RELEVANCE: &[&str] = &["high", "medium", "low"];
+const COMMENT_PLAN_ACTIONABILITY: &[&str] = &[
+    "specific_guard_missing",
+    "specific_contract_missing",
+    "specific_witness_missing",
+    "specific_receipt_missing",
+    "specific_reach_missing",
+    "human_review_only",
+    "not_actionable",
+];
+
 fn check_advisory_artifacts(dir: &Path) -> Result<(), String> {
     check_advisory_artifact_set(dir)?;
     println!("check-advisory-artifacts: ok ({})", dir.display());
@@ -1567,49 +1604,104 @@ fn check_advisory_artifact_set(dir: &Path) -> Result<AdvisoryArtifactSummary, St
     require_boundary_text(sarif_boundary, "cards.sarif")?;
 
     let comment_plan = parse_json_file(&dir.join("comment-plan.json"))?;
-    require_json_str(&comment_plan, "mode", "plan_only", "comment-plan.json")?;
-    require_json_str(&comment_plan, "policy", "advisory", "comment-plan.json")?;
-    require_json_array(&comment_plan, "comments", "comment-plan.json")?;
-    let comments = json_array_at(&comment_plan, "/comments", "comment-plan.json")?;
-    if comments.len() > 3 {
+    check_comment_plan_artifact(&comment_plan, &card_ids, card_count)?;
+
+    Ok(AdvisoryArtifactSummary {
+        card_ids,
+        card_count,
+        open_actionable_gaps,
+        scope,
+    })
+}
+
+fn check_comment_plan_artifact(
+    comment_plan: &serde_json::Value,
+    card_ids: &BTreeSet<String>,
+    card_count: usize,
+) -> Result<(), String> {
+    require_json_str(comment_plan, "schema_version", "0.1", "comment-plan.json")?;
+    require_json_str(comment_plan, "tool", "unsafe-review", "comment-plan.json")?;
+    require_json_str(comment_plan, "mode", "plan_only", "comment-plan.json")?;
+    require_json_str(comment_plan, "policy", "advisory", "comment-plan.json")?;
+
+    let selected_count =
+        json_usize_at(comment_plan, "/summary/selected_count", "comment-plan.json")?;
+    let not_selected_count = json_usize_at(
+        comment_plan,
+        "/summary/not_selected_count",
+        "comment-plan.json",
+    )?;
+    require_json_usize_at(
+        comment_plan,
+        "/summary/budget",
+        COMMENT_PLAN_REVIEW_BUDGET,
+        "comment-plan.json",
+    )?;
+    require_json_str(
+        comment_plan
+            .get("summary")
+            .ok_or_else(|| "comment-plan.json is missing summary".to_string())?,
+        "reason",
+        COMMENT_PLAN_REVIEW_BUDGET_REASON,
+        "comment-plan.json summary",
+    )?;
+    require_json_str(
+        comment_plan
+            .get("summary")
+            .ok_or_else(|| "comment-plan.json is missing summary".to_string())?,
+        "reason_code",
+        COMMENT_PLAN_REVIEW_BUDGET_REASON_CODE,
+        "comment-plan.json summary",
+    )?;
+
+    let comments = json_array_at(comment_plan, "/comments", "comment-plan.json")?;
+    if comments.len() != selected_count {
         return Err(format!(
-            "comment-plan.json has {} comment(s), expected at most 3",
+            "comment-plan.json summary.selected_count is {selected_count}, but comments has {} item(s)",
             comments.len()
         ));
     }
-    for comment in comments {
-        let Some(card_id) = comment.get("card_id").and_then(serde_json::Value::as_str) else {
-            return Err("comment-plan.json comment is missing card_id".to_string());
-        };
-        if !card_ids.contains(card_id) {
-            return Err(format!(
-                "comment-plan.json references unknown card id `{card_id}`"
-            ));
-        }
-        let Some(path) = comment.get("path").and_then(serde_json::Value::as_str) else {
-            return Err("comment-plan.json comment is missing path".to_string());
-        };
-        if path.trim().is_empty() {
-            return Err("comment-plan.json comment path must not be empty".to_string());
-        }
-        let Some(line) = comment.get("line").and_then(serde_json::Value::as_u64) else {
-            return Err("comment-plan.json comment is missing line".to_string());
-        };
-        if line == 0 {
-            return Err("comment-plan.json comment line must be one-based".to_string());
-        }
-        json_array_at(comment, "/witness_routes", "comment-plan.json comment")?;
-        json_array_at(comment, "/verify_commands", "comment-plan.json comment")?;
-        let Some(body) = comment.get("body").and_then(serde_json::Value::as_str) else {
-            return Err("comment-plan.json comment is missing body".to_string());
-        };
-        if !body.contains("unsafe-review did not post this comment") {
-            return Err(
-                "comment-plan.json comment body must state that unsafe-review did not post this comment"
-                    .to_string(),
-            );
-        }
+    if comments.len() > COMMENT_PLAN_REVIEW_BUDGET {
+        return Err(format!(
+            "comment-plan.json has {} comment(s), expected at most {COMMENT_PLAN_REVIEW_BUDGET}",
+            comments.len()
+        ));
     }
+
+    let empty_not_selected = Vec::new();
+    let not_selected = match comment_plan.get("not_selected") {
+        Some(value) => value
+            .as_array()
+            .ok_or_else(|| "comment-plan.json not_selected must be an array".to_string())?,
+        None => &empty_not_selected,
+    };
+    if not_selected.len() != not_selected_count {
+        return Err(format!(
+            "comment-plan.json summary.not_selected_count is {not_selected_count}, but not_selected has {} item(s)",
+            not_selected.len()
+        ));
+    }
+    if selected_count + not_selected_count != card_count {
+        return Err(format!(
+            "comment-plan.json selected plus not_selected count is {}, but cards.json has {card_count} card(s)",
+            selected_count + not_selected_count
+        ));
+    }
+
+    let mut projected_ids = BTreeSet::new();
+    for comment in comments {
+        check_selected_comment_plan_item(comment, card_ids, &mut projected_ids)?;
+    }
+    for item in not_selected {
+        check_not_selected_comment_plan_item(item, card_ids, &mut projected_ids)?;
+    }
+    if projected_ids.len() != card_count {
+        return Err(format!(
+            "comment-plan.json projects {} unique card id(s), but cards.json has {card_count}",
+            projected_ids.len()
+        ));
+    }
+
     let comment_boundary = comment_plan
         .get("trust_boundary")
         .and_then(serde_json::Value::as_str)
@@ -1638,12 +1730,156 @@ fn check_advisory_artifact_set(dir: &Path) -> Result<AdvisoryArtifactSummary, St
         }
     }
 
-    Ok(AdvisoryArtifactSummary {
-        card_ids,
-        card_count,
-        open_actionable_gaps,
-        scope,
-    })
+    Ok(())
+}
+
+fn check_selected_comment_plan_item(
+    comment: &serde_json::Value,
+    card_ids: &BTreeSet<String>,
+    projected_ids: &mut BTreeSet<String>,
+) -> Result<(), String> {
+    let card_id = require_known_card_id(comment, "comment-plan.json comment", card_ids)?;
+    if !projected_ids.insert(card_id.to_string()) {
+        return Err(format!(
+            "comment-plan.json projects card id `{card_id}` more than once"
+        ));
+    }
+    check_comment_plan_common_fields(comment, "comment-plan.json comment")?;
+    require_json_bool(comment, "changed_line", true, "comment-plan.json comment")?;
+    json_array_at(comment, "/witness_routes", "comment-plan.json comment")?;
+    json_array_at(comment, "/verify_commands", "comment-plan.json comment")?;
+    require_non_empty_json_str(comment, "next_action", "comment-plan.json comment")?;
+    require_known(
+        require_non_empty_json_str(comment, "selection_reason", "comment-plan.json comment")?,
+        COMMENT_PLAN_SELECTION_REASONS,
+        "comment-plan.json comment",
+        "selection_reason",
+    )?;
+    require_known(
+        require_non_empty_json_str(
+            comment,
+            "selection_reason_code",
+            "comment-plan.json comment",
+        )?,
+        COMMENT_PLAN_SELECTION_REASON_CODES,
+        "comment-plan.json comment",
+        "selection_reason_code",
+    )?;
+    check_comment_plan_review_signals(comment, "comment-plan.json comment")?;
+    let trust_boundary =
+        require_non_empty_json_str(comment, "trust_boundary", "comment-plan.json comment")?;
+    require_boundary_text(trust_boundary, "comment-plan.json comment")?;
+    let body = require_non_empty_json_str(comment, "body", "comment-plan.json comment")?;
+    if !body.contains("unsafe-review did not post this comment") {
+        return Err(
+            "comment-plan.json comment body must state that unsafe-review did not post this comment"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+fn check_not_selected_comment_plan_item(
+    item: &serde_json::Value,
+    card_ids: &BTreeSet<String>,
+    projected_ids: &mut BTreeSet<String>,
+) -> Result<(), String> {
+    let card_id = require_known_card_id(item, "comment-plan.json not_selected item", card_ids)?;
+    if !projected_ids.insert(card_id.to_string()) {
+        return Err(format!(
+            "comment-plan.json projects card id `{card_id}` more than once"
+        ));
+    }
+    check_comment_plan_common_fields(item, "comment-plan.json not_selected item")?;
+    require_json_bool_present(item, "changed_line", "comment-plan.json not_selected item")?;
+    require_non_empty_json_str(item, "next_action", "comment-plan.json not_selected item")?;
+    require_known(
+        require_non_empty_json_str(item, "reason", "comment-plan.json not_selected item")?,
+        COMMENT_PLAN_NON_SELECTION_REASONS,
+        "comment-plan.json not_selected item",
+        "reason",
+    )?;
+    require_known(
+        require_non_empty_json_str(item, "reason_code", "comment-plan.json not_selected item")?,
+        COMMENT_PLAN_NON_SELECTION_REASON_CODES,
+        "comment-plan.json not_selected item",
+        "reason_code",
+    )?;
+    check_comment_plan_review_signals(item, "comment-plan.json not_selected item")?;
+    Ok(())
+}
+
+fn check_comment_plan_common_fields(item: &serde_json::Value, context: &str) -> Result<(), String> {
+    let path = require_non_empty_json_str(item, "path", context)?;
+    if path.trim().is_empty() {
+        return Err(format!("{context} path must not be empty"));
+    }
+    let line = item
+        .get("line")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| format!("{context} is missing line"))?;
+    if line == 0 {
+        return Err(format!("{context} line must be one-based"));
+    }
+    for field in [
+        "class",
+        "priority",
+        "confidence",
+        "operation",
+        "operation_family",
+    ] {
+        require_non_empty_json_str(item, field, context)?;
+    }
+    Ok(())
+}
+
+fn check_comment_plan_review_signals(
+    item: &serde_json::Value,
+    context: &str,
+) -> Result<(), String> {
+    require_known(
+        require_non_empty_json_str(item, "actionability", context)?,
+        COMMENT_PLAN_ACTIONABILITY,
+        context,
+        "actionability",
+    )?;
+    require_known(
+        require_non_empty_json_str(item, "relevance", context)?,
+        COMMENT_PLAN_RELEVANCE,
+        context,
+        "relevance",
+    )
+}
+
+fn require_json_bool(
+    value: &serde_json::Value,
+    key: &str,
+    expected: bool,
+    path: &str,
+) -> Result<(), String> {
+    let actual = value
+        .get(key)
+        .and_then(serde_json::Value::as_bool)
+        .ok_or_else(|| format!("{path} is missing boolean key `{key}`"))?;
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(format!(
+            "{path} key `{key}` is {actual}, expected {expected}"
+        ))
+    }
+}
+
+fn require_json_bool_present(
+    value: &serde_json::Value,
+    key: &str,
+    path: &str,
+) -> Result<(), String> {
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_bool)
+        .map(|_| ())
+        .ok_or_else(|| format!("{path} is missing boolean key `{key}`"))
 }
 
 fn check_review_kit_manifest(dir: &Path, summary: &AdvisoryArtifactSummary) -> Result<(), String> {
@@ -5336,7 +5572,7 @@ impl WitnessKind {
         write_valid_artifacts(&dir)?;
         fs::write(
             dir.join("comment-plan.json"),
-            r#"{"mode":"plan_only","policy":"advisory","comments":[{"card_id":"missing","body":"Plan boundary: artifact-only inline comment candidate; unsafe-review did not post this comment, run witnesses, or make a policy decision."}],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}"#,
+            valid_comment_plan_json("missing"),
         )
         .map_err(|err| format!("write comment plan failed: {err}"))?;
 
@@ -5355,14 +5591,21 @@ impl WitnessKind {
         write_valid_artifacts(&dir)?;
         fs::write(
             dir.join("comment-plan.json"),
-            r#"{"mode":"plan_only","policy":"advisory","comments":[{"card_id":"card-1","witness_routes":[{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}],"verify_commands":["cargo +nightly miri test card"],"body":"Plan boundary: artifact-only inline comment candidate; unsafe-review did not post this comment, run witnesses, or make a policy decision."}],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}"#,
+            comment_plan_json_with_comment(
+                r#"{"card_id":"card-1","line":7,"changed_line":true,"class":"guard_missing","priority":"high","confidence":"medium","operation":"unsafe { ptr.cast::<Header>().read() }","operation_family":"raw_pointer_read","witness_routes":[{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}],"next_action":"add an alignment guard","verify_commands":["cargo +nightly miri test card"],"selection_reason":"actionable high-priority review card","selection_reason_code":"top_actionable_card","actionability":"specific_guard_missing","relevance":"medium","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result","body":"Plan boundary: artifact-only inline comment candidate; unsafe-review did not post this comment, run witnesses, or make a policy decision."}"#,
+            ),
         )
         .map_err(|err| format!("write comment plan failed: {err}"))?;
 
         let result = check_advisory_artifacts(&dir);
 
         fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
-        assert!(result.err().unwrap_or_default().contains("missing path"));
+        assert!(
+            result
+                .err()
+                .unwrap_or_default()
+                .contains("string key `path`")
+        );
         Ok(())
     }
 
@@ -5397,7 +5640,9 @@ impl WitnessKind {
         write_valid_artifacts(&dir)?;
         fs::write(
             dir.join("comment-plan.json"),
-            r#"{"mode":"plan_only","policy":"advisory","comments":[{"card_id":"card-1","path":"src/lib.rs","line":7,"body":"Plan boundary: artifact-only inline comment candidate; unsafe-review did not post this comment, run witnesses, or make a policy decision."}],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}"#,
+            comment_plan_json_with_comment(
+                r#"{"card_id":"card-1","path":"src/lib.rs","line":7,"changed_line":true,"class":"guard_missing","priority":"high","confidence":"medium","operation":"unsafe { ptr.cast::<Header>().read() }","operation_family":"raw_pointer_read","next_action":"add an alignment guard","verify_commands":["cargo +nightly miri test card"],"selection_reason":"actionable high-priority review card","selection_reason_code":"top_actionable_card","actionability":"specific_guard_missing","relevance":"medium","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result","body":"Plan boundary: artifact-only inline comment candidate; unsafe-review did not post this comment, run witnesses, or make a policy decision."}"#,
+            ),
         )
         .map_err(|err| format!("write comment plan failed: {err}"))?;
 
@@ -5416,7 +5661,9 @@ impl WitnessKind {
         write_valid_artifacts(&dir)?;
         fs::write(
             dir.join("comment-plan.json"),
-            r#"{"mode":"plan_only","policy":"advisory","comments":[{"card_id":"card-1","path":"src/lib.rs","line":7,"witness_routes":[{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}],"verify_commands":["cargo +nightly miri test card"],"body":"Missing evidence only."}],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}"#,
+            comment_plan_json_with_comment(
+                r#"{"card_id":"card-1","path":"src/lib.rs","line":7,"changed_line":true,"class":"guard_missing","priority":"high","confidence":"medium","operation":"unsafe { ptr.cast::<Header>().read() }","operation_family":"raw_pointer_read","witness_routes":[{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}],"next_action":"add an alignment guard","verify_commands":["cargo +nightly miri test card"],"selection_reason":"actionable high-priority review card","selection_reason_code":"top_actionable_card","actionability":"specific_guard_missing","relevance":"medium","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result","body":"Missing evidence only."}"#,
+            ),
         )
         .map_err(|err| format!("write comment plan failed: {err}"))?;
 
@@ -5531,6 +5778,22 @@ review_after = "2026-08-01"
         Ok(())
     }
 
+    fn valid_comment_plan_json(card_id: &str) -> String {
+        comment_plan_json_with_comment(&format!(
+            r#"{{"card_id":"{card_id}","path":"src/lib.rs","line":7,"changed_line":true,"class":"guard_missing","priority":"high","confidence":"medium","operation":"unsafe {{ ptr.cast::<Header>().read() }}","operation_family":"raw_pointer_read","witness_routes":[{{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}}],"next_action":"add an alignment guard","verify_commands":["cargo +nightly miri test card"],"selection_reason":"actionable high-priority review card","selection_reason_code":"top_actionable_card","actionability":"specific_guard_missing","relevance":"medium","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result","body":"Plan boundary: artifact-only inline comment candidate; unsafe-review did not post this comment, run witnesses, or make a policy decision."}}"#
+        ))
+    }
+
+    fn comment_plan_json_with_comment(comment: &str) -> String {
+        format!(
+            r#"{{"schema_version":"0.1","tool":"unsafe-review","mode":"plan_only","policy":"advisory","summary":{{"selected_count":1,"not_selected_count":0,"budget":3,"reason":"bounded reviewer noise","reason_code":"bounded_reviewer_noise"}},"comments":[{comment}],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}"#
+        )
+    }
+
+    fn zero_card_comment_plan_json() -> &'static str {
+        r#"{"schema_version":"0.1","tool":"unsafe-review","mode":"plan_only","policy":"advisory","summary":{"selected_count":0,"not_selected_count":0,"budget":3,"reason":"bounded reviewer noise","reason_code":"bounded_reviewer_noise"},"comments":[],"no_changed_gaps":{"message":"No changed unsafe-review gaps were found.","limitation":"This does not prove the repo safe, UB-free, Miri-clean, or that any unsafe site executed."},"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}"#
+    }
+
     fn write_valid_artifacts(dir: &Path) -> Result<(), String> {
         fs::write(
             dir.join("cards.json"),
@@ -5549,7 +5812,7 @@ review_after = "2026-08-01"
         .map_err(|err| format!("write sarif failed: {err}"))?;
         fs::write(
             dir.join("comment-plan.json"),
-            r#"{"mode":"plan_only","policy":"advisory","comments":[{"card_id":"card-1","path":"src/lib.rs","line":7,"witness_routes":[{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}],"verify_commands":["cargo +nightly miri test card"],"body":"Plan boundary: artifact-only inline comment candidate; unsafe-review did not post this comment, run witnesses, or make a policy decision."}],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}"#,
+            valid_comment_plan_json("card-1"),
         )
         .map_err(|err| format!("write comment plan failed: {err}"))?;
         Ok(())
@@ -5614,11 +5877,8 @@ review_after = "2026-08-01"
             r#"{"version":"2.1.0","runs":[{"results":[],"properties":{"trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}]}"#,
         )
         .map_err(|err| format!("write sarif failed: {err}"))?;
-        fs::write(
-            dir.join("comment-plan.json"),
-            r#"{"mode":"plan_only","policy":"advisory","comments":[],"no_changed_gaps":{"message":"No changed unsafe-review gaps were found.","limitation":"This does not prove the repo safe, UB-free, Miri-clean, or that any unsafe site executed."},"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}"#,
-        )
-        .map_err(|err| format!("write comment plan failed: {err}"))?;
+        fs::write(dir.join("comment-plan.json"), zero_card_comment_plan_json())
+            .map_err(|err| format!("write comment plan failed: {err}"))?;
         fs::write(
             dir.join("witness-plan.md"),
             "# unsafe-review witness plan\n\n- Review cards: 0\n- Open actionable gaps: 0\n- Policy mode: `advisory`\n\nNo changed unsafe-review gaps were found.\nThis does not prove the repo safe, UB-free, Miri-clean, or that any unsafe site executed.\n\nNo witness routes are recommended because no review cards were emitted.\n\n## Trust boundary\n\nThis artifact is static unsafe contract review. It routes reviewers to credible witnesses but does not run Miri, cargo-careful, sanitizers, Loom, Shuttle, Kani, or Crux. It is not a proof of memory safety, not UB-free status, and not a Miri result unless a witness receipt is attached.\n",

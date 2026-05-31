@@ -48,10 +48,11 @@ blocking PR decision unless an explicit policy mode says so.
 
 `comment-plan.json` is the only inline-comment surface for v0.x. It is
 plan-only, capped at three candidate comments, restricted to changed lines, and
-limited to high-signal actionable cards. It must not include `static_unknown`,
-baseline-known, or suppressed cards. No workflow posts the plan by default; a
-future trusted poster must consume this artifact rather than regenerating its
-own analyzer truth.
+limited to high-signal actionable cards. It carries a review-budget summary,
+selected-card reasons, relevance/actionability signals, and `not_selected`
+entries for cards that remain in the artifact but are not inline candidates.
+No workflow posts the plan by default; a future trusted poster must consume this
+artifact rather than regenerating its own analyzer truth.
 
 ## Non-goals
 
@@ -76,7 +77,8 @@ own analyzer truth.
 - `unsafe-review check --format sarif --out target/unsafe-review/cards.sarif`
   writes parseable SARIF 2.1.0.
 - `unsafe-review check --format comment-plan --out target/unsafe-review/comment-plan.json`
-  writes candidate inline comments without posting them.
+  writes a plan-only review budget with selected and not-selected reasons
+  without posting comments.
 - `unsafe-review first-pr --base origin/main` writes `review-kit.json`,
   `cards.json`, `pr-summary.md`, `github-summary.md`, `cards.sarif`,
   `comment-plan.json`, `witness-plan.md`, and `lsp.json`.

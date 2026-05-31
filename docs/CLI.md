@@ -125,7 +125,7 @@ findings independently.
 | `markdown` | `unsafe-review check --diff change.diff --format markdown` | local report with operation and next-action context |
 | `pr-summary` | `unsafe-review check --base origin/main --format pr-summary --out target/unsafe-review/pr-summary.md` | sparse reviewer-facing PR artifact |
 | `sarif` | `unsafe-review check --base origin/main --format sarif --out target/unsafe-review/cards.sarif` | code-scanning-compatible artifact |
-| `comment-plan` | `unsafe-review check --base origin/main --format comment-plan --out target/unsafe-review/comment-plan.json` | artifact-only inline comment candidates with card ID, operation, routes, and verify commands |
+| `comment-plan` | `unsafe-review check --base origin/main --format comment-plan --out target/unsafe-review/comment-plan.json` | artifact-only review budget with selected comments, non-selected card reasons, card ID, operation, routes, and verify commands |
 | `lsp` | `unsafe-review check --base origin/main --format lsp --out target/unsafe-review/lsp.json` | saved editor diagnostics and hovers |
 | `witness-plan` | `unsafe-review check --base origin/main --format witness-plan --out target/unsafe-review/witness-plan.md` | reviewer-facing witness route plan |
 
@@ -133,11 +133,13 @@ The default human output is for terminal review. It names the card identity,
 operation family, operation expression, obligation evidence, witness route, next
 action, verify commands, and trust boundary without executing witnesses.
 
-`comment-plan` is plan-only. It carries the concrete ReviewCard operation
-expression for each planned comment and does not post comments. When no changed
-unsafe-review gaps are found, `comments` is empty and the artifact includes a
-`no_changed_gaps` message with the same no-proof limitation used by the terminal
-and Markdown surfaces.
+`comment-plan` is plan-only. It carries a review-budget summary, the concrete
+ReviewCard operation expression for each planned comment, selected-card reason
+codes, and `not_selected` entries explaining why other cards stayed in the
+artifact instead of becoming inline-comment candidates. It does not post
+comments. When no changed unsafe-review gaps are found, `comments` is empty and
+the artifact includes a `no_changed_gaps` message with the same no-proof
+limitation used by the terminal and Markdown surfaces.
 
 `lsp` writes saved JSON only. It includes a read-only status object,
 diagnostics, hovers, and command data for copying packets, copying witness
@@ -183,11 +185,11 @@ cargo xtask check-first-pr-artifacts target/unsafe-review
 ```
 
 That verifier keeps the bundle advisory: it checks the review-kit manifest,
-bounded GitHub summary, route limitations, comment-plan caps and renderable
-inline fields, saved LSP diagnostic evidence and action payloads, zero-gap
-wording, card identity consistency, and absence of positive safety/proof
-wording. It does not run witnesses, post comments, edit source, or make a
-policy decision.
+bounded GitHub summary, route limitations, comment-plan review-budget counts,
+selected/not-selected reason vocabulary, renderable inline fields, saved LSP
+diagnostic evidence and action payloads, zero-gap wording, card identity
+consistency, and absence of positive safety/proof wording. It does not run
+witnesses, post comments, edit source, or make a policy decision.
 
 ## Explain And Context
 
