@@ -1765,7 +1765,7 @@ fn check_review_kit_manifest(dir: &Path, summary: &AdvisoryArtifactSummary) -> R
             None if artifact
                 .get("schema_version")
                 .is_some_and(serde_json::Value::is_null) => {}
-            None if !artifact.get("schema_version").is_some() => {}
+            None if artifact.get("schema_version").is_none() => {}
             None => {
                 return Err(format!(
                     "review-kit.json artifact `{artifact_path}` should not have a schema_version"
