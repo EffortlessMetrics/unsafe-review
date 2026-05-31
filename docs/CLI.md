@@ -98,6 +98,7 @@ target/unsafe-review/github-summary.md
 target/unsafe-review/cards.sarif
 target/unsafe-review/comment-plan.json
 target/unsafe-review/witness-plan.md
+target/unsafe-review/receipt-audit.md
 target/unsafe-review/lsp.json
 target/unsafe-review/repair-queue.json
 ```
@@ -120,6 +121,11 @@ cockpit in `pr-summary.md`.
 `do_not_auto_repair`. It is copy-only ReviewCard projection data for humans or
 agents; `unsafe-review` does not run an agent, edit source, suppress cards, or
 claim repair success.
+
+`receipt-audit.md` summarizes saved witness receipt metadata against the
+current ReviewCards. It is an audit surface only: `unsafe-review first-pr` does
+not run Miri, cargo-careful, sanitizers, Loom, Shuttle, Kani, or Crux, and a
+matching receipt does not prove site reach or memory safety.
 
 ## Output Formats
 
@@ -172,6 +178,7 @@ target/unsafe-review/github-summary.md
 target/unsafe-review/cards.sarif
 target/unsafe-review/comment-plan.json
 target/unsafe-review/witness-plan.md
+target/unsafe-review/receipt-audit.md
 target/unsafe-review/lsp.json
 target/unsafe-review/repair-queue.json
 ```
@@ -186,8 +193,8 @@ That verifier checks parseability, advisory policy, plan-only comment mode,
 projected card identity consistency, result counts, and trust-boundary text. It
 does not prove the analyzer found every unsafe issue.
 
-For the full `first-pr` bundle, including `witness-plan.md`, saved `lsp.json`,
-and `repair-queue.json`, use:
+For the full `first-pr` bundle, including `witness-plan.md`,
+`receipt-audit.md`, saved `lsp.json`, and `repair-queue.json`, use:
 
 ```bash
 cargo xtask check-first-pr-artifacts target/unsafe-review
@@ -196,7 +203,8 @@ cargo xtask check-first-pr-artifacts target/unsafe-review
 That verifier keeps the bundle advisory: it checks the review-kit manifest,
 bounded GitHub summary, route limitations, comment-plan review-budget counts,
 selected/not-selected reason vocabulary, renderable inline fields, saved LSP
-diagnostic evidence and action payloads, repair-queue bucket names and
+diagnostic evidence and action payloads, receipt-audit boundary text,
+repair-queue bucket names and
 do-not-do boundaries, zero-gap wording, card identity consistency, and absence
 of positive safety/proof wording. It does not run witnesses, run agents, post
 comments, edit source, or make a policy decision.

@@ -564,6 +564,7 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
     assert!(stdout.contains("cards.sarif"));
     assert!(stdout.contains("comment-plan.json"));
     assert!(stdout.contains("witness-plan.md"));
+    assert!(stdout.contains("receipt-audit.md"));
     assert!(stdout.contains("lsp.json"));
     assert!(stdout.contains("repair-queue.json"));
     assert!(stdout.contains("Trust boundary:"));
@@ -611,6 +612,7 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
         review_kit["handoff"]["agent_repair_queue"],
         "repair-queue.json"
     );
+    assert_eq!(review_kit["handoff"]["receipt_audit"], "receipt-audit.md");
     assert_eq!(review_kit["handoff"]["top_card"]["card_id"], card_id);
     assert!(
         review_kit["trust_boundary"]
@@ -633,6 +635,7 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
         "cards.sarif",
         "comment-plan.json",
         "witness-plan.md",
+        "receipt-audit.md",
         "lsp.json",
         "repair-queue.json",
     ] {
@@ -671,6 +674,7 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
     assert!(github_summary.contains("## Open next"));
     assert!(github_summary.contains("Review kit manifest: `review-kit.json`"));
     assert!(github_summary.contains("Full reviewer cockpit: `pr-summary.md`"));
+    assert!(github_summary.contains("Receipt audit: `receipt-audit.md`"));
     assert!(github_summary.contains("Agent repair queue: `repair-queue.json`"));
     assert!(github_summary.contains("`comment-plan.json` is plan-only"));
     assert!(github_summary.contains("Full advisory bundle"));
@@ -746,6 +750,17 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
     );
     assert!(!witness_plan.contains("Miri passed"));
     assert!(!witness_plan.contains("site reached"));
+
+    let receipt_audit = fs::read_to_string(out_dir.join("receipt-audit.md"))?;
+    assert!(receipt_audit.contains("# unsafe-review receipt audit"));
+    assert!(receipt_audit.contains("Static audit of saved witness receipt metadata"));
+    assert!(receipt_audit.contains("| Receipts | Matched | Unmatched |"));
+    assert!(receipt_audit.contains("No receipt files found."));
+    assert!(receipt_audit.contains("does not execute Miri"));
+    assert!(receipt_audit.contains("does not prove site reach"));
+    assert!(receipt_audit.contains("does not make policy decisions"));
+    assert!(!receipt_audit.contains("Miri passed"));
+    assert!(!receipt_audit.contains("site reached"));
 
     let repair_queue = parse_json(&fs::read_to_string(out_dir.join("repair-queue.json"))?)?;
     assert_eq!(repair_queue["schema_version"], "0.1");
@@ -857,6 +872,7 @@ fn first_pr_clean_output_stays_advisory_not_all_clear() -> Result<(), Box<dyn Er
     assert!(github_summary.contains("## Open next"));
     assert!(github_summary.contains("Review kit manifest: `review-kit.json`"));
     assert!(github_summary.contains("Full reviewer cockpit: `pr-summary.md`"));
+    assert!(github_summary.contains("Receipt audit: `receipt-audit.md`"));
     assert!(github_summary.contains("Agent repair queue: `repair-queue.json`"));
     assert!(github_summary.contains("Full advisory bundle"));
     assert!(github_summary.contains("review-kit.json"));
@@ -868,6 +884,13 @@ fn first_pr_clean_output_stays_advisory_not_all_clear() -> Result<(), Box<dyn Er
     assert!(witness_plan.contains("not UB-free status"));
     assert!(!witness_plan.contains("Miri passed"));
     assert!(!witness_plan.contains("site reached"));
+
+    let receipt_audit = fs::read_to_string(out_dir.join("receipt-audit.md"))?;
+    assert!(receipt_audit.contains("# unsafe-review receipt audit"));
+    assert!(receipt_audit.contains("No receipt files found."));
+    assert!(receipt_audit.contains("does not execute Miri"));
+    assert!(receipt_audit.contains("does not make policy decisions"));
+    assert!(!receipt_audit.contains("Miri passed"));
 
     let repair_queue = parse_json(&fs::read_to_string(out_dir.join("repair-queue.json"))?)?;
     assert_eq!(repair_queue["summary"]["cards"], 0);

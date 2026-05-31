@@ -9,16 +9,7 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --all-targets --locked
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
 cargo run --locked -p xtask -- check-pr
-unsafe-review check --base origin/main --format json
-unsafe-review check --base origin/main \
-  --format pr-summary \
-  --out target/unsafe-review/pr-summary.md
-unsafe-review check --base origin/main \
-  --format sarif \
-  --out target/unsafe-review/cards.sarif
-unsafe-review check --base origin/main \
-  --format comment-plan \
-  --out target/unsafe-review/comment-plan.json
+unsafe-review first-pr --base origin/main --out-dir target/unsafe-review
 ```
 
 The CI workflow keeps repository permissions read-only, avoids persisted checkout
@@ -43,8 +34,13 @@ The advisory GitHub workflow writes and uploads:
 ```text
 target/unsafe-review/cards.json
 target/unsafe-review/pr-summary.md
+target/unsafe-review/github-summary.md
 target/unsafe-review/cards.sarif
 target/unsafe-review/comment-plan.json
+target/unsafe-review/witness-plan.md
+target/unsafe-review/receipt-audit.md
+target/unsafe-review/lsp.json
+target/unsafe-review/repair-queue.json
 ```
 
 Before upload, the workflow runs:
@@ -89,10 +85,11 @@ contract with:
 cargo xtask check-advisory-artifacts target/unsafe-review
 ```
 
-This checks that `cards.json`, `pr-summary.md`, `cards.sarif`, and
-`comment-plan.json` exist, machine-readable artifacts parse, the policy remains
-advisory, the comment plan remains plan-only, projected card IDs match
-`cards.json`, result counts stay consistent, and the trust boundary is present.
+This checks that the first-pr review kit artifacts exist, machine-readable
+artifacts parse, the policy remains advisory, the comment plan remains
+plan-only, the receipt audit stays metadata-only, repair queue boundaries are
+present, projected card IDs match `cards.json`, result counts stay consistent,
+and the trust boundary is present.
 
 Witness tools are routed, not run everywhere. Miri, sanitizers, Loom, and Kani
 belong in targeted PR, nightly, or release lanes unless repo policy says
