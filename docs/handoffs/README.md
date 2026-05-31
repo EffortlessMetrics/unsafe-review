@@ -5,6 +5,7 @@ what not to do next. Do not put active specs here.
 
 | Handoff | Date | Scope |
 |---|---|---|
+| [Release 0.3.1 preparation](2026-05-31-release-0.3.1-preparation.md) | 2026-05-31 | crates.io README/image package-surface hotfix after source history repair, synchronized 0.3.1 version bump, validation checklist, and manual publish order |
 | [Swarm history catch-up](2026-05-31-swarm-history-catchup.md) | 2026-05-31 | source history-preserving merge from unsafe-review-swarm/main; must be merge-committed, not squashed |
 | [Source history catch-up process](2026-05-31-source-history-catchup-process.md) | 2026-05-31 | process docs for source history repair, crates.io patch release preconditions, and the rule that history repair precedes package hotfix publication |
 | [Source 0.3.0 publication sync](2026-05-31-source-0.3.0-publication-sync.md) | 2026-05-31 | mirrors source 0.3.0 release metadata, records source publication receipt PR #504, and updates the source-sync checkpoint without importing source badge counts |
