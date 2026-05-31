@@ -66,6 +66,7 @@ changed unsafe seam
 `first-pr` writes a standard advisory bundle under `target/unsafe-review/`:
 
 ```text
+review-kit.json
 cards.json
 pr-summary.md
 github-summary.md
@@ -79,6 +80,7 @@ The bundle is artifact-first:
 
 | Artifact | Use |
 |---|---|
+| `review-kit.json` | Artifact index, top-card handoff, and trust boundary |
 | `cards.json` | Canonical ReviewCard data |
 | `pr-summary.md` | Reviewer first screen |
 | `github-summary.md` | Bounded GitHub job summary text |

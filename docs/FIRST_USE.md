@@ -41,8 +41,10 @@ unsafe-review first-pr --base origin/main
 This writes the standard local review bundle:
 
 ```text
+target/unsafe-review/review-kit.json
 target/unsafe-review/cards.json
 target/unsafe-review/pr-summary.md
+target/unsafe-review/github-summary.md
 target/unsafe-review/cards.sarif
 target/unsafe-review/comment-plan.json
 target/unsafe-review/witness-plan.md
@@ -121,7 +123,7 @@ artifact only; `unsafe-review` does not post comments by default.
 
 ## Inspect One Card
 
-`first-pr` prints an `Inspect top card` command for the highest-priority card.
+`first-pr` prints an `Explain top card` command for the highest-priority card.
 Run that command to see why the card exists, what evidence is missing, what would
 resolve it, what would not resolve it, which witness route fits, and what
 unsafe-review is not claiming:

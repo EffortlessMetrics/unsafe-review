@@ -1452,6 +1452,8 @@ fn check_manual_fuzz_harness() -> Result<(), String> {
 struct AdvisoryArtifactSummary {
     card_ids: BTreeSet<String>,
     card_count: usize,
+    open_actionable_gaps: usize,
+    scope: String,
 }
 
 fn check_advisory_artifacts(dir: &Path) -> Result<(), String> {
@@ -1462,6 +1464,8 @@ fn check_advisory_artifacts(dir: &Path) -> Result<(), String> {
 
 fn check_first_pr_artifacts(dir: &Path) -> Result<(), String> {
     let summary = check_advisory_artifact_set(dir)?;
+    check_review_kit_manifest(dir, &summary)?;
+    check_github_summary_artifact(dir, summary.card_count)?;
     check_witness_plan_artifact(dir, summary.card_count)?;
     check_lsp_artifact(dir, &summary.card_ids)?;
     check_first_pr_artifact_overclaims(dir)?;
@@ -1481,6 +1485,7 @@ fn check_advisory_artifact_set(dir: &Path) -> Result<AdvisoryArtifactSummary, St
     let cards = parse_json_file(&dir.join("cards.json"))?;
     require_json_str(&cards, "tool", "unsafe-review", "cards.json")?;
     require_json_str(&cards, "policy", "advisory", "cards.json")?;
+    let scope = require_non_empty_json_str(&cards, "scope", "cards.json")?.to_string();
     require_json_array(&cards, "cards", "cards.json")?;
     let cards_boundary = cards
         .get("trust_boundary")
@@ -1495,6 +1500,8 @@ fn check_advisory_artifact_set(dir: &Path) -> Result<AdvisoryArtifactSummary, St
             "cards.json summary.cards is {summary_cards}, but cards array has {card_count}"
         ));
     }
+    let open_actionable_gaps =
+        json_usize_at(&cards, "/summary/open_actionable_gaps", "cards.json")?;
 
     let pr_summary_path = dir.join("pr-summary.md");
     let pr_summary = read_to_string(&pr_summary_path)?;
@@ -1634,7 +1641,240 @@ fn check_advisory_artifact_set(dir: &Path) -> Result<AdvisoryArtifactSummary, St
     Ok(AdvisoryArtifactSummary {
         card_ids,
         card_count,
+        open_actionable_gaps,
+        scope,
     })
+}
+
+fn check_review_kit_manifest(dir: &Path, summary: &AdvisoryArtifactSummary) -> Result<(), String> {
+    let path = dir.join("review-kit.json");
+    let review_kit = parse_json_file(&path)?;
+    require_json_str(&review_kit, "schema_version", "0.1", "review-kit.json")?;
+    require_json_str(&review_kit, "tool", "unsafe-review", "review-kit.json")?;
+    require_json_str(
+        &review_kit,
+        "mode",
+        "review_kit_manifest",
+        "review-kit.json",
+    )?;
+    require_json_str(&review_kit, "source", "first_pr", "review-kit.json")?;
+    require_json_str(&review_kit, "policy", "advisory", "review-kit.json")?;
+    require_json_str(&review_kit, "scope", &summary.scope, "review-kit.json")?;
+    require_non_empty_json_str(&review_kit, "tool_version", "review-kit.json")?;
+
+    let manifest_cards = json_usize_at(&review_kit, "/summary/cards", "review-kit.json")?;
+    if manifest_cards != summary.card_count {
+        return Err(format!(
+            "review-kit.json summary.cards is {manifest_cards}, but cards.json has {}",
+            summary.card_count
+        ));
+    }
+    let manifest_open = json_usize_at(
+        &review_kit,
+        "/summary/open_actionable_gaps",
+        "review-kit.json",
+    )?;
+    if manifest_open != summary.open_actionable_gaps {
+        return Err(format!(
+            "review-kit.json summary.open_actionable_gaps is {manifest_open}, but cards.json has {}",
+            summary.open_actionable_gaps
+        ));
+    }
+
+    match review_kit.get("top_card_id") {
+        Some(serde_json::Value::String(card_id)) => {
+            if !summary.card_ids.contains(card_id) {
+                return Err(format!(
+                    "review-kit.json top_card_id `{card_id}` is not present in cards.json"
+                ));
+            }
+        }
+        Some(serde_json::Value::Null) if summary.card_count == 0 => {}
+        Some(serde_json::Value::Null) => {
+            return Err(
+                "review-kit.json top_card_id must name a card when cards exist".to_string(),
+            );
+        }
+        _ => return Err("review-kit.json top_card_id must be a string or null".to_string()),
+    }
+
+    let boundary = review_kit
+        .get("trust_boundary")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "review-kit.json is missing trust_boundary".to_string())?;
+    require_boundary_text(boundary, "review-kit.json")?;
+    for expected in [
+        "not Miri-clean status",
+        "not site-execution proof",
+        "did not run witnesses",
+        "post comments",
+        "edit source",
+        "run an agent",
+        "enforce blocking policy",
+    ] {
+        if !text_contains_ignore_ascii_case(boundary, expected) {
+            return Err(format!(
+                "review-kit.json trust_boundary must include `{expected}`"
+            ));
+        }
+    }
+
+    let artifacts = json_array_at(&review_kit, "/artifacts", "review-kit.json")?;
+    let mut seen = BTreeSet::new();
+    for artifact in artifacts {
+        let artifact_path =
+            require_non_empty_json_str(artifact, "path", "review-kit.json artifact")?;
+        if artifact_path.contains('\\')
+            || Path::new(artifact_path)
+                .components()
+                .any(|component| matches!(component, std::path::Component::ParentDir))
+        {
+            return Err(format!(
+                "review-kit.json artifact path `{artifact_path}` must be a relative clean path"
+            ));
+        }
+        if !seen.insert(artifact_path.to_string()) {
+            return Err(format!(
+                "review-kit.json repeats artifact path `{artifact_path}`"
+            ));
+        }
+        if !dir.join(artifact_path).is_file() {
+            return Err(format!(
+                "review-kit.json lists missing artifact `{artifact_path}`"
+            ));
+        }
+        require_json_str(
+            artifact,
+            "kind",
+            expected_review_kit_artifact_kind(artifact_path),
+            "review-kit.json artifact",
+        )?;
+        require_json_str(
+            artifact,
+            "format",
+            expected_review_kit_artifact_format(artifact_path),
+            "review-kit.json artifact",
+        )?;
+        match expected_review_kit_artifact_schema(artifact_path) {
+            Some(schema) => require_json_str(
+                artifact,
+                "schema_version",
+                schema,
+                "review-kit.json artifact",
+            )?,
+            None if artifact
+                .get("schema_version")
+                .is_some_and(serde_json::Value::is_null) => {}
+            None if !artifact.get("schema_version").is_some() => {}
+            None => {
+                return Err(format!(
+                    "review-kit.json artifact `{artifact_path}` should not have a schema_version"
+                ));
+            }
+        }
+    }
+    for expected in [
+        "review-kit.json",
+        "cards.json",
+        "pr-summary.md",
+        "github-summary.md",
+        "cards.sarif",
+        "comment-plan.json",
+        "witness-plan.md",
+        "lsp.json",
+    ] {
+        if !seen.contains(expected) {
+            return Err(format!(
+                "review-kit.json is missing artifact entry `{expected}`"
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn expected_review_kit_artifact_kind(path: &str) -> &'static str {
+    match path {
+        "review-kit.json" => "review_kit_manifest",
+        "cards.json" => "review_cards",
+        "pr-summary.md" => "reviewer_summary",
+        "github-summary.md" => "github_summary",
+        "cards.sarif" => "sarif",
+        "comment-plan.json" => "comment_plan",
+        "witness-plan.md" => "witness_plan",
+        "lsp.json" => "saved_lsp",
+        _ => "unknown",
+    }
+}
+
+fn expected_review_kit_artifact_format(path: &str) -> &'static str {
+    if path.ends_with(".json") {
+        "json"
+    } else if path.ends_with(".md") {
+        "markdown"
+    } else if path.ends_with(".sarif") {
+        "sarif"
+    } else {
+        "unknown"
+    }
+}
+
+fn expected_review_kit_artifact_schema(path: &str) -> Option<&'static str> {
+    match path {
+        "review-kit.json" | "cards.json" | "comment-plan.json" | "lsp.json" => Some("0.1"),
+        "cards.sarif" => Some("2.1.0"),
+        _ => None,
+    }
+}
+
+const GITHUB_SUMMARY_WORD_LIMIT: usize = 600;
+
+fn check_github_summary_artifact(dir: &Path, card_count: usize) -> Result<(), String> {
+    let path = dir.join("github-summary.md");
+    let text = read_to_string(&path)?;
+
+    require_text_contains(&text, "## unsafe-review advisory summary", &path)?;
+    require_text_contains(&text, &format!("- Review cards: {card_count}"), &path)?;
+    require_text_contains(&text, "## Top card", &path)?;
+    require_text_contains(&text, "- Review kit manifest: `review-kit.json`", &path)?;
+    require_text_contains(&text, "- Full reviewer cockpit: `pr-summary.md`", &path)?;
+    require_text_contains(&text, "`comment-plan.json` is plan-only", &path)?;
+    require_text_contains(&text, "Full advisory bundle", &path)?;
+    require_text_contains(&text, "review-kit.json", &path)?;
+    require_text_contains(&text, "static unsafe contract review", &path)?;
+    require_text_contains(&text, "not memory-safety proof", &path)?;
+    require_text_contains(&text, "not UB-free status", &path)?;
+    require_text_contains(&text, "not Miri-clean status", &path)?;
+    require_text_contains(&text, "not site-execution proof", &path)?;
+    require_text_contains(&text, "did not run witnesses", &path)?;
+    require_text_contains(&text, "post comments", &path)?;
+    require_text_contains(&text, "edit source", &path)?;
+    require_text_contains(&text, "enforce blocking policy", &path)?;
+
+    for forbidden in [
+        "# unsafe-review PR summary",
+        "## Card table",
+        "## Witness plan",
+    ] {
+        if text.contains(forbidden) {
+            return Err(format!(
+                "{} must stay bounded and must not include `{forbidden}`",
+                path.display()
+            ));
+        }
+    }
+    let word_count = text.split_whitespace().count();
+    if word_count > GITHUB_SUMMARY_WORD_LIMIT {
+        return Err(format!(
+            "{} is {word_count} words; github-summary.md must stay under {GITHUB_SUMMARY_WORD_LIMIT}",
+            path.display()
+        ));
+    }
+    if card_count == 0 {
+        require_text_contains(&text, "No changed unsafe-review gaps were found.", &path)?;
+    }
+
+    Ok(())
 }
 
 fn check_witness_plan_artifact(dir: &Path, card_count: usize) -> Result<(), String> {
@@ -4956,7 +5196,9 @@ impl WitnessKind {
     fn first_pr_artifact_checker_rejects_missing_witness_plan() -> Result<(), String> {
         let dir = unique_temp_dir("unsafe-review-first-pr-missing-witness")?;
         fs::create_dir_all(&dir).map_err(|err| format!("create temp dir failed: {err}"))?;
-        write_valid_artifacts(&dir)?;
+        write_valid_first_pr_artifacts(&dir)?;
+        fs::remove_file(dir.join("witness-plan.md"))
+            .map_err(|err| format!("remove witness plan failed: {err}"))?;
 
         let result = check_first_pr_artifacts(&dir);
 
@@ -5292,7 +5534,7 @@ review_after = "2026-08-01"
     fn write_valid_artifacts(dir: &Path) -> Result<(), String> {
         fs::write(
             dir.join("cards.json"),
-            r#"{"tool":"unsafe-review","policy":"advisory","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result","summary":{"cards":1},"cards":[{"id":"card-1"}]}"#,
+            r#"{"schema_version":"0.1","tool":"unsafe-review","scope":"diff","policy":"advisory","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result","summary":{"cards":1,"open_actionable_gaps":1},"cards":[{"id":"card-1"}]}"#,
         )
         .map_err(|err| format!("write cards failed: {err}"))?;
         fs::write(
@@ -5315,6 +5557,16 @@ review_after = "2026-08-01"
 
     fn write_valid_first_pr_artifacts(dir: &Path) -> Result<(), String> {
         write_valid_artifacts(dir)?;
+        fs::write(
+            dir.join("review-kit.json"),
+            r#"{"schema_version":"0.1","tool":"unsafe-review","tool_version":"0.3.0-test","mode":"review_kit_manifest","source":"first_pr","policy":"advisory","scope":"diff","base_ref":null,"head_commit":null,"summary":{"cards":1,"open_actionable_gaps":1},"top_card_id":"card-1","artifacts":[{"path":"review-kit.json","kind":"review_kit_manifest","format":"json","schema_version":"0.1"},{"path":"cards.json","kind":"review_cards","format":"json","schema_version":"0.1"},{"path":"pr-summary.md","kind":"reviewer_summary","format":"markdown","schema_version":null},{"path":"github-summary.md","kind":"github_summary","format":"markdown","schema_version":null},{"path":"cards.sarif","kind":"sarif","format":"sarif","schema_version":"2.1.0"},{"path":"comment-plan.json","kind":"comment_plan","format":"json","schema_version":"0.1"},{"path":"witness-plan.md","kind":"witness_plan","format":"markdown","schema_version":null},{"path":"lsp.json","kind":"saved_lsp","format":"json","schema_version":"0.1"}],"trust_boundary":"Static unsafe contract review kit manifest only; this indexes first-pr artifacts and does not reclassify ReviewCards. It is not a proof of memory safety, not UB-free status, not a Miri result, not Miri-clean status, and not site-execution proof. unsafe-review did not run witnesses, post comments, edit source, run an agent, or enforce blocking policy."}"#,
+        )
+        .map_err(|err| format!("write review kit failed: {err}"))?;
+        fs::write(
+            dir.join("github-summary.md"),
+            "## unsafe-review advisory summary\n\n- Scope: `diff`\n- Review cards: 1\n- Open actionable gaps: 1\n- Policy mode: `advisory`\n\n## Top card\n\n- ID: `card-1`\n- Class: `guard_missing`\n- Operation family: `raw_pointer_read`\n- Missing evidence: Missing visible local guard\n- Next action: add an alignment guard\n- Witness route: `miri`\n- Explain: `unsafe-review explain card-1`\n- Agent context: `unsafe-review context card-1 --json`\n\n## Open next\n\n- Review kit manifest: `review-kit.json`\n- Full reviewer cockpit: `pr-summary.md`\n- Machine-readable ReviewCards: `cards.json`\n- Witness routes: `witness-plan.md`\n- Comment budget: `comment-plan.json` is plan-only; no comments were posted.\n\n---\n\nFull advisory bundle (review-kit.json, cards.json, pr-summary.md, github-summary.md, cards.sarif, comment-plan.json, witness-plan.md, lsp.json) is attached as the workflow artifact.\n\n> Trust boundary: static unsafe contract review only; not memory-safety proof, not UB-free status, not Miri-clean status, and not site-execution proof.\n> Execution boundary: unsafe-review did not run witnesses, post comments, edit source, run an agent, or enforce blocking policy.\n",
+        )
+        .map_err(|err| format!("write github summary failed: {err}"))?;
         fs::write(
             dir.join("witness-plan.md"),
             "# unsafe-review witness plan\n\n- Review cards: 1\n- Open actionable gaps: 1\n- Policy mode: `advisory`\n\n## Route groups\n\n### Miri / cargo-careful\n\n- Limit: Concrete runtime evidence is path-specific. It can support the exercised route, but it does not prove arbitrary callers, repo safety, UB-free status, or site execution unless a matching receipt records the run.\n\n#### `card-1`\n\n- Route: `miri`\n  - Reason: route\n  - What it can show: a focused run\n  - What it cannot prove: arbitrary callers\n  - Command:\n\n```bash\ncargo +nightly miri test card\n```\n  - Receipt hint: unsafe-review receipt import-miri card-1\n\n## Trust boundary\n\nThis artifact is static unsafe contract review. It routes reviewers to credible witnesses but does not run Miri, cargo-careful, sanitizers, Loom, Shuttle, Kani, or Crux. It is not a proof of memory safety, not UB-free status, and not a Miri result unless a witness receipt is attached.\n",
@@ -5339,14 +5591,24 @@ review_after = "2026-08-01"
     fn write_valid_zero_card_first_pr_artifacts(dir: &Path) -> Result<(), String> {
         fs::write(
             dir.join("cards.json"),
-            r#"{"tool":"unsafe-review","policy":"advisory","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result","summary":{"cards":0},"cards":[]}"#,
+            r#"{"schema_version":"0.1","tool":"unsafe-review","scope":"diff","policy":"advisory","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result","summary":{"cards":0,"open_actionable_gaps":0},"cards":[]}"#,
         )
         .map_err(|err| format!("write cards failed: {err}"))?;
+        fs::write(
+            dir.join("review-kit.json"),
+            r#"{"schema_version":"0.1","tool":"unsafe-review","tool_version":"0.3.0-test","mode":"review_kit_manifest","source":"first_pr","policy":"advisory","scope":"diff","base_ref":null,"head_commit":null,"summary":{"cards":0,"open_actionable_gaps":0},"top_card_id":null,"artifacts":[{"path":"review-kit.json","kind":"review_kit_manifest","format":"json","schema_version":"0.1"},{"path":"cards.json","kind":"review_cards","format":"json","schema_version":"0.1"},{"path":"pr-summary.md","kind":"reviewer_summary","format":"markdown","schema_version":null},{"path":"github-summary.md","kind":"github_summary","format":"markdown","schema_version":null},{"path":"cards.sarif","kind":"sarif","format":"sarif","schema_version":"2.1.0"},{"path":"comment-plan.json","kind":"comment_plan","format":"json","schema_version":"0.1"},{"path":"witness-plan.md","kind":"witness_plan","format":"markdown","schema_version":null},{"path":"lsp.json","kind":"saved_lsp","format":"json","schema_version":"0.1"}],"trust_boundary":"Static unsafe contract review kit manifest only; this indexes first-pr artifacts and does not reclassify ReviewCards. It is not a proof of memory safety, not UB-free status, not a Miri result, not Miri-clean status, and not site-execution proof. unsafe-review did not run witnesses, post comments, edit source, run an agent, or enforce blocking policy."}"#,
+        )
+        .map_err(|err| format!("write review kit failed: {err}"))?;
         fs::write(
             dir.join("pr-summary.md"),
             "- Review cards: 0\n\nNo changed unsafe-review gaps were found.\nThis does not prove the repo safe, UB-free, Miri-clean, or that any unsafe site executed.\n\nThis artifact is static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result unless a witness receipt is attached.\n",
         )
         .map_err(|err| format!("write pr summary failed: {err}"))?;
+        fs::write(
+            dir.join("github-summary.md"),
+            "## unsafe-review advisory summary\n\n- Scope: `diff`\n- Review cards: 0\n- Open actionable gaps: 0\n- Policy mode: `advisory`\n\n## Top card\n\nNo changed unsafe-review gaps were found.\nThis does not prove the repo safe, UB-free, Miri-clean, or that any unsafe site executed.\n\n## Open next\n\n- Review kit manifest: `review-kit.json`\n- Full reviewer cockpit: `pr-summary.md`\n- Machine-readable ReviewCards: `cards.json`\n- Witness routes: `witness-plan.md`\n- Comment budget: `comment-plan.json` is plan-only; no comments were posted.\n\n---\n\nFull advisory bundle (review-kit.json, cards.json, pr-summary.md, github-summary.md, cards.sarif, comment-plan.json, witness-plan.md, lsp.json) is attached as the workflow artifact.\n\n> Trust boundary: static unsafe contract review only; not memory-safety proof, not UB-free status, not Miri-clean status, and not site-execution proof.\n> Execution boundary: unsafe-review did not run witnesses, post comments, edit source, run an agent, or enforce blocking policy.\n",
+        )
+        .map_err(|err| format!("write github summary failed: {err}"))?;
         fs::write(
             dir.join("cards.sarif"),
             r#"{"version":"2.1.0","runs":[{"results":[],"properties":{"trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}]}"#,

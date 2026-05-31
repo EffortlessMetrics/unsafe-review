@@ -23,9 +23,10 @@ SARIF output is also a projection from existing `ReviewCard`s. SARIF results
 carry card identity, operation expression, operation family, hazards, missing
 evidence, witness route recommendations, structured route details, verify
 commands, and the same trust boundary in result properties.
-The advisory GitHub workflow uploads the JSON, Markdown summary, SARIF, and
-comment-plan artifacts. It does not run witness tools, post inline comments, or
-enable blocking policy.
+The advisory GitHub workflow uploads the review-kit manifest, JSON, Markdown
+reviewer summary, bounded GitHub summary, SARIF, comment-plan, witness-plan,
+and saved LSP artifacts. It does not run witness tools, post inline comments,
+or enable blocking policy.
 Inline comment planning is artifact-only. The plan contains candidate comments
 for actionable high-priority or high-confidence cards, but no workflow posts
 those comments by default. Each planned comment carries the same ReviewCard
@@ -76,9 +77,11 @@ own analyzer truth.
   writes parseable SARIF 2.1.0.
 - `unsafe-review check --format comment-plan --out target/unsafe-review/comment-plan.json`
   writes candidate inline comments without posting them.
-- The advisory workflow uploads `cards.json`, `pr-summary.md`, `cards.sarif`,
-  and `comment-plan.json` as artifacts without running Miri, posting comments,
-  or enabling blocking policy.
+- `unsafe-review first-pr --base origin/main` writes `review-kit.json`,
+  `cards.json`, `pr-summary.md`, `github-summary.md`, `cards.sarif`,
+  `comment-plan.json`, `witness-plan.md`, and `lsp.json`.
+- The advisory workflow uploads those artifacts without running Miri, posting
+  comments, or enabling blocking policy.
 - The advisory workflow runs `cargo xtask check-advisory-artifacts` before
   upload so malformed artifacts fail the advisory job instead of being published
   as trusted dogfood evidence.
@@ -91,6 +94,7 @@ own analyzer truth.
 cargo xtask check-pr
 cargo test --workspace
 cargo xtask check-advisory-artifacts target/unsafe-review
+cargo xtask check-first-pr-artifacts target/unsafe-review
 ```
 
 ## Promotion rule
