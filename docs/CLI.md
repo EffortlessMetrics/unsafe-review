@@ -99,6 +99,7 @@ target/unsafe-review/cards.sarif
 target/unsafe-review/comment-plan.json
 target/unsafe-review/witness-plan.md
 target/unsafe-review/lsp.json
+target/unsafe-review/repair-queue.json
 ```
 
 Use `--out-dir <dir>` to choose another artifact directory, or `--diff file|-`
@@ -112,6 +113,13 @@ comments, edit source, or enforce blocking policy.
 the top card when one exists, summary counts, handoff commands, and the trust
 boundary. `github-summary.md` is a bounded CI doorway; keep the full reviewer
 cockpit in `pr-summary.md`.
+
+`repair-queue.json` groups cards by card-sized handoff shape, such as
+`repairable_by_guard`, `repairable_by_safety_docs`,
+`requires_witness_receipt`, `requires_human_review`, and
+`do_not_auto_repair`. It is copy-only ReviewCard projection data for humans or
+agents; `unsafe-review` does not run an agent, edit source, suppress cards, or
+claim repair success.
 
 ## Output Formats
 
@@ -165,6 +173,7 @@ target/unsafe-review/cards.sarif
 target/unsafe-review/comment-plan.json
 target/unsafe-review/witness-plan.md
 target/unsafe-review/lsp.json
+target/unsafe-review/repair-queue.json
 ```
 
 Verify a local or downloaded artifact set with:
@@ -177,8 +186,8 @@ That verifier checks parseability, advisory policy, plan-only comment mode,
 projected card identity consistency, result counts, and trust-boundary text. It
 does not prove the analyzer found every unsafe issue.
 
-For the full `first-pr` bundle, including `witness-plan.md` and saved
-`lsp.json`, use:
+For the full `first-pr` bundle, including `witness-plan.md`, saved `lsp.json`,
+and `repair-queue.json`, use:
 
 ```bash
 cargo xtask check-first-pr-artifacts target/unsafe-review
@@ -187,9 +196,10 @@ cargo xtask check-first-pr-artifacts target/unsafe-review
 That verifier keeps the bundle advisory: it checks the review-kit manifest,
 bounded GitHub summary, route limitations, comment-plan review-budget counts,
 selected/not-selected reason vocabulary, renderable inline fields, saved LSP
-diagnostic evidence and action payloads, zero-gap wording, card identity
-consistency, and absence of positive safety/proof wording. It does not run
-witnesses, post comments, edit source, or make a policy decision.
+diagnostic evidence and action payloads, repair-queue bucket names and
+do-not-do boundaries, zero-gap wording, card identity consistency, and absence
+of positive safety/proof wording. It does not run witnesses, run agents, post
+comments, edit source, or make a policy decision.
 
 ## Explain And Context
 

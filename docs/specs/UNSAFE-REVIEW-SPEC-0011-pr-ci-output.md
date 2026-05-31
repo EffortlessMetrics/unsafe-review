@@ -25,8 +25,8 @@ evidence, witness route recommendations, structured route details, verify
 commands, and the same trust boundary in result properties.
 The advisory GitHub workflow uploads the review-kit manifest, JSON, Markdown
 reviewer summary, bounded GitHub summary, SARIF, comment-plan, witness-plan,
-and saved LSP artifacts. It does not run witness tools, post inline comments,
-or enable blocking policy.
+saved LSP, and repair-queue artifacts. It does not run witness tools, run
+agents, post inline comments, edit source, or enable blocking policy.
 Inline comment planning is artifact-only. The plan contains candidate comments
 for actionable high-priority or high-confidence cards, but no workflow posts
 those comments by default. Each planned comment carries the same ReviewCard
@@ -53,6 +53,14 @@ selected-card reasons, relevance/actionability signals, and `not_selected`
 entries for cards that remain in the artifact but are not inline candidates.
 No workflow posts the plan by default; a future trusted poster must consume this
 artifact rather than regenerating its own analyzer truth.
+
+`repair-queue.json` is the aggregate agent/human handoff surface for
+`first-pr`. It groups existing ReviewCards into known buckets such as
+`repairable_by_guard`, `repairable_by_safety_docs`,
+`requires_witness_receipt`, `requires_human_review`, and
+`do_not_auto_repair`. The queue is copy-only and advisory: it must include
+do-not-do boundaries and must not claim proof, automatic repair, witness
+execution, source edits, comments, suppression, or card resolution.
 
 ## Non-goals
 
@@ -81,7 +89,8 @@ artifact rather than regenerating its own analyzer truth.
   without posting comments.
 - `unsafe-review first-pr --base origin/main` writes `review-kit.json`,
   `cards.json`, `pr-summary.md`, `github-summary.md`, `cards.sarif`,
-  `comment-plan.json`, `witness-plan.md`, and `lsp.json`.
+  `comment-plan.json`, `witness-plan.md`, `lsp.json`, and
+  `repair-queue.json`.
 - The advisory workflow uploads those artifacts without running Miri, posting
   comments, or enabling blocking policy.
 - The advisory workflow runs `cargo xtask check-advisory-artifacts` before

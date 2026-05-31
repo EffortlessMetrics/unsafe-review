@@ -37,6 +37,8 @@ source of analyzer truth. It carries:
   operation family and missing obligation evidence
 - `agent_readiness`, an advisory classification of whether this card is a
   bounded repair-delegation candidate
+- `repair_queue`, the same card's queue buckets and summary used by the
+  aggregate `repair-queue.json` artifact
 - witness routes and verify commands from the card
 - do-not-do rules
 - stop conditions
@@ -61,15 +63,16 @@ are marked not ready with reasons. This classification does not execute an
 agent, apply edits, run witnesses, or resolve the card.
 
 Packets constrain LLMs with task, contract, missing evidence, allowed repairs,
-do-not-do list, verify commands, and stop conditions. They are copy-only in
-v0.x; `unsafe-review` does not run an agent, edit source, post comments, or
-claim that the packet resolves the card.
+repair queue buckets, do-not-do list, verify commands, and stop conditions.
+They are copy-only in v0.x; `unsafe-review` does not run an agent, edit source,
+post comments, suppress cards, or claim that the packet resolves the card.
 
 ## Projection contract
 
 Agent packets are card-scoped handoffs, not autonomous repair authority. Each
 packet must name one ReviewCard, the exact missing obligation evidence, allowed
-repair shapes, do-not-do rules, verify commands, and stop conditions.
+repair shapes, repair-queue bucket projection, do-not-do rules, verify
+commands, and stop conditions.
 
 The packet may classify whether the card is ready for bounded repair delegation,
 but that classification is advisory metadata. It must not hide the ReviewCard,
@@ -106,7 +109,8 @@ Whole-file dumps are out of scope by default.
   contract/guard summaries, related test mentions, and explicit limits against
   whole-file dumps and site-execution claims.
 - The packet includes obligation-level evidence, missing evidence, witness
-  routes, do-not-do rules, stop conditions, and the trust boundary.
+  routes, repair-queue buckets, do-not-do rules, stop conditions, and the trust
+  boundary.
 - Allowed repairs name the current card's missing obligation shape. For
   example, raw-pointer read packets may name same-pointer alignment or
   initialization evidence, while copy packets may name range and non-overlap

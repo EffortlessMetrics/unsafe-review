@@ -459,6 +459,13 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     assert!(packet["witness_routes"].is_array());
     assert_eq!(packet["agent_readiness"]["ready"], true);
     assert_eq!(packet["agent_readiness"]["state"], "ready");
+    assert_eq!(packet["repair_queue"]["buckets"][0], "repairable_by_guard");
+    assert!(
+        packet["repair_queue"]["summary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("repairable_by_guard")
+    );
     let allowed_repairs = serde_json::to_string(&packet["allowed_repairs"])?;
     assert!(allowed_repairs.contains("alignment guard"));
     assert!(allowed_repairs.contains("witness receipt"));
@@ -469,6 +476,8 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
             .contains("cargo +nightly miri test read_header")
     );
     assert!(packet["do_not_do"].is_array());
+    assert!(serde_json::to_string(&packet["do_not_do"])?.contains("do not suppress this card"));
+    assert!(serde_json::to_string(&packet["do_not_do"])?.contains("automatic safety repair"));
     assert!(
         serde_json::to_string(&packet["do_not_do"])?
             .contains("do not change unrelated unsafe code")
@@ -556,12 +565,14 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
     assert!(stdout.contains("comment-plan.json"));
     assert!(stdout.contains("witness-plan.md"));
     assert!(stdout.contains("lsp.json"));
+    assert!(stdout.contains("repair-queue.json"));
     assert!(stdout.contains("Trust boundary:"));
     assert!(stdout.contains("static unsafe contract review only"));
     assert!(stdout.contains("not memory-safety proof"));
     assert!(stdout.contains("not UB-free status"));
     assert!(stdout.contains("not Miri-clean status"));
     assert!(stdout.contains("did not run witnesses"));
+    assert!(stdout.contains("run agents"));
     assert!(stdout.contains("post comments"));
     assert!(stdout.contains("enforce blocking policy"));
 
@@ -596,6 +607,10 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
     assert_eq!(review_kit["top_card_id"], card_id);
     assert_eq!(review_kit["handoff"]["reviewer_summary"], "pr-summary.md");
     assert_eq!(review_kit["handoff"]["github_summary"], "github-summary.md");
+    assert_eq!(
+        review_kit["handoff"]["agent_repair_queue"],
+        "repair-queue.json"
+    );
     assert_eq!(review_kit["handoff"]["top_card"]["card_id"], card_id);
     assert!(
         review_kit["trust_boundary"]
@@ -619,6 +634,7 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
         "comment-plan.json",
         "witness-plan.md",
         "lsp.json",
+        "repair-queue.json",
     ] {
         let Some(entry) = artifacts
             .iter()
@@ -655,6 +671,7 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
     assert!(github_summary.contains("## Open next"));
     assert!(github_summary.contains("Review kit manifest: `review-kit.json`"));
     assert!(github_summary.contains("Full reviewer cockpit: `pr-summary.md`"));
+    assert!(github_summary.contains("Agent repair queue: `repair-queue.json`"));
     assert!(github_summary.contains("`comment-plan.json` is plan-only"));
     assert!(github_summary.contains("Full advisory bundle"));
     assert!(github_summary.contains("review-kit.json"));
@@ -663,6 +680,7 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
     assert!(github_summary.contains("unsafe-review did not run witnesses"));
     assert!(github_summary.contains("post comments"));
     assert!(github_summary.contains("edit source"));
+    assert!(github_summary.contains("run an agent"));
     assert!(github_summary.contains("enforce blocking policy"));
     assert!(!github_summary.contains("# unsafe-review PR summary"));
     assert!(!github_summary.contains("## Card table"));
@@ -728,6 +746,31 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
     );
     assert!(!witness_plan.contains("Miri passed"));
     assert!(!witness_plan.contains("site reached"));
+
+    let repair_queue = parse_json(&fs::read_to_string(out_dir.join("repair-queue.json"))?)?;
+    assert_eq!(repair_queue["schema_version"], "0.1");
+    assert_eq!(repair_queue["mode"], "aggregate_repair_queue");
+    assert_eq!(repair_queue["source"], "review_card");
+    assert_eq!(repair_queue["policy"], "advisory");
+    assert_eq!(repair_queue["summary"]["cards"], 1);
+    assert_eq!(repair_queue["summary"]["repairable_by_guard"], 1);
+    assert_eq!(repair_queue["summary"]["requires_witness_receipt"], 1);
+    let repair_entry = &repair_queue["buckets"]["repairable_by_guard"][0];
+    assert_eq!(repair_entry["card_id"], card_id);
+    assert_eq!(
+        repair_entry["context_command"],
+        format!("unsafe-review context {card_id} --json")
+    );
+    assert_eq!(repair_entry["agent_readiness"]["ready"], true);
+    assert!(
+        serde_json::to_string(&repair_entry["do_not_do"])?.contains("do not suppress this card")
+    );
+    assert!(
+        repair_queue["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("does not run agents")
+    );
 
     let lsp = parse_json(&fs::read_to_string(out_dir.join("lsp.json"))?)?;
     assert_eq!(lsp["mode"], "read_only_projection");
@@ -814,6 +857,7 @@ fn first_pr_clean_output_stays_advisory_not_all_clear() -> Result<(), Box<dyn Er
     assert!(github_summary.contains("## Open next"));
     assert!(github_summary.contains("Review kit manifest: `review-kit.json`"));
     assert!(github_summary.contains("Full reviewer cockpit: `pr-summary.md`"));
+    assert!(github_summary.contains("Agent repair queue: `repair-queue.json`"));
     assert!(github_summary.contains("Full advisory bundle"));
     assert!(github_summary.contains("review-kit.json"));
     assert!(!github_summary.contains("All clear"));
@@ -824,6 +868,16 @@ fn first_pr_clean_output_stays_advisory_not_all_clear() -> Result<(), Box<dyn Er
     assert!(witness_plan.contains("not UB-free status"));
     assert!(!witness_plan.contains("Miri passed"));
     assert!(!witness_plan.contains("site reached"));
+
+    let repair_queue = parse_json(&fs::read_to_string(out_dir.join("repair-queue.json"))?)?;
+    assert_eq!(repair_queue["summary"]["cards"], 0);
+    assert_eq!(repair_queue["summary"]["do_not_auto_repair"], 0);
+    assert!(
+        repair_queue["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("not an automatic repair queue")
+    );
 
     let comment_plan = parse_json(&fs::read_to_string(out_dir.join("comment-plan.json"))?)?;
     assert_eq!(comment_plan["summary"]["selected_count"], 0);
