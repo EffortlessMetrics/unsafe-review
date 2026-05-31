@@ -5,6 +5,7 @@ what not to do next. Do not put active specs here.
 
 | Handoff | Date | Scope |
 |---|---|---|
+| [Release 0.3.0 publication receipt](2026-05-31-release-0.3.0-publication.md) | 2026-05-31 | published 0.3.0 crates, publish order, install smoke, first-pr artifact smoke, explain/context/support smoke, docs.rs checks, tag, GitHub Release, trust boundary, and next sync |
 | [Release 0.3.0 preparation](2026-05-31-release-0.3.0-preparation.md) | 2026-05-31 | version bumps for the three public crates, advisory review cockpit release framing, validation checklist, package dry-runs, and manual publish order |
 | [Release 0.2.1 publication receipt](2026-05-26-release-0.2.1-publication.md) | 2026-05-26 | published 0.2.1 crates, publish order, install smoke, badge smoke, docs.rs checks, tag, GitHub Release, trust boundary, and next sync |
 | [Release 0.2.1 preparation](2026-05-26-release-0.2.1-preparation.md) | 2026-05-26 | version bumps for the three public crates, badge/readme patch-release framing, validation checklist, and manual publish order |
