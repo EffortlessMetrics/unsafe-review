@@ -5313,7 +5313,7 @@ impl WitnessKind {
         write_valid_artifacts(&dir)?;
         fs::write(
             dir.join("cards.json"),
-            r#"{"tool":"unsafe-review","policy":"advisory","summary":{"cards":1},"cards":[{"id":"card-1"}]}"#,
+            r#"{"schema_version":"0.1","tool":"unsafe-review","scope":"diff","policy":"advisory","summary":{"cards":1,"open_actionable_gaps":1},"cards":[{"id":"card-1"}]}"#,
         )
         .map_err(|err| format!("write cards failed: {err}"))?;
 
