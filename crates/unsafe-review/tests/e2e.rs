@@ -174,11 +174,28 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     ])?;
     let comment_plan = parse_json(&stdout_text(&comment_plan)?)?;
     assert_eq!(comment_plan["mode"], "plan_only");
+    assert_eq!(comment_plan["summary"]["selected_count"], 1);
+    assert_eq!(comment_plan["summary"]["not_selected_count"], 0);
+    assert_eq!(comment_plan["summary"]["budget"], 3);
+    assert_eq!(
+        comment_plan["summary"]["reason_code"],
+        "bounded_reviewer_noise"
+    );
     assert_eq!(comment_plan["comments"][0]["card_id"], card_id);
+    assert_eq!(comment_plan["comments"][0]["changed_line"], true);
     assert_eq!(
         comment_plan["comments"][0]["operation"],
         "unsafe { ptr.cast::<Header>().read() }"
     );
+    assert_eq!(
+        comment_plan["comments"][0]["selection_reason_code"],
+        "top_actionable_card"
+    );
+    assert_eq!(
+        comment_plan["comments"][0]["actionability"],
+        "specific_guard_missing"
+    );
+    assert_eq!(comment_plan["comments"][0]["relevance"], "medium");
     assert_eq!(
         comment_plan["comments"][0]["witness_routes"][0]["kind"],
         "miri"
@@ -666,7 +683,31 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
     let comment_plan = parse_json(&fs::read_to_string(out_dir.join("comment-plan.json"))?)?;
     assert_eq!(comment_plan["mode"], "plan_only");
     assert_eq!(comment_plan["policy"], "advisory");
+    assert_eq!(comment_plan["summary"]["selected_count"], 1);
+    assert_eq!(comment_plan["summary"]["not_selected_count"], 0);
+    assert_eq!(comment_plan["summary"]["budget"], 3);
+    assert_eq!(comment_plan["summary"]["reason"], "bounded reviewer noise");
+    assert_eq!(
+        comment_plan["summary"]["reason_code"],
+        "bounded_reviewer_noise"
+    );
     assert_eq!(comment_plan["comments"][0]["card_id"], card_id);
+    assert_eq!(comment_plan["comments"][0]["changed_line"], true);
+    assert_eq!(
+        comment_plan["comments"][0]["selection_reason_code"],
+        "top_actionable_card"
+    );
+    assert_eq!(
+        comment_plan["comments"][0]["actionability"],
+        "specific_guard_missing"
+    );
+    assert_eq!(comment_plan["comments"][0]["relevance"], "medium");
+    assert!(
+        comment_plan["comments"][0]["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("not UB-free status")
+    );
     assert!(
         comment_plan["comments"][0]["body"]
             .as_str()
@@ -785,6 +826,9 @@ fn first_pr_clean_output_stays_advisory_not_all_clear() -> Result<(), Box<dyn Er
     assert!(!witness_plan.contains("site reached"));
 
     let comment_plan = parse_json(&fs::read_to_string(out_dir.join("comment-plan.json"))?)?;
+    assert_eq!(comment_plan["summary"]["selected_count"], 0);
+    assert_eq!(comment_plan["summary"]["not_selected_count"], 0);
+    assert_eq!(comment_plan["summary"]["budget"], 3);
     assert_eq!(
         comment_plan["no_changed_gaps"]["message"],
         "No changed unsafe-review gaps were found."
@@ -805,6 +849,62 @@ fn first_pr_clean_output_stays_advisory_not_all_clear() -> Result<(), Box<dyn Er
             .as_str()
             .unwrap_or("")
             .contains("not a Miri result")
+    );
+
+    Ok(())
+}
+
+#[test]
+fn first_pr_comment_plan_explains_not_selected_cards() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("ffi_sanitizer_route");
+    let temp = TempDir::new("unsafe-review-first-pr-comment-not-selected-e2e")?;
+    let out_dir = temp.path().join("unsafe-review");
+
+    run_success([
+        os("first-pr"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        fixture.join("change.diff").into_os_string(),
+        os("--out-dir"),
+        out_dir.as_os_str().to_os_string(),
+    ])?;
+
+    let cards = parse_json(&fs::read_to_string(out_dir.join("cards.json"))?)?;
+    let card_id = json_str(&cards["cards"][0]["id"], "cards[0].id")?;
+
+    let comment_plan = parse_json(&fs::read_to_string(out_dir.join("comment-plan.json"))?)?;
+    assert_eq!(comment_plan["summary"]["selected_count"], 0);
+    assert_eq!(comment_plan["summary"]["not_selected_count"], 1);
+    assert_eq!(comment_plan["comments"].as_array().map_or(1, Vec::len), 0);
+    assert_eq!(
+        comment_plan["not_selected"].as_array().map_or(0, Vec::len),
+        1
+    );
+    assert_eq!(comment_plan["not_selected"][0]["card_id"], card_id);
+    assert_eq!(comment_plan["not_selected"][0]["changed_line"], true);
+    assert_eq!(comment_plan["not_selected"][0]["class"], "miri_unsupported");
+    assert_eq!(
+        comment_plan["not_selected"][0]["operation"],
+        cards["cards"][0]["operation"]
+    );
+    assert_eq!(comment_plan["not_selected"][0]["operation_family"], "ffi");
+    assert_eq!(
+        comment_plan["not_selected"][0]["next_action"],
+        cards["cards"][0]["next_action"]
+    );
+    assert_eq!(
+        comment_plan["not_selected"][0]["actionability"],
+        "specific_witness_missing"
+    );
+    assert_eq!(comment_plan["not_selected"][0]["relevance"], "low");
+    assert_eq!(
+        comment_plan["not_selected"][0]["reason"],
+        "priority/confidence below inline comment threshold"
+    );
+    assert_eq!(
+        comment_plan["not_selected"][0]["reason_code"],
+        "lower_relevance"
     );
 
     Ok(())
