@@ -1,12 +1,15 @@
-use crate::command::{
-    CheckOptions, Command, DiffInput, FirstPrOptions, Format, OutcomeOptions,
-    ReceiptTemplateOptions, SavedOutputReceiptOptions,
-};
+use crate::command::{CheckOptions, Command, DiffInput, FirstPrOptions, Format, OutcomeOptions};
 use std::path::PathBuf;
 use unsafe_review_core::PolicyMode;
 
-pub(crate) fn parse(args: Vec<String>) -> Result<Command, String> {
-    let mut rest = args.into_iter().skip(1).collect::<Vec<_>>();
+mod check_parse;
+mod policy;
+mod receipt;
+
+pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> {
+    let mut rest = args.into_iter();
+    let _binary = rest.next();
+    let mut rest = rest.collect::<Vec<_>>();
     if rest.is_empty() {
         return Ok(Command::Help);
     }
@@ -33,9 +36,10 @@ pub(crate) fn parse(args: Vec<String>) -> Result<Command, String> {
         "explain" => parse_explain(rest),
         "context" => parse_context(rest),
         "outcome" => parse_outcome(rest).map(Command::Outcome),
-        "policy" => parse_policy_command(rest),
-        "receipt" => parse_receipt(rest),
-        "receipt-template" => parse_receipt_template(rest).map(Command::ReceiptTemplate),
+        "policy" => policy::parse_policy_command(rest),
+        "receipt" => receipt::parse_receipt(rest),
+        "receipt-template" => receipt::parse_receipt_template(rest).map(Command::ReceiptTemplate),
+        "lsp" => Ok(Command::Lsp),
         other => Err(format!(
             "unknown command `{other}`. Run `unsafe-review --help`."
         )),
@@ -49,32 +53,6 @@ fn parse_support(args: Vec<String>) -> Result<Command, String> {
     Ok(Command::Support)
 }
 
-fn parse_policy_command(args: Vec<String>) -> Result<Command, String> {
-    let mut rest = args;
-    let Some(subcommand) = rest.first() else {
-        return Err("missing policy subcommand `report`".to_string());
-    };
-    let subcommand = subcommand.clone();
-    rest.remove(0);
-    match subcommand.as_str() {
-        "report" => parse_policy_report(rest).map(Command::PolicyReport),
-        other => Err(format!("unknown policy subcommand `{other}`")),
-    }
-}
-
-fn parse_policy_report(args: Vec<String>) -> Result<CheckOptions, String> {
-    let mut options = parse_check(args)?;
-    if !matches!(options.format, Format::Human) {
-        options.format = parse_policy_report_format(format_name(&options.format))?;
-    } else {
-        options.format = Format::Json;
-    }
-    if options.policy != PolicyMode::Advisory {
-        return Err("policy report is advisory-only".to_string());
-    }
-    Ok(options)
-}
-
 fn parse_doctor(args: Vec<String>) -> Result<Command, String> {
     let mut root = PathBuf::from(".");
     let mut idx = 0usize;
@@ -82,10 +60,10 @@ fn parse_doctor(args: Vec<String>) -> Result<Command, String> {
         match args[idx].as_str() {
             "--root" => {
                 idx += 1;
-                root = PathBuf::from(value(&args, idx, "--root")?);
+                root = parse_path_value(&args, idx, "--root")?;
             }
             arg if arg.starts_with("--root=") => {
-                root = PathBuf::from(inline_value(arg, "--root")?);
+                root = parse_inline_path_value(arg, "--root")?;
             }
             other => return Err(format!("unknown doctor argument `{other}`")),
         }
@@ -98,41 +76,17 @@ fn parse_first_pr(args: Vec<String>) -> Result<FirstPrOptions, String> {
     let mut options = FirstPrOptions::default();
     let mut idx = 0usize;
     while idx < args.len() {
+        if let Some(consumed) = check_parse::try_apply_check_arg(&args, idx, &mut options.check)? {
+            idx += consumed;
+            continue;
+        }
         match args[idx].as_str() {
-            "--root" => {
-                idx += 1;
-                options.check.root = PathBuf::from(value(&args, idx, "--root")?);
-            }
-            arg if arg.starts_with("--root=") => {
-                options.check.root = PathBuf::from(inline_value(arg, "--root")?);
-            }
-            "--base" => {
-                idx += 1;
-                options.check.base = Some(value(&args, idx, "--base")?.to_string());
-            }
-            arg if arg.starts_with("--base=") => {
-                options.check.base = Some(inline_value(arg, "--base")?.to_string());
-            }
-            "--diff" => {
-                idx += 1;
-                options.check.diff = Some(parse_diff_input(value(&args, idx, "--diff")?));
-            }
-            arg if arg.starts_with("--diff=") => {
-                options.check.diff = Some(parse_diff_input(inline_value(arg, "--diff")?));
-            }
             "--out-dir" => {
                 idx += 1;
                 options.out_dir = PathBuf::from(value(&args, idx, "--out-dir")?);
             }
             arg if arg.starts_with("--out-dir=") => {
                 options.out_dir = PathBuf::from(inline_value(arg, "--out-dir")?);
-            }
-            "--max-cards" => {
-                idx += 1;
-                options.check.max_cards = Some(parse_max_cards(value(&args, idx, "--max-cards")?)?);
-            }
-            arg if arg.starts_with("--max-cards=") => {
-                options.check.max_cards = Some(parse_max_cards(inline_value(arg, "--max-cards")?)?);
             }
             other => return Err(format!("unknown first-pr argument `{other}`")),
         }
@@ -149,61 +103,7 @@ fn parse_check(args: Vec<String>) -> Result<CheckOptions, String> {
     let mut options = CheckOptions::default();
     let mut idx = 0usize;
     while idx < args.len() {
-        match args[idx].as_str() {
-            "--root" => {
-                idx += 1;
-                options.root = PathBuf::from(value(&args, idx, "--root")?);
-            }
-            arg if arg.starts_with("--root=") => {
-                options.root = PathBuf::from(inline_value(arg, "--root")?);
-            }
-            "--base" => {
-                idx += 1;
-                options.base = Some(value(&args, idx, "--base")?.to_string());
-            }
-            arg if arg.starts_with("--base=") => {
-                options.base = Some(inline_value(arg, "--base")?.to_string());
-            }
-            "--diff" => {
-                idx += 1;
-                options.diff = Some(parse_diff_input(value(&args, idx, "--diff")?));
-            }
-            arg if arg.starts_with("--diff=") => {
-                options.diff = Some(parse_diff_input(inline_value(arg, "--diff")?));
-            }
-            "--format" => {
-                idx += 1;
-                options.format = parse_format(value(&args, idx, "--format")?)?;
-            }
-            arg if arg.starts_with("--format=") => {
-                options.format = parse_format(inline_value(arg, "--format")?)?;
-            }
-            "--policy" => {
-                idx += 1;
-                options.policy = parse_policy(value(&args, idx, "--policy")?)?;
-            }
-            arg if arg.starts_with("--policy=") => {
-                options.policy = parse_policy(inline_value(arg, "--policy")?)?;
-            }
-            "--json" => options.format = Format::Json,
-            "--markdown" => options.format = Format::Markdown,
-            "--out" => {
-                idx += 1;
-                options.out = Some(PathBuf::from(value(&args, idx, "--out")?));
-            }
-            arg if arg.starts_with("--out=") => {
-                options.out = Some(PathBuf::from(inline_value(arg, "--out")?));
-            }
-            "--max-cards" => {
-                idx += 1;
-                options.max_cards = Some(parse_max_cards(value(&args, idx, "--max-cards")?)?);
-            }
-            arg if arg.starts_with("--max-cards=") => {
-                options.max_cards = Some(parse_max_cards(inline_value(arg, "--max-cards")?)?);
-            }
-            other => return Err(format!("unknown argument `{other}`")),
-        }
-        idx += 1;
+        idx += check_parse::apply_check_arg(&args, idx, &mut options)?;
     }
     validate_check_options(&options)?;
     Ok(options)
@@ -217,17 +117,17 @@ fn parse_badges(args: Vec<String>) -> Result<Command, String> {
         match args[idx].as_str() {
             "--root" => {
                 idx += 1;
-                root = PathBuf::from(value(&args, idx, "--root")?);
+                root = parse_path_value(&args, idx, "--root")?;
             }
             arg if arg.starts_with("--root=") => {
-                root = PathBuf::from(inline_value(arg, "--root")?);
+                root = parse_inline_path_value(arg, "--root")?;
             }
             "--out" => {
                 idx += 1;
-                out = PathBuf::from(value(&args, idx, "--out")?);
+                out = parse_path_value(&args, idx, "--out")?;
             }
             arg if arg.starts_with("--out=") => {
-                out = PathBuf::from(inline_value(arg, "--out")?);
+                out = parse_inline_path_value(arg, "--out")?;
             }
             other => return Err(format!("unknown badges argument `{other}`")),
         }
@@ -245,10 +145,10 @@ fn parse_explain(args: Vec<String>) -> Result<Command, String> {
         match args[idx].as_str() {
             "--root" => {
                 idx += 1;
-                root = PathBuf::from(value(&args, idx, "--root")?);
+                root = parse_path_value(&args, idx, "--root")?;
             }
             arg if arg.starts_with("--root=") => {
-                root = PathBuf::from(inline_value(arg, "--root")?);
+                root = parse_inline_path_value(arg, "--root")?;
             }
             "--format" => {
                 idx += 1;
@@ -281,10 +181,10 @@ fn parse_context(args: Vec<String>) -> Result<Command, String> {
         match args[idx].as_str() {
             "--root" => {
                 idx += 1;
-                root = PathBuf::from(value(&args, idx, "--root")?);
+                root = parse_path_value(&args, idx, "--root")?;
             }
             arg if arg.starts_with("--root=") => {
-                root = PathBuf::from(inline_value(arg, "--root")?);
+                root = parse_inline_path_value(arg, "--root")?;
             }
             "--json" => {}
             "--format" => {
@@ -362,278 +262,42 @@ fn parse_outcome(args: Vec<String>) -> Result<OutcomeOptions, String> {
     })
 }
 
-fn parse_receipt(args: Vec<String>) -> Result<Command, String> {
-    let mut rest = args;
-    let Some(subcommand) = rest.first() else {
-        return Err(
-            "missing receipt subcommand `import-miri`, `import-careful`, `import-sanitizer`, `import-concurrency`, `import-proof`, `template`, `validate`, or `audit`"
-                .to_string(),
-        );
-    };
-    let subcommand = subcommand.clone();
-    rest.remove(0);
-    match subcommand.as_str() {
-        "import-careful" | "import-cargo-careful" => {
-            parse_saved_output_receipt(rest, "import-careful", false)
-                .map(Command::ReceiptImportCareful)
-        }
-        "import-miri" => {
-            parse_saved_output_receipt(rest, "import-miri", false).map(Command::ReceiptImportMiri)
-        }
-        "import-sanitizer" => parse_saved_output_receipt(rest, "import-sanitizer", true)
-            .map(Command::ReceiptImportSanitizer),
-        "import-concurrency" => parse_saved_output_receipt(rest, "import-concurrency", true)
-            .map(Command::ReceiptImportConcurrency),
-        "import-proof" => {
-            parse_saved_output_receipt(rest, "import-proof", true).map(Command::ReceiptImportProof)
-        }
-        "template" => parse_receipt_template(rest).map(Command::ReceiptTemplate),
-        "validate" => parse_receipt_validate(rest),
-        "audit" => parse_receipt_audit(rest).map(Command::ReceiptAudit),
-        other => Err(format!("unknown receipt subcommand `{other}`")),
+fn normalize_report_format(
+    format: Format,
+    validate: impl FnOnce(Format) -> Result<Format, String>,
+) -> Result<Format, String> {
+    if matches!(format, Format::Human) {
+        return Ok(Format::Json);
     }
+    validate(format)
 }
 
-fn parse_receipt_audit(args: Vec<String>) -> Result<CheckOptions, String> {
-    let mut options = parse_check(args)?;
-    if !matches!(options.format, Format::Human) {
-        options.format = parse_receipt_audit_format(format_name(&options.format))?;
+fn require_advisory_policy(options: &CheckOptions, message: &str) -> Result<(), String> {
+    if options.policy == PolicyMode::Advisory {
+        Ok(())
     } else {
-        options.format = Format::Json;
+        Err(message.to_string())
     }
-    if options.policy != PolicyMode::Advisory {
-        return Err("receipt audit is advisory-only".to_string());
-    }
-    Ok(options)
-}
-
-fn parse_saved_output_receipt(
-    args: Vec<String>,
-    command_name: &str,
-    allow_tool: bool,
-) -> Result<SavedOutputReceiptOptions, String> {
-    let mut options = SavedOutputReceiptOptions::default();
-    let mut id: Option<String> = None;
-    let mut idx = 0usize;
-    while idx < args.len() {
-        match args[idx].as_str() {
-            "--tool" if allow_tool => {
-                idx += 1;
-                options.tool = Some(value(&args, idx, "--tool")?.to_string());
-            }
-            arg if allow_tool && arg.starts_with("--tool=") => {
-                options.tool = Some(inline_value(arg, "--tool")?.to_string());
-            }
-            "--log" => {
-                idx += 1;
-                options.log = PathBuf::from(value(&args, idx, "--log")?);
-            }
-            arg if arg.starts_with("--log=") => {
-                options.log = PathBuf::from(inline_value(arg, "--log")?);
-            }
-            "--author" => {
-                idx += 1;
-                options.author = value(&args, idx, "--author")?.to_string();
-            }
-            arg if arg.starts_with("--author=") => {
-                options.author = inline_value(arg, "--author")?.to_string();
-            }
-            "--recorded-at" => {
-                idx += 1;
-                options.recorded_at = value(&args, idx, "--recorded-at")?.to_string();
-            }
-            arg if arg.starts_with("--recorded-at=") => {
-                options.recorded_at = inline_value(arg, "--recorded-at")?.to_string();
-            }
-            "--expires-at" => {
-                idx += 1;
-                options.expires_at = value(&args, idx, "--expires-at")?.to_string();
-            }
-            arg if arg.starts_with("--expires-at=") => {
-                options.expires_at = inline_value(arg, "--expires-at")?.to_string();
-            }
-            "--command" => {
-                idx += 1;
-                options.command = value(&args, idx, "--command")?.to_string();
-            }
-            arg if arg.starts_with("--command=") => {
-                options.command = inline_value(arg, "--command")?.to_string();
-            }
-            "--limitation" => {
-                idx += 1;
-                options
-                    .limitations
-                    .push(value(&args, idx, "--limitation")?.to_string());
-            }
-            arg if arg.starts_with("--limitation=") => {
-                options
-                    .limitations
-                    .push(inline_value(arg, "--limitation")?.to_string());
-            }
-            "--out" => {
-                idx += 1;
-                options.out = Some(PathBuf::from(value(&args, idx, "--out")?));
-            }
-            arg if arg.starts_with("--out=") => {
-                options.out = Some(PathBuf::from(inline_value(arg, "--out")?));
-            }
-            value if value.starts_with('-') => {
-                return Err(format!("unknown receipt {command_name} argument `{value}`"));
-            }
-            value => set_card_id(&mut id, value)?,
-        }
-        idx += 1;
-    }
-    options.card_id = id.ok_or_else(|| "missing card id".to_string())?;
-    if options.log.as_os_str().is_empty() {
-        return Err("missing value for --log".to_string());
-    }
-    validate_required_cli_value(&options.author, "--author")?;
-    validate_required_cli_value(&options.recorded_at, "--recorded-at")?;
-    validate_required_cli_value(&options.expires_at, "--expires-at")?;
-    validate_required_cli_value(&options.command, "--command")?;
-    if allow_tool && options.tool.as_deref().unwrap_or("").trim().is_empty() {
-        return Err("missing value for --tool".to_string());
-    }
-    Ok(options)
-}
-
-fn parse_receipt_template(args: Vec<String>) -> Result<ReceiptTemplateOptions, String> {
-    let mut options = ReceiptTemplateOptions::default();
-    let mut id: Option<String> = None;
-    let mut idx = 0usize;
-    while idx < args.len() {
-        match args[idx].as_str() {
-            "--tool" => {
-                idx += 1;
-                options.tool = value(&args, idx, "--tool")?.to_string();
-            }
-            arg if arg.starts_with("--tool=") => {
-                options.tool = inline_value(arg, "--tool")?.to_string();
-            }
-            "--strength" => {
-                idx += 1;
-                options.strength = value(&args, idx, "--strength")?.to_string();
-            }
-            arg if arg.starts_with("--strength=") => {
-                options.strength = inline_value(arg, "--strength")?.to_string();
-            }
-            "--author" => {
-                idx += 1;
-                options.author = value(&args, idx, "--author")?.to_string();
-            }
-            arg if arg.starts_with("--author=") => {
-                options.author = inline_value(arg, "--author")?.to_string();
-            }
-            "--recorded-at" => {
-                idx += 1;
-                options.recorded_at = value(&args, idx, "--recorded-at")?.to_string();
-            }
-            arg if arg.starts_with("--recorded-at=") => {
-                options.recorded_at = inline_value(arg, "--recorded-at")?.to_string();
-            }
-            "--expires-at" => {
-                idx += 1;
-                options.expires_at = value(&args, idx, "--expires-at")?.to_string();
-            }
-            arg if arg.starts_with("--expires-at=") => {
-                options.expires_at = inline_value(arg, "--expires-at")?.to_string();
-            }
-            "--summary" => {
-                idx += 1;
-                options.summary = Some(value(&args, idx, "--summary")?.to_string());
-            }
-            arg if arg.starts_with("--summary=") => {
-                options.summary = Some(inline_value(arg, "--summary")?.to_string());
-            }
-            "--command" => {
-                idx += 1;
-                options.command = Some(value(&args, idx, "--command")?.to_string());
-            }
-            arg if arg.starts_with("--command=") => {
-                options.command = Some(inline_value(arg, "--command")?.to_string());
-            }
-            "--limitation" => {
-                idx += 1;
-                options
-                    .limitations
-                    .push(value(&args, idx, "--limitation")?.to_string());
-            }
-            arg if arg.starts_with("--limitation=") => {
-                options
-                    .limitations
-                    .push(inline_value(arg, "--limitation")?.to_string());
-            }
-            "--out" => {
-                idx += 1;
-                options.out = Some(PathBuf::from(value(&args, idx, "--out")?));
-            }
-            arg if arg.starts_with("--out=") => {
-                options.out = Some(PathBuf::from(inline_value(arg, "--out")?));
-            }
-            value if value.starts_with('-') => {
-                return Err(format!("unknown receipt template argument `{value}`"));
-            }
-            value => set_card_id(&mut id, value)?,
-        }
-        idx += 1;
-    }
-    options.card_id = id.ok_or_else(|| "missing card id".to_string())?;
-    validate_required_cli_value(&options.tool, "--tool")?;
-    validate_required_cli_value(&options.strength, "--strength")?;
-    validate_required_cli_value(&options.author, "--author")?;
-    validate_required_cli_value(&options.recorded_at, "--recorded-at")?;
-    validate_required_cli_value(&options.expires_at, "--expires-at")?;
-    Ok(options)
-}
-
-fn parse_receipt_validate(args: Vec<String>) -> Result<Command, String> {
-    let mut root = PathBuf::from(".");
-    let mut idx = 0usize;
-    while idx < args.len() {
-        match args[idx].as_str() {
-            "--root" => {
-                idx += 1;
-                root = PathBuf::from(value(&args, idx, "--root")?);
-            }
-            arg if arg.starts_with("--root=") => {
-                root = PathBuf::from(inline_value(arg, "--root")?);
-            }
-            other => return Err(format!("unknown receipt validate argument `{other}`")),
-        }
-        idx += 1;
-    }
-    Ok(Command::ReceiptValidate { root })
 }
 
 fn parse_outcome_format(raw: &str) -> Result<Format, String> {
-    match parse_format(raw)? {
-        Format::Json => Ok(Format::Json),
-        Format::Markdown => Ok(Format::Markdown),
-        other => Err(format!(
-            "outcome only supports json or markdown output, got `{}`",
-            format_name(&other)
-        )),
-    }
+    json_or_markdown_format(parse_format(raw)?, "outcome")
 }
 
-fn parse_receipt_audit_format(raw: &str) -> Result<Format, String> {
-    match parse_format(raw)? {
-        Format::Json => Ok(Format::Json),
-        Format::Markdown => Ok(Format::Markdown),
-        other => Err(format!(
-            "receipt audit only supports json or markdown output, got `{}`",
-            format_name(&other)
-        )),
-    }
+fn parse_path_value(args: &[String], idx: usize, flag: &str) -> Result<PathBuf, String> {
+    Ok(PathBuf::from(value(args, idx, flag)?))
 }
 
-fn parse_policy_report_format(raw: &str) -> Result<Format, String> {
-    match parse_format(raw)? {
+fn parse_inline_path_value(arg: &str, flag: &str) -> Result<PathBuf, String> {
+    Ok(PathBuf::from(inline_value(arg, flag)?))
+}
+
+fn json_or_markdown_format(format: Format, command_name: &str) -> Result<Format, String> {
+    match format {
         Format::Json => Ok(Format::Json),
         Format::Markdown => Ok(Format::Markdown),
         other => Err(format!(
-            "policy report only supports json or markdown output, got `{}`",
+            "{command_name} only supports json or markdown output, got `{}`",
             format_name(&other)
         )),
     }
@@ -662,6 +326,10 @@ fn validate_required_cli_value(value: &str, flag: &str) -> Result<(), String> {
     }
 }
 
+pub(super) fn parse_receipt_audit_format(format: Format) -> Result<Format, String> {
+    json_or_markdown_format(format, "receipt audit")
+}
+
 fn set_card_id(id: &mut Option<String>, value: &str) -> Result<(), String> {
     if id.replace(value.to_string()).is_some() {
         return Err("expected exactly one card id".to_string());
@@ -679,7 +347,8 @@ fn parse_format(raw: &str) -> Result<Format, String> {
         "human" => Ok(Format::Human),
         "json" | "repo-json" => Ok(Format::Json),
         "markdown" | "md" => Ok(Format::Markdown),
-        "pr-summary" | "github-summary" | "github-markdown" => Ok(Format::PrSummary),
+        "pr-summary" => Ok(Format::PrSummary),
+        "github-summary" | "github-markdown" => Ok(Format::GithubSummary),
         "sarif" => Ok(Format::Sarif),
         "comment-plan" | "comments" => Ok(Format::CommentPlan),
         "lsp" | "lsp-json" | "editor-json" => Ok(Format::Lsp),
@@ -726,6 +395,7 @@ fn format_name(format: &Format) -> &'static str {
         Format::Json => "json",
         Format::Markdown => "markdown",
         Format::PrSummary => "pr-summary",
+        Format::GithubSummary => "github-summary",
         Format::Sarif => "sarif",
         Format::CommentPlan => "comment-plan",
         Format::Lsp => "lsp",
@@ -736,6 +406,15 @@ fn format_name(format: &Format) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_accepts_non_vec_iterators() {
+        let args = ["unsafe-review", "--version"]
+            .into_iter()
+            .map(str::to_string);
+        let command = parse(args);
+        assert_eq!(command, Ok(Command::Version));
+    }
 
     #[test]
     fn parses_pr_summary_format_for_check() -> Result<(), String> {
@@ -781,7 +460,7 @@ mod tests {
         let Command::Check(options) = command else {
             return Err("expected check command".to_string());
         };
-        assert_eq!(options.format, Format::PrSummary);
+        assert_eq!(options.format, Format::GithubSummary);
         Ok(())
     }
 
@@ -846,6 +525,13 @@ mod tests {
             return Err("expected check command".to_string());
         };
         assert_eq!(options.format, Format::CommentPlan);
+        Ok(())
+    }
+
+    #[test]
+    fn parses_lsp_command() -> Result<(), String> {
+        let command = parse(args(["unsafe-review", "lsp"]))?;
+        assert_eq!(command, Command::Lsp);
         Ok(())
     }
 
@@ -1612,6 +1298,17 @@ mod tests {
     }
 
     #[test]
+    fn policy_report_accepts_markdown_alias() -> Result<(), String> {
+        let command = parse(args(["unsafe-review", "policy", "report", "--format=md"]))?;
+
+        let Command::PolicyReport(options) = command else {
+            return Err("expected policy report command".to_string());
+        };
+        assert_eq!(options.format, Format::Markdown);
+        Ok(())
+    }
+
+    #[test]
     fn policy_report_rejects_non_report_format() {
         let command = parse(args([
             "unsafe-review",
@@ -1623,6 +1320,21 @@ mod tests {
         assert_eq!(
             command,
             Err("policy report only supports json or markdown output, got `sarif`".to_string())
+        );
+    }
+
+    #[test]
+    fn policy_report_rejects_explicit_human_format() {
+        let command = parse(args([
+            "unsafe-review",
+            "policy",
+            "report",
+            "--format=human",
+        ]));
+
+        assert_eq!(
+            command,
+            Err("policy report only supports json or markdown output, got `human`".to_string())
         );
     }
 

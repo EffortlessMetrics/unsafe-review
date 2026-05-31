@@ -1,37 +1,81 @@
 # Objective audit
 
-Date: 2026-05-18
-Status: active objective partially achieved; dogfood-calibrated evidence lane
-closed experimentally; continue broader calibration before policy promotion
+Date: 2026-05-30
+Status: active objective partially achieved; fixture-pinned calibration rail is
+installed; dogfood-backed evidence remains experimental; continue broader
+calibration before support-tier or policy promotion
 
 This audit maps the current product objective to concrete repo evidence. It is a
 status artifact, not a support-tier promotion. `docs/status/SUPPORT_TIERS.md`
 remains the authority for public claim wording.
 
-Latest evidence-hardening notes include `get_unchecked` bounds false-positive
-controls for bare predicate observations, closed positive branches, and checked
-indexes reassigned before the unchecked access.
+Latest evidence-hardening notes include `get_unchecked` same-receiver
+`get(index)` probe guards, including if-let, let-else, and match Some-arm forms, plus
+false-positive controls for bare predicate observations, closed positive
+branches, comment-only early-return text, and checked indexes or checked
+receivers reassigned before the unchecked access. `NonNull::new_unchecked`
+nullability evidence now also
+recognizes same-pointer if-let and let-else `NonNull::new` guards while
+rejecting stale reassigned pointers.
 Raw pointer alignment evidence now also has fixture-backed controls for
 same-pointer `is_aligned` guards, observations, closed branches, and stale
 checked pointers.
 Modulo alignment guards have the same fixture-backed observation, closed-branch,
 and stale-pointer controls.
 `Vec::from_raw_parts` len/cap capacity evidence now has fixture-backed controls
-for assertions, early returns, bare observations, closed branches, and stale
-checked cap arguments. `Vec::set_len` capacity evidence rejects unrelated local
-arguments merely named `cap` unless a const-capacity context is visible.
+for assertions, early returns, bare observations, closed branches,
+comment-only early-return text, and stale checked cap arguments. `Vec::set_len`
+capacity evidence rejects unrelated local arguments merely named `cap` unless a
+const-capacity context is visible, and `Vec::set_len` initialization evidence
+rejects unrelated initialization statements not tied to the receiver being
+lengthened.
+`Vec::set_len` capacity evidence also recognizes narrow same-vector
+`reserve(additional)` and `try_reserve(additional)?` evidence for
+`len + additional` while rejecting stale `additional` and stale `new_len` facts.
 `Box::from_raw` and `ptr::drop_in_place` ownership evidence reject stale
 `Box::into_raw` origins when the raw pointer is reassigned before use.
+Pointer arithmetic bounds evidence recognizes narrow same-offset
+`num_ctrl_bytes` guards and same-slice end-pointer patterns while rejecting
+other-offset, stale-offset, disjunctive positive-branch, and closed-branch
+controls, including later `let` shadowing of the checked offset.
 Unchecked-constructor availability evidence now has fixture-backed controls for
 same-receiver assertions, enclosing positive branches, unavailable-path early
 returns, other receivers, bare observations, and closed branches.
 Long unsafe-function bodies and `macro_rules!` bodies now have fixture-backed
 owner identity coverage while leaving operation families and advisory
 classifications unchanged.
+Recent applicability helper work also makes same-target and freshness checks
+explicit for the initial family sequence, including `get_unchecked`,
+`NonNull::new_unchecked`, `MaybeUninit::assume_init`, `Vec::set_len`, and
+`transmute` / `transmute_copy` value-domain evidence.
 
 The latest closed execution lane is recorded in
 `docs/status/DOGFOOD_CALIBRATED_EVIDENCE_LANE.md` and
 `docs/handoffs/2026-05-18-dogfood-calibrated-evidence-v0.6.md`.
+
+The active calibration rail is now recorded in
+`docs/specs/UNSAFE-REVIEW-SPEC-0026-accuracy-validation-and-calibration.md`,
+`.unsafe-review-spec/lanes/accuracy-calibration/implementation-plan.md`,
+`policy/accuracy-calibration.toml`, and
+`docs/accuracy/CALIBRATION_REPORT.md`. The checked report currently records 34
+fixture-pinned claims, 446 calibration cases, 34 label ledgers, and 459 label
+samples. It records zero dogfood-measured, labeled-calibrated, or
+policy-eligible claims. That is intentional: the current report is a
+claim-scoped fixture-pinned proof index, not a global precision/recall result
+or support-tier promotion. The latest MaybeUninit assume-init slice recognizes
+narrow same-slot `write`, open-branch `write`, and `MaybeUninit::new`
+initialization evidence while rejecting other-slot writes, closed conditional
+writes, and stale writes after reassignment.
+The latest `Vec::set_len` dogfood follow-up pins the `arrayvec#288`
+`Self::new()` capacity shape as a false-positive control: visible
+initialization evidence may be present, but capacity evidence remains missing
+when fixed-capacity storage is hidden behind an opaque constructor.
+
+Recent PR artifact hardening also improved the comment-plan surface: planned
+comments stay capped and deduplicated, selected cards carry next actions, and
+card-present/no-inline-comment cases now explain why cards were not selected for
+inline comment planning. The trusted comment poster remains a future split-token
+design document only; no workflow posts comments by default.
 
 ## Objective
 
@@ -46,12 +90,12 @@ witnesses by default.
 | Requirement | Current evidence | Status | Gap |
 |---|---|---|---|
 | Canonical product unit is `ReviewCard`; projections must not create parallel truth | JSON, PR summary, SARIF, comment-plan, saved LSP, agent packet, repo, badge, policy, and receipt surfaces are all listed in `SUPPORT_TIERS.md` as card projections; handoffs record lane boundaries | Experimental | Continue watching new surfaces for reclassification logic |
-| Card correctness before breadth | Fixture goldens cover raw pointer alignment/deref/read/write including method-form volatile reads/writes and `write_bytes`, raw-pointer len/capacity equality bounds evidence, pointer arithmetic `num_ctrl_bytes` bounds evidence and same-slice end-pointer evidence, target-feature documented declaration contract evidence, split syntax, inline unsafe operation dedupe, attributed unsafe-fn dedupe, unsafe-call wrappers including multi-line wrappers, long unsafe-function owner identity, macro owner identity, narrow `encode_utf8` remaining-capacity argument evidence, and unchecked-constructor availability evidence, multi-line `impl Trait` owner inference, nested unsafe operation parent-call dedupe, adjacent unchanged unsafe declaration filtering, unsafe contracts including documented public and private unsafe API declarations plus public `Safety:` doc prose and local `Safety:` comments, `MaybeUninit` `assume_init` / `assume_init_read` / `assume_init_ref` / `assume_init_mut` / `assume_init_drop`, `MaybeUninit` slice evidence, `Vec::set_len`, `Vec::set_len` initialized-loop evidence, `Vec::set_len` call-result initialization evidence, `Vec::set_len` shrink evidence, `Vec::set_len` last-index shrink evidence, `Vec::set_len` start-bound shrink evidence, `Vec::set_len(0)` clear evidence, `Vec::set_len` post-call initialization false-positive control, `Vec::from_raw_parts`, `Vec::from_raw_parts` same-pointer `ManuallyDrop` pointer/capacity, ownership, initialized-range, and len/capacity evidence, `Box::from_raw`, `copy_nonoverlapping`, overlapping `ptr::copy`, `ptr::replace`, `str::from_utf8_unchecked` including same-buffer `is_ok` enclosing branches, `is_err` early-return, question-mark propagation, match-return validation, post-validation, wrong-buffer, bare-observation, and stale-buffer false-positive-control fixtures, `mem::zeroed`, `static mut`, inline asm human-review routing, `transmute` including valid-value observation, closed-positive-branch, and stale-guard false-positive controls, `transmute_copy` including valid-value observation, closed-positive-branch, and stale-guard false-positive controls, multi-line `transmute_copy`, `unwrap_unchecked`, local infallible-result evidence plus same-receiver Option/Result state and if-let evidence for `unwrap_unchecked`, `unreachable_unchecked`, local infallible-path evidence plus other-context and post-evidence false-positive controls for `unreachable_unchecked`, `get_unchecked_mut` including same-receiver and post-check false-positive controls, `NonNull::new_unchecked` including bare-constructor observation, wrong-pointer, non-returning null branch, and post-check false-positive controls, `Pin::new_unchecked`, `drop_in_place`, `slice::from_raw_parts_mut`, FFI, unsafe impl Send/Sync including generic owner inference and generic-bound trait classification, and negative safe/comment cases; `fixtures/calibration.toml` indexes the core positive, negative, and false-positive-control claims | Experimental | Fixture corpus is curated; no broad semantic proof |
+| Card correctness before breadth | Fixture goldens cover raw pointer alignment/deref/read/write including method-form volatile reads/writes and `write_bytes`, raw-pointer len/capacity equality bounds evidence, pointer arithmetic `num_ctrl_bytes` bounds evidence, same-offset, stale-offset including reassigned, shadowed, and compound-mutated offsets, stale local bound identifiers, disjunctive/closed-branch false-positive controls, and same-slice end-pointer evidence, target-feature documented declaration contract evidence, split syntax, inline unsafe operation dedupe, attributed unsafe-fn dedupe, unsafe-call wrappers including multi-line wrappers, long unsafe-function owner identity, macro owner identity, narrow `encode_utf8` remaining-capacity argument evidence, and unchecked-constructor availability evidence, multi-line `impl Trait` owner inference, nested unsafe operation parent-call dedupe, adjacent unchanged unsafe declaration filtering, unsafe contracts including documented public and private unsafe API declarations plus public `Safety:` doc prose and local `Safety:` comments, `MaybeUninit` `assume_init` / `assume_init_read` / `assume_init_ref` / `assume_init_mut` / `assume_init_drop`, `MaybeUninit` slice evidence, `Vec::set_len`, `Vec::set_len` initialized-loop evidence, `Vec::set_len` call-result initialization evidence, `Vec::set_len` shrink evidence, `Vec::set_len` last-index shrink evidence, `Vec::set_len` start-bound shrink evidence, `Vec::set_len(0)` clear evidence, `Vec::set_len` post-call initialization false-positive control, `Vec::from_raw_parts`, `Vec::from_raw_parts` same-pointer `ManuallyDrop` pointer/capacity, ownership, initialized-range, and len/capacity evidence, `Box::from_raw`, `copy_nonoverlapping`, overlapping `ptr::copy`, `ptr::replace`, `str::from_utf8_unchecked` including same-buffer `is_ok` enclosing branches, if-let `Ok` branch validation, let-else `Ok` validation, `is_err` early-return, question-mark propagation, match-return validation, match `Ok` arm validation, post-validation, wrong-buffer, bare-observation, and stale-buffer false-positive-control fixtures, `mem::zeroed`, `static mut`, inline asm human-review routing, `transmute` including other-source-value, valid-value observation, closed-positive-branch, and stale-guard false-positive controls, `transmute_copy` including valid-value observation, closed-positive-branch, and stale-guard false-positive controls, multi-line `transmute_copy`, `unwrap_unchecked`, local infallible-result evidence plus same-receiver Option/Result state and if-let evidence for `unwrap_unchecked`, `unreachable_unchecked`, local infallible-path evidence plus other-context and post-evidence false-positive controls for `unreachable_unchecked`, `get_unchecked_mut` including same-receiver len guards, same-receiver `get(index)` probe guards, if-let, let-else, and match Some-arm get probes, and stale-index/stale-receiver/post-check false-positive controls, `NonNull::new_unchecked` including if-let, let-else, and match Some-arm `NonNull::new` guards, bare-constructor observation, wrong-pointer, non-returning null branch, post-check, and stale-pointer false-positive controls, `Pin::new_unchecked`, `drop_in_place`, `slice::from_raw_parts_mut`, FFI, unsafe impl Send/Sync including generic owner inference and generic-bound trait classification, and negative safe/comment cases; `fixtures/calibration.toml` indexes the core positive, negative, and false-positive-control claims | Experimental | Fixture corpus is curated; no broad semantic proof |
 | Obligation-level evidence | `ReviewCard` output and fixture goldens distinguish contract, discharge, reach, and witness evidence per obligation | Experimental | Guard patterns remain sparse |
 | Length guard does not discharge alignment; comments, operation names, and post-use checks do not count as guards | Raw-pointer alignment, comment-not-guard, and `NonNull::new_unchecked` fixture expectations are listed as proof in support tiers | Experimental | More real-world guard idioms need calibration |
-| Copy range evidence stays operation-specific | `copy_nonoverlapping_slice_range_guard`, `copy_nonoverlapping_slice_range_conjunctive_assert_guard`, `copy_nonoverlapping_slice_range_early_return_guard`, `copy_nonoverlapping_slice_range_disjunctive_early_return_guard`, `copy_nonoverlapping_slice_range_open_branch_guard`, `copy_nonoverlapping_slice_range_conjunctive_open_branch_guard`, `ptr_copy_slice_range_guard`, `ptr_copy_slice_range_conjunctive_assert_guard`, `ptr_copy_slice_range_early_return_guard`, `ptr_copy_slice_range_disjunctive_early_return_guard`, `ptr_copy_slice_range_open_branch_guard`, and `ptr_copy_slice_range_conjunctive_open_branch_guard` prove same-call source/destination slice length assertions, conjunctive assertions, early returns, disjunctive invalid-range early returns, or open branches discharge only `valid-range`, while `copy_nonoverlapping_slice_range_src_only_not_guard`, `copy_nonoverlapping_slice_range_dst_only_not_guard`, `ptr_copy_slice_range_src_only_not_guard`, `ptr_copy_slice_range_dst_only_not_guard`, `copy_nonoverlapping_slice_range_closed_branch_not_guard`, `ptr_copy_slice_range_closed_branch_not_guard`, `copy_nonoverlapping_slice_range_or_branch_not_guard`, `ptr_copy_slice_range_or_branch_not_guard`, `copy_nonoverlapping_slice_range_disjunctive_early_return_block_comment_not_guard`, `ptr_copy_slice_range_disjunctive_early_return_block_comment_not_guard`, `copy_nonoverlapping_slice_range_disjunctive_early_return_reassigned_count_not_guard`, `ptr_copy_slice_range_disjunctive_early_return_reassigned_count_not_guard`, `copy_nonoverlapping_slice_range_open_branch_reassigned_count_not_guard`, `copy_nonoverlapping_slice_range_open_branch_reassigned_src_not_guard`, `ptr_copy_slice_range_open_branch_reassigned_count_not_guard`, `ptr_copy_slice_range_open_branch_reassigned_dst_not_guard`, `copy_nonoverlapping_slice_range_reassigned_count_not_guard`, `copy_nonoverlapping_slice_range_reassigned_src_not_guard`, `ptr_copy_slice_range_reassigned_count_not_guard`, `ptr_copy_slice_range_reassigned_dst_not_guard`, `copy_nonoverlapping_other_len_not_guard`, and `ptr_copy_other_len_not_guard` prove one-sided, closed-branch, disjunctive positive-branch, comment-only early-return text, stale, or unrelated slice length assertions do not discharge copy source/destination range obligations | Experimental | Copy range evidence beyond same-call slice length guards remains limited |
+| Copy range evidence stays operation-specific | `copy_nonoverlapping_slice_range_guard`, `copy_nonoverlapping_slice_range_conjunctive_assert_guard`, `copy_nonoverlapping_slice_range_early_return_guard`, `copy_nonoverlapping_slice_range_disjunctive_early_return_guard`, `copy_nonoverlapping_slice_range_open_branch_guard`, `copy_nonoverlapping_slice_range_conjunctive_open_branch_guard`, `ptr_copy_slice_range_guard`, `ptr_copy_slice_range_conjunctive_assert_guard`, `ptr_copy_slice_range_early_return_guard`, `ptr_copy_slice_range_disjunctive_early_return_guard`, `ptr_copy_slice_range_open_branch_guard`, and `ptr_copy_slice_range_conjunctive_open_branch_guard` prove same-call source/destination slice length assertions, conjunctive assertions, early returns, disjunctive invalid-range early returns, or open branches discharge only `valid-range`, while `copy_nonoverlapping_slice_range_src_only_not_guard`, `copy_nonoverlapping_slice_range_dst_only_not_guard`, `ptr_copy_slice_range_src_only_not_guard`, `ptr_copy_slice_range_dst_only_not_guard`, `copy_nonoverlapping_slice_range_closed_branch_not_guard`, `ptr_copy_slice_range_closed_branch_not_guard`, `copy_nonoverlapping_slice_range_or_branch_not_guard`, `ptr_copy_slice_range_or_branch_not_guard`, `copy_nonoverlapping_slice_range_disjunctive_early_return_block_comment_not_guard`, `ptr_copy_slice_range_disjunctive_early_return_block_comment_not_guard`, `copy_nonoverlapping_slice_range_disjunctive_early_return_reassigned_count_not_guard`, `copy_nonoverlapping_slice_range_disjunctive_early_return_reassigned_src_not_guard`, `copy_nonoverlapping_slice_range_disjunctive_early_return_reassigned_dst_not_guard`, `ptr_copy_slice_range_disjunctive_early_return_reassigned_count_not_guard`, `ptr_copy_slice_range_disjunctive_early_return_reassigned_src_not_guard`, `ptr_copy_slice_range_disjunctive_early_return_reassigned_dst_not_guard`, `copy_nonoverlapping_slice_range_open_branch_reassigned_count_not_guard`, `copy_nonoverlapping_slice_range_open_branch_reassigned_src_not_guard`, `copy_nonoverlapping_slice_range_open_branch_reassigned_dst_not_guard`, `ptr_copy_slice_range_open_branch_reassigned_count_not_guard`, `ptr_copy_slice_range_open_branch_reassigned_src_not_guard`, `ptr_copy_slice_range_open_branch_reassigned_dst_not_guard`, `copy_nonoverlapping_slice_range_reassigned_count_not_guard`, `copy_nonoverlapping_slice_range_reassigned_src_not_guard`, `copy_nonoverlapping_slice_range_shadowed_src_path_not_guard`, `copy_nonoverlapping_slice_range_shadowed_dst_path_not_guard`, `ptr_copy_slice_range_reassigned_count_not_guard`, `ptr_copy_slice_range_reassigned_src_not_guard`, `ptr_copy_slice_range_reassigned_src_path_not_guard`, `ptr_copy_slice_range_reassigned_dst_not_guard`, `ptr_copy_slice_range_reassigned_dst_path_not_guard`, `copy_nonoverlapping_other_len_not_guard`, and `ptr_copy_other_len_not_guard` prove one-sided, closed-branch, disjunctive positive-branch, comment-only early-return text, stale, or unrelated slice length assertions do not discharge copy source/destination range obligations | Experimental | Copy range evidence beyond same-call slice length guards remains limited |
 | Stable-first implementation; no mandatory MIR or `rustc_private` | Workspace uses stable source parsing and `ra_ap_syntax`; support tiers mark MIR/nightly facts as deferred | Met for current lanes | Optional adapters still need ADR before promotion |
-| Advisory PR artifact loop | Handoff `2026-05-18-advisory-pr-artifacts-v0.2.md` records cards JSON, PR summary, SARIF, and comment-plan artifact proof plus in-workflow artifact verification | Experimental/dogfoodable | No automatic comments or blocking policy by design |
+| Advisory PR artifact loop | Handoff `2026-05-18-advisory-pr-artifacts-v0.2.md` records cards JSON, PR summary, SARIF, and comment-plan artifact proof plus in-workflow artifact verification; current comment-plan checks cover capped planned comments, duplicate planned-entry rejection, selected-card next actions, and not-selected card reasons | Experimental/dogfoodable | No automatic comments or blocking policy by design; trusted poster architecture remains docs-only and future |
 | Saved IDE projection | Handoff `2026-05-18-lsp-agent-projection-v0.3.md` records `--format lsp` saved diagnostics, hovers, status data, copy-command data, and related-test open-command data | Experimental | No live LSP server or editor extension; static related-test mentions do not prove site execution |
 | Bounded LLM packet | Handoff `2026-05-18-lsp-agent-projection-v0.3.md` records `context <card-id> --json` bounded packet proof | Experimental | Copy-only; no automated repair or source edits |
 | Repo posture and badges count open review gaps, not raw unsafe or safety status | Handoff `2026-05-18-repo-policy-v0.4.md` and support tiers cover repo JSON, badge JSON, saved-snapshot outcome comparison, and first capped `memchr` outcome dogfood | Experimental | Not release-grade posture or calibrated governance |
@@ -82,17 +126,25 @@ These are not failures; they are the next unsupported or weakly verified areas:
 - Outcome comparison is saved-snapshot only. It now has first capped `memchr`
   repo snapshot dogfood, but needs more repos and PR snapshot pairs before
   dashboard-like posture claims.
+- Comment-plan output now explains selected and not-selected cards, but it
+  remains an artifact-only plan. The trusted poster design is intentionally
+  split from analyzer execution and is not implemented as a posting workflow.
 - `crossbeam#1187` now has fixture and dogfood-rerun coverage for the narrow
   `swap(ptr::null_mut(), Ordering::...)` atomic pointer state transition shape,
   but broader safe-looking atomic pointer state changes that affect
   drop/deallocation invariants remain unsupported semantic work.
 - Real PR-diff dogfood shows `Vec::set_len` guard evidence still needs broader
   modeling; visible `MaybeUninit::new` initialization loops and const `CAP`
-  capacity facts now have fixture coverage, same-vector
-  `Vec::with_capacity(new_len)` capacity evidence has fixture coverage, and
-  unrelated capacity comparisons plus local arguments merely named `cap` are
-  pinned as non-evidence before `set_len`;
+  capacity facts now have fixture coverage, opaque `Self::new()` capacity
+  evidence is pinned as missing, same-vector
+  `Vec::with_capacity(new_len)`, narrow same-vector `reserve(additional)`, and
+  narrow same-vector `try_reserve(additional)?` capacity evidence have fixture
+  coverage, and unrelated capacity comparisons, local arguments merely named
+  `cap`, stale `new_len`, and stale `additional` facts are pinned as non-evidence before
+  `set_len`;
   `arrayvec#288` has a rerun receipt;
+  `MaybeUninit::assume_init` now has fixture coverage for same-slot `write` and
+  `MaybeUninit::new` initialization evidence while still rejecting stale writes;
   non-zero shrink and `set_len(0)` clear evidence also have fixture and
   dogfood-rerun coverage, start-bound shrink evidence has fixture and
   `rust-smallvec#277` dogfood-rerun coverage, and last-index shrink evidence
@@ -147,11 +199,14 @@ These are not failures; they are the next unsupported or weakly verified areas:
   is contract evidence only and does not prove target-feature availability.
 - The `hashbrown#693` `unwrap_unchecked` sites are labeled as invalid-value
   operation cards, and local `Fallibility::Infallible`, same-receiver
-  enclosing `is_some` / `is_ok` branches, early-return, and narrow
-  `if let ... as_ref()` state evidence is recognized for `unwrap_unchecked()`;
-  bare state observations and stale receiver-state evidence after reassignment
-  remain guard-missing false-positive controls. Broader option/result state
-  proof inference remains future work.
+  enclosing `is_some` / `is_ok` branches, early-return, narrow
+  `if let ... as_ref()`, `let Some(_) = ...as_ref() else { return ... }`,
+  `let Ok(_) = ...as_ref() else { return ... }`, and match Some/Ok arm state
+  evidence is recognized for `unwrap_unchecked()`; bare state observations,
+  comment-only early-return text, and stale receiver-state guards after
+  reassignment remain guard-missing
+  false-positive controls. Broader option/result state proof inference remains
+  future work.
 - The `hashbrown#469` `unreachable_unchecked` sites are labeled as
   invalid-value operation cards, and local `Fallibility::Infallible` error-path
   evidence is recognized while other-context, post-evidence, and closed-match
@@ -172,11 +227,13 @@ These are not failures; they are the next unsupported or weakly verified areas:
   line/column rescans per syntax node and skips impossible syntax node kinds
   before snippet normalization, but broader large-repo performance calibration
   still needs more repos and uncapped or sampled runs.
-- `str::from_utf8_unchecked` now recognizes same-buffer `is_ok`, `is_err`
-  early-return, question-mark propagation, and match-return validation evidence, and has
-  post-validation and wrong-buffer false-positive-control fixtures. Broader
-  indirect wrapper validation and aliasing-sensitive byte-slice equivalence
-  remain unsupported.
+- `str::from_utf8_unchecked` now recognizes same-buffer `is_ok`, if-let `Ok`,
+  if-let `Err` early-return, let-else `Ok`, `is_err` early-return,
+  question-mark propagation, match-return validation, and match `Ok` arm
+  validation evidence, and has post-validation, wrong-buffer, and
+  prefix-only validation, and reassigned-buffer false-positive-control fixtures.
+  Broader indirect wrapper validation and aliasing-sensitive byte-slice
+  equivalence remain unsupported.
 - The `bytes#826` `Vec::from_raw_parts` site is now labeled as a Vec ownership
   operation rather than a slice operation, and fixture coverage recognizes the
   narrow same-pointer `ManuallyDrop` raw-parts origin shape as pointer/capacity,
@@ -198,12 +255,17 @@ rtk cargo clippy --workspace --all-targets --locked -- -D warnings
 rtk cargo test --workspace --locked
 rtk cargo run --locked -p xtask -- check-pr
 rtk cargo run --locked -p xtask -- check-calibration
+rtk cargo run --locked -p xtask -- check-dogfood
+rtk cargo run --locked -p xtask -- check-doc-artifacts
+rtk cargo run --locked -p xtask -- check-goals
+rtk cargo run --locked -p xtask -- source-divergence
 rtk git diff --check
 ```
 
 Targeted proof commands added by recent receipt work:
 
 ```bash
+rtk cargo test -p unsafe-review-core receipt_audit --locked
 rtk cargo test -p unsafe-review-core receipt --locked
 rtk cargo test -p unsafe-review-core imported_receipt --locked
 rtk cargo test -p unsafe-review-cli receipt_template --locked
@@ -214,13 +276,14 @@ rtk cargo test -p unsafe-review --test e2e receipt_validate --locked
 
 ## Recommended Next Lane
 
-Continue dogfood measurement before policy promotion:
+Continue claim-scoped calibration before policy promotion:
 
-1. Run `unsafe-review` on more selected real unsafe-heavy crates and record
-   false-positive and false-negative notes.
-2. Measure card usefulness on more real PR diffs, not only repo snapshots.
-3. Dogfood explicit receipts and outcome comparison on more real unsafe-review
-   PRs.
+1. Keep `policy/accuracy-calibration.toml`, label ledgers, and fixture goldens
+   synchronized through `cargo xtask check-calibration`.
+2. Add selected real unsafe-heavy crates and PR diffs only with recorded limits,
+   false-positive notes, and false-negative notes.
+3. Dogfood explicit receipts, outcome comparison, comment-plan selection
+   reasons, and saved LSP/agent projections on more real unsafe-review PRs.
 4. Preserve exact-card matching, visible limitations, and advisory-only policy.
-5. Keep support tiers experimental until dogfood and calibration justify a
-   stronger claim.
+5. Keep support tiers experimental until labeled calibration and dogfood
+   evidence justify a stronger claim.

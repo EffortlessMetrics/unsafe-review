@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="unsafe-review-logo.svg" alt="unsafe-review warning mark" width="120" />
+  <img src="https://raw.githubusercontent.com/EffortlessMetrics/unsafe-review/main/unsafe-review-logo.svg" alt="unsafe-review warning mark" width="120" />
 </p>
 
 <h1 align="center">unsafe-review</h1>
@@ -66,7 +66,6 @@ changed unsafe seam
 `first-pr` writes a standard advisory bundle under `target/unsafe-review/`:
 
 ```text
-review-kit.json
 cards.json
 pr-summary.md
 github-summary.md
@@ -82,16 +81,15 @@ The bundle is artifact-first:
 
 | Artifact | Use |
 |---|---|
-| `review-kit.json` | Artifact index, top-card handoff, and trust boundary |
 | `cards.json` | Canonical ReviewCard data |
 | `pr-summary.md` | Reviewer first screen |
 | `github-summary.md` | Bounded GitHub job summary text |
 | `cards.sarif` | Code scanning / CI artifact |
 | `comment-plan.json` | Planned comments, not posted |
 | `witness-plan.md` | Suggested witness routes and limits |
-| `receipt-audit.md` | Saved receipt metadata audit, no witness execution |
+| `receipt-audit.md` | Saved receipt metadata audit; no witness was run |
 | `lsp.json` | Saved read-only editor projection |
-| `repair-queue.json` | Card-sized human/agent handoff buckets, no agent execution |
+| `repair-queue.json` | Copy-only agent repair queue; no agent was run |
 
 ## Explain One Card
 
@@ -120,13 +118,8 @@ what unsafe-review is not claiming
 not a UB-free claim, not a Miri result, not soundness evidence, and not evidence
 that any unsafe site executed.
 
-By default it does not:
-
-- run witnesses
-- post comments
-- edit source
-- enforce blocking policy
-- claim calibrated precision or recall
+By default it does not run witnesses, post comments, edit source, enforce
+blocking policy, or claim calibrated precision or recall.
 
 Findings are advisory unless you explicitly build a separate policy around the
 artifacts.

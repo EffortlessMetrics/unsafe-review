@@ -9,3 +9,6 @@ ADRs record durable architecture choices.
 - [ADR 0003: Witnesses are receipts](UNSAFE-REVIEW-ADR-0003-witnesses-are-receipts.md)
 - [ADR 0004: Three-crate surface](UNSAFE-REVIEW-ADR-0004-three-crate-surface.md)
 - [ADR 0005: Advisory-first policy](UNSAFE-REVIEW-ADR-0005-advisory-first-policy.md)
+- [ADR 0006: Live LSP server is read-only](UNSAFE-REVIEW-ADR-0006-live-lsp-server-is-read-only.md)
+
+- [ADR 0007: Editor extension is a thin read-only adapter](UNSAFE-REVIEW-ADR-0007-editor-extension-is-thin-adapter.md)

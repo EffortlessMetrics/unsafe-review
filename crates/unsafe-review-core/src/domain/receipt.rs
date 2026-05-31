@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+use crate::util::stable_hash_hex;
+
+mod summary;
+
 pub const WITNESS_RECEIPT_SCHEMA_VERSION: &str = "0.1";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -13,6 +17,7 @@ pub struct WitnessReceipt {
     pub expires_at: Option<String>,
     pub summary: Option<String>,
     pub command: Option<String>,
+    pub command_hash: Option<String>,
     pub limitations: Option<Vec<String>>,
 }
 
@@ -93,45 +98,16 @@ impl WitnessReceipt {
         if expires_at < &recorded_at[..10] {
             return Err("`expires_at` must be on or after the `recorded_at` date".to_string());
         }
+        self.validate_command_hash()?;
         Ok(())
     }
 
+    pub fn command_hash(command: &str) -> String {
+        stable_hash_hex(command)
+    }
+
     pub fn evidence_summary(&self) -> String {
-        let mut summary = format!(
-            "Imported {} receipt with `{}` strength",
-            self.tool, self.strength
-        );
-        if let Some(detail) = self.summary.as_deref().filter(|value| !value.is_empty()) {
-            summary.push_str(": ");
-            summary.push_str(detail);
-        }
-        if let Some(author) = self.author.as_deref().filter(|value| !value.is_empty()) {
-            summary.push_str("; author: ");
-            summary.push_str(author);
-        }
-        if let Some(recorded_at) = self
-            .recorded_at
-            .as_deref()
-            .filter(|value| !value.is_empty())
-        {
-            summary.push_str("; recorded_at: ");
-            summary.push_str(recorded_at);
-        }
-        if let Some(expires_at) = self.expires_at.as_deref().filter(|value| !value.is_empty()) {
-            summary.push_str("; expires_at: ");
-            summary.push_str(expires_at);
-        }
-        if let Some(command) = self.command.as_deref().filter(|value| !value.is_empty()) {
-            summary.push_str("; command: ");
-            summary.push_str(command);
-        }
-        if let Some(limitations) = &self.limitations
-            && !limitations.is_empty()
-        {
-            summary.push_str("; limitations: ");
-            summary.push_str(&limitations.join("; "));
-        }
-        summary
+        summary::evidence_summary(self)
     }
 
     pub fn to_pretty_json(&self) -> Result<String, String> {
@@ -149,6 +125,7 @@ impl WitnessReceipt {
         if !input.command.to_ascii_lowercase().contains("miri") {
             return Err("Miri receipt command must mention `miri`".to_string());
         }
+        let command_hash = Self::command_hash(&input.command);
         let mut limitations = vec![
             "saved-output adapter; unsafe-review did not run Miri".to_string(),
             "receipt strength is `ran`; site reach is not claimed".to_string(),
@@ -164,6 +141,7 @@ impl WitnessReceipt {
             expires_at: Some(input.expires_at),
             summary: Some("saved Miri output reported `test result: ok`".to_string()),
             command: Some(input.command),
+            command_hash: Some(command_hash),
             limitations: Some(limitations),
         };
         receipt.validate()?;
@@ -176,6 +154,7 @@ impl WitnessReceipt {
         if !input.command.to_ascii_lowercase().contains("careful") {
             return Err("cargo-careful receipt command must mention `careful`".to_string());
         }
+        let command_hash = Self::command_hash(&input.command);
         let mut limitations = vec![
             "saved-output adapter; unsafe-review did not run cargo-careful".to_string(),
             "receipt strength is `ran`; site reach is not claimed".to_string(),
@@ -191,6 +170,7 @@ impl WitnessReceipt {
             expires_at: Some(input.expires_at),
             summary: Some("saved cargo-careful output reported `test result: ok`".to_string()),
             command: Some(input.command),
+            command_hash: Some(command_hash),
             limitations: Some(limitations),
         };
         receipt.validate()?;
@@ -203,6 +183,7 @@ impl WitnessReceipt {
         validate_sanitizer_success_output(&input.output, &input.tool)?;
         validate_required(&input.command, "command")?;
         validate_sanitizer_command(&input.command)?;
+        let command_hash = Self::command_hash(&input.command);
         let mut limitations = vec![
             "saved-output adapter; unsafe-review did not run a sanitizer".to_string(),
             "receipt strength is `ran`; site reach is not claimed".to_string(),
@@ -221,6 +202,7 @@ impl WitnessReceipt {
                 input.tool
             )),
             command: Some(input.command),
+            command_hash: Some(command_hash),
             limitations: Some(limitations),
         };
         receipt.validate()?;
@@ -232,6 +214,7 @@ impl WitnessReceipt {
         validate_saved_success_output(&input.output, &input.tool)?;
         validate_required(&input.command, "command")?;
         validate_concurrency_command(&input.command)?;
+        let command_hash = Self::command_hash(&input.command);
         let mut limitations = vec![
             "saved-output adapter; unsafe-review did not run a concurrency witness".to_string(),
             "receipt strength is `ran`; site reach is not claimed".to_string(),
@@ -250,6 +233,7 @@ impl WitnessReceipt {
                 input.tool
             )),
             command: Some(input.command),
+            command_hash: Some(command_hash),
             limitations: Some(limitations),
         };
         receipt.validate()?;
@@ -261,6 +245,7 @@ impl WitnessReceipt {
         validate_saved_proof_success_output(&input.output, &input.tool)?;
         validate_required(&input.command, "command")?;
         validate_proof_command(&input.command)?;
+        let command_hash = Self::command_hash(&input.command);
         let mut limitations = vec![
             "saved-output adapter; unsafe-review did not run a proof tool".to_string(),
             "receipt strength is `ran`; site reach is not claimed".to_string(),
@@ -280,10 +265,25 @@ impl WitnessReceipt {
                 input.tool
             )),
             command: Some(input.command),
+            command_hash: Some(command_hash),
             limitations: Some(limitations),
         };
         receipt.validate()?;
         Ok(receipt)
+    }
+
+    fn validate_command_hash(&self) -> Result<(), String> {
+        let Some(command_hash) = self.command_hash.as_deref() else {
+            return Ok(());
+        };
+        validate_required(command_hash, "command_hash")?;
+        let command = validate_required_option(&self.command, "command")?;
+        let expected = Self::command_hash(command);
+        if command_hash == expected {
+            Ok(())
+        } else {
+            Err("`command_hash` does not match `command`".to_string())
+        }
     }
 }
 
@@ -496,26 +496,13 @@ fn validate_sanitizer_success_output(output: &str, tool: &str) -> Result<(), Str
 }
 
 fn validate_utc_timestamp(value: &str, key: &str) -> Result<(), String> {
-    let bytes = value.as_bytes();
-    let valid_shape = bytes.len() == 20
-        && bytes[4] == b'-'
-        && bytes[7] == b'-'
-        && bytes[10] == b'T'
-        && bytes[13] == b':'
-        && bytes[16] == b':'
-        && bytes[19] == b'Z'
-        && [0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18]
-            .iter()
-            .all(|index| bytes[*index].is_ascii_digit());
-    if !valid_shape {
+    if !timestamp_validation::has_utc_shape(value) {
         return Err(format!(
             "`{key}` must use UTC timestamp format YYYY-MM-DDTHH:MM:SSZ"
         ));
     }
     validate_date(&value[..10], key)?;
-    validate_range(decimal_at(value, 11, 2), 0, 23, key)?;
-    validate_range(decimal_at(value, 14, 2), 0, 59, key)?;
-    validate_range(decimal_at(value, 17, 2), 0, 59, key)
+    timestamp_validation::validate_time_components(value, key)
 }
 
 fn validate_date(value: &str, key: &str) -> Result<(), String> {
@@ -529,13 +516,46 @@ fn validate_date(value: &str, key: &str) -> Result<(), String> {
     if !valid_shape {
         return Err(format!("`{key}` must use date format YYYY-MM-DD"));
     }
-    validate_range(decimal_at(value, 0, 4), 1, 9999, key)?;
-    validate_range(decimal_at(value, 5, 2), 1, 12, key)?;
-    validate_range(decimal_at(value, 8, 2), 1, 31, key)
+    let year = decimal_at(value, 0, 4);
+    let month = decimal_at(value, 5, 2);
+    let day = decimal_at(value, 8, 2);
+    validate_range(year, 1, 9999, key)?;
+    validate_range(month, 1, 12, key)?;
+    validate_range(day, 1, 31, key)?;
+    let Some(year) = year else {
+        return Err(format!("`{key}` contains an invalid number"));
+    };
+    let Some(month) = month else {
+        return Err(format!("`{key}` contains an invalid number"));
+    };
+    let Some(day) = day else {
+        return Err(format!("`{key}` contains an invalid number"));
+    };
+    let Some(max_day) = days_in_month(year, month) else {
+        return Err(format!("`{key}` is out of range"));
+    };
+    if day > max_day {
+        return Err(format!("`{key}` is not a valid calendar date"));
+    }
+    Ok(())
 }
 
 fn decimal_at(value: &str, start: usize, len: usize) -> Option<u32> {
     value.get(start..start + len)?.parse().ok()
+}
+
+fn days_in_month(year: u32, month: u32) -> Option<u32> {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => Some(31),
+        4 | 6 | 9 | 11 => Some(30),
+        2 if is_leap_year(year) => Some(29),
+        2 => Some(28),
+        _ => None,
+    }
+}
+
+fn is_leap_year(year: u32) -> bool {
+    year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400))
 }
 
 fn validate_range(value: Option<u32>, min: u32, max: u32, key: &str) -> Result<(), String> {
@@ -559,6 +579,30 @@ fn looks_like_counted_card_id(value: &str) -> bool {
         && count.bytes().all(|byte| byte.is_ascii_digit())
 }
 
+mod timestamp_validation {
+    use super::{decimal_at, validate_range};
+
+    pub(super) fn has_utc_shape(value: &str) -> bool {
+        let bytes = value.as_bytes();
+        bytes.len() == 20
+            && bytes[4] == b'-'
+            && bytes[7] == b'-'
+            && bytes[10] == b'T'
+            && bytes[13] == b':'
+            && bytes[16] == b':'
+            && bytes[19] == b'Z'
+            && [0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18]
+                .iter()
+                .all(|index| bytes[*index].is_ascii_digit())
+    }
+
+    pub(super) fn validate_time_components(value: &str, key: &str) -> Result<(), String> {
+        validate_range(decimal_at(value, 11, 2), 0, 23, key)?;
+        validate_range(decimal_at(value, 14, 2), 0, 59, key)?;
+        validate_range(decimal_at(value, 17, 2), 0, 59, key)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -576,6 +620,45 @@ mod tests {
         assert!(decoded.evidence_summary().contains("Imported miri receipt"));
         assert!(decoded.evidence_summary().contains("fixture only"));
         Ok(())
+    }
+
+    #[test]
+    fn witness_receipt_validation_accepts_missing_command_hash_for_compatibility()
+    -> Result<(), String> {
+        let mut receipt = fixture_receipt();
+        receipt.command_hash = None;
+
+        receipt.validate()
+    }
+
+    #[test]
+    fn witness_receipt_validation_rejects_command_hash_mismatch() {
+        let mut receipt = fixture_receipt();
+        receipt.command_hash = Some("0000000000000000".to_string());
+
+        assert!(
+            receipt
+                .validate()
+                .err()
+                .unwrap_or_default()
+                .contains("command_hash")
+        );
+    }
+
+    #[test]
+    fn evidence_summary_omits_whitespace_only_optional_fields() {
+        let mut receipt = fixture_receipt();
+        receipt.summary = Some(" ".to_string());
+        receipt.author = Some("\t".to_string());
+        receipt.recorded_at = Some("\n".to_string());
+        receipt.expires_at = Some("   ".to_string());
+        receipt.command = Some("\r\n".to_string());
+        receipt.limitations = Some(vec!["fixture only".to_string()]);
+
+        assert_eq!(
+            receipt.evidence_summary(),
+            "Imported miri receipt with `ran` strength; command_hash: 3e163b0bce29ff2e; limitations: fixture only"
+        );
     }
 
     #[test]
@@ -604,6 +687,38 @@ mod tests {
                 .unwrap_or_default()
                 .contains("`author` is required")
         );
+    }
+
+    #[test]
+    fn witness_receipt_validation_rejects_invalid_calendar_dates() {
+        let mut bad_expiry = fixture_receipt();
+        bad_expiry.expires_at = Some("2026-02-29".to_string());
+        assert!(
+            bad_expiry
+                .validate()
+                .err()
+                .unwrap_or_default()
+                .contains("valid calendar date")
+        );
+
+        let mut bad_recorded_at = fixture_receipt();
+        bad_recorded_at.recorded_at = Some("2026-04-31T00:00:00Z".to_string());
+        assert!(
+            bad_recorded_at
+                .validate()
+                .err()
+                .unwrap_or_default()
+                .contains("valid calendar date")
+        );
+    }
+
+    #[test]
+    fn witness_receipt_validation_accepts_leap_day_dates() -> Result<(), String> {
+        let mut receipt = fixture_receipt();
+        receipt.recorded_at = Some("2028-02-29T00:00:00Z".to_string());
+        receipt.expires_at = Some("2028-02-29".to_string());
+
+        receipt.validate()
     }
 
     #[test]
@@ -1091,6 +1206,9 @@ mod tests {
             expires_at: Some("2026-08-18".to_string()),
             summary: Some("focused witness passed".to_string()),
             command: Some("cargo +nightly miri test read_header".to_string()),
+            command_hash: Some(WitnessReceipt::command_hash(
+                "cargo +nightly miri test read_header",
+            )),
             limitations: Some(vec!["fixture only".to_string()]),
         }
     }

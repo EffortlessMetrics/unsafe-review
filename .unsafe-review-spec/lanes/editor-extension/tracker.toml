@@ -1,0 +1,116 @@
+schema_version = "1.0"
+
+id = "editor-extension"
+name = "VS Code and Open VSX editor adapter"
+status = "active"
+owner = "editor/extension"
+
+objective = """
+Ship a read-only VS Code/Open VSX adapter over `unsafe-review lsp` that makes
+ReviewCard evidence visible in editors without creating a second analyzer,
+running witnesses, editing source, or claiming safety.
+"""
+
+end_state = [
+  "VS Code users can install a VSIX or Marketplace extension.",
+  "Open VSX-compatible editors can install the same extension package.",
+  "The extension starts `unsafe-review lsp` or uses a configured binary path.",
+  "Diagnostics, hovers, and commands come from ReviewCards through LSP.",
+  "Marketplace README and package metadata preserve the advisory trust boundary.",
+  "Release workflows can package VSIX and publish only after explicit manual approval.",
+]
+
+[[work_item]]
+id = "editor-spec-and-adr"
+status = "done"
+spec = "UNSAFE-REVIEW-SPEC-0021"
+adr = "UNSAFE-REVIEW-ADR-0007"
+proof = [
+  "cargo run --locked -p xtask -- check-docs",
+  "cargo run --locked -p xtask -- check-pr",
+  "git diff --check",
+]
+
+[[work_item]]
+id = "live-lsp-hardening-gate"
+status = "ready"
+proof = [
+  "cargo test -p unsafe-review-cli lsp --locked",
+  "cargo run --locked -p xtask -- lsp-smoke",
+  "cargo run --locked -p xtask -- check-pr",
+]
+
+[[work_item]]
+id = "extension-scaffold"
+status = "done"
+proof = [
+  "npm ci",
+  "npm run compile",
+  "npm test",
+  "npx @vscode/vsce package --out target/unsafe-review-vscode.vsix",
+]
+
+[[work_item]]
+id = "extension-saved-lsp-mvp"
+status = "done"
+description = """
+Saved-lsp.json viewer MVP shipped through the marketplace-first-hour-ux
+lane (PR #358 spec, #359 implementation). The MVP path explicitly
+unblocks editor reach without waiting on the live-lsp-hardening-gate by
+consuming target/unsafe-review/lsp.json directly. See
+docs/editor/extension-mvp.md.
+"""
+proof = [
+  "npm --prefix editors/vscode ci",
+  "npm --prefix editors/vscode run compile",
+  "npm --prefix editors/vscode test",
+]
+
+[[work_item]]
+id = "extension-lsp-client"
+status = "blocked"
+blocked_by = ["extension-scaffold", "live-lsp-hardening-gate"]
+description = """
+Live `unsafe-review lsp` client wiring inside the extension remains
+blocked behind the SPEC-0018 hardening gate. The MVP saved-bundle path
+does not consume a live server.
+"""
+proof = [
+  "npm test",
+  "cargo run --locked -p unsafe-review -- lsp --help",
+  "cargo test -p unsafe-review-cli lsp --locked",
+]
+
+[[work_item]]
+id = "marketplace-package-smoke"
+status = "done"
+description = """
+VSIX packaging ships through the editor-extension-packaging advisory
+lane (PR #360). .github/workflows/editor-extension.yml compiles, tests,
+and packages a VSIX, then uploads it as the unsafe-review-vscode
+workflow artifact on every relevant PR.
+"""
+proof = [
+  "npx --yes @vscode/vsce@2.32.0 package --out target/unsafe-review-vscode.vsix --allow-missing-repository",
+  "cargo run --locked -p xtask -- check-ci-lanes",
+  "cargo run --locked -p xtask -- check-policy",
+]
+
+[[work_item]]
+id = "publication-workflows"
+status = "done"
+description = """
+Manual marketplace publish workflow ships through
+.github/workflows/editor-publish.yml (PR #361). workflow_dispatch only,
+must be dispatched from main, defaults to dry_run=true, refuses to
+publish without an explicit target boolean and the matching secret.
+Status `done` here means the workflow exists and is gated correctly;
+an actual marketplace publication still requires owner-side publisher
+accounts, Eclipse/Open VSX namespace, and VSCE_PAT/OVSX_PAT secrets.
+"""
+proof = [
+  "cargo run --locked -p xtask -- check-ci-lanes",
+  "cargo run --locked -p xtask -- check-policy",
+  "cargo run --locked -p xtask -- check-pr",
+  "git diff --check",
+]

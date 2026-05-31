@@ -21,12 +21,24 @@ and limitations. The current implementation imports JSON receipts from:
 
 Each receipt is matched by exact counted `card_id`. A matching receipt marks the
 card's top-level witness evidence present and marks obligation-level witness
-evidence present. Receipt import does not discharge contracts, guards, or reach
-evidence.
+evidence present only when the receipt tool matches one of the current card's
+routed witness tools and the receipt strength records a saved witness run:
+`ran`, `test_targeted`, or `site_reached`. A `configured`, expired, or
+wrong-tool receipt remains valid receipt metadata for audit, but it does not
+remove the missing witness gap. Card-level witness summaries should surface that
+same-card metadata-only state so reviewers can see why a saved receipt did not
+import as current witness evidence. Receipt import does not discharge contracts,
+guards, or reach evidence.
 
 The receipt shape is represented in the core SDK as the serde-backed
 `WitnessReceipt` DTO. Importers and future native adapters must use that same
 shape instead of inventing parallel receipt schemas.
+
+Receipt `command_hash` is an optional stable command-string fingerprint. It is
+for drift detection and reviewer comparison only; it is not cryptographic proof
+and does not prove that the command ran. Older receipts without `command_hash`
+remain importable. When `command_hash` is present, validation checks that it
+matches the exact `command` string in the same receipt.
 
 The CLI may render a receipt template from explicit user-provided metadata. That
 template output is only a JSON authoring aid; it must not run witness commands or
@@ -71,16 +83,32 @@ use the same importer checks as normal card analysis so users do not get a
 separate receipt truth.
 
 The CLI may audit receipt files against the current `ReviewCard` set. Receipt
-audit must report matched, unmatched, stale, expired, wrong-identity, wrong-tool,
-weaker-than-required, and invalid receipt metadata without running witnesses,
-inferring site reach, making policy decisions, or claiming safety. Matched
-receipt entries include current card operation, missing-count, and next-action
-context so a receipt can improve witness evidence without erasing remaining
-guard or contract gaps. The audit is an advisory metadata report over saved
-receipts and current cards. JSON and Markdown audit output must include
-explicit limitations saying the audit uses saved metadata only, does not execute
-witness tools, does not prove site reach or safety, and does not erase remaining
-contract, guard, or reach gaps.
+audit must report matched, unmatched, stale, expired, wrong-identity,
+wrong-tool, weaker-than-required, command-hash-mismatch, duplicate, and invalid
+receipt metadata without running witnesses, inferring site reach, making policy
+decisions, or claiming safety. Audit must also mark the subset of receipts that
+would import as current ReviewCard witness evidence with
+`imports_witness_evidence`; this requires a current card match, a routed tool,
+saved-run strength (`ran`, `test_targeted`, or `site_reached`), no expiry, no
+validation error, and no duplicate receipt for the same card. Matched receipt
+entries include current card operation, missing-count, and next-action context.
+Audit entries include the current card's routed witness tools so a reviewer can
+compare the saved receipt tool against the ReviewCard route. Audit entries also
+include the saved
+`summary`, saved `author`, saved `recorded_at` timestamp, saved `command_hash`
+when present, saved per-receipt limitations, and surface command-hash
+mismatches as their own audit status so reviewers can compare receipt synopsis,
+ownership, recency, command-string drift, and saved scope limits without
+treating any of them as proof that the command ran or covered the unsafe site.
+When a matching receipt is imported as ReviewCard witness evidence, the
+evidence summary also includes the saved `command_hash` when present so
+card-level projections keep the same drift key visible.
+This lets a receipt improve witness evidence without erasing remaining guard or
+contract gaps. The audit is an advisory metadata report over saved receipts and
+current cards. JSON and Markdown audit output must include explicit limitations
+saying the audit uses saved metadata only, does not execute witness tools, does
+not prove site reach or safety, and does not erase remaining contract, guard, or
+reach gaps.
 
 Receipt JSON fields:
 
@@ -95,6 +123,7 @@ Receipt JSON fields:
   "expires_at": "2026-08-18",
   "summary": "focused witness passed",
   "command": "cargo +nightly miri test read_header",
+  "command_hash": "3e163b0bce29ff2e",
   "limitations": ["fixture only"]
 }
 ```
@@ -121,9 +150,9 @@ Receipt JSON fields:
 - `human-deep-review`
 - `unsupported`
 
-`author` must be non-empty. `recorded_at` must be a UTC timestamp in
-`YYYY-MM-DDTHH:MM:SSZ` form. `expires_at` must be a `YYYY-MM-DD` date on or
-after the `recorded_at` date.
+`author` must be non-empty. `recorded_at` must be a calendar-valid UTC
+timestamp in `YYYY-MM-DDTHH:MM:SSZ` form. `expires_at` must be a
+calendar-valid `YYYY-MM-DD` date on or after the `recorded_at` date.
 
 ## Non-goals
 
@@ -144,12 +173,19 @@ after the `recorded_at` date.
 
 ## Acceptance examples
 
-- A matching receipt removes the `witness` missing-evidence item.
-- A matching receipt marks obligation-level witness evidence present.
+- A matching routed-tool `ran`, `test_targeted`, or `site_reached` receipt
+  removes the `witness` missing-evidence item.
+- A matching routed-tool `ran`, `test_targeted`, or `site_reached` receipt
+  marks obligation-level witness evidence present.
+- A matching `configured` receipt validates and appears in receipt audit, but
+  does not remove the `witness` missing-evidence item.
+- A matching wrong-tool receipt validates and appears in receipt audit, but does
+  not remove the `witness` missing-evidence item.
 - A receipt with unknown tool is rejected.
 - A receipt with unknown strength is rejected.
 - A receipt with uncounted card identity is rejected.
 - A receipt missing author, timestamp, or expiry metadata is rejected.
+- A receipt with a shaped but invalid calendar date is rejected.
 - A receipt whose expiry predates its recorded date is rejected.
 - If receipt scope is limited, the receipt summary keeps that limitation visible.
 - The core `WitnessReceipt` DTO round-trips through serde JSON and validates the
@@ -172,11 +208,16 @@ after the `recorded_at` date.
 - The CLI receipt-validate command counts importable receipts and rejects the
   same invalid receipt files as normal analysis.
 - The CLI receipt-audit command reports matched, stale, expired,
-  wrong-identity, wrong-tool, weaker-than-required, and invalid receipts without
-  executing witnesses or making policy decisions.
-- Receipt-audit JSON and Markdown include limitations that preserve the saved
-  metadata boundary and state that matched receipts only improve witness
-  evidence.
+  wrong-identity, wrong-tool, weaker-than-required, command-hash-mismatch,
+  duplicate, and invalid receipts without executing witnesses or making policy
+  decisions.
+- The CLI receipt-audit command marks only currently importable saved witness
+  receipts with `imports_witness_evidence`; matching `configured`,
+  wrong-tool, expired, invalid, or duplicate receipts remain audit metadata.
+- Receipt-audit JSON and Markdown include per-receipt `summary`, `author`,
+  `recorded_at`, and limitation metadata plus report limitations that preserve
+  the saved metadata boundary and state that matched receipts only improve
+  witness evidence.
 
 ## CI proof
 

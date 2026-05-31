@@ -1,0 +1,376 @@
+schema_version = "0.1"
+status = "fixture_pinned"
+claim_id = "nonnull-new-unchecked-nullability-evidence"
+operation_family = "nonnull_unchecked"
+hazard = "pointer_validity"
+partition = "fixture"
+source_kind = "fixture_golden"
+trust_boundary = """
+Static unsafe contract review only. These labels describe fixture-pinned
+ReviewCard nullability evidence behavior for NonNull::new_unchecked; they are
+not a proof of memory safety, not UB-free status, not a Miri result, not Miri-clean status, not site execution evidence, not calibrated precision or recall, not witness adequacy, and not policy readiness.
+"""
+
+[[samples]]
+id = "nonnull-new-guard-present"
+fixture = "nonnull_new_guard"
+kind = "positive"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+expected_obligation_key = "non-null"
+expected_discharge_state = "present"
+label_source = "fixture_golden"
+rationale = "A same-pointer NonNull::new question-mark guard discharges the non-null obligation before NonNull::new_unchecked."
+
+[[samples]]
+id = "nonnull-new-reassigned-ptr-not-guard"
+fixture = "nonnull_new_reassigned_ptr_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+expected_obligation_key = "non-null"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "Question-mark NonNull::new evidence becomes stale when the checked pointer is reassigned before NonNull::new_unchecked."
+
+[[samples]]
+id = "nonnull-new-shadowed-ptr-not-guard"
+fixture = "nonnull_new_shadowed_ptr_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+expected_obligation_key = "non-null"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "Question-mark NonNull::new evidence becomes stale when a later `let ptr = ...` shadows the checked pointer before NonNull::new_unchecked."
+
+[[samples]]
+id = "nonnull-cast-checked-pointer-not-guard"
+fixture = "nonnull_cast_checked_pointer_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+expected_obligation_key = "non-null"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "Question-mark NonNull::new evidence for a pre-cast pointer is not treated as same-target evidence for a cast expression passed to NonNull::new_unchecked; reviewers should keep cast/provenance uncertainty explicit."
+
+[[samples]]
+id = "nonnull-method-receiver-reassigned-not-guard"
+fixture = "nonnull_method_receiver_reassigned_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+expected_obligation_key = "non-null"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "Nullability evidence for a pointer returned by a receiver method becomes stale when the checked receiver is reassigned before NonNull::new_unchecked."
+
+[[samples]]
+id = "nonnull-if-let-new-guard-present"
+fixture = "nonnull_if_let_new_guard"
+kind = "positive"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+expected_obligation_key = "non-null"
+expected_discharge_state = "present"
+label_source = "fixture_golden"
+rationale = "A same-pointer if-let NonNull::new branch that contains NonNull::new_unchecked discharges the non-null obligation."
+
+[[samples]]
+id = "nonnull-let-else-new-guard-present"
+fixture = "nonnull_let_else_new_guard"
+kind = "positive"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+expected_obligation_key = "non-null"
+expected_discharge_state = "present"
+label_source = "fixture_golden"
+rationale = "A same-pointer let-else NonNull::new early return before NonNull::new_unchecked discharges the non-null obligation."
+
+[[samples]]
+id = "nonnull-match-new-guard-present"
+fixture = "nonnull_match_new_guard"
+kind = "positive"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+expected_obligation_key = "non-null"
+expected_discharge_state = "present"
+label_source = "fixture_golden"
+rationale = "A same-pointer match NonNull::new Some arm that contains NonNull::new_unchecked discharges the non-null obligation."
+
+[[samples]]
+id = "nonnull-other-guard-not-evidence"
+fixture = "nonnull_other_guard_not_evidence"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+expected_obligation_key = "non-null"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "NonNull::new evidence for another pointer does not discharge the target pointer's non-null obligation."
+
+[[samples]]
+id = "nonnull-is-null-nonreturning-not-guard"
+fixture = "nonnull_is_null_nonreturning_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+expected_obligation_key = "non-null"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "A same-pointer is_null observation that does not exit the null path is not a dominating non-null guard."
+
+[[samples]]
+id = "nonnull-is-null-return-comment-not-guard"
+fixture = "nonnull_is_null_return_comment_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+expected_obligation_key = "non-null"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "Comment-only return text inside a same-pointer is_null branch is not executable early-return evidence and must not discharge non-null evidence."
+
+[[samples]]
+id = "nonnull-is-null-disjunct-return-guard-present"
+fixture = "nonnull_is_null_disjunct_return_guard"
+kind = "positive"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+expected_obligation_key = "non-null"
+expected_discharge_state = "present"
+label_source = "fixture_golden"
+rationale = "A same-pointer `ptr.is_null()` predicate in a top-level `||` early-return condition discharges the non-null obligation after the guard."
+
+[[samples]]
+id = "nonnull-is-null-conjunct-return-not-guard"
+fixture = "nonnull_is_null_conjunct_return_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+expected_obligation_key = "non-null"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "A same-pointer `ptr.is_null()` predicate in a top-level `&&` early-return condition does not dominate the fallthrough and must not discharge non-null evidence."
+
+[[samples]]
+id = "nonnull-is-null-reassigned-ptr-not-guard"
+fixture = "nonnull_is_null_reassigned_ptr_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+expected_obligation_key = "non-null"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "A same-pointer is_null early-return guard becomes stale when the checked pointer is reassigned before NonNull::new_unchecked."
+
+[[samples]]
+id = "nonnull-is-null-shadowed-ptr-not-guard"
+fixture = "nonnull_is_null_shadowed_ptr_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+expected_obligation_key = "non-null"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "A same-pointer is_null early-return guard becomes stale when the checked pointer is shadowed before NonNull::new_unchecked."
+
+[[samples]]
+id = "nonnull-is-null-open-branch-guard-present"
+fixture = "nonnull_is_null_open_branch_guard"
+kind = "positive"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+expected_obligation_key = "non-null"
+expected_discharge_state = "present"
+label_source = "fixture_golden"
+rationale = "A same-pointer `!ptr.is_null()` open branch that contains NonNull::new_unchecked discharges the non-null obligation."
+
+[[samples]]
+id = "nonnull-is-null-conjunct-open-branch-guard-present"
+fixture = "nonnull_is_null_conjunct_open_branch_guard"
+kind = "positive"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+expected_obligation_key = "non-null"
+expected_discharge_state = "present"
+label_source = "fixture_golden"
+rationale = "A same-pointer `!ptr.is_null()` predicate in a top-level `&&` open-branch condition discharges the non-null obligation for that branch."
+
+[[samples]]
+id = "nonnull-is-null-disjunct-open-branch-not-guard"
+fixture = "nonnull_is_null_disjunct_open_branch_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+expected_obligation_key = "non-null"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "A same-pointer `!ptr.is_null()` predicate in a `||` branch does not dominate NonNull::new_unchecked and must not discharge non-null evidence."
+
+[[samples]]
+id = "nonnull-is-null-open-branch-reassigned-ptr-not-guard"
+fixture = "nonnull_is_null_open_branch_reassigned_ptr_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+expected_obligation_key = "non-null"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "A same-pointer `!ptr.is_null()` open branch becomes stale when the checked pointer is reassigned before NonNull::new_unchecked."
+
+[[samples]]
+id = "nonnull-is-null-open-branch-shadowed-ptr-not-guard"
+fixture = "nonnull_is_null_open_branch_shadowed_ptr_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+expected_obligation_key = "non-null"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "A same-pointer `!ptr.is_null()` open branch becomes stale when the checked pointer is shadowed before NonNull::new_unchecked."
+
+[[samples]]
+id = "nonnull-observed-not-guard"
+fixture = "nonnull_observed_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+expected_obligation_key = "non-null"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "A bare same-pointer NonNull::new observation is not checked and does not discharge non-null evidence."
+
+[[samples]]
+id = "nonnull-post-check-not-guard"
+fixture = "nonnull_post_check_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+expected_obligation_key = "non-null"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "A nullability check after NonNull::new_unchecked does not discharge evidence needed before construction."
+
+[[samples]]
+id = "nonnull-if-let-new-reassigned-ptr-not-guard"
+fixture = "nonnull_if_let_new_reassigned_ptr_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+expected_obligation_key = "non-null"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "If-let NonNull::new evidence becomes stale when the checked pointer is reassigned before NonNull::new_unchecked."
+
+[[samples]]
+id = "nonnull-if-let-new-shadowed-ptr-not-guard"
+fixture = "nonnull_if_let_new_shadowed_ptr_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+expected_obligation_key = "non-null"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "If-let NonNull::new evidence becomes stale when the checked pointer is shadowed before NonNull::new_unchecked."
+
+[[samples]]
+id = "nonnull-let-else-new-reassigned-ptr-not-guard"
+fixture = "nonnull_let_else_new_reassigned_ptr_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+expected_obligation_key = "non-null"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "Let-else NonNull::new evidence becomes stale when the checked pointer is reassigned before NonNull::new_unchecked."
+
+[[samples]]
+id = "nonnull-let-else-new-shadowed-ptr-not-guard"
+fixture = "nonnull_let_else_new_shadowed_ptr_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+expected_obligation_key = "non-null"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "Let-else NonNull::new evidence becomes stale when the checked pointer is shadowed before NonNull::new_unchecked."
+
+[[samples]]
+id = "nonnull-match-new-reassigned-ptr-not-guard"
+fixture = "nonnull_match_new_reassigned_ptr_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+expected_obligation_key = "non-null"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "Match NonNull::new Some-arm evidence becomes stale when the checked pointer is reassigned before NonNull::new_unchecked."
+
+[[samples]]
+id = "nonnull-match-new-shadowed-ptr-not-guard"
+fixture = "nonnull_match_new_shadowed_ptr_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+expected_obligation_key = "non-null"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "Match NonNull::new Some-arm evidence becomes stale when the checked pointer is shadowed before NonNull::new_unchecked."

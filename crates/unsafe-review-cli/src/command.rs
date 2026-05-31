@@ -13,6 +13,7 @@ pub(crate) enum Format {
     Json,
     Markdown,
     PrSummary,
+    GithubSummary,
     Sarif,
     CommentPlan,
     Lsp,
@@ -131,4 +132,5 @@ pub(crate) enum Command {
     ReceiptImportProof(SavedOutputReceiptOptions),
     Outcome(OutcomeOptions),
     PolicyReport(CheckOptions),
+    Lsp,
 }

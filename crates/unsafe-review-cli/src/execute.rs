@@ -7,21 +7,37 @@ use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use unsafe_review_core::{
-    AnalysisMode, AnalyzeInput, CardId, CargoCarefulReceiptInput, ConcurrencyReceiptInput,
-    DiffSource, MiriReceiptInput, PolicyMode, ProofReceiptInput, SanitizerReceiptInput, Scope,
-    WITNESS_RECEIPT_SCHEMA_VERSION, WitnessReceipt, analyze, audit_witness_receipts,
-    collect_context, compare_outcome_json, evaluate_policy_report, explain_card,
-    render_badge_jsons, render_comment_plan, render_github_summary, render_human, render_json,
-    render_lsp, render_markdown, render_outcome_json, render_outcome_markdown,
-    render_policy_report_json, render_policy_report_markdown, render_pr_summary,
-    render_receipt_audit_json, render_receipt_audit_markdown, render_repair_queue, render_sarif,
-    render_witness_plan, validate_witness_receipts,
+    AnalysisMode, AnalyzeInput, AnalyzeOutput, CardId, CargoCarefulReceiptInput,
+    ConcurrencyReceiptInput, DiffSource, MiriReceiptInput, PolicyMode, ProofReceiptInput,
+    SanitizerReceiptInput, Scope, WITNESS_RECEIPT_SCHEMA_VERSION, WitnessReceipt, analyze,
+    audit_witness_receipts, compare_outcome_json, evaluate_policy_report, render_badge_jsons,
+    render_comment_plan, render_github_summary, render_human, render_json, render_lsp,
+    render_markdown, render_outcome_json, render_outcome_markdown, render_policy_report_json,
+    render_policy_report_markdown, render_pr_summary, render_receipt_audit_json,
+    render_receipt_audit_markdown, render_repair_queue, render_sarif, render_witness_plan,
+    validate_witness_receipts,
 };
+
+mod card_lookup;
+mod first_pr;
 
 const NO_CHANGED_GAPS_MESSAGE: &str = "No changed unsafe-review gaps were found.";
 const NO_CHANGED_GAPS_LIMITATION: &str =
     "This does not prove the repo safe, UB-free, Miri-clean, or that any unsafe site executed.";
+type FirstPrRenderer = fn(&AnalyzeOutput) -> String;
+
 const REVIEW_KIT_ARTIFACT: &str = "review-kit.json";
+const RECEIPT_AUDIT_ARTIFACT: &str = "receipt-audit.md";
+const FIRST_PR_RENDERED_ARTIFACTS: [(&str, FirstPrRenderer); 8] = [
+    ("cards.json", render_json),
+    ("pr-summary.md", render_pr_summary),
+    ("github-summary.md", render_github_summary),
+    ("cards.sarif", render_sarif),
+    ("comment-plan.json", render_comment_plan),
+    ("witness-plan.md", render_witness_plan),
+    ("lsp.json", render_lsp),
+    ("repair-queue.json", render_repair_queue),
+];
 const FIRST_PR_ARTIFACTS: [&str; 10] = [
     REVIEW_KIT_ARTIFACT,
     "cards.json",
@@ -30,7 +46,7 @@ const FIRST_PR_ARTIFACTS: [&str; 10] = [
     "cards.sarif",
     "comment-plan.json",
     "witness-plan.md",
-    "receipt-audit.md",
+    RECEIPT_AUDIT_ARTIFACT,
     "lsp.json",
     "repair-queue.json",
 ];
@@ -67,6 +83,7 @@ pub(crate) fn execute(command: Command) -> Result<(), String> {
         Command::ReceiptImportProof(options) => receipt_import_proof(options),
         Command::Outcome(options) => outcome(options),
         Command::PolicyReport(options) => policy_report(options),
+        Command::Lsp => crate::lsp::serve(),
     }
 }
 
@@ -76,7 +93,7 @@ fn print_support() {
     println!("Current posture:");
     println!("- ReviewCards: experimental; selected slices are fixture-backed or dogfood-backed.");
     println!(
-        "- first-pr bundle: advisory; projects the review-kit manifest, summaries, cards, SARIF, comment plans, witness plans, receipt audit, saved LSP JSON, and repair queue from ReviewCards."
+        "- first-pr bundle: advisory; projects cards, summaries, SARIF, comment plans, witness plans, and saved LSP JSON from ReviewCards."
     );
     println!(
         "- receipts: saved-output template/import/audit only; receipts attach external evidence to exact card identities."
@@ -151,221 +168,29 @@ fn first_pr(options: FirstPrOptions) -> Result<(), String> {
 
     fs::create_dir_all(&options.out_dir)
         .map_err(|err| format!("create {} failed: {err}", options.out_dir.display()))?;
-    write_artifact(&options.out_dir.join("cards.json"), render_json(&output))?;
+    for (name, renderer) in FIRST_PR_RENDERED_ARTIFACTS {
+        write_artifact(&options.out_dir.join(name), renderer(&output))?;
+    }
     write_artifact(
-        &options.out_dir.join("pr-summary.md"),
-        render_pr_summary(&output),
-    )?;
-    write_artifact(
-        &options.out_dir.join("github-summary.md"),
-        render_github_summary(&output),
-    )?;
-    write_artifact(&options.out_dir.join("cards.sarif"), render_sarif(&output))?;
-    write_artifact(
-        &options.out_dir.join("comment-plan.json"),
-        render_comment_plan(&output),
-    )?;
-    write_artifact(
-        &options.out_dir.join("witness-plan.md"),
-        render_witness_plan(&output),
-    )?;
-    write_artifact(
-        &options.out_dir.join("receipt-audit.md"),
+        &options.out_dir.join(RECEIPT_AUDIT_ARTIFACT),
         render_receipt_audit_markdown(&receipt_audit),
-    )?;
-    write_artifact(&options.out_dir.join("lsp.json"), render_lsp(&output))?;
-    write_artifact(
-        &options.out_dir.join("repair-queue.json"),
-        render_repair_queue(&output),
     )?;
     write_artifact(
         &options.out_dir.join(REVIEW_KIT_ARTIFACT),
-        render_review_kit_manifest(&output, &root, &check, &FIRST_PR_ARTIFACTS),
+        first_pr::render_review_kit_manifest(&output, &root, &check, &FIRST_PR_ARTIFACTS),
     )?;
 
-    println!("unsafe-review first-pr");
-    println!("unsafe-review wrote an advisory PR bundle.");
-    println!("- Artifact directory: {}", options.out_dir.display());
-    println!("- Review cards: {}", output.summary.cards);
-    println!(
-        "- Open actionable gaps: {}",
-        output.summary.open_actionable_gaps
-    );
-    println!("Open:");
-    println!("  {}", options.out_dir.join("pr-summary.md").display());
-    println!("Agent repair queue:");
-    println!(
-        "  {} (copy-only; unsafe-review did not run an agent)",
-        options.out_dir.join("repair-queue.json").display()
-    );
-    println!("Receipt audit:");
-    println!(
-        "  {} (metadata-only; unsafe-review did not run witnesses)",
-        options.out_dir.join("receipt-audit.md").display()
-    );
-    if output.summary.open_actionable_gaps == 0 {
-        println!("{NO_CHANGED_GAPS_MESSAGE}");
-        println!("{NO_CHANGED_GAPS_LIMITATION}");
-    } else if let Some(card) = output.cards.first() {
-        println!("Top card:");
-        println!(
-            "  {}:{} `{}`",
-            card.site.location.file.display(),
-            card.site.location.line,
-            card.operation.family.as_str()
-        );
-        println!("  Class: `{}`", card.class.as_str());
-        if !card.missing.is_empty() {
-            let missing = card
-                .missing
-                .iter()
-                .map(|missing| missing.kind.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
-            println!("  Missing: {missing}");
-        }
-        if let Some(route) = card.routes.first() {
-            println!("  Route: `{}`", route.kind.as_str());
-        }
-        println!("  Next: {}", card.next_action.summary);
-        println!("Explain top card:");
-        println!(
-            "  unsafe-review explain --root {} {}",
-            root.display(),
-            card.id
-        );
-        println!("Agent packet:");
-        println!(
-            "  unsafe-review context --root {} {} --json",
-            root.display(),
-            card.id
-        );
-    }
-    println!("Artifacts:");
-    for name in FIRST_PR_ARTIFACTS {
-        println!("  {}", options.out_dir.join(name).display());
-    }
-    println!("Trust boundary:");
-    println!(
-        "  static unsafe contract review only; not memory-safety proof, not UB-free status, and not Miri-clean status."
-    );
-    println!(
-        "  unsafe-review did not run witnesses, run agents, post comments, edit source, or enforce blocking policy."
+    first_pr::print_first_pr_report(
+        &output,
+        &options.out_dir,
+        &root,
+        &check,
+        NO_CHANGED_GAPS_MESSAGE,
+        NO_CHANGED_GAPS_LIMITATION,
+        &FIRST_PR_ARTIFACTS,
     );
 
     Ok(())
-}
-
-fn render_review_kit_manifest(
-    output: &unsafe_review_core::AnalyzeOutput,
-    root: &Path,
-    check: &CheckOptions,
-    artifacts: &[&str],
-) -> String {
-    let value = serde_json::json!({
-        "schema_version": "0.1",
-        "tool": "unsafe-review",
-        "tool_version": env!("CARGO_PKG_VERSION"),
-        "mode": "review_kit_manifest",
-        "source": "first_pr",
-        "policy": output.policy.as_str(),
-        "scope": scope_name(&output.scope),
-        "base_ref": check.base.as_deref(),
-        "head_commit": git_head_commit(root),
-        "summary": {
-            "cards": output.summary.cards,
-            "open_actionable_gaps": output.summary.open_actionable_gaps,
-        },
-        "top_card_id": output.cards.first().map(|card| card.id.to_string()),
-        "handoff": {
-            "reviewer_summary": "pr-summary.md",
-            "github_summary": "github-summary.md",
-            "agent_repair_queue": "repair-queue.json",
-            "receipt_audit": "receipt-audit.md",
-            "top_card": output.cards.first().map(|card| serde_json::json!({
-                "card_id": card.id.to_string(),
-                "explain": format!("unsafe-review explain {}", card.id),
-                "context": format!("unsafe-review context {} --json", card.id),
-            })),
-        },
-        "artifacts": artifacts
-            .iter()
-            .map(|path| artifact_entry(path))
-            .collect::<Vec<_>>(),
-        "trust_boundary": "Static unsafe contract review kit manifest only; this indexes first-pr artifacts and does not reclassify ReviewCards. It is not a proof of memory safety, not UB-free status, not a Miri result, not Miri-clean status, and not site-execution proof. unsafe-review did not run witnesses, post comments, edit source, run an agent, or enforce blocking policy.",
-    });
-    serde_json::to_string_pretty(&value).unwrap_or_else(|err| {
-        format!("{{\n  \"error\": \"review kit serialization failed: {err}\"\n}}")
-    })
-}
-
-fn scope_name(scope: &Scope) -> &'static str {
-    match scope {
-        Scope::Diff => "diff",
-        Scope::Repo => "repo",
-    }
-}
-
-fn git_head_commit(root: &Path) -> Option<String> {
-    let output = ProcessCommand::new("git")
-        .arg("-C")
-        .arg(root)
-        .arg("rev-parse")
-        .arg("--verify")
-        .arg("HEAD")
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    (!text.is_empty()).then_some(text)
-}
-
-fn artifact_entry(path: &str) -> serde_json::Value {
-    serde_json::json!({
-        "path": path,
-        "kind": artifact_kind(path),
-        "format": artifact_format(path),
-        "schema_version": artifact_schema_version(path),
-    })
-}
-
-fn artifact_kind(path: &str) -> &'static str {
-    match path {
-        "review-kit.json" => "review_kit_manifest",
-        "cards.json" => "review_cards",
-        "pr-summary.md" => "reviewer_summary",
-        "github-summary.md" => "github_summary",
-        "cards.sarif" => "sarif",
-        "comment-plan.json" => "comment_plan",
-        "witness-plan.md" => "witness_plan",
-        "receipt-audit.md" => "receipt_audit",
-        "lsp.json" => "saved_lsp",
-        "repair-queue.json" => "repair_queue",
-        _ => "unknown",
-    }
-}
-
-fn artifact_format(path: &str) -> &'static str {
-    if path.ends_with(".json") {
-        "json"
-    } else if path.ends_with(".md") {
-        "markdown"
-    } else if path.ends_with(".sarif") {
-        "sarif"
-    } else {
-        "unknown"
-    }
-}
-
-fn artifact_schema_version(path: &str) -> Option<&'static str> {
-    match path {
-        "review-kit.json" | "cards.json" | "comment-plan.json" | "lsp.json"
-        | "repair-queue.json" => Some("0.1"),
-        "cards.sarif" => Some("2.1.0"),
-        _ => None,
-    }
 }
 
 fn enforce_policy(output: &unsafe_review_core::AnalyzeOutput) -> Result<(), String> {
@@ -449,6 +274,7 @@ fn render_with_format(output: &unsafe_review_core::AnalyzeOutput, format: &Forma
         Format::Json => render_json(output),
         Format::Markdown => render_markdown(output),
         Format::PrSummary => render_pr_summary(output),
+        Format::GithubSummary => render_github_summary(output),
         Format::Sarif => render_sarif(output),
         Format::CommentPlan => render_comment_plan(output),
         Format::Lsp => render_lsp(output),
@@ -610,29 +436,28 @@ fn badges(root: &Path, out: &Path) -> Result<(), String> {
         .map_err(|err| format!("write badge failed: {err}"))?;
     fs::write(out.join("unsafe-review-plus.json"), plus)
         .map_err(|err| format!("write badge failed: {err}"))?;
-    println!("wrote badges to {}", out.display());
+    println!("wrote:");
+    println!("  {}", out.join("unsafe-review.json").display());
+    println!("  {}", out.join("unsafe-review-plus.json").display());
+    println!();
+    println!("next:");
+    println!("  git add {}", out.display());
+    println!("  add Shields endpoint badges for your own OWNER/REPO/BRANCH");
+    println!();
+    println!("trust boundary:");
+    println!(
+        "  badge JSON counts unsafe-review gaps; it is not safety, UB-free, or Miri-clean status."
+    );
     Ok(())
 }
 
 fn explain(root: &Path, id: &str, format: Format) -> Result<(), String> {
-    let output = analyze(AnalyzeInput {
-        root: root.to_path_buf(),
-        scope: Scope::Repo,
-        diff: DiffSource::NoneRepoScan,
-        mode: AnalysisMode::Repo,
-        policy: PolicyMode::Advisory,
-        include_unchanged_tests: true,
-        max_cards: None,
-    })?;
+    let output = card_lookup::analyze_repo_cards(root)?;
     let id = CardId(id.to_string());
-    let Some(detail) = explain_card(&output, &id) else {
-        return Err(format!("card `{id}` not found"));
-    };
+    let detail = card_lookup::explain_text(&output, &id)?;
     match format {
         Format::Json => {
-            let Some(packet) = collect_context(&output, &id) else {
-                return Err(format!("card `{id}` not found"));
-            };
+            let packet = card_lookup::context_packet(&output, &id)?;
             println!("{packet}");
         }
         _ => println!("{detail}"),
@@ -641,24 +466,15 @@ fn explain(root: &Path, id: &str, format: Format) -> Result<(), String> {
 }
 
 fn context(root: &Path, id: &str) -> Result<(), String> {
-    let output = analyze(AnalyzeInput {
-        root: root.to_path_buf(),
-        scope: Scope::Repo,
-        diff: DiffSource::NoneRepoScan,
-        mode: AnalysisMode::Repo,
-        policy: PolicyMode::Advisory,
-        include_unchanged_tests: true,
-        max_cards: None,
-    })?;
+    let output = card_lookup::analyze_repo_cards(root)?;
     let id = CardId(id.to_string());
-    let Some(packet) = collect_context(&output, &id) else {
-        return Err(format!("card `{id}` not found"));
-    };
+    let packet = card_lookup::context_packet(&output, &id)?;
     println!("{packet}");
     Ok(())
 }
 
 fn receipt_template(options: ReceiptTemplateOptions) -> Result<(), String> {
+    let command_hash = options.command.as_deref().map(WitnessReceipt::command_hash);
     let receipt = WitnessReceipt {
         schema_version: WITNESS_RECEIPT_SCHEMA_VERSION.to_string(),
         card_id: options.card_id,
@@ -669,6 +485,7 @@ fn receipt_template(options: ReceiptTemplateOptions) -> Result<(), String> {
         expires_at: Some(options.expires_at),
         summary: options.summary,
         command: options.command,
+        command_hash,
         limitations: if options.limitations.is_empty() {
             None
         } else {
@@ -913,10 +730,10 @@ fn print_help() {
     println!();
     println!("Commands:");
     println!(
-        "  check   [--root .] [--base origin/main | --diff file|-] [--format human|json|markdown|pr-summary|sarif|comment-plan|lsp|witness-plan] [--policy advisory|no-new-debt] [--out file]"
+        "  check   [--root .] [--base origin/main | --diff file|-] [--format human|json|markdown|pr-summary|github-summary|sarif|comment-plan|lsp|witness-plan] [--policy advisory|no-new-debt] [--out file]"
     );
     println!(
-        "  repo    [--root .] [--format human|json|markdown|pr-summary|sarif|comment-plan|lsp|witness-plan] [--policy advisory|no-new-debt] [--out file]"
+        "  repo    [--root .] [--format human|json|markdown|pr-summary|github-summary|sarif|comment-plan|lsp|witness-plan] [--policy advisory|no-new-debt] [--out file]"
     );
     println!(
         "  first-pr [--root .] [--base origin/main|--diff file|-] [--out-dir target/unsafe-review] [--max-cards N]"
@@ -962,4 +779,41 @@ fn print_help() {
     println!(
         "Trust boundary: static unsafe contract review only; not memory-safety proof, not UB-free status, and not Miri-clean status."
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{resolve_diff_path, writable_status, yes_no};
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn resolve_diff_path_joins_relative_path_to_root() {
+        let root = Path::new("/workspace/project");
+        let diff = Path::new("fixtures/example.diff");
+
+        let resolved = resolve_diff_path(root, diff);
+
+        assert_eq!(
+            resolved,
+            PathBuf::from("/workspace/project/fixtures/example.diff")
+        );
+    }
+
+    #[test]
+    fn resolve_diff_path_preserves_absolute_paths() {
+        let root = Path::new("/workspace/project");
+        let diff = Path::new("/tmp/patch.diff");
+
+        let resolved = resolve_diff_path(root, diff);
+
+        assert_eq!(resolved, PathBuf::from("/tmp/patch.diff"));
+    }
+
+    #[test]
+    fn yes_no_and_writable_status_report_expected_labels() {
+        assert_eq!(yes_no(true), "yes");
+        assert_eq!(yes_no(false), "no");
+        assert_eq!(writable_status(true), "writable");
+        assert_eq!(writable_status(false), "not writable");
+    }
 }

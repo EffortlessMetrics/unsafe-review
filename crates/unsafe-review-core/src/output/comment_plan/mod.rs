@@ -416,7 +416,7 @@ mod tests {
         assert_eq!(value["not_selected"][0]["operation_family"], "unknown");
         assert_eq!(
             value["not_selected"][0]["next_action"],
-            "Add a precise `# Safety` section or `SAFETY:` / `Safety:` comment that names the required conditions."
+            "Add a precise public `# Safety` section that names the required caller obligations."
         );
         assert_eq!(
             value["not_selected"][0]["reason"],

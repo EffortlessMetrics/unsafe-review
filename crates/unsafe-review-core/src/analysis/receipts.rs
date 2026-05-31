@@ -1,5 +1,5 @@
 use crate::api::AnalyzeOutput;
-use crate::domain::{CardId, ReviewCard, WitnessEvidence, WitnessReceipt};
+use crate::domain::{CardId, ReviewCard, WitnessEvidence, WitnessReceipt, WitnessRoute};
 use crate::util::path_display;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -11,16 +11,37 @@ const AUDIT_TRUST_BOUNDARY: &str = "Static witness receipt audit only; this chec
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ReceiptIndex {
-    by_card_id: BTreeMap<String, WitnessEvidence>,
+    by_card_id: BTreeMap<String, ImportedReceipt>,
+    metadata_by_card_id: BTreeMap<String, ReceiptMetadata>,
+    audit_date: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+struct ImportedReceipt {
+    tool: String,
+    evidence: WitnessEvidence,
+}
+
+#[derive(Clone, Debug)]
+struct ReceiptMetadata {
+    tool: String,
+    strength: String,
+    expires_at: String,
 }
 
 impl ReceiptIndex {
     pub(crate) fn load(root: &Path) -> Result<Self, String> {
+        let audit_date = current_utc_date()?;
+        Self::load_with_date(root, &audit_date)
+    }
+
+    fn load_with_date(root: &Path, audit_date: &str) -> Result<Self, String> {
         let dir = root.join(".unsafe-review").join("receipts");
         if !dir.is_dir() {
             return Ok(Self::default());
         }
         let mut by_card_id = BTreeMap::new();
+        let mut metadata_by_card_id = BTreeMap::new();
         let entries =
             fs::read_dir(&dir).map_err(|err| format!("read {} failed: {err}", dir.display()))?;
         for entry in entries {
@@ -30,8 +51,27 @@ impl ReceiptIndex {
                 continue;
             }
             let receipt = parse_receipt_file(&path)?;
+            metadata_by_card_id
+                .entry(receipt.card_id.clone())
+                .or_insert_with(|| ReceiptMetadata {
+                    tool: receipt.tool.clone(),
+                    strength: receipt.strength.clone(),
+                    expires_at: receipt.expires_at.clone(),
+                });
+            if receipt.expires_at.as_str() < audit_date {
+                continue;
+            }
+            if !imports_witness_evidence(&receipt.strength) {
+                continue;
+            }
             if by_card_id
-                .insert(receipt.card_id.clone(), receipt.evidence)
+                .insert(
+                    receipt.card_id.clone(),
+                    ImportedReceipt {
+                        tool: receipt.tool,
+                        evidence: receipt.evidence,
+                    },
+                )
                 .is_some()
             {
                 return Err(format!(
@@ -41,20 +81,75 @@ impl ReceiptIndex {
                 ));
             }
         }
-        Ok(Self { by_card_id })
+        Ok(Self {
+            by_card_id,
+            metadata_by_card_id,
+            audit_date: Some(audit_date.to_string()),
+        })
     }
 
-    pub(crate) fn evidence_for(&self, id: &CardId) -> Option<WitnessEvidence> {
-        self.by_card_id.get(&id.0).cloned()
-    }
+    pub(crate) fn witness_evidence_for(
+        &self,
+        id: &CardId,
+        routes: &[WitnessRoute],
+    ) -> WitnessEvidence {
+        let route_tools = routes
+            .iter()
+            .map(|route| route.kind.as_str())
+            .collect::<Vec<_>>();
+        if let Some(receipt) = self.by_card_id.get(&id.0) {
+            if route_tools.iter().any(|tool| *tool == receipt.tool) {
+                return receipt.evidence.clone();
+            }
+            return WitnessEvidence::missing_with(format!(
+                "Saved `{}` receipt for this card does not match routed witness tools: {}",
+                receipt.tool,
+                route_tools.join(", ")
+            ));
+        }
 
-    pub(crate) fn len(&self) -> usize {
-        self.by_card_id.len()
+        let Some(metadata) = self.metadata_by_card_id.get(&id.0) else {
+            return WitnessEvidence::missing();
+        };
+        if self
+            .audit_date
+            .as_deref()
+            .is_some_and(|audit_date| metadata.expires_at.as_str() < audit_date)
+        {
+            return WitnessEvidence::missing_with(format!(
+                "Saved `{}` receipt for this card is expired; attach a current matching witness receipt",
+                metadata.tool
+            ));
+        }
+        if !imports_witness_evidence(&metadata.strength) {
+            return WitnessEvidence::missing_with(format!(
+                "Saved `{}` receipt for this card has `{}` strength; attach a saved witness run receipt",
+                metadata.tool, metadata.strength
+            ));
+        }
+        WitnessEvidence::missing()
     }
 }
 
 pub(crate) fn validate_receipts(root: &Path) -> Result<usize, String> {
-    ReceiptIndex::load(root).map(|index| index.len())
+    let dir = root.join(".unsafe-review").join("receipts");
+    if !dir.is_dir() {
+        return Ok(0);
+    }
+    let mut count = 0;
+    let mut card_ids = BTreeSet::new();
+    for path in receipt_files(&dir)? {
+        let receipt = parse_receipt_file(&path)?;
+        if !card_ids.insert(receipt.card_id.clone()) {
+            return Err(format!(
+                "{} imports duplicate receipt for card_id `{}`",
+                path.display(),
+                receipt.card_id
+            ));
+        }
+        count += 1;
+    }
+    Ok(count)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -80,6 +175,7 @@ pub struct ReceiptAuditSummary {
     pub wrong_identity: usize,
     pub wrong_tool: usize,
     pub weaker_than_required: usize,
+    pub command_hash_mismatch: usize,
     pub duplicate: usize,
     pub invalid: usize,
 }
@@ -90,7 +186,12 @@ pub struct ReceiptAuditEntry {
     pub card_id: Option<String>,
     pub receipt_tool: Option<String>,
     pub strength: Option<String>,
+    pub summary: Option<String>,
+    pub author: Option<String>,
+    pub recorded_at: Option<String>,
     pub expires_at: Option<String>,
+    pub command_hash: Option<String>,
+    pub limitations: Vec<String>,
     pub statuses: Vec<String>,
     pub issues: Vec<String>,
     pub matched_card: Option<ReceiptAuditCard>,
@@ -179,6 +280,9 @@ struct AuditReceiptRecord {
 struct ParsedReceipt {
     card_id: String,
     evidence: WitnessEvidence,
+    expires_at: String,
+    strength: String,
+    tool: String,
 }
 
 fn parse_receipt_file(path: &Path) -> Result<ParsedReceipt, String> {
@@ -192,7 +296,14 @@ fn parse_receipt_file(path: &Path) -> Result<ParsedReceipt, String> {
     Ok(ParsedReceipt {
         card_id: receipt.card_id.clone(),
         evidence: WitnessEvidence::present(receipt.evidence_summary()),
+        expires_at: receipt.expires_at.clone().unwrap_or_default(),
+        strength: receipt.strength,
+        tool: receipt.tool,
     })
+}
+
+fn imports_witness_evidence(strength: &str) -> bool {
+    matches!(strength, "ran" | "test_targeted" | "site_reached")
 }
 
 fn audit_receipt_records(root: &Path) -> Result<Vec<AuditReceiptRecord>, String> {
@@ -258,7 +369,12 @@ fn audit_receipt_record(
             card_id: None,
             receipt_tool: None,
             strength: None,
+            summary: None,
+            author: None,
+            recorded_at: None,
             expires_at: None,
+            command_hash: None,
+            limitations: Vec::new(),
             statuses: statuses.into_iter().collect(),
             issues,
             matched_card: None,
@@ -274,7 +390,12 @@ fn audit_receipt_record(
             card_id: None,
             receipt_tool: None,
             strength: None,
+            summary: None,
+            author: None,
+            recorded_at: None,
             expires_at: None,
+            command_hash: None,
+            limitations: Vec::new(),
             statuses: statuses.into_iter().collect(),
             issues,
             matched_card: None,
@@ -295,6 +416,9 @@ fn audit_receipt_record(
         }
         if err.contains("unknown receipt tool") {
             statuses.insert("wrong_tool".to_string());
+        }
+        if err.contains("command_hash") {
+            statuses.insert("command_hash_mismatch".to_string());
         }
     }
 
@@ -340,12 +464,21 @@ fn audit_receipt_record(
         ));
     }
 
+    if receipt_imports_current_witness_evidence(&receipt, &statuses, &route_tools) {
+        statuses.insert("imports_witness_evidence".to_string());
+    }
+
     ReceiptAuditEntry {
         path,
         card_id: Some(receipt.card_id),
         receipt_tool: Some(receipt.tool),
         strength: Some(receipt.strength),
+        summary: receipt.summary,
+        author: receipt.author,
+        recorded_at: receipt.recorded_at,
         expires_at: receipt.expires_at,
+        command_hash: receipt.command_hash,
+        limitations: receipt.limitations.unwrap_or_default(),
         statuses: statuses.into_iter().collect(),
         issues,
         matched_card: matched.map(|card| ReceiptAuditCard {
@@ -358,6 +491,19 @@ fn audit_receipt_record(
         }),
         route_tools,
     }
+}
+
+fn receipt_imports_current_witness_evidence(
+    receipt: &WitnessReceipt,
+    statuses: &BTreeSet<String>,
+    route_tools: &[String],
+) -> bool {
+    statuses.contains("matched")
+        && !statuses.contains("invalid")
+        && !statuses.contains("expired")
+        && !statuses.contains("duplicate")
+        && route_tools.iter().any(|tool| tool == &receipt.tool)
+        && imports_witness_evidence(&receipt.strength)
 }
 
 fn route_tools(card: &ReviewCard) -> BTreeSet<String> {
@@ -396,6 +542,7 @@ fn count_statuses(summary: &mut ReceiptAuditSummary, statuses: &[String]) {
             "wrong_identity" => summary.wrong_identity += 1,
             "wrong_tool" => summary.wrong_tool += 1,
             "weaker_than_required" => summary.weaker_than_required += 1,
+            "command_hash_mismatch" => summary.command_hash_mismatch += 1,
             "duplicate" => summary.duplicate += 1,
             "invalid" => summary.invalid += 1,
             _ => {}
@@ -442,6 +589,7 @@ mod tests {
     use super::*;
     use crate::analysis::pipeline;
     use crate::api::{AnalysisMode, AnalyzeInput, DiffSource, PolicyMode, Scope};
+    use crate::domain::WitnessKind;
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -476,14 +624,95 @@ mod tests {
 
         fs::remove_dir_all(&root).map_err(|err| format!("remove temp root failed: {err}"))?;
         let evidence = index
-            .evidence_for(&CardId(card_id.to_string()))
-            .ok_or_else(|| "receipt evidence missing".to_string())?;
+            .witness_evidence_for(&CardId(card_id.to_string()), &routes_for(WitnessKind::Miri));
         assert!(evidence.present);
         assert!(evidence.summary.contains("miri"));
         assert!(evidence.summary.contains("ran"));
         assert!(evidence.summary.contains("core/fixtures"));
         assert!(evidence.summary.contains("2026-08-18"));
         assert!(evidence.summary.contains("fixture only"));
+        Ok(())
+    }
+
+    #[test]
+    fn receipt_index_skips_expired_receipts_for_witness_evidence() -> Result<(), String> {
+        let root = unique_temp_dir("unsafe-review-expired-receipt-index")?;
+        let receipts = root.join(".unsafe-review").join("receipts");
+        fs::create_dir_all(&receipts).map_err(|err| format!("create receipt dir failed: {err}"))?;
+        let card_id =
+            "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1";
+        write_receipt(
+            &receipts,
+            "expired.json",
+            card_id,
+            "miri",
+            "ran",
+            "2026-05-17",
+        )?;
+
+        let index = ReceiptIndex::load_with_date(&root, "2026-05-18")?;
+        let validated = validate_receipts(&root)?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp root failed: {err}"))?;
+        assert_eq!(validated, 1);
+        let evidence = index
+            .witness_evidence_for(&CardId(card_id.to_string()), &routes_for(WitnessKind::Miri));
+        assert!(!evidence.present);
+        assert!(evidence.summary.contains("expired"));
+        Ok(())
+    }
+
+    #[test]
+    fn receipt_index_skips_configured_receipts_for_witness_evidence() -> Result<(), String> {
+        let root = unique_temp_dir("unsafe-review-configured-receipt-index")?;
+        let receipts = root.join(".unsafe-review").join("receipts");
+        fs::create_dir_all(&receipts).map_err(|err| format!("create receipt dir failed: {err}"))?;
+        let card_id =
+            "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1";
+        write_receipt(
+            &receipts,
+            "configured.json",
+            card_id,
+            "miri",
+            "configured",
+            "2026-08-18",
+        )?;
+
+        let index = ReceiptIndex::load_with_date(&root, "2026-05-18")?;
+        let validated = validate_receipts(&root)?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp root failed: {err}"))?;
+        assert_eq!(validated, 1);
+        let evidence = index
+            .witness_evidence_for(&CardId(card_id.to_string()), &routes_for(WitnessKind::Miri));
+        assert!(!evidence.present);
+        assert!(evidence.summary.contains("configured"));
+        Ok(())
+    }
+
+    #[test]
+    fn receipt_index_skips_unrouted_tools_for_witness_evidence() -> Result<(), String> {
+        let root = unique_temp_dir("unsafe-review-unrouted-receipt-index")?;
+        let receipts = root.join(".unsafe-review").join("receipts");
+        fs::create_dir_all(&receipts).map_err(|err| format!("create receipt dir failed: {err}"))?;
+        let card_id =
+            "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1";
+        write_receipt(&receipts, "loom.json", card_id, "loom", "ran", "2026-08-18")?;
+
+        let index = ReceiptIndex::load_with_date(&root, "2026-05-18")?;
+        let validated = validate_receipts(&root)?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp root failed: {err}"))?;
+        assert_eq!(validated, 1);
+        let evidence = index
+            .witness_evidence_for(&CardId(card_id.to_string()), &routes_for(WitnessKind::Miri));
+        assert!(!evidence.present);
+        assert!(
+            evidence
+                .summary
+                .contains("does not match routed witness tools")
+        );
+        assert!(evidence.summary.contains("loom"));
         Ok(())
     }
 
@@ -751,6 +980,7 @@ mod tests {
         assert_eq!(report.summary.wrong_identity, 1);
         assert_eq!(report.summary.wrong_tool, 1);
         assert_eq!(report.summary.weaker_than_required, 1);
+        assert_eq!(report.summary.command_hash_mismatch, 0);
         assert_eq!(report.summary.duplicate, 5);
         assert_eq!(report.summary.invalid, 1);
         assert_eq!(report.limitations.len(), 4);
@@ -783,12 +1013,173 @@ mod tests {
         assert_eq!(matched_card.operation_family, "raw_pointer_read");
         assert_eq!(matched_card.missing_count, 2);
         assert!(matched_card.next_action.contains("Add or expose"));
+        let expected_command_hash = WitnessReceipt::command_hash("cargo test");
+        assert_eq!(
+            matched_entry.command_hash.as_deref(),
+            Some(expected_command_hash.as_str())
+        );
+        assert!(
+            !matched_entry
+                .statuses
+                .iter()
+                .any(|status| status == "imports_witness_evidence")
+        );
+        assert_eq!(
+            matched_entry.recorded_at.as_deref(),
+            Some("2025-12-18T00:00:00Z")
+        );
+        assert_eq!(matched_entry.summary.as_deref(), Some("focused witness"));
+        assert_eq!(matched_entry.author.as_deref(), Some("core/fixtures"));
+        assert_eq!(matched_entry.limitations, vec!["fixture only"]);
         let duplicate_entries = report
             .receipts
             .iter()
             .filter(|entry| entry.statuses.iter().any(|status| status == "duplicate"))
             .count();
         assert_eq!(duplicate_entries, 5);
+        Ok(())
+    }
+
+    #[test]
+    fn receipt_audit_marks_only_importable_current_witness_receipts() -> Result<(), String> {
+        let importable_root = copy_fixture_to_temp(
+            "raw_pointer_alignment",
+            "unsafe-review-receipt-audit-importable",
+        )?;
+        let importable_output = analyze_fixture_root(&importable_root)?;
+        let importable_card_id = importable_output
+            .cards
+            .first()
+            .ok_or_else(|| "fixture produced no card".to_string())?
+            .id
+            .0
+            .clone();
+        let importable_dir = importable_root.join(".unsafe-review").join("receipts");
+        fs::create_dir_all(&importable_dir)
+            .map_err(|err| format!("create receipt dir failed: {err}"))?;
+        write_receipt(
+            &importable_dir,
+            "miri-ran.json",
+            &importable_card_id,
+            "miri",
+            "ran",
+            "2026-08-18",
+        )?;
+
+        let importable_report = audit_receipts_with_date(&importable_output, "2026-05-18")?;
+        let importable_entry = importable_report
+            .receipts
+            .first()
+            .ok_or_else(|| "importable receipt entry missing".to_string())?;
+        assert!(
+            importable_entry
+                .statuses
+                .iter()
+                .any(|status| status == "imports_witness_evidence")
+        );
+
+        let configured_root = copy_fixture_to_temp(
+            "raw_pointer_alignment",
+            "unsafe-review-receipt-audit-configured",
+        )?;
+        let configured_output = analyze_fixture_root(&configured_root)?;
+        let configured_card_id = configured_output
+            .cards
+            .first()
+            .ok_or_else(|| "fixture produced no card".to_string())?
+            .id
+            .0
+            .clone();
+        let configured_dir = configured_root.join(".unsafe-review").join("receipts");
+        fs::create_dir_all(&configured_dir)
+            .map_err(|err| format!("create receipt dir failed: {err}"))?;
+        write_receipt(
+            &configured_dir,
+            "miri-configured.json",
+            &configured_card_id,
+            "miri",
+            "configured",
+            "2026-08-18",
+        )?;
+
+        let configured_report = audit_receipts_with_date(&configured_output, "2026-05-18")?;
+        let configured_entry = configured_report
+            .receipts
+            .first()
+            .ok_or_else(|| "configured receipt entry missing".to_string())?;
+        assert!(
+            configured_entry
+                .statuses
+                .iter()
+                .any(|status| status == "matched")
+        );
+        assert!(
+            configured_entry
+                .statuses
+                .iter()
+                .any(|status| status == "weaker_than_required")
+        );
+        assert!(
+            !configured_entry
+                .statuses
+                .iter()
+                .any(|status| status == "imports_witness_evidence")
+        );
+
+        let wrong_tool_root = copy_fixture_to_temp(
+            "raw_pointer_alignment",
+            "unsafe-review-receipt-audit-wrong-tool-importability",
+        )?;
+        let wrong_tool_output = analyze_fixture_root(&wrong_tool_root)?;
+        let wrong_tool_card_id = wrong_tool_output
+            .cards
+            .first()
+            .ok_or_else(|| "fixture produced no card".to_string())?
+            .id
+            .0
+            .clone();
+        let wrong_tool_dir = wrong_tool_root.join(".unsafe-review").join("receipts");
+        fs::create_dir_all(&wrong_tool_dir)
+            .map_err(|err| format!("create receipt dir failed: {err}"))?;
+        write_receipt(
+            &wrong_tool_dir,
+            "loom-ran.json",
+            &wrong_tool_card_id,
+            "loom",
+            "ran",
+            "2026-08-18",
+        )?;
+
+        let wrong_tool_report = audit_receipts_with_date(&wrong_tool_output, "2026-05-18")?;
+        let wrong_tool_entry = wrong_tool_report
+            .receipts
+            .first()
+            .ok_or_else(|| "wrong-tool receipt entry missing".to_string())?;
+        assert!(
+            wrong_tool_entry
+                .statuses
+                .iter()
+                .any(|status| status == "matched")
+        );
+        assert!(
+            wrong_tool_entry
+                .statuses
+                .iter()
+                .any(|status| status == "wrong_tool")
+        );
+        assert!(
+            !wrong_tool_entry
+                .statuses
+                .iter()
+                .any(|status| status == "imports_witness_evidence")
+        );
+
+        fs::remove_dir_all(&importable_root)
+            .map_err(|err| format!("remove importable temp root failed: {err}"))?;
+        fs::remove_dir_all(&configured_root)
+            .map_err(|err| format!("remove configured temp root failed: {err}"))?;
+        fs::remove_dir_all(&wrong_tool_root)
+            .map_err(|err| format!("remove wrong-tool temp root failed: {err}"))?;
         Ok(())
     }
 
@@ -815,6 +1206,74 @@ mod tests {
         assert_eq!(report.summary.wrong_identity, 1);
         assert_eq!(report.summary.wrong_tool, 1);
         assert_eq!(report.summary.receipts, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn receipt_audit_reports_command_hash_mismatch_without_losing_card_context()
+    -> Result<(), String> {
+        let root = copy_fixture_to_temp(
+            "raw_pointer_alignment",
+            "unsafe-review-receipt-audit-command-hash-mismatch",
+        )?;
+        let output = analyze_fixture_root(&root)?;
+        let card_id = output
+            .cards
+            .first()
+            .ok_or_else(|| "fixture produced no card".to_string())?
+            .id
+            .0
+            .clone();
+        let receipt_dir = root.join(".unsafe-review").join("receipts");
+        fs::create_dir_all(&receipt_dir)
+            .map_err(|err| format!("create receipt dir failed: {err}"))?;
+        fs::write(
+            receipt_dir.join("bad-command-hash.json"),
+            format!(
+                r#"{{
+  "schema_version": "0.1",
+  "card_id": "{card_id}",
+  "tool": "miri",
+  "strength": "ran",
+  "author": "core/fixtures",
+  "recorded_at": "2025-12-18T00:00:00Z",
+  "expires_at": "2026-08-18",
+  "summary": "focused witness",
+  "command": "cargo test",
+  "command_hash": "0000000000000000",
+  "limitations": ["fixture only"]
+}}"#
+            ),
+        )
+        .map_err(|err| format!("write receipt failed: {err}"))?;
+
+        let report = audit_receipts_with_date(&output, "2026-05-18")?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp root failed: {err}"))?;
+        assert_eq!(report.summary.receipts, 1);
+        assert_eq!(report.summary.matched, 1);
+        assert_eq!(report.summary.command_hash_mismatch, 1);
+        assert_eq!(report.summary.invalid, 1);
+        let entry = report
+            .receipts
+            .first()
+            .ok_or_else(|| "receipt audit entry missing".to_string())?;
+        assert_eq!(entry.command_hash.as_deref(), Some("0000000000000000"));
+        assert!(entry.statuses.iter().any(|status| status == "matched"));
+        assert!(entry.statuses.iter().any(|status| status == "invalid"));
+        assert!(
+            entry
+                .statuses
+                .iter()
+                .any(|status| status == "command_hash_mismatch")
+        );
+        assert!(entry.matched_card.is_some());
+        assert!(
+            entry
+                .issues
+                .iter()
+                .any(|issue| issue.contains("command_hash"))
+        );
         Ok(())
     }
 
@@ -882,6 +1341,7 @@ mod tests {
         strength: &str,
         expires_at: &str,
     ) -> Result<(), String> {
+        let command_hash = WitnessReceipt::command_hash("cargo test");
         fs::write(
             dir.join(name),
             format!(
@@ -895,10 +1355,20 @@ mod tests {
   "expires_at": "{expires_at}",
   "summary": "focused witness",
   "command": "cargo test",
+  "command_hash": "{command_hash}",
   "limitations": ["fixture only"]
 }}"#
             ),
         )
         .map_err(|err| format!("write receipt {name} failed: {err}"))
+    }
+
+    fn routes_for(kind: WitnessKind) -> Vec<WitnessRoute> {
+        vec![WitnessRoute {
+            kind,
+            reason: "fixture route".to_string(),
+            command: None,
+            required: false,
+        }]
     }
 }

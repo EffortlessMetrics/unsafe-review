@@ -1,0 +1,670 @@
+schema_version = "0.1"
+status = "fixture_pinned"
+claim_id = "transmute-bool-valid-value-evidence"
+operation_family = "transmute"
+hazard = "invalid_value"
+partition = "fixture"
+source_kind = "fixture_golden"
+trust_boundary = """
+Static unsafe contract review only. These labels describe fixture-pinned
+ReviewCard valid-value evidence behavior; they are not a proof of memory safety, not UB-free status, not a Miri result, not Miri-clean status, not site execution evidence, not calibrated precision or recall, not witness adequacy, and not policy readiness.
+"""
+
+[[samples]]
+id = "transmute-bool-missing-valid-value"
+fixture = "transmute_invalid_value"
+kind = "positive"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "A bare transmute from `u8` to `bool` does not prove the destination value satisfies bool validity."
+
+[[samples]]
+id = "transmute-bool-layout-only-missing-valid-value"
+fixture = "transmute_layout_size_guard"
+kind = "positive"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "A layout-size guard does not discharge the bool valid-value obligation."
+
+[[samples]]
+id = "transmute-bool-conjunct-layout-guard-present"
+fixture = "transmute_layout_conjunct_branch_guard"
+kind = "positive"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "layout"
+expected_contract_state = "present"
+expected_discharge_state = "present"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A size_of layout predicate that appears as a top-level conjunct in an open branch is still dominating layout evidence."
+
+[[samples]]
+id = "transmute-bool-disjunct-layout-not-guard"
+fixture = "transmute_layout_disjunct_branch_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "layout"
+expected_contract_state = "present"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A layout-size predicate that appears only in a disjunctive open branch can enter without the layout check and must not discharge layout evidence."
+
+[[samples]]
+id = "transmute-bool-layout-mismatch-return-present"
+fixture = "transmute_layout_mismatch_return_guard"
+kind = "positive"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "layout"
+expected_contract_state = "present"
+expected_discharge_state = "present"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "An early return on mismatched source/destination size discharges the layout obligation for the later transmute."
+
+[[samples]]
+id = "transmute-bool-layout-mismatch-return-comment-not-layout"
+fixture = "transmute_layout_mismatch_return_comment_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "layout"
+expected_contract_state = "present"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A comment that says a layout mismatch should return is contract prose only; it does not create executable layout evidence."
+
+[[samples]]
+id = "transmute-bool-conjunct-layout-return-not-guard"
+fixture = "transmute_layout_conjunct_return_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "layout"
+expected_contract_state = "present"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A layout mismatch predicate that appears only in a conjunctive early-return branch can still fall through with mismatched layout and must not discharge layout evidence."
+
+[[samples]]
+id = "transmute-bool-closed-layout-not-guard"
+fixture = "transmute_layout_closed_branch_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "layout"
+expected_contract_state = "present"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A layout-size assertion in a closed branch does not dominate the later transmute and must not discharge layout evidence."
+
+[[samples]]
+id = "transmute-bool-observed-layout-not-guard"
+fixture = "transmute_layout_observed_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "layout"
+expected_contract_state = "present"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "Observed layout-size equality does not assert or branch on the layout obligation and must not discharge layout evidence."
+
+[[samples]]
+id = "transmute-bool-comment-not-valid-value"
+fixture = "transmute_bool_comment_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_contract_state = "present"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A SAFETY comment that claims the source byte is bool-valid is contract prose only; it does not create executable valid-value evidence."
+
+[[samples]]
+id = "transmute-bool-domain-guard-present"
+fixture = "transmute_bool_valid_value_guard"
+kind = "positive"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_discharge_state = "present"
+label_source = "fixture_golden"
+rationale = "A dominating same-value bool-domain guard discharges the valid-value obligation."
+
+[[samples]]
+id = "transmute-bool-conjunct-branch-guard-present"
+fixture = "transmute_bool_conjunct_branch_guard"
+kind = "positive"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_discharge_state = "present"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A same-value bool-domain predicate that appears as a top-level conjunct in an open branch is still dominating valid-value evidence."
+
+[[samples]]
+id = "transmute-bool-disjunct-branch-not-valid-value"
+fixture = "transmute_bool_disjunct_branch_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A same-value bool-domain predicate that appears only in a disjunctive open branch can admit invalid bytes and must not discharge valid-value evidence."
+
+[[samples]]
+id = "transmute-bool-invalid-return-guard-present"
+fixture = "transmute_bool_invalid_return_guard"
+kind = "positive"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_discharge_state = "present"
+label_source = "fixture_golden"
+rationale = "An early return on invalid bool byte values discharges the valid-value obligation."
+
+[[samples]]
+id = "transmute-bool-invalid-return-comment-not-valid-value"
+fixture = "transmute_bool_invalid_return_comment_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A comment that says invalid bool byte values should return is contract prose only; it does not create executable valid-value evidence."
+
+[[samples]]
+id = "transmute-bool-disjunct-return-guard-present"
+fixture = "transmute_bool_disjunct_return_guard"
+kind = "positive"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_discharge_state = "present"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "An invalid-byte predicate that appears as a top-level disjunct in an early-return branch still excludes invalid bool byte values before transmute."
+
+[[samples]]
+id = "transmute-bool-conjunct-return-not-valid-value"
+fixture = "transmute_bool_conjunct_return_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "An invalid-byte predicate that appears only in a conjunctive early-return branch can leave invalid bytes on the fallthrough path and must not discharge valid-value evidence."
+
+[[samples]]
+id = "transmute-bool-other-value-not-guard"
+fixture = "transmute_bool_other_value_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "Bool-domain evidence for another source byte does not discharge the valid-value obligation for the transmuted byte."
+
+[[samples]]
+id = "transmute-bool-prior-guarded-call-not-guard"
+fixture = "transmute_bool_prior_guarded_call_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "Bool-domain evidence for a prior transmute operation does not discharge the valid-value obligation for a later transmute of another byte."
+
+[[samples]]
+id = "transmute-bool-observed-not-guard"
+fixture = "transmute_bool_value_observed_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "A bare observed bool-domain expression is not a dominating guard for the transmute."
+
+[[samples]]
+id = "transmute-bool-closed-branch-not-guard"
+fixture = "transmute_bool_closed_if_observed_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "A closed positive bool-domain branch does not dominate the later transmute."
+
+[[samples]]
+id = "transmute-bool-reassigned-not-guard"
+fixture = "transmute_bool_guard_then_reassigned_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "Bool-domain evidence becomes stale when the transmuted byte is reassigned before use."
+
+[[samples]]
+id = "transmute-bool-compound-reassigned-not-guard"
+fixture = "transmute_bool_guard_then_compound_reassigned_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "Bool-domain evidence becomes stale when the transmuted byte is compound reassigned before use."
+
+[[samples]]
+id = "transmute-bool-shadowed-not-guard"
+fixture = "transmute_bool_guard_then_shadowed_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "Bool-domain evidence becomes stale when a later let-binding shadows the transmuted byte before use."
+
+[[samples]]
+id = "transmute-copy-bool-missing-valid-value"
+fixture = "transmute_copy_invalid_value"
+kind = "positive"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "A bare transmute_copy from referenced `u8` to `bool` does not prove destination validity."
+
+[[samples]]
+id = "transmute-copy-bool-layout-only-missing-valid-value"
+fixture = "transmute_copy_layout_size_guard"
+kind = "positive"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_contract_state = "present"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A transmute_copy layout-size guard does not discharge the referenced bool valid-value obligation."
+
+[[samples]]
+id = "transmute-copy-bool-comment-not-valid-value"
+fixture = "transmute_copy_bool_comment_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_contract_state = "present"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A SAFETY comment that claims the referenced byte is bool-valid is contract prose only; it does not create executable transmute_copy valid-value evidence."
+
+[[samples]]
+id = "transmute-copy-bool-other-value-not-valid-value"
+fixture = "transmute_copy_bool_other_value_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_contract_state = "present"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "Bool-domain evidence for another referenced byte does not discharge the valid-value obligation for transmute_copy of `value`."
+
+[[samples]]
+id = "transmute-copy-bool-prior-guarded-call-not-valid-value"
+fixture = "transmute_copy_bool_prior_guarded_call_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_contract_state = "present"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "Bool-domain evidence for an earlier transmute_copy operation does not discharge the valid-value obligation for a later transmute_copy of `other`."
+
+[[samples]]
+id = "transmute-copy-conjunct-layout-guard-present"
+fixture = "transmute_copy_layout_conjunct_branch_guard"
+kind = "positive"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "layout"
+expected_contract_state = "present"
+expected_discharge_state = "present"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A transmute_copy size_of layout predicate that appears as a top-level conjunct in an open branch is still dominating layout evidence."
+
+[[samples]]
+id = "transmute-copy-disjunct-layout-not-guard"
+fixture = "transmute_copy_layout_disjunct_branch_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "layout"
+expected_contract_state = "present"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A transmute_copy layout-size predicate that appears only in a disjunctive open branch can enter without the layout check and must not discharge layout evidence."
+
+[[samples]]
+id = "transmute-copy-layout-mismatch-return-present"
+fixture = "transmute_copy_layout_mismatch_return_guard"
+kind = "positive"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "layout"
+expected_contract_state = "present"
+expected_discharge_state = "present"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "An early return on mismatched source/destination size discharges layout evidence for the later transmute_copy."
+
+[[samples]]
+id = "transmute-copy-layout-mismatch-return-comment-not-layout"
+fixture = "transmute_copy_layout_mismatch_return_comment_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "layout"
+expected_contract_state = "present"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A comment that says a transmute_copy layout mismatch should return is contract prose only; it does not create executable layout evidence."
+
+[[samples]]
+id = "transmute-copy-conjunct-layout-return-not-guard"
+fixture = "transmute_copy_layout_conjunct_return_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "layout"
+expected_contract_state = "present"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A transmute_copy layout mismatch predicate that appears only in a conjunctive early-return branch can still fall through with mismatched layout and must not discharge layout evidence."
+
+[[samples]]
+id = "transmute-copy-bool-domain-guard-present"
+fixture = "transmute_copy_bool_valid_value_guard"
+kind = "positive"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_discharge_state = "present"
+label_source = "fixture_golden"
+rationale = "A dominating referenced-byte bool-domain guard discharges transmute_copy valid-value evidence."
+
+[[samples]]
+id = "transmute-copy-bool-conjunct-branch-guard-present"
+fixture = "transmute_copy_bool_conjunct_branch_guard"
+kind = "positive"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_discharge_state = "present"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A referenced-byte bool-domain predicate that appears as a top-level conjunct in an open branch is still dominating transmute_copy valid-value evidence."
+
+[[samples]]
+id = "transmute-copy-bool-disjunct-branch-not-valid-value"
+fixture = "transmute_copy_bool_disjunct_branch_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A referenced-byte bool-domain predicate that appears only in a disjunctive open branch can admit invalid bytes and must not discharge transmute_copy valid-value evidence."
+
+[[samples]]
+id = "transmute-copy-bool-invalid-return-guard-present"
+fixture = "transmute_copy_bool_invalid_return_guard"
+kind = "positive"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_discharge_state = "present"
+label_source = "fixture_golden"
+rationale = "An early return on invalid referenced-byte values discharges transmute_copy valid-value evidence."
+
+[[samples]]
+id = "transmute-copy-bool-invalid-return-comment-not-valid-value"
+fixture = "transmute_copy_bool_invalid_return_comment_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A comment that says invalid referenced bool byte values should return is contract prose only; it does not create executable transmute_copy valid-value evidence."
+
+[[samples]]
+id = "transmute-copy-bool-disjunct-return-guard-present"
+fixture = "transmute_copy_bool_disjunct_return_guard"
+kind = "positive"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_discharge_state = "present"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A referenced-byte invalid-domain predicate that appears as a top-level disjunct in an early-return branch still excludes invalid bool byte values before transmute_copy."
+
+[[samples]]
+id = "transmute-copy-bool-conjunct-return-not-valid-value"
+fixture = "transmute_copy_bool_conjunct_return_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A referenced-byte invalid-domain predicate that appears only in a conjunctive early-return branch can leave invalid bytes on the fallthrough path and must not discharge transmute_copy valid-value evidence."
+
+[[samples]]
+id = "transmute-copy-bool-observed-not-guard"
+fixture = "transmute_copy_bool_value_observed_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "A bare referenced-byte bool-domain observation is not a dominating guard for transmute_copy."
+
+[[samples]]
+id = "transmute-copy-bool-closed-branch-not-guard"
+fixture = "transmute_copy_bool_closed_if_observed_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_contract_state = "present"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A closed positive referenced-byte bool-domain branch does not dominate the later transmute_copy."
+
+[[samples]]
+id = "transmute-copy-bool-reassigned-not-guard"
+fixture = "transmute_copy_bool_guard_then_reassigned_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "Referenced-byte bool-domain evidence becomes stale when the byte is reassigned before transmute_copy."
+
+[[samples]]
+id = "transmute-copy-bool-compound-reassigned-not-guard"
+fixture = "transmute_copy_bool_guard_then_compound_reassigned_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "Referenced-byte bool-domain evidence becomes stale when the byte is compound reassigned before transmute_copy."
+
+[[samples]]
+id = "transmute-copy-bool-shadowed-not-guard"
+fixture = "transmute_copy_bool_guard_then_shadowed_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "Referenced-byte bool-domain evidence becomes stale when a later let-binding shadows the byte before transmute_copy."
+
+[[samples]]
+id = "multiline-transmute-copy-bool-missing-valid-value"
+fixture = "multiline_transmute_copy_invalid_value"
+kind = "positive"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+expected_obligation_key = "valid-value"
+expected_contract_state = "present"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A multiline transmute_copy keeps concrete transmute obligations and still lacks bool valid-value evidence."

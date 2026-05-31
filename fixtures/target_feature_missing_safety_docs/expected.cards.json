@@ -1,0 +1,71 @@
+[
+  {
+    "id": "UR-target-feature-missing-safety-docs-src-lib-rs-find-raw-operation-target_feature-target-feature-88dd4a92b072-target_feature-c1",
+    "class": "contract_missing",
+    "priority": "high",
+    "confidence": "high",
+    "site": {
+      "file": "src/lib.rs",
+      "line": 2,
+      "column": 1,
+      "kind": "operation",
+      "owner": "find_raw",
+      "visibility": "private",
+      "public_api_surface": false,
+      "snippet": "#[target_feature(enable = \"sse2\")]"
+    },
+    "operation": "#[target_feature(enable = \"sse2\")]",
+    "operation_family": "target_feature",
+    "hazards": [
+      "target_feature"
+    ],
+    "obligations": [
+      "callers only execute this path on supported hardware"
+    ],
+    "obligation_evidence": [
+      {
+        "key": "target-feature",
+        "description": "callers only execute this path on supported hardware",
+        "contract": {
+          "present": false,
+          "state": "missing",
+          "summary": "No nearby `# Safety` docs or `SAFETY:` / `Safety:` comment detected"
+        },
+        "discharge": {
+          "present": false,
+          "state": "missing",
+          "summary": "No obligation-specific guard code was detected"
+        },
+        "reach": {
+          "present": true,
+          "state": "present",
+          "summary": "1 related test file(s) mention owner `find_raw`"
+        },
+        "witness": {
+          "present": false,
+          "state": "missing",
+          "summary": "No imported witness receipt was found"
+        }
+      }
+    ],
+    "contract": "No nearby `# Safety` docs or `SAFETY:` / `Safety:` comment detected",
+    "discharge": "No visible local guard detected",
+    "reach": "1 related test file(s) mention owner `find_raw`",
+    "witness": "No imported witness receipt was found",
+    "witness_routes": [
+      {
+        "kind": "human-deep-review",
+        "reason": "The analyzer could not infer a precise witness route; use manual unsafe contract review",
+        "command": null,
+        "required": false
+      }
+    ],
+    "missing": [
+      "Missing `# Safety` documentation or `SAFETY:` / `Safety:` comment",
+      "Missing visible local guard for inferred safety obligations",
+      "No witness receipt imported for this card"
+    ],
+    "next_action": "Add a precise `# Safety` section or `SAFETY:` / `Safety:` comment that names the required conditions.",
+    "verify_commands": []
+  }
+]

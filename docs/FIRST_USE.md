@@ -54,8 +54,8 @@ target/unsafe-review/repair-queue.json
 ```
 
 The default policy is advisory. The bundle is artifact-only: it does not run
-witness tools, run agents, post comments, edit source, or enforce blocking
-policy. A finding means:
+witness tools, post comments, edit source, or enforce blocking policy. A finding
+means:
 
 ```text
 This changed unsafe-adjacent seam is missing review evidence.
@@ -125,13 +125,26 @@ artifact only; `unsafe-review` does not post comments by default.
 
 ## Inspect One Card
 
-`first-pr` prints an `Explain top card` command for the highest-priority card.
-Run that command to see why the card exists, what evidence is missing, what would
-resolve it, what would not resolve it, which witness route fits, and what
-unsafe-review is not claiming:
+`first-pr` prints `Explain top card` and `Agent packet` commands for the
+highest-priority card.
+Run the `explain` command to see why the card exists, what evidence is missing,
+what would resolve it, what would not resolve it, which witness route fits, and
+what unsafe-review is not claiming:
 
 ```bash
 unsafe-review explain <card-id>
+```
+
+It also writes `receipt-audit.md` and prints the matching
+`unsafe-review receipt audit` command for checking saved witness receipt metadata
+against the current first-pr cards. That audit does not run Miri, cargo-careful,
+sanitizers, Loom, Shuttle, Kani, or Crux.
+
+Run the `context --json` command when handing the bounded card packet to an
+agent:
+
+```bash
+unsafe-review context <card-id> --json
 ```
 
 You can also copy any other card id from JSON, human output, or the PR summary
@@ -211,3 +224,7 @@ witnesses, or make a policy decision.
 
 For command details, receipt import examples, policy report examples, and output
 format reference, see the [CLI guide](CLI.md).
+
+For a longer walkthrough that covers explain, support posture, witness plans,
+agent packets, and the saved editor projection in one path, see the
+[first-hour guide](FIRST_HOUR.md).

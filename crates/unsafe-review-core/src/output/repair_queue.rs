@@ -358,6 +358,7 @@ mod tests {
                 operation_family: "ffi",
                 buckets: &[
                     "repairable_by_guard",
+                    "repairable_by_test",
                     "requires_witness_receipt",
                     "requires_human_review",
                     "do_not_auto_repair",
@@ -557,12 +558,12 @@ mod tests {
             .ok_or("repair queue buckets should be an object")?;
         let mut names = buckets
             .iter()
-            .filter(|(_, entries)| {
+            .filter(|(_name, entries)| {
                 entries
                     .as_array()
                     .is_some_and(|entries| !entries.is_empty())
             })
-            .map(|(name, _)| name.clone())
+            .map(|(name, _entries)| name.clone())
             .collect::<Vec<_>>();
         names.sort();
         Ok(names)

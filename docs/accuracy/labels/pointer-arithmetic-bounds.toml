@@ -1,0 +1,137 @@
+schema_version = "0.1"
+status = "fixture_pinned"
+claim_id = "pointer-arithmetic-bounds-evidence"
+operation_family = "pointer_arithmetic"
+hazard = "bounds"
+partition = "fixture"
+source_kind = "fixture_golden"
+trust_boundary = """
+Static unsafe contract review only. These labels describe fixture-pinned
+ReviewCard bounds evidence behavior for pointer arithmetic; they are not a proof of memory safety, not UB-free status, not a Miri result, not Miri-clean status, not site execution evidence, not calibrated precision or recall, not witness adequacy, and not policy readiness.
+"""
+
+[[samples]]
+id = "pointer-arithmetic-num-ctrl-bytes-bounds-present"
+fixture = "pointer_arithmetic_num_ctrl_bytes_guard"
+kind = "positive"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "pointer_arithmetic"
+expected_hazard = "bounds"
+expected_obligation_key = "bounds"
+expected_discharge_state = "present"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "An index < num_ctrl_bytes guard discharges pointer-arithmetic bounds evidence without importing a witness receipt."
+
+[[samples]]
+id = "pointer-arithmetic-other-offset-bounds-missing"
+fixture = "pointer_arithmetic_other_offset_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "pointer_arithmetic"
+expected_hazard = "bounds"
+expected_obligation_key = "bounds"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A bounds guard for `other` does not discharge pointer arithmetic that advances by `index`."
+
+[[samples]]
+id = "pointer-arithmetic-reassigned-offset-bounds-missing"
+fixture = "pointer_arithmetic_reassigned_offset_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "pointer_arithmetic"
+expected_hazard = "bounds"
+expected_obligation_key = "bounds"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A bounds guard for `index` does not discharge pointer arithmetic after `index` is reassigned."
+
+[[samples]]
+id = "pointer-arithmetic-shadowed-offset-bounds-missing"
+fixture = "pointer_arithmetic_shadowed_offset_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "pointer_arithmetic"
+expected_hazard = "bounds"
+expected_obligation_key = "bounds"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A bounds guard for `index` does not discharge pointer arithmetic after a later `let index = ...` shadows the checked offset."
+
+[[samples]]
+id = "pointer-arithmetic-compound-offset-bounds-missing"
+fixture = "pointer_arithmetic_compound_offset_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "pointer_arithmetic"
+expected_hazard = "bounds"
+expected_obligation_key = "bounds"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A bounds guard for `index` does not discharge pointer arithmetic after `index` is compound-mutated before the unsafe operation."
+
+[[samples]]
+id = "pointer-arithmetic-stale-bound-bounds-missing"
+fixture = "pointer_arithmetic_stale_bound_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "pointer_arithmetic"
+expected_hazard = "bounds"
+expected_obligation_key = "bounds"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A bounds guard over `index < len` does not discharge pointer arithmetic after the local `len` bound is reassigned before the unsafe operation."
+
+[[samples]]
+id = "pointer-arithmetic-disjunct-bounds-missing"
+fixture = "pointer_arithmetic_disjunct_bounds_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "pointer_arithmetic"
+expected_hazard = "bounds"
+expected_obligation_key = "bounds"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A disjunctive positive branch can enter the pointer arithmetic without satisfying the bounds comparison, so it must not discharge bounds evidence."
+
+[[samples]]
+id = "pointer-arithmetic-closed-branch-bounds-missing"
+fixture = "pointer_arithmetic_closed_branch_not_guard"
+kind = "false_positive_control"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "pointer_arithmetic"
+expected_hazard = "bounds"
+expected_obligation_key = "bounds"
+expected_discharge_state = "missing"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A closed positive branch observes the bounds predicate but does not dominate the later pointer arithmetic, so it must not discharge bounds evidence."
+
+[[samples]]
+id = "pointer-arithmetic-same-slice-end-bounds-present"
+fixture = "pointer_arithmetic_slice_end"
+kind = "positive"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "pointer_arithmetic"
+expected_hazard = "bounds"
+expected_obligation_key = "bounds"
+expected_discharge_state = "present"
+expected_witness_route_kinds = ["miri", "cargo-careful"]
+label_source = "fixture_golden"
+rationale = "A same-slice start pointer plus len end-pointer pattern discharges pointer-arithmetic bounds evidence without proving arbitrary provenance."
