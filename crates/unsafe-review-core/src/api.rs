@@ -1,5 +1,6 @@
 use crate::analysis::{pipeline, receipts};
 use crate::domain::{CardId, ReviewCard};
+use crate::input::workspace;
 use crate::output::{
     agent, badges, comment_plan, human, json, lsp, markdown, outcome, policy_report, receipt_audit,
     repair_queue, sarif, witness_plan,
@@ -53,6 +54,54 @@ pub enum DiffSource {
     NoneRepoScan,
     Text(String),
     File(PathBuf),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RepoScanPhase {
+    Discovering,
+    Scanning,
+    Complete,
+}
+
+impl RepoScanPhase {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Discovering => "discovering",
+            Self::Scanning => "scanning",
+            Self::Complete => "complete",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RepoScanStatus {
+    pub schema_version: String,
+    pub phase: RepoScanPhase,
+    pub elapsed_ms: u64,
+    pub files_discovered: usize,
+    pub files_scanned: usize,
+    pub cards_found: usize,
+    pub last_path: Option<PathBuf>,
+    pub completed: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DiscoveryOptions {
+    pub include: Vec<String>,
+    pub exclude: Vec<String>,
+    pub respect_gitignore: bool,
+    pub large_repo_ignores: bool,
+    pub max_files: Option<usize>,
+}
+
+impl DiscoveryOptions {
+    pub fn repo_defaults() -> Self {
+        Self {
+            respect_gitignore: true,
+            large_repo_ignores: true,
+            ..Self::default()
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -110,6 +159,31 @@ pub struct AnalyzeOutput {
 
 pub fn analyze(input: AnalyzeInput) -> Result<AnalyzeOutput, String> {
     pipeline::analyze(input)
+}
+
+pub fn analyze_with_discovery(
+    input: AnalyzeInput,
+    discovery: DiscoveryOptions,
+) -> Result<AnalyzeOutput, String> {
+    pipeline::analyze_with_discovery(input, discovery)
+}
+
+pub fn analyze_with_discovery_and_progress<F>(
+    input: AnalyzeInput,
+    discovery: DiscoveryOptions,
+    progress: F,
+) -> Result<AnalyzeOutput, String>
+where
+    F: FnMut(&RepoScanStatus) -> Result<(), String>,
+{
+    pipeline::analyze_with_discovery_and_progress(input, discovery, progress)
+}
+
+pub fn discover_repo_files(
+    root: PathBuf,
+    discovery: DiscoveryOptions,
+) -> Result<Vec<PathBuf>, String> {
+    workspace::discover_rust_files(&root, &discovery)
 }
 
 pub fn validate_witness_receipts(root: PathBuf) -> Result<usize, String> {

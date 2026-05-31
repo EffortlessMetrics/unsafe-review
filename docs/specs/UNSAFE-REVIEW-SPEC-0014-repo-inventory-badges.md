@@ -16,6 +16,32 @@ Repo mode is a static posture snapshot projected from `ReviewCard`s. It reports
 repo-scope summary counts, card JSON, Markdown posture reports, advisory policy,
 and the static-review trust boundary.
 
+Repo mode supports bounded file selection before analysis. `--include` and
+`--exclude` are repeatable glob filters over root-relative Rust paths. Empty
+include filters mean all discovered Rust files are eligible before excludes.
+Repo discovery respects gitignore files by default, supports an explicit
+opt-out for ignored Rust files, and skips common non-review trees by default:
+`.git`, `.github`, `.unsafe-review*`, `target`, `node_modules`, `vendor`,
+`build`, `dist`, and any directory named `generated`.
+
+`--list-files` is a dry run over the same discovery and filtering pipeline. It
+prints the selected root-relative Rust files and exits without creating
+ReviewCards or running witness tools. `--max-files` truncates the selected
+file list after deterministic ordering and applies to both dry-run listing and
+repo analysis input.
+
+When repo analysis writes a report through `--out`, it renders to
+`<out>.partial` and renames that file to `<out>` only after a successful render.
+It also updates a `<out>.status.json` sidecar while discovery and scanning run.
+The sidecar is operational scan status, not a second ReviewCard truth. It
+records `schema_version`, `phase`, `elapsed_ms`, `files_discovered`,
+`files_scanned`, `cards_found`, `last_path`, `completed`, `error`, and
+`partial_path`. `--progress` prints stderr heartbeats from the same status
+stream. On normal analysis, write, or rename errors, the command marks status
+incomplete and keeps any rendered partial report at `<out>.partial`. If the
+process is interrupted before rendering, the latest status sidecar is the
+durable artifact; a dedicated signal handler is deferred.
+
 Repo JSON uses this top-level contract:
 
 ```text
@@ -121,6 +147,8 @@ the current `unsafe-review badges` repo projection.
 - fixture-backed examples for positive and negative cases
 - JSON output contract coverage
 - CLI e2e coverage for repo JSON and badge JSON
+- CLI e2e coverage for repo file-selection dry runs
+- CLI e2e coverage for repo status sidecars and progress heartbeats
 - CLI e2e coverage for outcome comparison JSON/Markdown
 - policy documentation when behavior is configurable
 
@@ -128,9 +156,16 @@ the current `unsafe-review badges` repo projection.
 
 - Repo JSON for a fixture reports `scope = repo`, advisory policy, open-gap
   counts, cards, and the trust boundary.
+- Repo file-list dry runs honor include/exclude filters, gitignore defaults,
+  large-repo default skips, and max-file truncation without analyzing files.
+- Repo `--out` writes `<out>.status.json` with complete scan status on
+  successful analysis, promotes `<out>.partial` to `<out>` only after successful
+  rendering, marks status incomplete on normal output errors, and `--progress`
+  prints a final completion heartbeat.
 - Repo Markdown for a fixture reports repo posture, summary counts, top card
-  classes, operation families, witness routes, cards with concrete operation
-  expressions and next actions, and the trust boundary.
+  classes, operation families, witness routes, cards with direct `path:line`
+  source locations, concrete operation expressions and next actions, and the
+  trust boundary.
 - Badge JSON for a fixture reports open unsafe-review gaps rather than raw
   unsafe count or safe/unsafe status.
 - The `unsafe-review+` badge message equals `unsuppressed_review_gaps` plus the

@@ -223,6 +223,32 @@ edit source. See
 [Agent packet examples](explanation/agent-packet-examples.md) for
 fixture-backed examples of repair-ready and human-review-only packets.
 
+## Manual Candidates
+
+Import a manually discovered advisory candidate:
+
+```bash
+unsafe-review candidate import target/unsafe-scout/textdecoder-candidate.json \
+  --out .unsafe-review/candidates/R4R2-S001.json
+```
+
+The imported artifact is canonicalized with `source = "manual"` and
+`manual_candidate = true`. It remains advisory and must not be described as an
+analyzer-discovered finding.
+
+After import, `explain` and `context` can load the candidate by ID from
+`.unsafe-review/candidates/` when no analyzer ReviewCard with that ID exists:
+
+```bash
+unsafe-review explain R4R2-S001
+unsafe-review context R4R2-S001
+unsafe-review candidate witness-plan R4R2-S001
+```
+
+Manual candidate projections preserve the manual marker and external evidence
+references. They do not execute witnesses, post comments, edit source, enforce
+policy, prove UB, prove site execution, or prove repository safety.
+
 ## Repo Posture And Badges
 
 Repo mode scans the workspace and reports static open unsafe-review gaps:
@@ -231,6 +257,58 @@ Repo mode scans the workspace and reports static open unsafe-review gaps:
 unsafe-review repo --format json
 unsafe-review repo --format markdown --out target/unsafe-review/repo-posture.md
 ```
+
+When `repo` writes a report with `--out`, it renders to `<out>.partial` and
+renames that file to `<out>` only after a successful render. It also updates
+`<out>.status.json` while analysis runs. The status sidecar records the scan
+phase, elapsed time, discovered files, scanned files, cards found, last path,
+completion, and normal errors. Add `--progress` to print a small stderr
+heartbeat from the same status stream. If a normal write or rename error occurs
+after rendering, the partial report is kept at `<out>.partial`; if the process
+is interrupted before rendering, the latest status sidecar is the durable
+artifact.
+
+Repo Markdown also includes a related sink cluster section. The cluster section
+groups existing ReviewCards by source file and inferred owner/helper so a
+reviewer can inspect nearby unsafe sinks together. It is a report-only triage
+view; it is not a call graph, not proof of a shared root cause, and not a new
+analyzer finding source.
+
+For large or mixed repositories, bound the scan with repo-only file selection
+controls:
+
+```bash
+unsafe-review repo \
+  --root . \
+  --include 'src/**/*.rs' \
+  --include 'packages/**/*.rs' \
+  --exclude 'vendor/**' \
+  --exclude 'build/**' \
+  --exclude '**/generated/**' \
+  --format markdown \
+  --out target/unsafe-review/repo-posture.md
+```
+
+`--include` and `--exclude` are repeatable glob filters over root-relative Rust
+paths. Repo discovery respects gitignore files by default; use
+`--no-respect-gitignore` only when the review intentionally includes ignored
+Rust files. Repo discovery also skips common large or generated directories by
+default: `.git`, `.github`, `.unsafe-review*`, `target`, `node_modules`,
+`vendor`, `build`, `dist`, and `generated`.
+
+Use `--list-files` as a dry run before scanning a large repo:
+
+```bash
+unsafe-review repo \
+  --root . \
+  --include 'src/**/*.rs' \
+  --exclude '**/generated/**' \
+  --list-files
+```
+
+`--list-files` prints the selected root-relative Rust files and exits without
+running analysis. `--max-files <n>` truncates the selected file list after
+sorting, so it bounds both `--list-files` output and repo analysis input.
 
 Badge JSON reports open review gaps, not raw unsafe usage and not safety status:
 

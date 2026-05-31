@@ -1,29 +1,94 @@
 mod card_builder;
 
 use super::{receipts, scanner};
-use crate::api::{AnalysisMode, AnalyzeInput, AnalyzeOutput, DiffSource, Scope, Summary};
+use crate::api::{
+    AnalysisMode, AnalyzeInput, AnalyzeOutput, DiffSource, DiscoveryOptions, RepoScanPhase,
+    RepoScanStatus, Scope, Summary,
+};
 use crate::domain::{CardId, ReviewCard};
 use crate::input::{diff, workspace};
 use crate::policy::PolicyState;
 use crate::util::{slug, stable_hash_hex};
 use std::collections::BTreeMap;
 use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::Instant;
+
+type RepoProgressFn<'a> = &'a mut dyn FnMut(&RepoScanStatus) -> Result<(), String>;
 
 pub(crate) fn analyze(input: AnalyzeInput) -> Result<AnalyzeOutput, String> {
-    analyze_with_receipts(input, true)
+    let discovery = default_discovery_for(&input);
+    analyze_with_receipts(input, true, discovery, None)
+}
+
+pub(crate) fn analyze_with_discovery(
+    input: AnalyzeInput,
+    discovery: DiscoveryOptions,
+) -> Result<AnalyzeOutput, String> {
+    analyze_with_receipts(input, true, discovery, None)
+}
+
+pub(crate) fn analyze_with_discovery_and_progress<F>(
+    input: AnalyzeInput,
+    discovery: DiscoveryOptions,
+    mut progress: F,
+) -> Result<AnalyzeOutput, String>
+where
+    F: FnMut(&RepoScanStatus) -> Result<(), String>,
+{
+    analyze_with_receipts(input, true, discovery, Some(&mut progress))
 }
 
 pub(crate) fn analyze_without_receipts(input: AnalyzeInput) -> Result<AnalyzeOutput, String> {
-    analyze_with_receipts(input, false)
+    let discovery = default_discovery_for(&input);
+    analyze_with_receipts(input, false, discovery, None)
+}
+
+fn default_discovery_for(input: &AnalyzeInput) -> DiscoveryOptions {
+    if matches!(input.scope, Scope::Repo) || matches!(input.mode, AnalysisMode::Repo) {
+        DiscoveryOptions::repo_defaults()
+    } else {
+        DiscoveryOptions::default()
+    }
 }
 
 fn analyze_with_receipts(
     input: AnalyzeInput,
     import_receipts: bool,
+    discovery: DiscoveryOptions,
+    mut progress: Option<RepoProgressFn<'_>>,
 ) -> Result<AnalyzeOutput, String> {
+    let started = Instant::now();
     let repo_mode = matches!(input.scope, Scope::Repo) || matches!(input.mode, AnalysisMode::Repo);
     let diff_index = load_diff_index(&input.diff)?;
-    let all_rust_files = workspace::discover_rust_files(&input.root)?;
+    emit_repo_status(
+        &mut progress,
+        repo_status(RepoScanPhase::Discovering, &started, 0, 0, 0, None, false),
+    )?;
+    let mut discovered_files = 0usize;
+    let all_rust_files = {
+        let mut discovery_progress = |count: usize, path: &Path| {
+            discovered_files = count;
+            emit_repo_status(
+                &mut progress,
+                repo_status(
+                    RepoScanPhase::Discovering,
+                    &started,
+                    discovered_files,
+                    0,
+                    0,
+                    Some(path.to_path_buf()),
+                    false,
+                ),
+            )
+        };
+        workspace::discover_rust_files_with_progress(
+            &input.root,
+            &discovery,
+            Some(&mut discovery_progress),
+        )?
+    };
+    discovered_files = all_rust_files.len();
     let package = package_name(&input.root);
     let policy_state = PolicyState::load(&input.root)?;
     let receipt_index = if import_receipts {
@@ -44,11 +109,38 @@ fn analyze_with_receipts(
     let mut cards = Vec::new();
     let mut identity_counts = BTreeMap::new();
     let max_cards = input.max_cards.unwrap_or(usize::MAX);
+    let mut files_scanned = 0usize;
+    let mut last_scanned_path = None;
+    emit_repo_status(
+        &mut progress,
+        repo_status(
+            RepoScanPhase::Scanning,
+            &started,
+            discovered_files,
+            files_scanned,
+            cards.len(),
+            None,
+            false,
+        ),
+    )?;
     'files: for rel in &candidate_files {
         if cards.len() >= max_cards {
             break;
         }
+        emit_repo_status(
+            &mut progress,
+            repo_status(
+                RepoScanPhase::Scanning,
+                &started,
+                discovered_files,
+                files_scanned,
+                cards.len(),
+                Some(rel.clone()),
+                false,
+            ),
+        )?;
         let scanned = scanner::scan_file(&input.root, rel, Some(&diff_index), repo_mode)?;
+        files_scanned += 1;
         let mut build_ctx = card_builder::CardBuildContext {
             root: &input.root,
             package: &package,
@@ -56,11 +148,29 @@ fn analyze_with_receipts(
             policy_state: &policy_state,
             identity_counts: &mut identity_counts,
         };
+        let mut reached_max_cards = false;
         for scanned_site in scanned {
             cards.push(card_builder::build_card(&mut build_ctx, scanned_site));
             if cards.len() >= max_cards {
-                break 'files;
+                reached_max_cards = true;
+                break;
             }
+        }
+        emit_repo_status(
+            &mut progress,
+            repo_status(
+                RepoScanPhase::Scanning,
+                &started,
+                discovered_files,
+                files_scanned,
+                cards.len(),
+                Some(rel.clone()),
+                false,
+            ),
+        )?;
+        last_scanned_path = Some(rel.clone());
+        if reached_max_cards {
+            break 'files;
         }
     }
     cards.sort_by(|left, right| {
@@ -71,6 +181,18 @@ fn analyze_with_receipts(
             .then(left.site.location.line.cmp(&right.site.location.line))
     });
     let summary = summarize(all_rust_files.len(), candidate_files.len(), &cards);
+    emit_repo_status(
+        &mut progress,
+        repo_status(
+            RepoScanPhase::Complete,
+            &started,
+            discovered_files,
+            files_scanned,
+            cards.len(),
+            last_scanned_path,
+            true,
+        ),
+    )?;
     Ok(AnalyzeOutput {
         schema_version: "0.1".to_string(),
         tool: "unsafe-review".to_string(),
@@ -81,6 +203,37 @@ fn analyze_with_receipts(
         summary,
         cards,
     })
+}
+
+fn emit_repo_status(
+    progress: &mut Option<RepoProgressFn<'_>>,
+    status: RepoScanStatus,
+) -> Result<(), String> {
+    if let Some(progress) = progress.as_deref_mut() {
+        progress(&status)?;
+    }
+    Ok(())
+}
+
+fn repo_status(
+    phase: RepoScanPhase,
+    started: &Instant,
+    files_discovered: usize,
+    files_scanned: usize,
+    cards_found: usize,
+    last_path: Option<PathBuf>,
+    completed: bool,
+) -> RepoScanStatus {
+    RepoScanStatus {
+        schema_version: "repo-scan-status/v1".to_string(),
+        phase,
+        elapsed_ms: started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+        files_discovered,
+        files_scanned,
+        cards_found,
+        last_path,
+        completed,
+    }
 }
 
 fn package_name(root: &std::path::Path) -> String {
@@ -383,7 +536,7 @@ fn is_ident_continue(ch: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::{AnalysisMode, DiffSource, PolicyMode, Scope};
+    use crate::api::{AnalysisMode, DiffSource, DiscoveryOptions, PolicyMode, Scope};
     use crate::domain::{
         HazardKind, OperationFamily, Priority, ReviewCard, ReviewClass, UnsafeSiteKind,
         WitnessKind, WitnessRoute,
@@ -949,6 +1102,109 @@ mod tests {
             PathBuf::from("src/lib.rs")
         );
         assert_eq!(output.cards[0].site.owner, Some("source_root".to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn repo_scan_honors_discovery_filters_before_analysis() -> Result<(), String> {
+        let root = unique_temp_dir("unsafe-review-filtered-repo")?;
+        fs::create_dir_all(root.join("src")).map_err(|err| format!("create src failed: {err}"))?;
+        fs::create_dir_all(root.join("packages/pkg/src"))
+            .map_err(|err| format!("create package src failed: {err}"))?;
+        fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"filtered-repo-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+        )
+        .map_err(|err| format!("write Cargo.toml failed: {err}"))?;
+        fs::write(root.join("src/lib.rs"), "pub unsafe fn selected() {}\n")
+            .map_err(|err| format!("write src file failed: {err}"))?;
+        fs::write(
+            root.join("packages/pkg/src/lib.rs"),
+            "pub unsafe fn excluded() {}\n",
+        )
+        .map_err(|err| format!("write package file failed: {err}"))?;
+
+        let output = analyze_with_discovery(
+            AnalyzeInput {
+                root: root.clone(),
+                scope: Scope::Repo,
+                diff: DiffSource::NoneRepoScan,
+                mode: AnalysisMode::Repo,
+                policy: PolicyMode::Advisory,
+                include_unchanged_tests: true,
+                max_cards: None,
+            },
+            DiscoveryOptions {
+                include: vec!["src/**/*.rs".to_string(), "packages/**/*.rs".to_string()],
+                exclude: vec!["packages/**".to_string()],
+                ..DiscoveryOptions::repo_defaults()
+            },
+        )?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        assert_eq!(output.summary.rust_files, 1);
+        assert_eq!(output.summary.changed_rust_files, 1);
+        assert_eq!(output.cards.len(), 1);
+        assert_eq!(
+            output.cards[0].site.location.file,
+            PathBuf::from("src/lib.rs")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn repo_scan_status_reports_discovery_scanning_and_completion() -> Result<(), String> {
+        let root = unique_temp_dir("unsafe-review-repo-status")?;
+        fs::create_dir_all(root.join("src")).map_err(|err| format!("create src failed: {err}"))?;
+        fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"repo-status-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+        )
+        .map_err(|err| format!("write Cargo.toml failed: {err}"))?;
+        fs::write(
+            root.join("src/lib.rs"),
+            "pub unsafe fn read_header(ptr: *const u8) -> u32 { unsafe { ptr.cast::<u32>().read() } }\n",
+        )
+        .map_err(|err| format!("write src file failed: {err}"))?;
+
+        let mut statuses = Vec::new();
+        let output = analyze_with_discovery_and_progress(
+            AnalyzeInput {
+                root: root.clone(),
+                scope: Scope::Repo,
+                diff: DiffSource::NoneRepoScan,
+                mode: AnalysisMode::Repo,
+                policy: PolicyMode::Advisory,
+                include_unchanged_tests: true,
+                max_cards: None,
+            },
+            DiscoveryOptions::repo_defaults(),
+            |status| {
+                statuses.push(status.clone());
+                Ok(())
+            },
+        )?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        assert!(
+            statuses
+                .iter()
+                .any(|status| status.phase == RepoScanPhase::Discovering)
+        );
+        assert!(
+            statuses
+                .iter()
+                .any(|status| status.phase == RepoScanPhase::Scanning)
+        );
+        let complete = statuses
+            .last()
+            .ok_or_else(|| "expected at least one repo scan status".to_string())?;
+        assert_eq!(complete.phase, RepoScanPhase::Complete);
+        assert!(complete.completed);
+        assert_eq!(complete.files_discovered, 1);
+        assert_eq!(complete.files_scanned, 1);
+        assert_eq!(complete.cards_found, output.cards.len());
+        assert_eq!(complete.last_path, Some(PathBuf::from("src/lib.rs")));
         Ok(())
     }
 
@@ -1866,6 +2122,124 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
     }
 
     #[test]
+    fn js_buffer_reentry_after_descriptor_capture_emits_advisory_card() -> Result<(), String> {
+        let output = temp_source_output(
+            "unsafe-review-js-buffer-reentry",
+            r#"
+pub struct JSValue;
+pub struct GlobalObject;
+pub struct Options;
+pub struct StringOrBuffer;
+
+impl StringOrBuffer {
+    pub fn from_js(_global: &mut GlobalObject, _value: JSValue) -> Result<Self, ()> {
+        Ok(Self)
+    }
+
+    pub fn byte_slice(&self) -> &[u8] {
+        &[]
+    }
+}
+
+impl Options {
+    pub fn get(&self, _global: &mut GlobalObject, _name: &str) -> Result<i32, ()> {
+        Ok(1)
+    }
+}
+
+pub fn zstd_sync(
+    global: &mut GlobalObject,
+    arg0: JSValue,
+    options: Options,
+) -> Result<usize, ()> {
+    let input = StringOrBuffer::from_js(global, arg0)?;
+    let level = options.get(global, "level")?;
+    native_compress(&input, level)
+}
+
+fn native_compress(input: &StringOrBuffer, level: i32) -> Result<usize, ()> {
+    let bytes = input.byte_slice();
+    Ok(bytes.len() + level as usize)
+}
+"#,
+        )?;
+        let card = single_card("js_buffer_reentry", &output)?;
+
+        assert_eq!(card.operation.family, OperationFamily::UnsafeFnCall);
+        assert_eq!(card.class, ReviewClass::ContractMissing);
+        assert_eq!(card.site.owner.as_deref(), Some("zstd_sync"));
+        assert!(
+            card.operation
+                .expression
+                .contains("JS-backed buffer descriptor")
+        );
+        assert!(
+            card.operation
+                .expression
+                .contains("StringOrBuffer::from_js")
+        );
+        assert!(card.operation.expression.contains("options.get"));
+        assert!(card.operation.expression.contains("native_compress"));
+        assert!(
+            card.next_action
+                .summary
+                .contains("parse options before capture")
+        );
+        assert!(
+            card.routes
+                .iter()
+                .any(|route| route.kind == WitnessKind::HumanDeepReview)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn js_buffer_reentry_heuristic_respects_capture_before_reentry_order() -> Result<(), String> {
+        let output = temp_source_output(
+            "unsafe-review-js-buffer-reentry-negative",
+            r#"
+pub struct JSValue;
+pub struct GlobalObject;
+pub struct Options;
+pub struct StringOrBuffer;
+
+impl StringOrBuffer {
+    pub fn from_js(_global: &mut GlobalObject, _value: JSValue) -> Result<Self, ()> {
+        Ok(Self)
+    }
+
+    pub fn byte_slice(&self) -> &[u8] {
+        &[]
+    }
+}
+
+impl Options {
+    pub fn get(&self, _global: &mut GlobalObject, _name: &str) -> Result<i32, ()> {
+        Ok(1)
+    }
+}
+
+pub fn zstd_sync(
+    global: &mut GlobalObject,
+    arg0: JSValue,
+    options: Options,
+) -> Result<usize, ()> {
+    let level = options.get(global, "level")?;
+    let input = StringOrBuffer::from_js(global, arg0)?;
+    let bytes = input.byte_slice();
+    Ok(bytes.len() + level as usize)
+}
+"#,
+        )?;
+
+        assert!(
+            output.cards.is_empty(),
+            "parsing options before descriptor capture should not trigger the reentry heuristic"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn vec_from_raw_parts_uses_vec_operation_family() -> Result<(), String> {
         let output = fixture_output("vec_from_raw_parts")?;
         let card = single_card("vec_from_raw_parts", &output)?;
@@ -2298,8 +2672,11 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
             "ptr_copy_slice_range_disjunctive_early_return_shadowed_count_not_guard",
             "ptr_copy_slice_range_disjunctive_early_return_reassigned_src_not_guard",
             "ptr_copy_slice_range_disjunctive_early_return_reassigned_src_path_not_guard",
+            "ptr_copy_slice_range_disjunctive_early_return_shadowed_src_path_not_guard",
             "ptr_copy_slice_range_disjunctive_early_return_shadowed_src_not_guard",
             "ptr_copy_slice_range_disjunctive_early_return_reassigned_dst_not_guard",
+            "ptr_copy_slice_range_disjunctive_early_return_reassigned_dst_path_not_guard",
+            "ptr_copy_slice_range_disjunctive_early_return_shadowed_dst_path_not_guard",
             "ptr_copy_slice_range_disjunctive_early_return_shadowed_dst_not_guard",
             "ptr_copy_slice_range_reassigned_count_not_guard",
             "ptr_copy_slice_range_shadowed_count_not_guard",
@@ -2353,10 +2730,25 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
         for fixture in [
             "maybeuninit_assume_init_write_guard",
             "maybeuninit_assume_init_read_write_guard",
+            "maybeuninit_assume_init_ref_write_guard",
+            "maybeuninit_assume_init_mut_write_guard",
+            "maybeuninit_assume_init_drop_write_guard",
             "maybeuninit_assume_init_open_branch_write_guard",
+            "maybeuninit_assume_init_read_open_branch_write_guard",
+            "maybeuninit_assume_init_ref_open_branch_write_guard",
+            "maybeuninit_assume_init_mut_open_branch_write_guard",
+            "maybeuninit_assume_init_drop_open_branch_write_guard",
             "maybeuninit_assume_init_open_branch_new_guard",
+            "maybeuninit_assume_init_read_open_branch_new_guard",
+            "maybeuninit_assume_init_ref_open_branch_new_guard",
+            "maybeuninit_assume_init_mut_open_branch_new_guard",
+            "maybeuninit_assume_init_drop_open_branch_new_guard",
             "maybeuninit_assume_init_new_guard",
+            "maybeuninit_assume_init_read_new_guard",
+            "maybeuninit_assume_init_ref_new_guard",
+            "maybeuninit_assume_init_mut_method_new_guard",
             "maybeuninit_assume_init_mut_new_guard",
+            "maybeuninit_assume_init_drop_new_guard",
         ] {
             let output = fixture_output(fixture)?;
             let card = single_card(fixture, &output)?;
@@ -2382,14 +2774,41 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
         for fixture in [
             "maybeuninit_assume_init_comment_not_guard",
             "maybeuninit_assume_init_closed_branch_write_not_guard",
+            "maybeuninit_assume_init_read_closed_branch_write_not_guard",
+            "maybeuninit_assume_init_ref_closed_branch_write_not_guard",
+            "maybeuninit_assume_init_mut_closed_branch_write_not_guard",
+            "maybeuninit_assume_init_drop_closed_branch_write_not_guard",
             "maybeuninit_assume_init_closed_branch_new_not_guard",
+            "maybeuninit_assume_init_read_closed_branch_new_not_guard",
+            "maybeuninit_assume_init_ref_closed_branch_new_not_guard",
+            "maybeuninit_assume_init_mut_closed_branch_new_not_guard",
+            "maybeuninit_assume_init_drop_closed_branch_new_not_guard",
             "maybeuninit_assume_init_other_slot_write_not_guard",
             "maybeuninit_assume_init_stale_write_not_guard",
             "maybeuninit_assume_init_read_stale_write_not_guard",
+            "maybeuninit_assume_init_ref_stale_write_not_guard",
+            "maybeuninit_assume_init_mut_stale_write_not_guard",
+            "maybeuninit_assume_init_drop_stale_write_not_guard",
+            "maybeuninit_assume_init_read_other_slot_write_not_guard",
+            "maybeuninit_assume_init_ref_other_slot_write_not_guard",
+            "maybeuninit_assume_init_mut_other_slot_write_not_guard",
+            "maybeuninit_assume_init_drop_other_slot_write_not_guard",
             "maybeuninit_assume_init_stale_field_write_not_guard",
             "maybeuninit_assume_init_stale_new_not_guard",
+            "maybeuninit_assume_init_read_stale_new_not_guard",
+            "maybeuninit_assume_init_ref_stale_new_not_guard",
+            "maybeuninit_assume_init_mut_stale_new_not_guard",
+            "maybeuninit_assume_init_drop_stale_new_not_guard",
             "maybeuninit_assume_init_shadowed_slot_not_guard",
+            "maybeuninit_assume_init_read_shadowed_slot_not_guard",
+            "maybeuninit_assume_init_ref_shadowed_slot_not_guard",
+            "maybeuninit_assume_init_mut_shadowed_slot_not_guard",
+            "maybeuninit_assume_init_drop_shadowed_slot_not_guard",
             "maybeuninit_assume_init_mutslot_new_not_guard",
+            "maybeuninit_assume_init_read_mutslot_new_not_guard",
+            "maybeuninit_assume_init_ref_mutslot_new_not_guard",
+            "maybeuninit_assume_init_mut_mutslot_new_not_guard",
+            "maybeuninit_assume_init_drop_mutslot_new_not_guard",
             "maybeuninit_assume_init_partial_field_not_guard",
             "maybeuninit_assume_init_partial_array_not_guard",
         ] {
@@ -3489,6 +3908,36 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
             ));
         }
         Ok(&output.cards[0])
+    }
+
+    fn temp_source_output(prefix: &str, source: &str) -> Result<AnalyzeOutput, String> {
+        let root = unique_temp_dir(prefix)?;
+        fs::create_dir_all(root.join("src"))
+            .map_err(|err| format!("create temp fixture failed: {err}"))?;
+        fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"js-buffer-reentry-fixture\"\nversion = \"0.0.0\"\nedition = \"2021\"\n",
+        )
+        .map_err(|err| format!("write temp Cargo.toml failed: {err}"))?;
+        fs::write(root.join("src/lib.rs"), source)
+            .map_err(|err| format!("write temp source failed: {err}"))?;
+
+        let output = analyze(AnalyzeInput {
+            root: root.clone(),
+            scope: Scope::Repo,
+            diff: DiffSource::NoneRepoScan,
+            mode: AnalysisMode::Repo,
+            policy: PolicyMode::Advisory,
+            include_unchanged_tests: true,
+            max_cards: None,
+        });
+        let cleanup =
+            fs::remove_dir_all(&root).map_err(|err| format!("remove temp fixture failed: {err}"));
+        match (output, cleanup) {
+            (Ok(output), Ok(())) => Ok(output),
+            (Err(err), _) => Err(err),
+            (Ok(_), Err(err)) => Err(err),
+        }
     }
 
     fn obligation_discharge_present(card: &ReviewCard, key: &str) -> bool {

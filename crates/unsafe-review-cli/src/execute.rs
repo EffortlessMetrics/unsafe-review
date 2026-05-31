@@ -1,6 +1,7 @@
 use crate::command::{
-    CheckOptions, Command, DiffInput, FirstPrOptions, Format, OutcomeOptions,
-    ReceiptTemplateOptions, SavedOutputReceiptOptions,
+    CandidateCommand, CandidateImportOptions, CandidateWitnessPlanOptions, CheckOptions, Command,
+    DiffInput, FirstPrOptions, Format, OutcomeOptions, ReceiptTemplateOptions, RepoOptions,
+    SavedOutputReceiptOptions,
 };
 use std::fs;
 use std::io::{self, Read};
@@ -8,14 +9,16 @@ use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use unsafe_review_core::{
     AnalysisMode, AnalyzeInput, AnalyzeOutput, CardId, CargoCarefulReceiptInput,
-    ConcurrencyReceiptInput, DiffSource, MiriReceiptInput, PolicyMode, ProofReceiptInput,
-    SanitizerReceiptInput, Scope, WITNESS_RECEIPT_SCHEMA_VERSION, WitnessReceipt, analyze,
-    audit_witness_receipts, compare_outcome_json, evaluate_policy_report, render_badge_jsons,
+    ConcurrencyReceiptInput, DiffSource, DiscoveryOptions, MiriReceiptInput, PolicyMode,
+    ProofReceiptInput, RepoScanStatus, SanitizerReceiptInput, Scope,
+    WITNESS_RECEIPT_SCHEMA_VERSION, WitnessReceipt, analyze, analyze_with_discovery,
+    analyze_with_discovery_and_progress, audit_witness_receipts, compare_outcome_json,
+    discover_repo_files, evaluate_policy_report, read_manual_candidate, render_badge_jsons,
     render_comment_plan, render_github_summary, render_human, render_json, render_lsp,
-    render_markdown, render_outcome_json, render_outcome_markdown, render_policy_report_json,
-    render_policy_report_markdown, render_pr_summary, render_receipt_audit_json,
-    render_receipt_audit_markdown, render_repair_queue, render_sarif, render_witness_plan,
-    validate_witness_receipts,
+    render_manual_candidate_witness_plan, render_markdown, render_outcome_json,
+    render_outcome_markdown, render_policy_report_json, render_policy_report_markdown,
+    render_pr_summary, render_receipt_audit_json, render_receipt_audit_markdown,
+    render_repair_queue, render_sarif, render_witness_plan, validate_witness_receipts,
 };
 
 mod card_lookup;
@@ -57,6 +60,10 @@ pub(crate) fn execute(command: Command) -> Result<(), String> {
             print_help();
             Ok(())
         }
+        Command::RepoHelp => {
+            print_repo_help();
+            Ok(())
+        }
         Command::Version => {
             println!("unsafe-review {}", env!("CARGO_PKG_VERSION"));
             Ok(())
@@ -66,13 +73,24 @@ pub(crate) fn execute(command: Command) -> Result<(), String> {
             Ok(())
         }
         Command::Doctor { root } => doctor(&root),
-        Command::Check(options) => run_check(options, Scope::Diff, AnalysisMode::Draft),
-        Command::Repo(options) => run_check(options, Scope::Repo, AnalysisMode::Repo),
-        Command::Pilot(options) => run_check(options, Scope::Diff, AnalysisMode::Draft),
+        Command::Check(options) => run_check(
+            options,
+            Scope::Diff,
+            AnalysisMode::Draft,
+            DiscoveryOptions::default(),
+        ),
+        Command::Repo(options) => repo(options),
+        Command::Pilot(options) => run_check(
+            options,
+            Scope::Diff,
+            AnalysisMode::Draft,
+            DiscoveryOptions::default(),
+        ),
         Command::FirstPr(options) => first_pr(options),
         Command::Badges { root, out } => badges(&root, &out),
         Command::Explain { root, id, format } => explain(&root, &id, format),
         Command::Context { root, id } => context(&root, &id),
+        Command::Candidate(command) => candidate(command),
         Command::ReceiptTemplate(options) => receipt_template(options),
         Command::ReceiptValidate { root } => receipt_validate(&root),
         Command::ReceiptAudit(options) => receipt_audit(options),
@@ -118,18 +136,26 @@ fn print_support() {
     println!("- docs/status/SUPPORT_TIERS.md");
 }
 
-fn run_check(options: CheckOptions, scope: Scope, mode: AnalysisMode) -> Result<(), String> {
+fn run_check(
+    options: CheckOptions,
+    scope: Scope,
+    mode: AnalysisMode,
+    discovery: DiscoveryOptions,
+) -> Result<(), String> {
     let diff = diff_source(&options)?;
     let policy = options.policy.clone();
-    let output = analyze(AnalyzeInput {
-        root: options.root,
-        scope,
-        diff,
-        mode,
-        policy,
-        include_unchanged_tests: true,
-        max_cards: options.max_cards,
-    })?;
+    let output = analyze_with_discovery(
+        AnalyzeInput {
+            root: options.root,
+            scope,
+            diff,
+            mode,
+            policy,
+            include_unchanged_tests: true,
+            max_cards: options.max_cards,
+        },
+        discovery,
+    )?;
     let rendered = render_with_format(&output, &options.format);
     if let Some(path) = options.out {
         ensure_parent_dir(&path)?;
@@ -140,6 +166,289 @@ fn run_check(options: CheckOptions, scope: Scope, mode: AnalysisMode) -> Result<
     }
     enforce_policy(&output)?;
     Ok(())
+}
+
+fn repo(options: RepoOptions) -> Result<(), String> {
+    if options.list_files {
+        return repo_list_files(options);
+    }
+    run_repo_check(options)
+}
+
+fn run_repo_check(options: RepoOptions) -> Result<(), String> {
+    let check = options.check;
+    let diff = diff_source(&check)?;
+    let policy = check.policy.clone();
+    let report_path = check.out.clone();
+    let partial_path = report_path.as_deref().map(repo_partial_path);
+    let status_path = report_path.as_deref().map(repo_status_path);
+    let mut reporter = RepoStatusReporter::new(status_path, options.progress);
+    let output = match analyze_with_discovery_and_progress(
+        AnalyzeInput {
+            root: check.root,
+            scope: Scope::Repo,
+            diff,
+            mode: AnalysisMode::Repo,
+            policy,
+            include_unchanged_tests: true,
+            max_cards: check.max_cards,
+        },
+        options.discovery,
+        |status| reporter.record(status),
+    ) {
+        Ok(output) => output,
+        Err(err) => {
+            return Err(repo_incomplete_error(
+                &mut reporter,
+                &err,
+                partial_path.as_deref(),
+            ));
+        }
+    };
+    let rendered = render_with_format(&output, &check.format);
+    if let Some(path) = report_path {
+        let partial = repo_partial_path(&path);
+        if let Err(err) = write_repo_report(&path, &partial, rendered) {
+            return Err(repo_incomplete_error(&mut reporter, &err, Some(&partial)));
+        }
+    } else {
+        println!("{rendered}");
+    }
+    enforce_policy(&output)?;
+    Ok(())
+}
+
+fn repo_list_files(options: RepoOptions) -> Result<(), String> {
+    let root = options.check.root.clone();
+    let files = discover_repo_files(root.clone(), options.discovery)?;
+    let rendered = render_repo_file_list(&root, &files);
+    if let Some(path) = options.check.out {
+        ensure_parent_dir(&path)?;
+        fs::write(&path, rendered)
+            .map_err(|err| format!("write {} failed: {err}", path.display()))?;
+    } else {
+        print!("{rendered}");
+    }
+    Ok(())
+}
+
+fn render_repo_file_list(root: &Path, files: &[PathBuf]) -> String {
+    let mut rendered = format!(
+        "unsafe-review repo file list\nroot: {}\nfiles: {}\n",
+        root.display(),
+        files.len()
+    );
+    for file in files {
+        rendered.push_str(&file.display().to_string());
+        rendered.push('\n');
+    }
+    rendered
+}
+
+struct RepoStatusReporter {
+    status_path: Option<PathBuf>,
+    progress: bool,
+    last_status: Option<RepoScanStatus>,
+    last_phase: Option<String>,
+    last_discovery_heartbeat: usize,
+    last_scan_heartbeat: usize,
+}
+
+impl RepoStatusReporter {
+    fn new(status_path: Option<PathBuf>, progress: bool) -> Self {
+        Self {
+            status_path,
+            progress,
+            last_status: None,
+            last_phase: None,
+            last_discovery_heartbeat: 0,
+            last_scan_heartbeat: 0,
+        }
+    }
+
+    fn record(&mut self, status: &RepoScanStatus) -> Result<(), String> {
+        self.last_status = Some(status.clone());
+        if let Some(path) = &self.status_path {
+            ensure_parent_dir(path)?;
+            fs::write(path, render_repo_scan_status(status)?)
+                .map_err(|err| format!("write {} failed: {err}", path.display()))?;
+        }
+        if self.progress && self.should_print(status) {
+            eprintln!("{}", format_repo_progress(status));
+        }
+        Ok(())
+    }
+
+    fn record_incomplete(
+        &mut self,
+        error: &str,
+        partial_path: Option<&Path>,
+    ) -> Result<Option<PathBuf>, String> {
+        let Some(path) = self.status_path.clone() else {
+            return Ok(None);
+        };
+        ensure_parent_dir(&path)?;
+        fs::write(
+            &path,
+            render_repo_scan_incomplete_status(
+                self.last_status.as_ref(),
+                error,
+                partial_path.filter(|path| path.exists()),
+            )?,
+        )
+        .map_err(|err| format!("write {} failed: {err}", path.display()))?;
+        Ok(Some(path))
+    }
+
+    fn should_print(&mut self, status: &RepoScanStatus) -> bool {
+        let phase = status.phase.as_str();
+        let phase_changed = self.last_phase.as_deref() != Some(phase);
+        if phase_changed {
+            self.last_phase = Some(phase.to_string());
+            return true;
+        }
+        if status.completed {
+            return true;
+        }
+        if status.files_scanned >= self.last_scan_heartbeat + 100 {
+            self.last_scan_heartbeat = status.files_scanned;
+            return true;
+        }
+        if status.files_discovered >= self.last_discovery_heartbeat + 100 {
+            self.last_discovery_heartbeat = status.files_discovered;
+            return true;
+        }
+        false
+    }
+}
+
+fn render_repo_scan_status(status: &RepoScanStatus) -> Result<String, String> {
+    let value = serde_json::json!({
+        "schema_version": status.schema_version.as_str(),
+        "phase": status.phase.as_str(),
+        "elapsed_ms": status.elapsed_ms,
+        "files_discovered": status.files_discovered,
+        "files_scanned": status.files_scanned,
+        "cards_found": status.cards_found,
+        "last_path": status.last_path.as_ref().map(|path| path.display().to_string()),
+        "completed": status.completed,
+        "error": null,
+        "partial_path": null,
+    });
+    let mut rendered = serde_json::to_string_pretty(&value)
+        .map_err(|err| format!("render repo status JSON failed: {err}"))?;
+    rendered.push('\n');
+    Ok(rendered)
+}
+
+fn render_repo_scan_incomplete_status(
+    status: Option<&RepoScanStatus>,
+    error: &str,
+    partial_path: Option<&Path>,
+) -> Result<String, String> {
+    let value = serde_json::json!({
+        "schema_version": status
+            .map(|status| status.schema_version.as_str())
+            .unwrap_or("repo-scan-status/v1"),
+        "phase": "failed",
+        "elapsed_ms": status.map_or(0, |status| status.elapsed_ms),
+        "files_discovered": status.map_or(0, |status| status.files_discovered),
+        "files_scanned": status.map_or(0, |status| status.files_scanned),
+        "cards_found": status.map_or(0, |status| status.cards_found),
+        "last_path": status
+            .and_then(|status| status.last_path.as_ref())
+            .map(|path| path.display().to_string()),
+        "completed": false,
+        "error": error,
+        "partial_path": partial_path.map(|path| path.display().to_string()),
+    });
+    let mut rendered = serde_json::to_string_pretty(&value)
+        .map_err(|err| format!("render repo status JSON failed: {err}"))?;
+    rendered.push('\n');
+    Ok(rendered)
+}
+
+fn format_repo_progress(status: &RepoScanStatus) -> String {
+    let last_path = status
+        .last_path
+        .as_ref()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "-".to_string());
+    format!(
+        "unsafe-review repo: phase={} elapsed_ms={} files_discovered={} files_scanned={} cards_found={} last_path={} completed={}",
+        status.phase.as_str(),
+        status.elapsed_ms,
+        status.files_discovered,
+        status.files_scanned,
+        status.cards_found,
+        last_path,
+        status.completed,
+    )
+}
+
+fn repo_status_path(out: &Path) -> PathBuf {
+    out_with_suffix(out, ".status.json")
+}
+
+fn repo_partial_path(out: &Path) -> PathBuf {
+    out_with_suffix(out, ".partial")
+}
+
+fn out_with_suffix(out: &Path, suffix: &str) -> PathBuf {
+    if let Some(file_name) = out.file_name() {
+        let mut suffixed_file_name = file_name.to_os_string();
+        suffixed_file_name.push(suffix);
+        out.with_file_name(suffixed_file_name)
+    } else {
+        PathBuf::from(format!("{}{}", out.display(), suffix))
+    }
+}
+
+fn write_repo_report(path: &Path, partial_path: &Path, rendered: String) -> Result<(), String> {
+    ensure_parent_dir(partial_path)?;
+    fs::write(partial_path, rendered).map_err(|err| {
+        format!(
+            "write partial repo report {} failed: {err}",
+            partial_path.display()
+        )
+    })?;
+    fs::rename(partial_path, path).map_err(|err| {
+        format!(
+            "rename partial repo report {} to {} failed: {err}",
+            partial_path.display(),
+            path.display()
+        )
+    })?;
+    Ok(())
+}
+
+fn repo_incomplete_error(
+    reporter: &mut RepoStatusReporter,
+    error: &str,
+    partial_path: Option<&Path>,
+) -> String {
+    let mut message = error.to_string();
+    match reporter.record_incomplete(error, partial_path) {
+        Ok(Some(status_path)) => {
+            message.push_str(&format!(
+                "; incomplete repo status written to {}",
+                status_path.display()
+            ));
+        }
+        Ok(None) => {}
+        Err(status_err) => {
+            message.push_str(&format!(
+                "; failed to update incomplete repo status: {status_err}"
+            ));
+        }
+    }
+    if let Some(partial_path) = partial_path.filter(|path| path.exists()) {
+        message.push_str(&format!(
+            "; partial repo report kept at {}",
+            partial_path.display()
+        ));
+    }
+    message
 }
 
 fn first_pr(options: FirstPrOptions) -> Result<(), String> {
@@ -454,10 +763,18 @@ fn badges(root: &Path, out: &Path) -> Result<(), String> {
 fn explain(root: &Path, id: &str, format: Format) -> Result<(), String> {
     let output = card_lookup::analyze_repo_cards(root)?;
     let id = CardId(id.to_string());
-    let detail = card_lookup::explain_text(&output, &id)?;
+    let detail = match card_lookup::explain_text(&output, &id) {
+        Ok(detail) => detail,
+        Err(_) => card_lookup::manual_candidate_explain(root, &id.0)?
+            .ok_or_else(|| format!("card `{id}` not found"))?,
+    };
     match format {
         Format::Json => {
-            let packet = card_lookup::context_packet(&output, &id)?;
+            let packet = match card_lookup::context_packet(&output, &id) {
+                Ok(packet) => packet,
+                Err(_) => card_lookup::manual_candidate_context(root, &id.0)?
+                    .ok_or_else(|| format!("card `{id}` not found"))?,
+            };
             println!("{packet}");
         }
         _ => println!("{detail}"),
@@ -468,8 +785,55 @@ fn explain(root: &Path, id: &str, format: Format) -> Result<(), String> {
 fn context(root: &Path, id: &str) -> Result<(), String> {
     let output = card_lookup::analyze_repo_cards(root)?;
     let id = CardId(id.to_string());
-    let packet = card_lookup::context_packet(&output, &id)?;
+    let packet = match card_lookup::context_packet(&output, &id) {
+        Ok(packet) => packet,
+        Err(_) => card_lookup::manual_candidate_context(root, &id.0)?
+            .ok_or_else(|| format!("card `{id}` not found"))?,
+    };
     println!("{packet}");
+    Ok(())
+}
+
+fn candidate(command: CandidateCommand) -> Result<(), String> {
+    match command {
+        CandidateCommand::Import(options) => candidate_import(options),
+        CandidateCommand::WitnessPlan(options) => candidate_witness_plan(options),
+    }
+}
+
+fn candidate_import(options: CandidateImportOptions) -> Result<(), String> {
+    let candidate = read_manual_candidate(&options.input)?;
+    let rendered = candidate.to_pretty_json()?;
+    if let Some(out) = options.out {
+        ensure_parent_dir(&out)?;
+        fs::write(&out, rendered)
+            .map_err(|err| format!("write manual candidate {} failed: {err}", out.display()))?;
+        println!("wrote manual candidate: {}", out.display());
+        println!("id: {}", candidate.id);
+        println!("source: manual");
+        println!("manual_candidate: true");
+        println!("trust boundary: {}", candidate.trust_boundary);
+    } else {
+        print!("{rendered}");
+    }
+    Ok(())
+}
+
+fn candidate_witness_plan(options: CandidateWitnessPlanOptions) -> Result<(), String> {
+    let candidate = unsafe_review_core::load_manual_candidate(&options.root, &options.id)?
+        .ok_or_else(|| format!("manual candidate `{}` not found", options.id))?;
+    let rendered = render_manual_candidate_witness_plan(&candidate);
+    if let Some(out) = options.out {
+        ensure_parent_dir(&out)?;
+        fs::write(&out, rendered).map_err(|err| {
+            format!(
+                "write manual candidate witness plan {} failed: {err}",
+                out.display()
+            )
+        })?;
+    } else {
+        print!("{rendered}");
+    }
     Ok(())
 }
 
@@ -733,7 +1097,7 @@ fn print_help() {
         "  check   [--root .] [--base origin/main | --diff file|-] [--format human|json|markdown|pr-summary|github-summary|sarif|comment-plan|lsp|witness-plan] [--policy advisory|no-new-debt] [--out file]"
     );
     println!(
-        "  repo    [--root .] [--format human|json|markdown|pr-summary|github-summary|sarif|comment-plan|lsp|witness-plan] [--policy advisory|no-new-debt] [--out file]"
+        "  repo    [--root .] [--include glob] [--exclude glob] [--list-files] [--progress] [--respect-gitignore|--no-respect-gitignore] [--max-files N] [--format human|json|markdown|pr-summary|github-summary|sarif|comment-plan|lsp|witness-plan] [--policy advisory|no-new-debt] [--out file] [--max-cards N]"
     );
     println!(
         "  first-pr [--root .] [--base origin/main|--diff file|-] [--out-dir target/unsafe-review] [--max-cards N]"
@@ -743,6 +1107,10 @@ fn print_help() {
     println!("  badges  [--root .] [--out badges]");
     println!("  explain [--root .] [--json|--format json] <card-id>");
     println!("  context [--root .] [--json|--format json] <card-id>");
+    println!(
+        "  candidate import <manual-candidate.json> [--out .unsafe-review/candidates/<id>.json]"
+    );
+    println!("  candidate witness-plan [--root .] <candidate-id> [--out file]");
     println!("  support");
     println!(
         "  outcome --before <cards.json> --after <cards.json> [--format json|markdown] [--out file]"
@@ -778,6 +1146,72 @@ fn print_help() {
     println!();
     println!(
         "Trust boundary: static unsafe contract review only; not memory-safety proof, not UB-free status, and not Miri-clean status."
+    );
+}
+
+fn print_repo_help() {
+    println!("unsafe-review repo: advisory unsafe contract review for a whole Rust repo");
+    println!();
+    println!("Usage:");
+    println!(
+        "  unsafe-review repo [--root .] [--include glob] [--exclude glob] [--list-files] [--progress] [--respect-gitignore|--no-respect-gitignore] [--max-files N] [--format human|json|markdown|pr-summary|github-summary|sarif|comment-plan|lsp|witness-plan] [--policy advisory|no-new-debt] [--out file] [--max-cards N]"
+    );
+    println!();
+    println!("What repo scans today:");
+    println!("- Discovers *.rs files under --root, defaulting to the current directory.");
+    println!(
+        "- Discovery respects gitignore files by default and skips .git, .github, .unsafe-review*, target, node_modules, vendor, build, dist, and generated directories."
+    );
+    println!(
+        "- Repo mode scans the selected Rust files; --base and --diff are accepted by the shared parser but do not make repo a diff-only scan."
+    );
+    println!("- Use check or first-pr when you want changed-file review from --base or --diff.");
+    println!();
+    println!("Options:");
+    println!("- --root <dir> chooses the repository or subdirectory to scan.");
+    println!("- --include <glob> adds a root-relative Rust file include filter.");
+    println!("- --exclude <glob> removes root-relative Rust files from the selection.");
+    println!(
+        "- --respect-gitignore is the default; --no-respect-gitignore includes ignored Rust files."
+    );
+    println!("- --list-files prints selected Rust files and exits without analysis.");
+    println!("- --progress prints scan-status heartbeats to stderr during analysis.");
+    println!("- --max-files <N> truncates the selected file list before analysis.");
+    println!(
+        "- --format <name> chooses human, json, markdown, pr-summary, github-summary, sarif, comment-plan, lsp, or witness-plan output."
+    );
+    println!(
+        "- --policy advisory is the default; --policy no-new-debt exits nonzero for open actionable gaps."
+    );
+    println!("- --out <file> writes the rendered report to a file instead of stdout.");
+    println!("- --max-cards <N> stops after N cards are collected; it does not limit discovery.");
+    println!();
+    println!("Large-repo guidance:");
+    println!(
+        "- Prefer scoped roots or include/exclude filters such as --include 'src/**/*.rs' and --exclude '**/generated/**'."
+    );
+    println!("- Use --list-files before a large scan to confirm the selected Rust files.");
+    println!();
+    println!("Output and cancellation:");
+    println!(
+        "- --out renders to <out>.partial, then renames it to <out> only after a successful render."
+    );
+    println!(
+        "- <out>.status.json records phase, elapsed time, discovered files, scanned files, cards found, last path, completion, and normal errors."
+    );
+    println!(
+        "- On normal errors, incomplete status is kept; if a rendered partial report exists, it is left at <out>.partial."
+    );
+    println!(
+        "- If interrupted before rendering, the latest status sidecar is the durable artifact; a dedicated signal handler is deferred."
+    );
+    println!();
+    println!("Trust boundary:");
+    println!(
+        "- ReviewCards are advisory static findings, not memory-safety proof, not UB-free status, and not Miri-clean status."
+    );
+    println!(
+        "- unsafe-review does not execute witnesses, post comments, edit source, or enforce blocking policy by default."
     );
 }
 
