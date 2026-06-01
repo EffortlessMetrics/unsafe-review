@@ -302,19 +302,18 @@ fn validate_label_ledger(
     let mut ids = BTreeSet::new();
     let mut fixtures = BTreeSet::new();
     let mut sample_keys = BTreeSet::new();
+    let context = LabelLedgerContext {
+        path,
+        claim_id,
+        source_kind,
+        claim,
+        fixture_cases,
+    };
     for (idx, sample) in samples.iter().enumerate() {
         let sample = sample
             .as_table()
             .ok_or_else(|| format!("{path} samples[{idx}] must be a TOML table"))?;
-        let sample = validate_sample(
-            path,
-            idx,
-            sample,
-            source_kind,
-            claim,
-            fixture_cases,
-            &mut ids,
-        )?;
+        let sample = validate_sample(&context, idx, sample, &mut ids)?;
         fixtures.insert(sample.fixture);
         if !sample_keys.insert(sample.key.clone()) {
             return Err(format!("{path} contains duplicate sample `{}`", sample.key));
@@ -336,15 +335,21 @@ fn require_label_trust_boundary_limits(text: &str, path: &str) -> Result<(), Str
     Ok(())
 }
 
+struct LabelLedgerContext<'a> {
+    path: &'a str,
+    claim_id: &'a str,
+    source_kind: &'a str,
+    claim: &'a PolicyClaim,
+    fixture_cases: &'a BTreeMap<String, CalibrationFixtureCase>,
+}
+
 fn validate_sample(
-    path: &str,
+    context: &LabelLedgerContext<'_>,
     idx: usize,
     sample: &toml::map::Map<String, toml::Value>,
-    ledger_source_kind: &str,
-    claim: &PolicyClaim,
-    fixture_cases: &BTreeMap<String, CalibrationFixtureCase>,
     ids: &mut BTreeSet<String>,
 ) -> Result<LabelSampleStats, String> {
+    let path = context.path;
     for field in sample.keys() {
         if !LABEL_SAMPLE_FIELDS.contains(&field.as_str()) {
             return Err(format!(
@@ -358,9 +363,10 @@ fn validate_sample(
     }
     let label_source = required_table_string(sample, "label_source", path, idx)?;
     require_allowed(label_source, LABEL_SOURCE_KINDS, path, "label_source")?;
-    if label_source != ledger_source_kind {
+    if label_source != context.source_kind {
         return Err(format!(
-            "{path} samples[{idx}] label_source `{label_source}` does not match ledger source_kind `{ledger_source_kind}`"
+            "{path} samples[{idx}] label_source `{label_source}` does not match ledger source_kind `{}`",
+            context.source_kind
         ));
     }
     if label_source == "human_adjudicated" {
@@ -373,12 +379,12 @@ fn validate_sample(
         required_table_string(sample, "adjudicator", path, idx)?;
     }
     let fixture = required_table_string(sample, "fixture", path, idx)?;
-    if !claim.fixtures.contains(fixture) {
+    if !context.claim.fixtures.contains(fixture) {
         return Err(format!(
             "{path} samples[{idx}] references fixture `{fixture}` not listed by policy/accuracy-calibration.toml claim"
         ));
     }
-    let fixture_case = fixture_cases.get(fixture).ok_or_else(|| {
+    let fixture_case = context.fixture_cases.get(fixture).ok_or_else(|| {
         format!("{path} samples[{idx}] references fixture `{fixture}` not present in fixtures/calibration.toml")
     })?;
     let kind = required_table_string(sample, "kind", path, idx)?;
@@ -439,6 +445,7 @@ fn validate_sample(
     let expected_owner = optional_table_string(sample, "expected_owner", path, idx)?;
     let expected_site_kind = optional_table_string(sample, "expected_site_kind", path, idx)?;
     let obligation_key = required_table_string(sample, "expected_obligation_key", path, idx)?;
+    require_obligation_hazard_alignment(path, idx, obligation_key, expected_hazard)?;
     let fixture_obligation = FixtureObligation {
         fixture,
         operation_family: expected_operation_family,
@@ -448,6 +455,12 @@ fn validate_sample(
         obligation_key,
     };
     let contract_state = optional_table_string(sample, "expected_contract_state", path, idx)?;
+    if public_contract_claim_requires_contract_state(context.claim_id) && contract_state.is_none() {
+        return Err(format!(
+            "{path} samples[{idx}] claim `{}` must pin `expected_contract_state`",
+            context.claim_id
+        ));
+    }
     if let Some(contract_state) = contract_state {
         require_allowed(
             contract_state,
@@ -484,6 +497,12 @@ fn validate_sample(
         },
     )?;
     let route_kinds = optional_table_str_array(sample, "expected_witness_route_kinds", path, idx)?;
+    if witness_route_claim_requires_route_labels(context.claim_id) && route_kinds.is_empty() {
+        return Err(format!(
+            "{path} samples[{idx}] claim `{}` must pin `expected_witness_route_kinds`",
+            context.claim_id
+        ));
+    }
     if !route_kinds.is_empty() {
         for route_kind in &route_kinds {
             require_allowed(
@@ -508,6 +527,28 @@ fn validate_sample(
             route_kinds.join(",")
         ),
     })
+}
+
+fn public_contract_claim_requires_contract_state(claim_id: &str) -> bool {
+    claim_id == "public-unsafe-api-safety-docs-contract-evidence"
+}
+
+fn witness_route_claim_requires_route_labels(claim_id: &str) -> bool {
+    claim_id.ends_with("-witness-routes") || claim_id.ends_with("-human-review-routes")
+}
+
+fn require_obligation_hazard_alignment(
+    path: &str,
+    idx: usize,
+    obligation_key: &str,
+    expected_hazard: &str,
+) -> Result<(), String> {
+    if obligation_key == "valid-range" && expected_hazard != "bounds" {
+        return Err(format!(
+            "{path} samples[{idx}] expected_obligation_key `valid-range` must use expected_hazard `bounds`, got `{expected_hazard}`"
+        ));
+    }
+    Ok(())
 }
 
 fn reject_zero_card_fields(
@@ -952,6 +993,66 @@ rationale = "The trust boundary must name the full accuracy-label no-overclaim p
     }
 
     #[test]
+    fn label_ledger_rejects_witness_route_claim_without_route_labels() -> Result<(), String> {
+        let ledger = r#"
+schema_version = "0.1"
+status = "fixture_pinned"
+claim_id = "unsafe-impl-send-sync-witness-routes"
+operation_family = "unsafe_impl_send_sync"
+hazard = "send_sync_invariant"
+partition = "fixture"
+source_kind = "fixture_golden"
+trust_boundary = "Static unsafe contract review only; this is not a proof of memory safety, not UB-free status, not a Miri result, not Miri-clean status, not site execution evidence, not calibrated precision or recall, not witness adequacy, and not policy readiness."
+
+[[samples]]
+id = "missing-route-labels"
+fixture = "unsafe_impl_send"
+kind = "positive"
+expected_cards = 1
+expected_class = "requires_loom"
+expected_operation_family = "unsafe_impl_send_sync"
+expected_hazard = "send_sync_invariant"
+expected_obligation_key = "thread-safety"
+expected_discharge_state = "missing"
+label_source = "fixture_golden"
+rationale = "Witness-route calibration claims must pin the route kinds projected by the ReviewCard."
+"#
+        .parse::<toml::Table>()
+        .map(toml::Value::Table)
+        .map_err(|err| format!("parse test ledger failed: {err}"))?;
+        let mut cases = BTreeMap::new();
+        cases.insert(
+            "unsafe_impl_send".to_string(),
+            CalibrationFixtureCase {
+                kind: "positive".to_string(),
+                expected_cards: 1,
+                expected_class: Some("requires_loom".to_string()),
+                expected_operation_family: Some("unsafe_impl_send_sync".to_string()),
+                expected_hazard: Some("send_sync_invariant".to_string()),
+            },
+        );
+        let claim = PolicyClaim {
+            operation_family: Some("unsafe_impl_send_sync".to_string()),
+            hazard: Some("send_sync_invariant".to_string()),
+            fixtures: BTreeSet::from(["unsafe_impl_send".to_string()]),
+            label_ledgers: BTreeSet::new(),
+        };
+
+        let result = validate_label_ledger(
+            "docs/accuracy/labels/test.toml",
+            &ledger,
+            "unsafe-impl-send-sync-witness-routes",
+            &claim,
+            &cases,
+        );
+
+        let err = result.err().unwrap_or_default();
+        assert!(err.contains("must pin"));
+        assert!(err.contains("expected_witness_route_kinds"));
+        Ok(())
+    }
+
+    #[test]
     fn label_ledger_rejects_missing_witness_route_kind() -> Result<(), String> {
         let ledger = r#"
 schema_version = "0.1"
@@ -1012,6 +1113,66 @@ rationale = "The fixture routes Send/Sync invariants to Loom/Shuttle, so ASan sh
                 .unwrap_or_default()
                 .contains("expected_witness_route_kinds")
         );
+        Ok(())
+    }
+
+    #[test]
+    fn label_ledger_rejects_public_contract_claim_without_contract_state() -> Result<(), String> {
+        let ledger = r#"
+schema_version = "0.1"
+status = "fixture_pinned"
+claim_id = "public-unsafe-api-safety-docs-contract-evidence"
+operation_family = "unknown"
+hazard = "unknown"
+partition = "fixture"
+source_kind = "fixture_golden"
+trust_boundary = "Static unsafe contract review only; this is not a proof of memory safety, not UB-free status, not a Miri result, not Miri-clean status, not site execution evidence, not calibrated precision or recall, not witness adequacy, and not policy readiness."
+
+[[samples]]
+id = "missing-contract-state"
+fixture = "public_unsafe_fn_missing_safety"
+kind = "positive"
+expected_cards = 1
+expected_class = "contract_missing"
+expected_operation_family = "unknown"
+expected_hazard = "unknown"
+expected_obligation_key = "unknown"
+expected_discharge_state = "present"
+label_source = "fixture_golden"
+rationale = "Public unsafe API contract evidence claims must pin the ReviewCard contract evidence state."
+"#
+        .parse::<toml::Table>()
+        .map(toml::Value::Table)
+        .map_err(|err| format!("parse test ledger failed: {err}"))?;
+        let mut cases = BTreeMap::new();
+        cases.insert(
+            "public_unsafe_fn_missing_safety".to_string(),
+            CalibrationFixtureCase {
+                kind: "positive".to_string(),
+                expected_cards: 1,
+                expected_class: Some("contract_missing".to_string()),
+                expected_operation_family: Some("unknown".to_string()),
+                expected_hazard: Some("unknown".to_string()),
+            },
+        );
+        let claim = PolicyClaim {
+            operation_family: Some("unknown".to_string()),
+            hazard: Some("unknown".to_string()),
+            fixtures: BTreeSet::from(["public_unsafe_fn_missing_safety".to_string()]),
+            label_ledgers: BTreeSet::new(),
+        };
+
+        let result = validate_label_ledger(
+            "docs/accuracy/labels/test.toml",
+            &ledger,
+            "public-unsafe-api-safety-docs-contract-evidence",
+            &claim,
+            &cases,
+        );
+
+        let err = result.err().unwrap_or_default();
+        assert!(err.contains("must pin"));
+        assert!(err.contains("expected_contract_state"));
         Ok(())
     }
 
@@ -1139,6 +1300,66 @@ rationale = "The fixture intentionally has alignment evidence, so missing should
                 .unwrap_or_default()
                 .contains("expected_discharge_state")
         );
+        Ok(())
+    }
+
+    #[test]
+    fn label_ledger_rejects_valid_range_sample_with_non_bounds_hazard() -> Result<(), String> {
+        let ledger = r#"
+schema_version = "0.1"
+status = "fixture_pinned"
+claim_id = "ptr-copy-valid-range-evidence"
+operation_family = "ptr_copy"
+hazard = "bounds"
+partition = "fixture"
+source_kind = "fixture_golden"
+trust_boundary = "Static unsafe contract review only; this is not a proof of memory safety, not UB-free status, not a Miri result, not Miri-clean status, not site execution evidence, not calibrated precision or recall, not witness adequacy, and not policy readiness."
+
+[[samples]]
+id = "bad-valid-range-hazard"
+fixture = "ptr_copy_slice_range_guard"
+kind = "positive"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "ptr_copy"
+expected_hazard = "pointer_validity"
+expected_obligation_key = "valid-range"
+expected_discharge_state = "present"
+label_source = "fixture_golden"
+rationale = "Valid-range labels must stay tied to the bounds hazard, not a broader pointer validity selector."
+"#
+        .parse::<toml::Table>()
+        .map(toml::Value::Table)
+        .map_err(|err| format!("parse test ledger failed: {err}"))?;
+        let mut cases = BTreeMap::new();
+        cases.insert(
+            "ptr_copy_slice_range_guard".to_string(),
+            CalibrationFixtureCase {
+                kind: "positive".to_string(),
+                expected_cards: 1,
+                expected_class: Some("guard_missing".to_string()),
+                expected_operation_family: Some("ptr_copy".to_string()),
+                expected_hazard: Some("pointer_validity".to_string()),
+            },
+        );
+        let claim = PolicyClaim {
+            operation_family: Some("ptr_copy".to_string()),
+            hazard: Some("bounds".to_string()),
+            fixtures: BTreeSet::from(["ptr_copy_slice_range_guard".to_string()]),
+            label_ledgers: BTreeSet::new(),
+        };
+
+        let result = validate_label_ledger(
+            "docs/accuracy/labels/test.toml",
+            &ledger,
+            "ptr-copy-valid-range-evidence",
+            &claim,
+            &cases,
+        );
+
+        let err = result.err().unwrap_or_default();
+        assert!(err.contains("expected_obligation_key `valid-range`"));
+        assert!(err.contains("expected_hazard `bounds`"));
         Ok(())
     }
 

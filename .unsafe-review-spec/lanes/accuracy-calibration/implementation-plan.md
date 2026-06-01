@@ -74,6 +74,8 @@ The guard rejects:
   documentation or comments as a substitute for concrete guard evidence.
 - fixture golden cards whose public unsafe API contract next_action suggests a
   `SAFETY:` comment as a substitute for public `# Safety` documentation.
+- public unsafe API contract-evidence label ledgers whose non-zero-card samples
+  do not pin `expected_contract_state`.
 - fixture golden cards whose site metadata has unknown kind or visibility,
   invalid source coordinates, invalid file paths, incoherent public API flags,
   or operation/snippet drift.
@@ -82,6 +84,8 @@ The guard rejects:
 - fixture golden cards whose witness routes are missing, required by default,
   outside the operation family registry row, whose commands do not match the
   route kind, or out of sync with verify_commands.
+- witness-routing label ledgers whose non-zero-card samples do not pin
+  `expected_witness_route_kinds`.
 - fixture golden ReviewCard IDs that omit stable fixture/package, file, owner,
   site kind, operation family, operation path/callee, snippet hash, hazard, or
   counted suffix components.

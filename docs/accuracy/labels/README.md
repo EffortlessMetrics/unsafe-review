@@ -82,13 +82,13 @@ source kind, and trust boundary. Fixture-pinned ledgers do not create calibrated
 accuracy claims; human-adjudicated samples still require labelers,
 adjudication, and a later metric report.
 
-Samples may pin both `expected_contract_state` and
-`expected_discharge_state` when the claim is about public contract evidence.
-The states are read from the ReviewCard obligation evidence, not from a
-separate label-specific truth.
+Samples for public unsafe API contract-evidence claims must pin
+`expected_contract_state`. Contract state and the required
+`expected_discharge_state` are read from the ReviewCard obligation evidence,
+not from a separate label-specific truth.
 
-Samples may pin `expected_witness_route_kinds` when the claim is about witness
-routing. Route kinds are read from the ReviewCard `witness_routes` projection.
+Samples for witness-routing claims must pin `expected_witness_route_kinds`.
+Route kinds are read from the ReviewCard `witness_routes` projection.
 
 Samples may pin `expected_owner` and `expected_site_kind` when the claim is
 about ReviewCard identity or inventory behavior. These fields are read from the
