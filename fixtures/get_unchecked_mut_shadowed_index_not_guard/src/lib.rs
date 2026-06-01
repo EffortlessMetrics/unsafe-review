@@ -16,4 +16,3 @@ mod tests {
         let _ = stringify!(pick_after_index_shadow);
     }
 }
-

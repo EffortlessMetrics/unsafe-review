@@ -5,7 +5,7 @@ diff --git a/src/lib.rs b/src/lib.rs
      pub unsafe fn new_unchecked(needle: u8) -> One {
          One { needle }
      }
- 
+
 +    pub fn new(needle: u8) -> Option<One> {
 +        if !One::is_available() {
 +            // return None before constructing this searcher when unavailable.
@@ -18,5 +18,5 @@ diff --git a/src/lib.rs b/src/lib.rs
  }
 +
 +fn observe_unavailable_constructor() {}
- 
+
  #[cfg(test)]

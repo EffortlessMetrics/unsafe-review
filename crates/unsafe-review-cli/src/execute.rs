@@ -207,7 +207,7 @@ fn run_repo_check(options: RepoOptions) -> Result<(), String> {
     };
     let rendered = render_with_format(&output, &check.format);
     if let Some(path) = report_path {
-        let partial = partial_path.expect("repo out path has a partial path");
+        let partial = repo_partial_path(&path);
         if let Err(err) = write_repo_report(&path, &partial, rendered) {
             return Err(repo_incomplete_error(&mut reporter, &err, Some(&partial)));
         }

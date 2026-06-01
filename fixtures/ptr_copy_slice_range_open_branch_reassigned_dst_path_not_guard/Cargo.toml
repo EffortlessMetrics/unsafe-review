@@ -2,4 +2,3 @@
 name = "ptr-copy-slice-range-open-branch-reassigned-dst-path-not-guard"
 version = "0.1.0"
 edition = "2021"
-

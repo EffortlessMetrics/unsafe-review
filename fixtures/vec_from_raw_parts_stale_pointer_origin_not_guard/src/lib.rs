@@ -8,4 +8,3 @@ pub fn rebuild_vec(input: Vec<u8>, spare: Vec<u8>) -> Vec<u8> {
     // SAFETY: fixture keeps len/cap from raw but makes pointer origin stale.
     unsafe { Vec::from_raw_parts(ptr, len, cap) }
 }
-

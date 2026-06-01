@@ -3,4 +3,3 @@ diff --git a/src/lib.rs b/src/lib.rs
 +++ b/src/lib.rs
 @@ -7,1 +7,1 @@
 +    unsafe { strlen(ptr) }
-

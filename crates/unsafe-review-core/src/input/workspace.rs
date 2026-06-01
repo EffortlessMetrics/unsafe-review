@@ -3,6 +3,8 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 use ignore::{DirEntry, WalkBuilder};
 use std::path::{Path, PathBuf};
 
+type DiscoveryProgressFn<'a> = &'a mut dyn FnMut(usize, &Path) -> Result<(), String>;
+
 pub(crate) fn discover_rust_files(
     root: &Path,
     options: &DiscoveryOptions,
@@ -13,7 +15,7 @@ pub(crate) fn discover_rust_files(
 pub(crate) fn discover_rust_files_with_progress(
     root: &Path,
     options: &DiscoveryOptions,
-    mut progress: Option<&mut dyn FnMut(usize, &Path) -> Result<(), String>>,
+    mut progress: Option<DiscoveryProgressFn<'_>>,
 ) -> Result<Vec<PathBuf>, String> {
     let matcher = DiscoveryMatcher::new(options)?;
     let mut out = Vec::new();
@@ -41,18 +43,15 @@ pub(crate) fn discover_rust_files_with_progress(
         {
             continue;
         }
-        if !path.extension().is_some_and(|ext| ext == "rs") {
+        if path.extension().is_none_or(|ext| ext != "rs") {
             continue;
         }
         let rel = path.strip_prefix(root).unwrap_or(path).to_path_buf();
         if matcher.allows(&rel) {
-            out.push(rel);
             if let Some(progress) = progress.as_deref_mut() {
-                progress(
-                    out.len(),
-                    out.last().expect("just pushed a discovered file"),
-                )?;
+                progress(out.len() + 1, &rel)?;
             }
+            out.push(rel);
         }
     }
     out.sort_by(|left, right| {

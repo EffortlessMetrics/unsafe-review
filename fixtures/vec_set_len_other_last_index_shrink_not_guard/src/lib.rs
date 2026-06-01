@@ -21,4 +21,3 @@ mod tests {
         shrink_from_other(&mut values, &other);
     }
 }
-

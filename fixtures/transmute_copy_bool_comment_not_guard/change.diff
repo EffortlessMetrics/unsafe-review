@@ -17,4 +17,3 @@ diff --git a/src/lib.rs b/src/lib.rs
 +        let _ = stringify!(copy_byte_to_bool_commented);
 +    }
 +}
-

@@ -17,4 +17,3 @@ mod tests {
         let _ = core::mem::size_of_val(&(assume_after_other_slot_write as fn(u32) -> u32));
     }
 }
-

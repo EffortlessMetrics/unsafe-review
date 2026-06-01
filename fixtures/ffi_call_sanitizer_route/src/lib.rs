@@ -16,4 +16,3 @@ mod tests {
         let _wrapper = len as fn(*const u8) -> usize;
     }
 }
-

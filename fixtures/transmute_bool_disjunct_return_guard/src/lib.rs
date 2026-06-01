@@ -16,4 +16,3 @@ mod tests {
         let _value = byte_to_bool_disjunct_return(1, false);
     }
 }
-

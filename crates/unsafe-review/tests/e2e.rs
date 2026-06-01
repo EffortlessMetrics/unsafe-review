@@ -2684,7 +2684,7 @@ fn json_usize(value: &Value, field: &str) -> Result<usize, Box<dyn Error>> {
         .as_u64()
         .ok_or_else(|| format!("{field} must be an unsigned count"))?
         .try_into()
-        .map_err(|_| format!("{field} does not fit in usize"))?)
+        .map_err(|_err| format!("{field} does not fit in usize"))?)
 }
 
 fn json_str<'a>(value: &'a Value, path: &str) -> Result<&'a str, Box<dyn Error>> {

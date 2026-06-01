@@ -17,4 +17,3 @@ mod tests {
         let _ = stringify!(pick_after_shadowed_get_probe);
     }
 }
-

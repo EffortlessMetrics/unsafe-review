@@ -15,4 +15,3 @@ mod tests {
         let _ = stringify!(copy_byte_to_bool_conjunct_layout_return);
     }
 }
-

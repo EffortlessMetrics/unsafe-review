@@ -16,4 +16,3 @@ mod tests {
         let _ = core::mem::size_of_val(&(byte_to_bool_conjunct_return as fn(u8, bool) -> bool));
     }
 }
-

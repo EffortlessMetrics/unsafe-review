@@ -85,25 +85,13 @@ pub struct RepoScanStatus {
     pub completed: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DiscoveryOptions {
     pub include: Vec<String>,
     pub exclude: Vec<String>,
     pub respect_gitignore: bool,
     pub large_repo_ignores: bool,
     pub max_files: Option<usize>,
-}
-
-impl Default for DiscoveryOptions {
-    fn default() -> Self {
-        Self {
-            include: Vec::new(),
-            exclude: Vec::new(),
-            respect_gitignore: false,
-            large_repo_ignores: false,
-            max_files: None,
-        }
-    }
 }
 
 impl DiscoveryOptions {

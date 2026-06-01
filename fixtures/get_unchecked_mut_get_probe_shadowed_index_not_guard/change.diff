@@ -21,4 +21,3 @@ diff --git a/src/lib.rs b/src/lib.rs
 +        let _ = stringify!(pick_after_shadowed_get_probe);
 +    }
 +}
-

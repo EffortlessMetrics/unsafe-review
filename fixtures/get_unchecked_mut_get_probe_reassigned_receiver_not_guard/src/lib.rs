@@ -26,4 +26,3 @@ mod tests {
         assert_eq!(fallback, [5_u8, 6, 9, 8]);
     }
 }
-

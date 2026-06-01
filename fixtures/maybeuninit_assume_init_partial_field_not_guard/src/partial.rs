@@ -7,4 +7,3 @@ pub(crate) fn initialize_first_field(slot: &mut MaybeUninit<Pair>, value: u32) {
         (*slot.as_mut_ptr()).first = value;
     }
 }
-

@@ -30,4 +30,3 @@ diff --git a/src/lib.rs b/src/lib.rs
 +        assert_eq!(fallback, [5_u8, 6, 9, 8]);
 +    }
 +}
-

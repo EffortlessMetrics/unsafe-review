@@ -304,7 +304,7 @@ mod tests {
     }
 
     #[test]
-    fn review_kit_manifest_lists_artifacts_and_boundary() {
+    fn review_kit_manifest_lists_artifacts_and_boundary() -> Result<(), String> {
         let output = AnalyzeOutput {
             schema_version: "0.1".to_string(),
             tool: "unsafe-review".to_string(),
@@ -334,8 +334,10 @@ mod tests {
             &check,
             &["review-kit.json", "cards.json", "pr-summary.md"],
         );
-        let value: serde_json::Value =
-            serde_json::from_str(&rendered).expect("manifest should render JSON");
+        let value: serde_json::Value = match serde_json::from_str(&rendered) {
+            Ok(value) => value,
+            Err(err) => return Err(format!("manifest should render JSON: {err}")),
+        };
 
         assert_eq!(value["schema_version"], "0.1");
         assert_eq!(value["mode"], "review_kit_manifest");
@@ -371,5 +373,6 @@ mod tests {
                 .unwrap_or("")
                 .contains("did not run witnesses")
         );
+        Ok(())
     }
 }

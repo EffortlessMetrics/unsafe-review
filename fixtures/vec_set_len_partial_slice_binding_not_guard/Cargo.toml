@@ -3,4 +3,3 @@ name = "vec-set-len-partial-slice-binding-not-guard"
 version = "0.0.0"
 edition = "2024"
 publish = false
-

@@ -15,4 +15,3 @@ mod tests {
         let _ = stringify!(grow_after_len_change);
     }
 }
-

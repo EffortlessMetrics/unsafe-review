@@ -155,14 +155,18 @@ mod tests {
     #[test]
     fn numeric_messages_are_counts_only() -> Result<(), String> {
         require_numeric_message("badges/unsafe-review.json", "294")?;
-        let main_err = require_numeric_message("badges/unsafe-review.json", "294 open gaps")
-            .expect_err("descriptive badge message should be rejected");
+        let main_err = match require_numeric_message("badges/unsafe-review.json", "294 open gaps") {
+            Ok(()) => return Err("descriptive badge message should be rejected".to_string()),
+            Err(err) => err,
+        };
         assert!(main_err.contains("numeric count"));
-        let plus_err = require_numeric_message(
+        let plus_err = match require_numeric_message(
             "badges/unsafe-review-plus.json",
             "19 contract / 111 guard / 37 witness",
-        )
-        .expect_err("compound badge message should be rejected");
+        ) {
+            Ok(()) => return Err("compound badge message should be rejected".to_string()),
+            Err(err) => err,
+        };
         assert!(plus_err.contains("numeric count"));
         Ok(())
     }

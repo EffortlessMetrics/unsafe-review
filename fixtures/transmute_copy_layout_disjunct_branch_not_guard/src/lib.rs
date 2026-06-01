@@ -16,4 +16,3 @@ mod tests {
         let _ = stringify!(copy_byte_to_bool_disjunct_layout);
     }
 }
-

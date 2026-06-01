@@ -22,4 +22,3 @@ diff --git a/src/lib.rs b/src/lib.rs
 +        let _ = stringify!(copy_checked);
 +    }
 +}
-

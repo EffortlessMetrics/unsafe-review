@@ -16,4 +16,3 @@ mod tests {
         let _value = copy_byte_to_bool_conjunct_layout(1, true);
     }
 }
-
