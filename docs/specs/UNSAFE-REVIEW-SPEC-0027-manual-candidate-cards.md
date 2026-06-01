@@ -71,12 +71,17 @@ unsafe-review candidate import target/unsafe-scout/textdecoder-candidate.json \
   --out .unsafe-review/candidates/R4R2-S001.json
 ```
 
+The repository keeps the example below at
+`docs/examples/manual-candidates/textdecoder-sab.json` so release and dogfood
+smokes can exercise import without depending on an external scout artifact.
+
 The importer must preserve the supplied manual candidate identity. Projected
 cards or card-like records must carry:
 
 ```text
 source = manual
 manual_candidate = true
+analyzer_discovered = false
 ```
 
 Manual candidates must remain source-aware in every downstream surface. They
@@ -100,6 +105,9 @@ links to the same manual ID through a reviewed linkage field.
 {
   "schema_version": "manual-candidate/v1",
   "id": "R4R2-S001",
+  "source": "manual",
+  "manual_candidate": true,
+  "analyzer_discovered": false,
   "title": "TextDecoder SharedArrayBuffer decode creates &[u8] over shared bytes",
   "location": {
     "file": "src/runtime/webcore/TextDecoder.rs",
@@ -151,8 +159,9 @@ into an analyzer ReviewCard.
 - schema parser tests for valid and invalid `manual-candidate/v1` JSON
 - CLI import e2e coverage for `candidate import`
 - projection tests proving `source = manual` and `manual_candidate = true` are
-  preserved in explain, context, witness-plan, saved JSON, first-pr
-  `manual-candidates.json`, and outcome surfaces
+  preserved with `analyzer_discovered = false` in explain, context,
+  witness-plan, saved JSON, first-pr `manual-candidates.json`, and outcome
+  surfaces
 - receipt tests for manual candidate IDs
 - negative tests proving manual candidates are not labeled analyzer-discovered
 
@@ -173,6 +182,11 @@ into an analyzer ReviewCard.
 - `first-pr` writes `manual-candidates.json` for imported candidates and keeps
   ReviewCard-derived artifacts, including cards JSON, SARIF, comment-plan,
   saved LSP, repair queue, and policy-report surfaces, ReviewCard-only.
+- `first-pr` terminal output and `review-kit.json` include a bounded,
+  copy-only manual candidate handoff with `manual-candidates.json`,
+  `explain`, `context --json`, and `candidate witness-plan` commands while
+  preserving `source = manual`, `manual_candidate = true`, and
+  `analyzer_discovered = false`.
 
 ## CI Proof
 
@@ -186,7 +200,7 @@ cargo test -p unsafe-review-core manual_candidate
 cargo test -p unsafe-review-core outcome
 cargo test -p unsafe-review manual_candidate
 cargo test -p unsafe-review first_pr_writes_standard_advisory_review_bundle
-cargo run --locked -p xtask -- check-first-pr-artifacts
+cargo run --locked -p xtask -- check-first-pr-artifacts target/unsafe-review-manual-candidate-smoke
 cargo run --locked -p xtask -- check-pr
 cargo run --locked -p xtask -- source-divergence
 git diff --check

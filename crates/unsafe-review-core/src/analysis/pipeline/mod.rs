@@ -1873,6 +1873,25 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
             "bounds"
         ));
 
+        let reassigned_receiver_path =
+            fixture_output("get_unchecked_mut_reassigned_receiver_path_not_guard")?;
+        let reassigned_receiver_path_card = single_card(
+            "get_unchecked_mut_reassigned_receiver_path_not_guard",
+            &reassigned_receiver_path,
+        )?;
+        assert_eq!(
+            reassigned_receiver_path_card.operation.family,
+            OperationFamily::GetUnchecked
+        );
+        assert_eq!(
+            reassigned_receiver_path_card.class,
+            ReviewClass::GuardMissing
+        );
+        assert!(!obligation_discharge_present(
+            reassigned_receiver_path_card,
+            "bounds"
+        ));
+
         let shadowed_receiver = fixture_output("get_unchecked_mut_shadowed_receiver_not_guard")?;
         let shadowed_receiver_card = single_card(
             "get_unchecked_mut_shadowed_receiver_not_guard",
@@ -1904,6 +1923,44 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
         );
         assert!(!obligation_discharge_present(
             reassigned_probe_receiver_card,
+            "bounds"
+        ));
+
+        let reassigned_probe_receiver_path =
+            fixture_output("get_unchecked_mut_get_probe_reassigned_receiver_path_not_guard")?;
+        let reassigned_probe_receiver_path_card = single_card(
+            "get_unchecked_mut_get_probe_reassigned_receiver_path_not_guard",
+            &reassigned_probe_receiver_path,
+        )?;
+        assert_eq!(
+            reassigned_probe_receiver_path_card.operation.family,
+            OperationFamily::GetUnchecked
+        );
+        assert_eq!(
+            reassigned_probe_receiver_path_card.class,
+            ReviewClass::GuardMissing
+        );
+        assert!(!obligation_discharge_present(
+            reassigned_probe_receiver_path_card,
+            "bounds"
+        ));
+
+        let shadowed_probe_receiver_path =
+            fixture_output("get_unchecked_mut_get_probe_shadowed_receiver_path_not_guard")?;
+        let shadowed_probe_receiver_path_card = single_card(
+            "get_unchecked_mut_get_probe_shadowed_receiver_path_not_guard",
+            &shadowed_probe_receiver_path,
+        )?;
+        assert_eq!(
+            shadowed_probe_receiver_path_card.operation.family,
+            OperationFamily::GetUnchecked
+        );
+        assert_eq!(
+            shadowed_probe_receiver_path_card.class,
+            ReviewClass::GuardMissing
+        );
+        assert!(!obligation_discharge_present(
+            shadowed_probe_receiver_path_card,
             "bounds"
         ));
 
@@ -2022,6 +2079,44 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
             "bounds"
         ));
 
+        let stale_if_let_probe_receiver_path =
+            fixture_output("get_unchecked_mut_if_let_get_reassigned_receiver_path_not_guard")?;
+        let stale_if_let_probe_receiver_path_card = single_card(
+            "get_unchecked_mut_if_let_get_reassigned_receiver_path_not_guard",
+            &stale_if_let_probe_receiver_path,
+        )?;
+        assert_eq!(
+            stale_if_let_probe_receiver_path_card.operation.family,
+            OperationFamily::GetUnchecked
+        );
+        assert_eq!(
+            stale_if_let_probe_receiver_path_card.class,
+            ReviewClass::GuardMissing
+        );
+        assert!(!obligation_discharge_present(
+            stale_if_let_probe_receiver_path_card,
+            "bounds"
+        ));
+
+        let shadowed_if_let_probe_receiver_path =
+            fixture_output("get_unchecked_mut_if_let_get_shadowed_receiver_path_not_guard")?;
+        let shadowed_if_let_probe_receiver_path_card = single_card(
+            "get_unchecked_mut_if_let_get_shadowed_receiver_path_not_guard",
+            &shadowed_if_let_probe_receiver_path,
+        )?;
+        assert_eq!(
+            shadowed_if_let_probe_receiver_path_card.operation.family,
+            OperationFamily::GetUnchecked
+        );
+        assert_eq!(
+            shadowed_if_let_probe_receiver_path_card.class,
+            ReviewClass::GuardMissing
+        );
+        assert!(!obligation_discharge_present(
+            shadowed_if_let_probe_receiver_path_card,
+            "bounds"
+        ));
+
         let shadowed_if_let_probe_receiver =
             fixture_output("get_unchecked_mut_if_let_get_shadowed_receiver_not_guard")?;
         let shadowed_if_let_probe_receiver_card = single_card(
@@ -2076,6 +2171,25 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
         );
         assert!(!obligation_discharge_present(
             stale_let_else_probe_receiver_card,
+            "bounds"
+        ));
+
+        let stale_let_else_probe_receiver_path =
+            fixture_output("get_unchecked_mut_let_else_get_reassigned_receiver_path_not_guard")?;
+        let stale_let_else_probe_receiver_path_card = single_card(
+            "get_unchecked_mut_let_else_get_reassigned_receiver_path_not_guard",
+            &stale_let_else_probe_receiver_path,
+        )?;
+        assert_eq!(
+            stale_let_else_probe_receiver_path_card.operation.family,
+            OperationFamily::GetUnchecked
+        );
+        assert_eq!(
+            stale_let_else_probe_receiver_path_card.class,
+            ReviewClass::GuardMissing
+        );
+        assert!(!obligation_discharge_present(
+            stale_let_else_probe_receiver_path_card,
             "bounds"
         ));
 

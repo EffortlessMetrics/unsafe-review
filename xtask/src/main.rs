@@ -15,12 +15,14 @@ use calibration_constants::{
 mod accuracy_labels;
 mod advisory_artifacts;
 mod calibration_constants;
+mod calibration_manifest;
 mod command_args;
 mod commands;
 mod docs_automation_paths;
 mod first_hour;
 mod markdown;
 mod public_badges;
+mod public_surfaces;
 mod source_sync;
 mod spec_status;
 mod support_tiers;
@@ -87,7 +89,6 @@ const WORKFLOW_ALLOWLIST: &str = "policy/workflow-allowlist.toml";
 const WORKFLOW_DIR: &str = ".github/workflows";
 const DOC_ARTIFACT_LEDGER: &str = "policy/doc-artifacts.toml";
 const DOCS_AUTOMATION_LEDGER: &str = "policy/docs-automation.toml";
-const PUBLIC_SURFACES_LEDGER: &str = "policy/public-surfaces.toml";
 const CI_LANE_LEDGER: &str = "policy/ci-lane-whitelist.toml";
 const PACKAGE_BOUNDARY_LEDGER: &str = "policy/package-boundary.toml";
 const SOURCE_OF_TRUTH_INDEX: &str = ".unsafe-review-spec/index.toml";
@@ -104,37 +105,6 @@ const DOCS_AUTOMATION_KINDS: &[&str] = &[
     "handoff_receipt",
 ];
 const DOCS_AUTOMATION_MODES: &[&str] = &["check", "generate"];
-const PUBLIC_SURFACE_STATUSES: &[&str] = &["experimental", "accepted", "deferred"];
-const PUBLIC_SURFACE_FRONT_DOORS: &[&str] = &[
-    "README.md",
-    "docs/FIRST_USE.md",
-    "docs/CLI.md",
-    "crates/unsafe-review/README.md",
-    "crates/unsafe-review-cli/README.md",
-    "crates/unsafe-review-core/README.md",
-];
-const FIRST_PR_ARTIFACT_LIST_SURFACES: &[&str] = &[
-    ".github/examples/unsafe-review-first-pr.yml",
-    ".github/workflows/unsafe-review.yml",
-    "docs/CLI.md",
-    "docs/FIRST_HOUR.md",
-    "docs/FIRST_USE.md",
-    "docs/ci/PR_CI.md",
-    "docs/editor/saved-lsp-json.md",
-    "docs/specs/UNSAFE-REVIEW-SPEC-0011-pr-ci-output.md",
-    "docs/specs/UNSAFE-REVIEW-SPEC-0024-ci-design.md",
-];
-const FIRST_PR_BUNDLE_ARTIFACT_PATHS: &[&str] = &[
-    "target/unsafe-review/review-kit.json",
-    "target/unsafe-review/cards.json",
-    "target/unsafe-review/pr-summary.md",
-    "target/unsafe-review/github-summary.md",
-    "target/unsafe-review/cards.sarif",
-    "target/unsafe-review/comment-plan.json",
-    "target/unsafe-review/witness-plan.md",
-    "target/unsafe-review/lsp.json",
-    "target/unsafe-review/repair-queue.json",
-];
 const GOAL_WORK_ITEM_STATUSES: &[&str] = &["ready", "active", "blocked", "done", "superseded"];
 const PACKAGE_CLASSIFICATIONS: &[&str] = &["published", "private", "internal", "deferred"];
 const CI_LANE_STATUSES: &[&str] = &["advisory", "required", "deferred", "retired"];
@@ -297,7 +267,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
         commands::XtaskCommand::CheckDocArtifacts => check_doc_artifacts(),
         commands::XtaskCommand::CheckDocsAutomation => check_docs_automation(),
         commands::XtaskCommand::CheckSpecStatus => spec_status::check(),
-        commands::XtaskCommand::CheckPublicSurfaces => check_public_surfaces(),
+        commands::XtaskCommand::CheckPublicSurfaces => public_surfaces::check(),
         commands::XtaskCommand::CheckGoals => check_goals(),
         commands::XtaskCommand::CheckPackageBoundary => check_package_boundary(),
         commands::XtaskCommand::CheckCiLanes => check_ci_lanes(),
@@ -330,7 +300,7 @@ fn check_docs() -> Result<(), String> {
     public_badges::check_endpoints()?;
     spec_status::check_dashboard_impl()?;
     check_docs_map_paths("docs/README.md")?;
-    check_first_pr_artifact_list_surfaces()?;
+    public_surfaces::check_first_pr_artifact_list_surfaces()?;
     check_index(
         Path::new("docs/specs"),
         Path::new("docs/specs/README.md"),
@@ -380,7 +350,7 @@ fn check_policy() -> Result<(), String> {
     )?;
     check_doc_artifacts()?;
     check_docs_automation()?;
-    check_public_surfaces()?;
+    public_surfaces::check()?;
     check_goals()?;
     check_package_boundary()?;
     check_ci_lanes()?;
@@ -540,110 +510,6 @@ fn check_docs_automation() -> Result<(), String> {
     let surfaces = check_docs_automation_impl()?;
     println!("check-docs-automation: ok ({surfaces} surfaces)");
     Ok(())
-}
-
-fn check_public_surfaces() -> Result<(), String> {
-    let surfaces = check_public_surfaces_impl()?;
-    println!("check-public-surfaces: ok ({surfaces} surfaces)");
-    Ok(())
-}
-
-fn check_public_surfaces_impl() -> Result<usize, String> {
-    let value = parse_toml_file(&workspace_path(PUBLIC_SURFACES_LEDGER))?;
-    require_toml_string(&value, "schema_version", PUBLIC_SURFACES_LEDGER)?;
-    require_known(
-        required_toml_string(&value, "status", PUBLIC_SURFACES_LEDGER)?,
-        PUBLIC_SURFACE_STATUSES,
-        PUBLIC_SURFACES_LEDGER,
-        "status",
-    )?;
-    let trust_boundary = required_toml_string(&value, "trust_boundary", PUBLIC_SURFACES_LEDGER)?;
-    for required in ["advisory", "memory-safety proof", "UB-free", "Miri-clean"] {
-        if !text_contains_ignore_ascii_case(trust_boundary, required) {
-            return Err(format!(
-                "{PUBLIC_SURFACES_LEDGER} trust_boundary must mention `{required}`"
-            ));
-        }
-    }
-
-    let forbidden_terms = value
-        .get("forbidden_terms")
-        .ok_or_else(|| format!("{PUBLIC_SURFACES_LEDGER} is missing `forbidden_terms` array"))?;
-    let forbidden_terms =
-        toml_str_array(forbidden_terms, PUBLIC_SURFACES_LEDGER, "forbidden_terms")?;
-    if forbidden_terms.is_empty() {
-        return Err(format!(
-            "{PUBLIC_SURFACES_LEDGER} forbidden_terms must not be empty"
-        ));
-    }
-    let mut seen = BTreeSet::new();
-    for term in forbidden_terms {
-        if term.trim().is_empty() {
-            return Err(format!(
-                "{PUBLIC_SURFACES_LEDGER} forbidden_terms entries must be non-empty"
-            ));
-        }
-        if !seen.insert(term.to_ascii_lowercase()) {
-            return Err(format!(
-                "{PUBLIC_SURFACES_LEDGER} contains duplicate forbidden term `{term}`"
-            ));
-        }
-    }
-
-    public_badges::check_endpoints()?;
-    public_badges::check_generated_projection()?;
-    for path in PUBLIC_SURFACE_FRONT_DOORS {
-        check_public_surface_front_door(path)?;
-    }
-
-    Ok(PUBLIC_SURFACE_FRONT_DOORS.len() + public_badges::endpoint_count())
-}
-
-fn check_first_pr_artifact_list_surfaces() -> Result<(), String> {
-    for path in FIRST_PR_ARTIFACT_LIST_SURFACES {
-        require_file(path)?;
-        let source = workspace_path(path);
-        let text = read_to_string(&source)?;
-        require_first_pr_artifact_paths(path, &text)?;
-    }
-    Ok(())
-}
-
-fn require_first_pr_artifact_paths(path: &str, text: &str) -> Result<(), String> {
-    for artifact in FIRST_PR_BUNDLE_ARTIFACT_PATHS {
-        if !text.contains(artifact) {
-            return Err(format!("{path} must list first-pr artifact `{artifact}`"));
-        }
-    }
-    Ok(())
-}
-
-fn check_public_surface_front_door(path: &str) -> Result<(), String> {
-    require_file(path)?;
-    check_markdown_local_links(path)?;
-    let source = workspace_path(path);
-    let text = read_to_string(&source)?;
-    reject_positive_overclaims(Path::new(path), &text)?;
-    if !public_surface_has_trust_boundary(&text) {
-        return Err(format!(
-            "{path} must include advisory trust-boundary wording such as not-proof, not-UB-free, no-default-witness, or no-default-blocking language"
-        ));
-    }
-    Ok(())
-}
-
-fn public_surface_has_trust_boundary(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    let has_negative = lower.contains("not")
-        || lower.contains("does not")
-        || lower.contains("no ")
-        || lower.contains("without");
-    let has_boundary = lower.contains("proof")
-        || lower.contains("ub-free")
-        || lower.contains("miri")
-        || lower.contains("witness")
-        || lower.contains("blocking");
-    has_negative && has_boundary
 }
 
 fn check_docs_automation_impl() -> Result<usize, String> {
@@ -1321,145 +1187,19 @@ fn check_fixture_exception_ledgers(dirs: &[PathBuf]) -> Result<(), String> {
 }
 
 fn check_calibration() -> Result<(), String> {
-    let path = workspace_path("fixtures/calibration.toml");
-    let value = parse_toml_file(&path)?;
-    require_toml_string(&value, "schema_version", "fixtures/calibration.toml")?;
-    let required = value
-        .get("required_core_fixtures")
-        .and_then(toml::Value::as_array)
-        .ok_or_else(|| "fixtures/calibration.toml is missing required_core_fixtures".to_string())?;
-    let cases = value
-        .get("cases")
-        .and_then(toml::Value::as_array)
-        .ok_or_else(|| "fixtures/calibration.toml is missing cases".to_string())?;
-    if cases.is_empty() {
-        return Err("fixtures/calibration.toml has no calibration cases".to_string());
-    }
-
-    let mut fixtures = BTreeSet::new();
-    let mut kinds = BTreeSet::new();
-    let mut operation_families = BTreeSet::new();
-    let mut operation_family_fixtures = BTreeMap::new();
-    let mut fixture_cases = BTreeMap::new();
-    let support_capabilities = support_tier_capabilities()?;
-    for (idx, case) in cases.iter().enumerate() {
-        let Some(case) = case.as_table() else {
-            return Err(format!(
-                "fixtures/calibration.toml cases[{idx}] must be a TOML table"
-            ));
-        };
-        check_calibration_case_fields(case, idx)?;
-        let fixture = required_case_string(case, "fixture", idx)?;
-        let kind = required_case_string(case, "kind", idx)?;
-        let claim = required_case_string(case, "claim", idx)?;
-        let support_tier = required_case_string(case, "support_tier", idx)?;
-        if !support_capabilities.contains(support_tier) {
-            return Err(format!(
-                "fixtures/calibration.toml cases[{idx}] support_tier `{support_tier}` is not a capability in docs/status/SUPPORT_TIERS.md"
-            ));
-        }
-        if !CALIBRATION_REQUIRED_KINDS.contains(&kind) {
-            return Err(format!(
-                "fixtures/calibration.toml cases[{idx}] uses unknown kind `{kind}`"
-            ));
-        }
-        if claim.len() < 16 {
-            return Err(format!(
-                "fixtures/calibration.toml cases[{idx}] claim is too terse"
-            ));
-        }
-        if !fixtures.insert(fixture.to_string()) {
-            return Err(format!(
-                "fixtures/calibration.toml contains duplicate fixture `{fixture}`"
-            ));
-        }
-        kinds.insert(kind.to_string());
-        let expected_cards = required_case_usize(case, "expected_cards", idx)?;
-        let expected_class = optional_case_string(case, "expected_class", idx)?.map(str::to_string);
-        let expected_operation_family =
-            optional_case_string(case, "expected_operation_family", idx)?.map(str::to_string);
-        let expected_hazard =
-            optional_case_string(case, "expected_hazard", idx)?.map(str::to_string);
-        check_calibration_case(case, fixture, kind, idx)?;
-        fixture_cases.insert(
-            fixture.to_string(),
-            accuracy_labels::CalibrationFixtureCase {
-                kind: kind.to_string(),
-                expected_cards,
-                expected_class,
-                expected_operation_family,
-                expected_hazard,
-            },
-        );
-        if let Some(operation_family) =
-            optional_case_string(case, "expected_operation_family", idx)?
-        {
-            operation_families.insert(operation_family.to_string());
-            operation_family_fixtures
-                .entry(operation_family.to_string())
-                .or_insert_with(BTreeSet::new)
-                .insert(fixture.to_string());
-        }
-    }
-    check_operation_family_registry_coverage(&operation_families, &operation_family_fixtures)?;
-
-    for kind in CALIBRATION_REQUIRED_KINDS {
-        if !kinds.contains(*kind) {
-            return Err(format!(
-                "fixtures/calibration.toml is missing a `{kind}` calibration case"
-            ));
-        }
-    }
-
-    let mut required_fixtures = BTreeSet::new();
-    for (idx, fixture) in required.iter().enumerate() {
-        let Some(fixture) = fixture.as_str() else {
-            return Err(format!(
-                "fixtures/calibration.toml required_core_fixtures[{idx}] must be a string"
-            ));
-        };
-        if !required_fixtures.insert(fixture.to_string()) {
-            return Err(format!(
-                "fixtures/calibration.toml contains duplicate required core fixture `{fixture}`"
-            ));
-        }
-        if !fixtures.contains(fixture) {
-            return Err(format!(
-                "fixtures/calibration.toml required core fixture `{fixture}` has no case"
-            ));
-        }
-    }
-    for fixture in &fixtures {
-        if !required_fixtures.contains(fixture) {
-            return Err(format!(
-                "fixtures/calibration.toml case fixture `{fixture}` is missing from required_core_fixtures"
-            ));
-        }
-    }
-
-    for dir in fixture_dirs(&workspace_path("fixtures"))? {
-        let fixture = fixture_dir_name(&dir)?;
-        if FIXTURE_EXPECTED_CARDS_EXCEPTIONS.contains(&fixture) {
-            continue;
-        }
-        if dir.join("expected.cards.json").is_file() && !fixtures.contains(fixture) {
-            return Err(format!(
-                "fixture `{fixture}` has expected.cards.json but no fixtures/calibration.toml case"
-            ));
-        }
-    }
+    let manifest = calibration_manifest::validate()?;
 
     let accuracy_policy = parse_toml_file(&workspace_path("policy/accuracy-calibration.toml"))?;
     let label_count =
-        accuracy_labels::check_accuracy_label_ledgers(&accuracy_policy, &fixture_cases)?;
+        accuracy_labels::check_accuracy_label_ledgers(&accuracy_policy, &manifest.fixture_cases)?;
     let report_stats =
-        accuracy_calibration_report_stats(&accuracy_policy, cases.len(), label_count)?;
+        accuracy_calibration_report_stats(&accuracy_policy, manifest.case_count, label_count)?;
     check_accuracy_calibration_report(&report_stats)?;
     check_objective_audit_calibration_snapshot(&report_stats)?;
 
     println!(
         "check-calibration: ok ({} cases, {label_count} labels)",
-        cases.len()
+        manifest.case_count
     );
     Ok(())
 }
@@ -6967,19 +6707,20 @@ jobs:
 
     #[test]
     fn first_pr_artifact_list_surfaces_include_full_bundle() -> Result<(), String> {
-        check_first_pr_artifact_list_surfaces()
+        public_surfaces::check_first_pr_artifact_list_surfaces()
     }
 
     #[test]
     fn first_pr_artifact_list_rejects_missing_review_kit() -> Result<(), String> {
-        let text = FIRST_PR_BUNDLE_ARTIFACT_PATHS
+        let text = public_surfaces::FIRST_PR_BUNDLE_ARTIFACT_PATHS
             .iter()
             .copied()
             .filter(|artifact| *artifact != "target/unsafe-review/review-kit.json")
             .collect::<Vec<_>>()
             .join("\n");
 
-        let Err(err) = require_first_pr_artifact_paths("docs/example.md", &text) else {
+        let Err(err) = public_surfaces::require_first_pr_artifact_paths("docs/example.md", &text)
+        else {
             return Err("missing review-kit artifact should fail".to_string());
         };
 
@@ -10823,21 +10564,21 @@ Snapshot reports:
 
     #[test]
     fn public_surface_checker_validates_current_contract() -> Result<(), String> {
-        check_public_surfaces_impl().map(|_| ())
+        public_surfaces::check_impl().map(|_| ())
     }
 
     #[test]
     fn public_surface_boundary_requires_negative_claim_limit() {
-        assert!(public_surface_has_trust_boundary(
+        assert!(public_surfaces::has_trust_boundary(
             "This is advisory review evidence, not memory-safety proof."
         ));
-        assert!(public_surface_has_trust_boundary(
+        assert!(public_surfaces::has_trust_boundary(
             "The command does not run Miri or enable blocking policy by default."
         ));
-        assert!(!public_surface_has_trust_boundary(
+        assert!(!public_surfaces::has_trust_boundary(
             "This command proves the reviewed code is safe."
         ));
-        assert!(!public_surface_has_trust_boundary(
+        assert!(!public_surfaces::has_trust_boundary(
             "Install this command to review pull requests."
         ));
     }
