@@ -22,13 +22,22 @@ mod first_hour;
 mod markdown;
 mod public_badges;
 mod source_sync;
+mod spec_status;
+mod support_tiers;
 mod workflow_allowlist;
 
 use advisory_artifacts::{check_advisory_artifacts, check_first_pr_artifacts};
 use first_hour::check_first_hour;
+use support_tiers::{SUPPORT_TIERS_DOC, check_support_tiers, support_tier_capabilities};
 
 #[cfg(test)]
 use command_args::{require_max_args, require_no_extra_args};
+#[cfg(test)]
+use support_tiers::{
+    SUPPORT_SUMMARY_DOC, SUPPORT_SUMMARY_REQUIRED_PHRASES, check_support_summary_text,
+    check_support_tiers_text, support_capability_from_row, support_summary_posture_from_row,
+    support_tier_from_row,
+};
 
 #[cfg(test)]
 use workflow_allowlist::{
@@ -78,7 +87,6 @@ const WORKFLOW_ALLOWLIST: &str = "policy/workflow-allowlist.toml";
 const WORKFLOW_DIR: &str = ".github/workflows";
 const DOC_ARTIFACT_LEDGER: &str = "policy/doc-artifacts.toml";
 const DOCS_AUTOMATION_LEDGER: &str = "policy/docs-automation.toml";
-const SPEC_STATUS_DASHBOARD: &str = "docs/specs/UNSAFE-REVIEW-SPEC-STATUS.md";
 const PUBLIC_SURFACES_LEDGER: &str = "policy/public-surfaces.toml";
 const CI_LANE_LEDGER: &str = "policy/ci-lane-whitelist.toml";
 const PACKAGE_BOUNDARY_LEDGER: &str = "policy/package-boundary.toml";
@@ -96,34 +104,6 @@ const DOCS_AUTOMATION_KINDS: &[&str] = &[
     "handoff_receipt",
 ];
 const DOCS_AUTOMATION_MODES: &[&str] = &["check", "generate"];
-const SPEC_STATUS_HEADER: &[&str] = &[
-    "Spec",
-    "Status",
-    "Implementation state",
-    "Proof commands",
-    "Last touched",
-    "Notes",
-];
-const SPEC_STATUS_LIFECYCLE_STATUSES: &[&str] = &["accepted", "draft", "proposed"];
-const SPEC_STATUS_XTASK_COMMANDS: &[&str] = &[
-    "check-advisory-artifacts",
-    "check-calibration",
-    "check-ci-lanes",
-    "check-doc-artifacts",
-    "check-docs",
-    "check-docs-automation",
-    "check-dogfood",
-    "check-first-hour",
-    "check-first-pr-artifacts",
-    "check-goals",
-    "check-package-boundary",
-    "check-pr",
-    "check-policy",
-    "check-public-surfaces",
-    "check-source-sync",
-    "check-spec-status",
-    "source-divergence",
-];
 const PUBLIC_SURFACE_STATUSES: &[&str] = &["experimental", "accepted", "deferred"];
 const PUBLIC_SURFACE_FRONT_DOORS: &[&str] = &[
     "README.md",
@@ -169,37 +149,6 @@ const FIXTURE_EXPECTED_CARDS_EXCEPTIONS: &[&str] = &[
 const FIXTURE_PACKAGE_PREFIX_EXCEPTIONS: &[(&str, &str)] =
     &[("raw_pointer_alignment_line_drift", "raw-pointer-alignment")];
 
-const SUPPORT_TIERS_DOC: &str = "docs/status/SUPPORT_TIERS.md";
-const SUPPORT_SUMMARY_DOC: &str = "docs/status/SUPPORT_SUMMARY.md";
-const KNOWN_SUPPORT_TIERS: &[&str] = &["scaffold", "experimental", "planned", "deferred"];
-const SUPPORT_PROOF_TERMS: &[&str] = &[
-    "test",
-    "tests",
-    "fixture",
-    "fixtures",
-    "golden",
-    "goldens",
-    "e2e",
-    "xtask",
-    "workflow",
-    "handoff",
-    "dogfood",
-    "parser",
-    "renderer",
-    "manifest",
-    "serde",
-    "round-trip",
-    "adr",
-];
-const KNOWN_SUPPORT_SUMMARY_POSTURES: &[&str] = &["Experimental", "Deferred or planned"];
-const SUPPORT_SUMMARY_REQUIRED_PHRASES: &[&str] = &[
-    "memory-safety proof",
-    "UB-free claim",
-    "Miri-clean claim",
-    "site-execution proof",
-    "calibrated policy gate",
-    "SUPPORT_TIERS.md",
-];
 const DOGFOOD_MANIFEST: &str = "docs/dogfood/corpus.toml";
 const DOGFOOD_INDEX: &str = "docs/dogfood/index.json";
 const DOGFOOD_README: &str = "docs/dogfood/README.md";
@@ -347,7 +296,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
         commands::XtaskCommand::CheckPolicy => check_policy(),
         commands::XtaskCommand::CheckDocArtifacts => check_doc_artifacts(),
         commands::XtaskCommand::CheckDocsAutomation => check_docs_automation(),
-        commands::XtaskCommand::CheckSpecStatus => check_spec_status(),
+        commands::XtaskCommand::CheckSpecStatus => spec_status::check(),
         commands::XtaskCommand::CheckPublicSurfaces => check_public_surfaces(),
         commands::XtaskCommand::CheckGoals => check_goals(),
         commands::XtaskCommand::CheckPackageBoundary => check_package_boundary(),
@@ -379,7 +328,7 @@ fn check_docs() -> Result<(), String> {
         check_markdown_local_links(path)?;
     }
     public_badges::check_endpoints()?;
-    check_spec_status_dashboard_impl()?;
+    spec_status::check_dashboard_impl()?;
     check_docs_map_paths("docs/README.md")?;
     check_first_pr_artifact_list_surfaces()?;
     check_index(
@@ -593,12 +542,6 @@ fn check_docs_automation() -> Result<(), String> {
     Ok(())
 }
 
-fn check_spec_status() -> Result<(), String> {
-    let rows = check_spec_status_dashboard_impl()?;
-    println!("check-spec-status: ok ({rows} rows)");
-    Ok(())
-}
-
 fn check_public_surfaces() -> Result<(), String> {
     let surfaces = check_public_surfaces_impl()?;
     println!("check-public-surfaces: ok ({surfaces} surfaces)");
@@ -796,13 +739,14 @@ fn check_docs_automation_impl() -> Result<usize, String> {
         if kind == "spec_status_dashboard" {
             if !paths
                 .iter()
-                .any(|path| path == Path::new(SPEC_STATUS_DASHBOARD))
+                .any(|path| path == Path::new(spec_status::DASHBOARD))
             {
                 return Err(format!(
-                    "{DOCS_AUTOMATION_LEDGER} generated_or_checked `{id}` must point at {SPEC_STATUS_DASHBOARD}"
+                    "{DOCS_AUTOMATION_LEDGER} generated_or_checked `{id}` must point at {}",
+                    spec_status::DASHBOARD
                 ));
             }
-            check_spec_status_dashboard_impl()?;
+            spec_status::check_dashboard_impl()?;
         }
         if let Some(required_text) = table.get("must_include") {
             let required_text =
@@ -812,258 +756,6 @@ fn check_docs_automation_impl() -> Result<usize, String> {
     }
 
     Ok(ids.len())
-}
-
-fn check_spec_status_dashboard_impl() -> Result<usize, String> {
-    let source = workspace_path(SPEC_STATUS_DASHBOARD);
-    let text = read_to_string(&source)?;
-    let rows = spec_status_rows_from_text(&text)?;
-    if rows.is_empty() {
-        return Err(format!(
-            "{SPEC_STATUS_DASHBOARD} must list at least one spec row"
-        ));
-    }
-
-    let mut seen = BTreeSet::new();
-    for row in &rows {
-        if !seen.insert(row.spec_id.clone()) {
-            return Err(format!(
-                "{SPEC_STATUS_DASHBOARD} contains duplicate row for `{}`",
-                row.spec_id
-            ));
-        }
-        let Some(spec_file) = spec_file_path_for_id(&row.spec_id)? else {
-            return Err(format!(
-                "{SPEC_STATUS_DASHBOARD} references `{}` but no matching docs/specs file exists",
-                row.spec_id
-            ));
-        };
-        let status = spec_lifecycle_status(&row.status);
-        require_known(
-            &status,
-            SPEC_STATUS_LIFECYCLE_STATUSES,
-            SPEC_STATUS_DASHBOARD,
-            "status",
-        )?;
-        let spec_status = spec_file_lifecycle_status(&spec_file)?;
-        require_known(
-            &spec_status,
-            SPEC_STATUS_LIFECYCLE_STATUSES,
-            &spec_file.display().to_string(),
-            "status",
-        )?;
-        check_spec_status_lifecycle_match(
-            &row.spec_id,
-            &status,
-            &spec_status,
-            &spec_file.display().to_string(),
-        )?;
-        if row.implementation_state.trim().is_empty() {
-            return Err(format!(
-                "{SPEC_STATUS_DASHBOARD} row `{}` must describe implementation state",
-                row.spec_id
-            ));
-        }
-        if row.notes.trim().is_empty() {
-            return Err(format!(
-                "{SPEC_STATUS_DASHBOARD} row `{}` must include notes",
-                row.spec_id
-            ));
-        }
-        if !is_iso_date(&row.last_touched) {
-            return Err(format!(
-                "{SPEC_STATUS_DASHBOARD} row `{}` has invalid Last touched date `{}`",
-                row.spec_id, row.last_touched
-            ));
-        }
-        check_spec_status_proof_commands(&row.spec_id, &row.proof_commands)?;
-    }
-
-    let source_index = parse_toml_file(&workspace_path(SOURCE_OF_TRUTH_INDEX))?;
-    let indexed_artifact_ids = source_truth_index_ids(&source_index, "artifact")?;
-    for id in indexed_artifact_ids
-        .iter()
-        .filter(|id| id.starts_with("UNSAFE-REVIEW-SPEC-"))
-    {
-        if !seen.contains(id) {
-            return Err(format!(
-                "{SPEC_STATUS_DASHBOARD} is missing source-of-truth indexed spec `{id}`"
-            ));
-        }
-    }
-
-    Ok(rows.len())
-}
-
-#[derive(Debug)]
-struct SpecStatusRow {
-    spec_id: String,
-    status: String,
-    implementation_state: String,
-    proof_commands: String,
-    last_touched: String,
-    notes: String,
-}
-
-fn spec_status_rows_from_text(text: &str) -> Result<Vec<SpecStatusRow>, String> {
-    let mut rows = Vec::new();
-    let mut in_table = false;
-    let mut saw_header = false;
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if !trimmed.starts_with('|') {
-            if in_table {
-                break;
-            }
-            continue;
-        }
-        let columns = markdown_table_columns(trimmed);
-        if columns.len() != SPEC_STATUS_HEADER.len() {
-            if in_table {
-                return Err(format!(
-                    "{SPEC_STATUS_DASHBOARD} has row with {} columns, expected {}: {trimmed}",
-                    columns.len(),
-                    SPEC_STATUS_HEADER.len()
-                ));
-            }
-            continue;
-        }
-        let columns = columns.into_iter().map(str::trim).collect::<Vec<_>>();
-        if columns == SPEC_STATUS_HEADER {
-            in_table = true;
-            saw_header = true;
-            continue;
-        }
-        if in_table && is_markdown_separator_row(&columns) {
-            continue;
-        }
-        if in_table {
-            let spec_id = spec_id_from_status_cell(columns[0]).ok_or_else(|| {
-                format!("{SPEC_STATUS_DASHBOARD} row is missing backticked spec id: {trimmed}")
-            })?;
-            rows.push(SpecStatusRow {
-                spec_id,
-                status: columns[1].to_string(),
-                implementation_state: columns[2].to_string(),
-                proof_commands: columns[3].to_string(),
-                last_touched: columns[4].to_string(),
-                notes: columns[5].to_string(),
-            });
-        }
-    }
-    if !saw_header {
-        return Err(format!(
-            "{SPEC_STATUS_DASHBOARD} is missing expected status table header"
-        ));
-    }
-    Ok(rows)
-}
-
-fn is_markdown_separator_row(columns: &[&str]) -> bool {
-    columns.iter().all(|column| {
-        let value = column.trim();
-        !value.is_empty() && value.chars().all(|ch| matches!(ch, '-' | ':' | ' '))
-    })
-}
-
-fn spec_id_from_status_cell(cell: &str) -> Option<String> {
-    let marker = "`UNSAFE-REVIEW-SPEC-";
-    let start = cell.find(marker)? + 1;
-    let rest = &cell[start..];
-    let end = rest.find('`')?;
-    Some(rest[..end].to_string())
-}
-
-fn spec_file_path_for_id(spec_id: &str) -> Result<Option<PathBuf>, String> {
-    for path in markdown_files(&workspace_path("docs/specs"))? {
-        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
-            return Err(format!("non-UTF-8 spec file path: {}", path.display()));
-        };
-        if name.starts_with(spec_id) && name.ends_with(".md") {
-            return Ok(Some(path));
-        }
-    }
-    Ok(None)
-}
-
-fn spec_file_lifecycle_status(path: &Path) -> Result<String, String> {
-    let text = read_to_string(path)?;
-    spec_lifecycle_status_from_text(&text, &path.display().to_string())
-}
-
-fn spec_lifecycle_status_from_text(text: &str, source: &str) -> Result<String, String> {
-    for line in text.lines() {
-        let trimmed = line.trim();
-        let status = trimmed
-            .strip_prefix("Status:")
-            .or_else(|| trimmed.strip_prefix("- Status:"));
-        if let Some(status) = status {
-            return Ok(spec_lifecycle_status(status));
-        }
-    }
-    Err(format!("{source} must include a Status header"))
-}
-
-fn spec_lifecycle_status(status: &str) -> String {
-    status
-        .trim()
-        .split([',', ' '])
-        .next()
-        .unwrap_or_default()
-        .to_ascii_lowercase()
-}
-
-fn check_spec_status_lifecycle_match(
-    spec_id: &str,
-    dashboard_status: &str,
-    spec_status: &str,
-    source: &str,
-) -> Result<(), String> {
-    if dashboard_status == spec_status {
-        return Ok(());
-    }
-    Err(format!(
-        "{SPEC_STATUS_DASHBOARD} row `{spec_id}` status `{dashboard_status}` must match {source} Status lifecycle `{spec_status}`"
-    ))
-}
-
-fn check_spec_status_proof_commands(spec_id: &str, proof_commands: &str) -> Result<(), String> {
-    let spans = markdown::code_spans(proof_commands);
-    let mut xtask_commands = 0usize;
-    for span in spans {
-        let Some(command) = span.strip_prefix("cargo run --locked -p xtask -- ") else {
-            continue;
-        };
-        let Some(command_name) = command.split_whitespace().next() else {
-            return Err(format!(
-                "{SPEC_STATUS_DASHBOARD} row `{spec_id}` has empty xtask proof command"
-            ));
-        };
-        xtask_commands += 1;
-        require_known(
-            command_name,
-            SPEC_STATUS_XTASK_COMMANDS,
-            SPEC_STATUS_DASHBOARD,
-            "proof command",
-        )?;
-    }
-    if xtask_commands == 0 {
-        return Err(format!(
-            "{SPEC_STATUS_DASHBOARD} row `{spec_id}` must include at least one `cargo run --locked -p xtask -- ...` proof command"
-        ));
-    }
-    Ok(())
-}
-
-fn is_iso_date(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    bytes.len() == 10
-        && bytes[4] == b'-'
-        && bytes[7] == b'-'
-        && bytes
-            .iter()
-            .enumerate()
-            .all(|(idx, byte)| idx == 4 || idx == 7 || byte.is_ascii_digit())
 }
 
 fn require_scope_paths(
@@ -1300,7 +992,10 @@ fn check_goals() -> Result<(), String> {
     Ok(())
 }
 
-fn source_truth_index_ids(value: &toml::Value, kind: &str) -> Result<BTreeSet<String>, String> {
+pub(crate) fn source_truth_index_ids(
+    value: &toml::Value,
+    kind: &str,
+) -> Result<BTreeSet<String>, String> {
     let entries = toml_array(value, kind, SOURCE_OF_TRUTH_INDEX)?;
     let mut ids = BTreeSet::new();
     for (idx, entry) in entries.iter().enumerate() {
@@ -1579,79 +1274,6 @@ fn looks_like_counted_card_id(value: &str) -> bool {
         && !prefix.is_empty()
         && !count.is_empty()
         && count.bytes().all(|byte| byte.is_ascii_digit())
-}
-
-fn check_support_tiers() -> Result<(), String> {
-    let path = SUPPORT_TIERS_DOC;
-    let text = read_to_string(Path::new(path))?;
-    check_support_tiers_text(path, &text)?;
-    check_support_summary()?;
-    println!("check-support-tiers: ok");
-    Ok(())
-}
-
-fn check_support_tiers_text(path: &str, text: &str) -> Result<(), String> {
-    let mut rows = 0usize;
-    for (line_no, line) in text.lines().enumerate() {
-        let Some(row) = support_tier_row_from_line(line, path, line_no + 1)? else {
-            continue;
-        };
-        rows += 1;
-        if !KNOWN_SUPPORT_TIERS.contains(&row.tier) {
-            return Err(format!(
-                "{path}:{} uses unknown support tier `{}`",
-                line_no + 1,
-                row.tier
-            ));
-        }
-        if matches!(row.tier, "scaffold" | "experimental")
-            && !support_proof_cell_has_evidence_term(row.proof)
-        {
-            return Err(format!(
-                "{path}:{} proof for `{}` must name concrete evidence such as tests, fixtures, dogfood, workflows, or an ADR",
-                line_no + 1,
-                row.capability
-            ));
-        }
-    }
-    if rows == 0 {
-        return Err(format!("{path} has no support-tier rows"));
-    }
-    Ok(())
-}
-
-fn check_support_summary() -> Result<(), String> {
-    let path = SUPPORT_SUMMARY_DOC;
-    let text = read_to_string(Path::new(path))?;
-    check_support_summary_text(path, &text)
-}
-
-fn check_support_summary_text(path: &str, text: &str) -> Result<(), String> {
-    for phrase in SUPPORT_SUMMARY_REQUIRED_PHRASES {
-        if !text.contains(phrase) {
-            return Err(format!(
-                "{path} must include trust-boundary phrase `{phrase}`"
-            ));
-        }
-    }
-
-    let mut rows = 0usize;
-    for (line_no, line) in text.lines().enumerate() {
-        let Some(posture) = support_summary_posture_from_row(line) else {
-            continue;
-        };
-        rows += 1;
-        if !KNOWN_SUPPORT_SUMMARY_POSTURES.contains(&posture) {
-            return Err(format!(
-                "{path}:{} uses unknown support summary posture `{posture}`",
-                line_no + 1
-            ));
-        }
-    }
-    if rows == 0 {
-        return Err(format!("{path} has no current-posture rows"));
-    }
-    Ok(())
 }
 
 fn check_fixtures() -> Result<(), String> {
@@ -6466,7 +6088,7 @@ fn check_tracked_generated_artifacts() -> Result<(), String> {
     Ok(())
 }
 
-fn parse_toml_file(path: &Path) -> Result<toml::Value, String> {
+pub(crate) fn parse_toml_file(path: &Path) -> Result<toml::Value, String> {
     parse_text_file(path, "TOML", |text| {
         text.parse::<toml::Table>().map(toml::Value::Table)
     })
@@ -6626,7 +6248,12 @@ fn required_table_string<'a>(
     }
 }
 
-fn require_known(value: &str, known: &[&str], path: &str, field: &str) -> Result<(), String> {
+pub(crate) fn require_known(
+    value: &str,
+    known: &[&str],
+    path: &str,
+    field: &str,
+) -> Result<(), String> {
     if known.contains(&value) {
         Ok(())
     } else {
@@ -6889,7 +6516,7 @@ fn fixture_dirs(dir: &Path) -> Result<Vec<PathBuf>, String> {
     Ok(dirs)
 }
 
-fn markdown_files(dir: &Path) -> Result<Vec<PathBuf>, String> {
+pub(crate) fn markdown_files(dir: &Path) -> Result<Vec<PathBuf>, String> {
     let mut files = Vec::new();
     visit_text(dir, &mut |path| {
         if path.extension().is_some_and(|ext| ext == "md") {
@@ -6930,59 +6557,7 @@ fn is_text_file(path: &Path) -> bool {
         .is_some_and(|ext| matches!(ext.to_str(), Some("md" | "toml" | "yml" | "yaml" | "txt")))
 }
 
-#[cfg(test)]
-fn support_tier_from_row(line: &str) -> Option<&str> {
-    let Ok(Some(row)) = support_tier_row_from_line(line, "support tier table", 0) else {
-        return None;
-    };
-    Some(row.tier)
-}
-
-fn support_capability_from_row(line: &str) -> Option<&str> {
-    let Ok(Some(row)) = support_tier_row_from_line(line, "support tier table", 0) else {
-        return None;
-    };
-    Some(row.capability)
-}
-
-struct SupportTierRow<'a> {
-    capability: &'a str,
-    tier: &'a str,
-    proof: &'a str,
-}
-
-fn support_tier_row_from_line<'a>(
-    line: &'a str,
-    path: &str,
-    line_no: usize,
-) -> Result<Option<SupportTierRow<'a>>, String> {
-    if !line.starts_with('|') || line.contains("---") || line.contains("Capability") {
-        return Ok(None);
-    }
-    let columns = markdown_table_columns(line);
-    if columns.len() != 5 {
-        return Err(format!(
-            "{path}:{line_no} support-tier rows must have 5 columns, found {}",
-            columns.len()
-        ));
-    }
-    for (idx, name) in [
-        (0, "Capability"),
-        (1, "Tier"),
-        (2, "Surface"),
-        (3, "Proof"),
-        (4, "Known limits"),
-    ] {
-        reject_placeholder_cell(path, line_no, name, columns[idx])?;
-    }
-    Ok(Some(SupportTierRow {
-        capability: columns[0],
-        tier: columns[1],
-        proof: columns[3],
-    }))
-}
-
-fn markdown_table_columns(line: &str) -> Vec<&str> {
+pub(crate) fn markdown_table_columns(line: &str) -> Vec<&str> {
     let mut columns = Vec::new();
     let mut start = 0usize;
     let mut in_code = false;
@@ -7002,59 +6577,6 @@ fn markdown_table_columns(line: &str) -> Vec<&str> {
         columns.push(column);
     }
     columns
-}
-
-fn reject_placeholder_cell(
-    path: &str,
-    line_no: usize,
-    column: &str,
-    value: &str,
-) -> Result<(), String> {
-    let normalized = value.trim().to_ascii_lowercase();
-    if normalized.is_empty()
-        || matches!(
-            normalized.as_str(),
-            "-" | "n/a" | "na" | "none" | "todo" | "tbd" | "placeholder"
-        )
-    {
-        Err(format!(
-            "{path}:{line_no} `{column}` cell must not be empty or placeholder"
-        ))
-    } else {
-        Ok(())
-    }
-}
-
-fn support_proof_cell_has_evidence_term(proof: &str) -> bool {
-    let proof = proof.to_ascii_lowercase();
-    SUPPORT_PROOF_TERMS.iter().any(|term| proof.contains(term))
-}
-
-fn support_summary_posture_from_row(line: &str) -> Option<&str> {
-    if !line.starts_with('|') || line.contains("---") || line.contains("Surface") {
-        return None;
-    }
-    let columns = line
-        .split('|')
-        .map(str::trim)
-        .filter(|column| !column.is_empty())
-        .collect::<Vec<_>>();
-    (columns.len() == 4).then(|| columns[1])
-}
-
-fn support_tier_capabilities() -> Result<BTreeSet<String>, String> {
-    let path = workspace_path(SUPPORT_TIERS_DOC);
-    let text = read_to_string(&path)?;
-    let mut capabilities = BTreeSet::new();
-    for line in text.lines() {
-        if let Some(capability) = support_capability_from_row(line) {
-            capabilities.insert(capability.to_string());
-        }
-    }
-    if capabilities.is_empty() {
-        return Err(format!("{} has no support-tier rows", path.display()));
-    }
-    Ok(capabilities)
 }
 
 fn fixture_dir_name(path: &Path) -> Result<&str, String> {
@@ -9556,7 +9078,7 @@ OperationFamily::RawPointerRead => vec![
 
     #[test]
     fn spec_status_dashboard_validates_current_table() -> Result<(), String> {
-        check_spec_status_dashboard_impl().map(|_| ())
+        spec_status::check_dashboard_impl().map(|_| ())
     }
 
     #[test]
@@ -9567,7 +9089,7 @@ OperationFamily::RawPointerRead => vec![
 | `UNSAFE-REVIEW-SPEC-0024` CI design | draft | CI lane taxonomy documented | `cargo run --locked -p xtask -- check-pr` | 2026-05-23 | Advisory findings stay non-blocking |
 "#;
 
-        let rows = spec_status_rows_from_text(text)?;
+        let rows = spec_status::rows_from_text(text)?;
 
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].spec_id, "UNSAFE-REVIEW-SPEC-0024");
@@ -9579,11 +9101,14 @@ OperationFamily::RawPointerRead => vec![
     #[test]
     fn spec_status_lifecycle_header_accepts_plain_and_bulleted_status() -> Result<(), String> {
         assert_eq!(
-            spec_lifecycle_status_from_text("Status: accepted, partial-runtime", "plain.md")?,
+            spec_status::lifecycle_status_from_text(
+                "Status: accepted, partial-runtime",
+                "plain.md"
+            )?,
             "accepted"
         );
         assert_eq!(
-            spec_lifecycle_status_from_text("- Status: Accepted", "bulleted.md")?,
+            spec_status::lifecycle_status_from_text("- Status: Accepted", "bulleted.md")?,
             "accepted"
         );
         Ok(())
@@ -9591,7 +9116,7 @@ OperationFamily::RawPointerRead => vec![
 
     #[test]
     fn spec_status_lifecycle_match_rejects_dashboard_drift() -> Result<(), String> {
-        let err = err_text(check_spec_status_lifecycle_match(
+        let err = err_text(spec_status::check_lifecycle_match(
             "UNSAFE-REVIEW-SPEC-0026",
             "accepted",
             "proposed",
@@ -9645,7 +9170,7 @@ OperationFamily::RawPointerRead => vec![
 
     #[test]
     fn spec_status_proof_commands_reject_unknown_xtask_commands() -> Result<(), String> {
-        let Err(err) = check_spec_status_proof_commands(
+        let Err(err) = spec_status::check_proof_commands(
             "UNSAFE-REVIEW-SPEC-0024",
             "`cargo run --locked -p xtask -- check-fake-thing`",
         ) else {
@@ -13791,7 +13316,7 @@ Snapshot reports:
         write_valid_first_pr_artifacts(&dir)?;
         fs::write(
             dir.join("github-summary.md"),
-            "## unsafe-review advisory summary\n\n- Scope: `diff`\n- Review cards: 1\n- Open actionable gaps: 1\n- Policy mode: `advisory`\n\n## Top card\n\n- ID: `missing`\n- Class: `guard_missing`\n- Next action: add an alignment guard\n\nKnown ReviewCard: `card-1`\n\n## Open next\n\n- Review kit manifest: `review-kit.json`\n- Full reviewer cockpit: `pr-summary.md`\n- Machine-readable ReviewCards: `cards.json`\n- Witness routes: `witness-plan.md`\n- Receipt audit: `receipt-audit.md` checks saved receipt metadata only; no witness was run.\n- Agent repair queue: `repair-queue.json` is copy-only; no agent was run.\n- Comment budget: `comment-plan.json` is plan-only; no comments were posted.\n\n---\n\nFull advisory bundle (review-kit.json, cards.json, pr-summary.md, github-summary.md, cards.sarif, comment-plan.json, witness-plan.md, receipt-audit.md, lsp.json, repair-queue.json) is attached as the workflow artifact.\n\n> Trust boundary: static unsafe contract review only; not memory-safety proof, not UB-free status, not Miri-clean status, and not site-execution proof.\n",
+            "## unsafe-review advisory summary\n\n- Scope: `diff`\n- Review cards: 1\n- Open actionable gaps: 1\n- Policy mode: `advisory`\n\n## Top card\n\n- ID: `missing`\n- Class: `guard_missing`\n- Next action: add an alignment guard\n\nKnown ReviewCard: `card-1`\n\n## Open next\n\n- Review kit manifest: `review-kit.json`\n- Full reviewer cockpit: `pr-summary.md`\n- Machine-readable ReviewCards: `cards.json`\n- Witness routes: `witness-plan.md`\n- Receipt audit: `receipt-audit.md` checks saved receipt metadata only; no witness was run.\n- Manual candidate index: `manual-candidates.json` lists imported advisory candidates separately from ReviewCards.\n- Agent repair queue: `repair-queue.json` is copy-only; no agent was run.\n- Comment budget: `comment-plan.json` is plan-only; no comments were posted.\n\n---\n\nFull advisory bundle (review-kit.json, cards.json, pr-summary.md, github-summary.md, cards.sarif, comment-plan.json, witness-plan.md, receipt-audit.md, manual-candidates.json, lsp.json, repair-queue.json) is attached as the workflow artifact.\n\n> Trust boundary: static unsafe contract review only; not memory-safety proof, not UB-free status, not Miri-clean status, and not site-execution proof.\n",
         )
         .map_err(|err| format!("write github summary failed: {err}"))?;
 
@@ -13815,7 +13340,7 @@ Snapshot reports:
         write_valid_first_pr_artifacts(&dir)?;
         fs::write(
             dir.join("github-summary.md"),
-            "## unsafe-review advisory summary\n\n- Scope: `diff`\n- Review cards: 1\n- Open actionable gaps: 1\n- Policy mode: `advisory`\n\n## Top card\n\n- ID: `card-1`\n- Class: `contract_missing`\n- Next action: add an alignment guard\n\n## Open next\n\n- Review kit manifest: `review-kit.json`\n- Full reviewer cockpit: `pr-summary.md`\n- Machine-readable ReviewCards: `cards.json`\n- Witness routes: `witness-plan.md`\n- Receipt audit: `receipt-audit.md` checks saved receipt metadata only; no witness was run.\n- Agent repair queue: `repair-queue.json` is copy-only; no agent was run.\n- Comment budget: `comment-plan.json` is plan-only; no comments were posted.\n\n---\n\nFull advisory bundle (review-kit.json, cards.json, pr-summary.md, github-summary.md, cards.sarif, comment-plan.json, witness-plan.md, receipt-audit.md, lsp.json, repair-queue.json) is attached as the workflow artifact.\n\n> Trust boundary: static unsafe contract review only; not memory-safety proof, not UB-free status, not Miri-clean status, and not site-execution proof.\n",
+            "## unsafe-review advisory summary\n\n- Scope: `diff`\n- Review cards: 1\n- Open actionable gaps: 1\n- Policy mode: `advisory`\n\n## Top card\n\n- ID: `card-1`\n- Class: `contract_missing`\n- Next action: add an alignment guard\n\n## Open next\n\n- Review kit manifest: `review-kit.json`\n- Full reviewer cockpit: `pr-summary.md`\n- Machine-readable ReviewCards: `cards.json`\n- Witness routes: `witness-plan.md`\n- Receipt audit: `receipt-audit.md` checks saved receipt metadata only; no witness was run.\n- Manual candidate index: `manual-candidates.json` lists imported advisory candidates separately from ReviewCards.\n- Agent repair queue: `repair-queue.json` is copy-only; no agent was run.\n- Comment budget: `comment-plan.json` is plan-only; no comments were posted.\n\n---\n\nFull advisory bundle (review-kit.json, cards.json, pr-summary.md, github-summary.md, cards.sarif, comment-plan.json, witness-plan.md, receipt-audit.md, manual-candidates.json, lsp.json, repair-queue.json) is attached as the workflow artifact.\n\n> Trust boundary: static unsafe contract review only; not memory-safety proof, not UB-free status, not Miri-clean status, and not site-execution proof.\n",
         )
         .map_err(|err| format!("write github summary failed: {err}"))?;
 
@@ -13982,7 +13507,7 @@ Snapshot reports:
         fs::write(
             &path,
             summary.replace(
-                "## Open next\n\n- Review kit manifest: `review-kit.json`\n- Full reviewer cockpit: `pr-summary.md`\n- Machine-readable ReviewCards: `cards.json`\n- Witness routes: `witness-plan.md`\n- Receipt audit: `receipt-audit.md` checks saved receipt metadata only; no witness was run.\n- Agent repair queue: `repair-queue.json` is copy-only; no agent was run.\n- Comment budget: `comment-plan.json` is plan-only; no comments were posted.\n\n",
+                "## Open next\n\n- Review kit manifest: `review-kit.json`\n- Full reviewer cockpit: `pr-summary.md`\n- Machine-readable ReviewCards: `cards.json`\n- Witness routes: `witness-plan.md`\n- Receipt audit: `receipt-audit.md` checks saved receipt metadata only; no witness was run.\n- Manual candidate index: `manual-candidates.json` lists imported advisory candidates separately from ReviewCards.\n- Agent repair queue: `repair-queue.json` is copy-only; no agent was run.\n- Comment budget: `comment-plan.json` is plan-only; no comments were posted.\n\n",
                 "",
             ),
         )
@@ -16337,6 +15862,7 @@ review_after = "2026-08-01"
                 {"path":"comment-plan.json","kind":"comment_plan","format":"json","schema_version":"0.1"},
                 {"path":"witness-plan.md","kind":"witness_plan","format":"markdown","schema_version":serde_json::Value::Null},
                 {"path":"receipt-audit.md","kind":"receipt_audit","format":"markdown","schema_version":serde_json::Value::Null},
+                {"path":"manual-candidates.json","kind":"manual_candidates","format":"json","schema_version":"manual-candidates/v1"},
                 {"path":"lsp.json","kind":"saved_lsp","format":"json","schema_version":"0.1"},
                 {"path":"repair-queue.json","kind":"repair_queue","format":"json","schema_version":"0.1"}
             ],
@@ -16344,6 +15870,14 @@ review_after = "2026-08-01"
         });
         fs::write(dir.join("review-kit.json"), value.to_string())
             .map_err(|err| format!("write review kit failed: {err}"))
+    }
+
+    fn write_empty_manual_candidates_artifact(dir: &Path) -> Result<(), String> {
+        fs::write(
+            dir.join("manual-candidates.json"),
+            r#"{"schema_version":"manual-candidates/v1","tool":"unsafe-review","tool_version":"0.2.1-test","mode":"manual_candidate_index","source":"first_pr","summary":{"manual_candidates":0,"external_evidence_refs":0,"analyzer_discovered":0},"candidates":[],"reviewcard_artifact_relationship":{"cards.json":"ReviewCard-only analyzer output; manual candidates are listed only in manual-candidates.json.","cards.sarif":"ReviewCard-only analyzer output; manual candidates are not emitted as SARIF analyzer results.","comment-plan.json":"ReviewCard-only comment planning; manual candidates are not selected for automatic comment plans.","lsp.json":"ReviewCard-only saved editor projection; manual candidates are not emitted as analyzer diagnostics.","repair-queue.json":"ReviewCard-only repair queue; manual candidates are not automatic repair tasks.","receipt-audit.md":"Receipts may match manual candidate IDs as manual/advisory targets without importing them as ReviewCard witness evidence.","policy-report":"ReviewCard-only policy simulation; manual candidates are not policy gating inputs."},"trust_boundary":"Manual/advisory static unsafe contract review candidate index only; candidates are not analyzer-discovered ReviewCards, not a proof of UB, not a proof of memory safety, not UB-free status, not a Miri result, not Miri-clean status, not site-execution proof, not repository safety, and not policy gating. unsafe-review did not run witnesses, post comments, edit source, run an agent, or enforce blocking policy."}"#,
+        )
+        .map_err(|err| format!("write manual candidates failed: {err}"))
     }
 
     fn add_repair_queue_boundaries(text: &str) -> String {
@@ -16446,9 +15980,10 @@ review_after = "2026-08-01"
         .map_err(|err| format!("write lsp failed: {err}"))?;
         fs::write(
             dir.join("github-summary.md"),
-            "## unsafe-review advisory summary\n\n- Scope: `diff`\n- Review cards: 1\n- Open actionable gaps: 1\n- Policy mode: `advisory`\n\n## Top card\n\n- ID: `card-1`\n- Class: `guard_missing`\n- Location: src/lib.rs:7\n- Operation: `unsafe { ptr.cast::<Header>().read() }`\n- Operation family: `raw_pointer_read`\n- Missing evidence: No missing evidence recorded\n- Primary route: `miri` because route\n\n```bash\ncargo +nightly miri test card\n```\n- Next action: Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.\n- Explain: `unsafe-review explain card-1`\n- Agent context: `unsafe-review context card-1 --json`\n\n## Open next\n\n- Review kit manifest: `review-kit.json`\n- Full reviewer cockpit: `pr-summary.md`\n- Machine-readable ReviewCards: `cards.json`\n- Witness routes: `witness-plan.md`\n- Receipt audit: `receipt-audit.md` checks saved receipt metadata only; no witness was run.\n- Agent repair queue: `repair-queue.json` is copy-only; no agent was run.\n- Comment budget: `comment-plan.json` is plan-only; no comments were posted.\n\n---\n\nFull advisory bundle (review-kit.json, cards.json, pr-summary.md, github-summary.md, cards.sarif, comment-plan.json, witness-plan.md, receipt-audit.md, lsp.json, repair-queue.json) is attached as the workflow artifact.\n\n> Trust boundary: static unsafe contract review only; not memory-safety proof, not UB-free status, not Miri-clean status, and not site-execution proof.\n",
+            "## unsafe-review advisory summary\n\n- Scope: `diff`\n- Review cards: 1\n- Open actionable gaps: 1\n- Policy mode: `advisory`\n\n## Top card\n\n- ID: `card-1`\n- Class: `guard_missing`\n- Location: src/lib.rs:7\n- Operation: `unsafe { ptr.cast::<Header>().read() }`\n- Operation family: `raw_pointer_read`\n- Missing evidence: No missing evidence recorded\n- Primary route: `miri` because route\n\n```bash\ncargo +nightly miri test card\n```\n- Next action: Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.\n- Explain: `unsafe-review explain card-1`\n- Agent context: `unsafe-review context card-1 --json`\n\n## Open next\n\n- Review kit manifest: `review-kit.json`\n- Full reviewer cockpit: `pr-summary.md`\n- Machine-readable ReviewCards: `cards.json`\n- Witness routes: `witness-plan.md`\n- Receipt audit: `receipt-audit.md` checks saved receipt metadata only; no witness was run.\n- Manual candidate index: `manual-candidates.json` lists imported advisory candidates separately from ReviewCards.\n- Agent repair queue: `repair-queue.json` is copy-only; no agent was run.\n- Comment budget: `comment-plan.json` is plan-only; no comments were posted.\n\n---\n\nFull advisory bundle (review-kit.json, cards.json, pr-summary.md, github-summary.md, cards.sarif, comment-plan.json, witness-plan.md, receipt-audit.md, manual-candidates.json, lsp.json, repair-queue.json) is attached as the workflow artifact.\n\n> Trust boundary: static unsafe contract review only; not memory-safety proof, not UB-free status, not Miri-clean status, and not site-execution proof.\n",
         )
         .map_err(|err| format!("write github summary failed: {err}"))?;
+        write_empty_manual_candidates_artifact(dir)?;
         write_review_kit_artifact(dir, 1, 1, Some("card-1"))?;
         Ok(())
     }
@@ -16507,7 +16042,7 @@ review_after = "2026-08-01"
         .map_err(|err| format!("write lsp failed: {err}"))?;
         fs::write(
             dir.join("github-summary.md"),
-            "## unsafe-review advisory summary\n\n- Scope: `diff`\n- Review cards: 0\n- Open actionable gaps: 0\n- Policy mode: `advisory`\n\n## Top card\n\nNo changed unsafe-review gaps were found.\nThis does not prove the repo safe, UB-free, Miri-clean, or that any unsafe site executed.\n\n## Open next\n\n- Review kit manifest: `review-kit.json`\n- Full reviewer cockpit: `pr-summary.md`\n- Machine-readable ReviewCards: `cards.json`\n- Witness routes: `witness-plan.md`\n- Receipt audit: `receipt-audit.md` checks saved receipt metadata only; no witness was run.\n- Agent repair queue: `repair-queue.json` is copy-only; no agent was run.\n- Comment budget: `comment-plan.json` is plan-only; no comments were posted.\n\n---\n\nFull advisory bundle (review-kit.json, cards.json, pr-summary.md, github-summary.md, cards.sarif, comment-plan.json, witness-plan.md, receipt-audit.md, lsp.json, repair-queue.json) is attached as the workflow artifact.\n\n> Trust boundary: static unsafe contract review only; not memory-safety proof, not UB-free status, not Miri-clean status, and not site-execution proof.\n",
+            "## unsafe-review advisory summary\n\n- Scope: `diff`\n- Review cards: 0\n- Open actionable gaps: 0\n- Policy mode: `advisory`\n\n## Top card\n\nNo changed unsafe-review gaps were found.\nThis does not prove the repo safe, UB-free, Miri-clean, or that any unsafe site executed.\n\n## Open next\n\n- Review kit manifest: `review-kit.json`\n- Full reviewer cockpit: `pr-summary.md`\n- Machine-readable ReviewCards: `cards.json`\n- Witness routes: `witness-plan.md`\n- Receipt audit: `receipt-audit.md` checks saved receipt metadata only; no witness was run.\n- Manual candidate index: `manual-candidates.json` lists imported advisory candidates separately from ReviewCards.\n- Agent repair queue: `repair-queue.json` is copy-only; no agent was run.\n- Comment budget: `comment-plan.json` is plan-only; no comments were posted.\n\n---\n\nFull advisory bundle (review-kit.json, cards.json, pr-summary.md, github-summary.md, cards.sarif, comment-plan.json, witness-plan.md, receipt-audit.md, manual-candidates.json, lsp.json, repair-queue.json) is attached as the workflow artifact.\n\n> Trust boundary: static unsafe contract review only; not memory-safety proof, not UB-free status, not Miri-clean status, and not site-execution proof.\n",
         )
         .map_err(|err| format!("write github summary failed: {err}"))?;
         fs::write(
@@ -16517,6 +16052,7 @@ review_after = "2026-08-01"
         .map_err(|err| format!("write repair queue failed: {err}"))?;
         fs::write(dir.join("receipt-audit.md"), receipt_audit_markdown())
             .map_err(|err| format!("write receipt audit failed: {err}"))?;
+        write_empty_manual_candidates_artifact(dir)?;
         write_review_kit_artifact(dir, 0, 0, None)?;
         Ok(())
     }

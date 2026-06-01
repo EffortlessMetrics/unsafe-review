@@ -1,6 +1,6 @@
 # UNSAFE-REVIEW-SPEC-0027: Manual candidate cards
 
-Status: proposed
+Status: proposed, partial-runtime
 Owner: product / cli
 Created: 2026-05-31
 Linked proposal: UNSAFE-REVIEW-PROP-0002-source-of-truth-stack
@@ -12,7 +12,7 @@ Linked issues:
 - #1145
 Linked PRs:
 - TBD
-Support-tier impact: future candidate import surface
+Support-tier impact: candidate import surface
 Policy impact:
 - none
 
@@ -64,7 +64,7 @@ Each `evidence[]` item must include:
 - `path`: local artifact path, when evidence is file-backed.
 - `summary`: optional concise description of what the evidence supports.
 
-Future import command shape:
+Import command shape:
 
 ```bash
 unsafe-review candidate import target/unsafe-scout/textdecoder-candidate.json \
@@ -151,7 +151,8 @@ into an analyzer ReviewCard.
 - schema parser tests for valid and invalid `manual-candidate/v1` JSON
 - CLI import e2e coverage for `candidate import`
 - projection tests proving `source = manual` and `manual_candidate = true` are
-  preserved in explain, context, witness-plan, saved JSON, and outcome surfaces
+  preserved in explain, context, witness-plan, saved JSON, first-pr
+  `manual-candidates.json`, and outcome surfaces
 - receipt tests for manual candidate IDs
 - negative tests proving manual candidates are not labeled analyzer-discovered
 
@@ -169,27 +170,34 @@ into an analyzer ReviewCard.
   evidence for that manual candidate.
 - Outcome comparison preserves manual source markers and compares manual IDs
   deterministically across snapshots.
+- `first-pr` writes `manual-candidates.json` for imported candidates and keeps
+  ReviewCard-derived artifacts, including cards JSON, SARIF, comment-plan,
+  saved LSP, repair queue, and policy-report surfaces, ReviewCard-only.
 
 ## CI Proof
 
-Current contract-only proof:
+Current runtime proof:
 
 ```bash
 cargo run --locked -p xtask -- check-docs
 cargo run --locked -p xtask -- check-doc-artifacts
 cargo run --locked -p xtask -- check-spec-status
+cargo test -p unsafe-review-core manual_candidate
+cargo test -p unsafe-review-core outcome
+cargo test -p unsafe-review manual_candidate
+cargo test -p unsafe-review first_pr_writes_standard_advisory_review_bundle
+cargo run --locked -p xtask -- check-first-pr-artifacts
 cargo run --locked -p xtask -- check-pr
 cargo run --locked -p xtask -- source-divergence
 git diff --check
 ```
 
-Future runtime proof must add focused CLI and projection tests when
-`candidate import` lands.
-
 ## Metrics / Promotion Rule
 
-Remain proposed until the importer and at least explain, context, witness-plan,
-receipt, and outcome projections preserve the manual candidate source marker.
+Remain partial-runtime until applicability for policy reports, SARIF, and
+comment-plan exports is explicitly accepted or rejected. The live runtime proof
+must keep import, explain, context, witness-plan, receipt, and outcome
+projections preserving the manual candidate source marker.
 
 ## Failure Modes
 

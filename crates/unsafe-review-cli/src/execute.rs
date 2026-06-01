@@ -3,19 +3,28 @@ use crate::command::{
     DiffInput, FirstPrOptions, Format, OutcomeOptions, ReceiptTemplateOptions, RepoOptions,
     SavedOutputReceiptOptions,
 };
+#[cfg(unix)]
+use signal_hook::consts::signal::{SIGINT, SIGTERM};
+#[cfg(unix)]
+use signal_hook::iterator::{Handle as SignalHandle, Signals};
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
+use std::sync::{Arc, Mutex};
+#[cfg(unix)]
+use std::thread;
+#[cfg(debug_assertions)]
+use std::time::Duration;
 use unsafe_review_core::{
     AnalysisMode, AnalyzeInput, AnalyzeOutput, CardId, CargoCarefulReceiptInput,
     ConcurrencyReceiptInput, DiffSource, DiscoveryOptions, MiriReceiptInput, PolicyMode,
-    ProofReceiptInput, RepoScanStatus, SanitizerReceiptInput, Scope,
+    ProofReceiptInput, RepoScanEvent, RepoScanPhase, RepoScanStatus, SanitizerReceiptInput, Scope,
     WITNESS_RECEIPT_SCHEMA_VERSION, WitnessReceipt, analyze, analyze_with_discovery,
-    analyze_with_discovery_and_progress, audit_witness_receipts, compare_outcome_json,
-    discover_repo_files, evaluate_policy_report, read_manual_candidate, render_badge_jsons,
-    render_comment_plan, render_github_summary, render_human, render_json, render_lsp,
-    render_manual_candidate_witness_plan, render_markdown, render_outcome_json,
+    analyze_with_discovery_and_repo_events, audit_witness_receipts, compare_outcome_json,
+    discover_repo_files, evaluate_policy_report, load_manual_candidates, read_manual_candidate,
+    render_badge_jsons, render_comment_plan, render_github_summary, render_human, render_json,
+    render_lsp, render_manual_candidate_witness_plan, render_markdown, render_outcome_json,
     render_outcome_markdown, render_policy_report_json, render_policy_report_markdown,
     render_pr_summary, render_receipt_audit_json, render_receipt_audit_markdown,
     render_repair_queue, render_sarif, render_witness_plan, validate_witness_receipts,
@@ -31,6 +40,7 @@ type FirstPrRenderer = fn(&AnalyzeOutput) -> String;
 
 const REVIEW_KIT_ARTIFACT: &str = "review-kit.json";
 const RECEIPT_AUDIT_ARTIFACT: &str = "receipt-audit.md";
+const MANUAL_CANDIDATES_ARTIFACT: &str = "manual-candidates.json";
 const FIRST_PR_RENDERED_ARTIFACTS: [(&str, FirstPrRenderer); 8] = [
     ("cards.json", render_json),
     ("pr-summary.md", render_pr_summary),
@@ -41,7 +51,7 @@ const FIRST_PR_RENDERED_ARTIFACTS: [(&str, FirstPrRenderer); 8] = [
     ("lsp.json", render_lsp),
     ("repair-queue.json", render_repair_queue),
 ];
-const FIRST_PR_ARTIFACTS: [&str; 10] = [
+const FIRST_PR_ARTIFACTS: [&str; 11] = [
     REVIEW_KIT_ARTIFACT,
     "cards.json",
     "pr-summary.md",
@@ -50,6 +60,7 @@ const FIRST_PR_ARTIFACTS: [&str; 10] = [
     "comment-plan.json",
     "witness-plan.md",
     RECEIPT_AUDIT_ARTIFACT,
+    MANUAL_CANDIDATES_ARTIFACT,
     "lsp.json",
     "repair-queue.json",
 ];
@@ -111,10 +122,10 @@ fn print_support() {
     println!("Current posture:");
     println!("- ReviewCards: experimental; selected slices are fixture-backed or dogfood-backed.");
     println!(
-        "- first-pr bundle: advisory; projects cards, summaries, SARIF, comment plans, witness plans, and saved LSP JSON from ReviewCards."
+        "- first-pr bundle: advisory; projects cards, summaries, SARIF, comment plans, witness plans, saved LSP JSON, and repair queues from ReviewCards, with manual candidates indexed separately."
     );
     println!(
-        "- receipts: saved-output template/import/audit only; receipts attach external evidence to exact card identities."
+        "- receipts: saved-output template/import/audit only; receipts attach external evidence to exact ReviewCard or manual candidate identities."
     );
     println!("- outcome comparison: saved snapshot comparison only.");
     println!("- policy report: advisory no-new-debt simulation only.");
@@ -182,8 +193,14 @@ fn run_repo_check(options: RepoOptions) -> Result<(), String> {
     let report_path = check.out.clone();
     let partial_path = report_path.as_deref().map(repo_partial_path);
     let status_path = report_path.as_deref().map(repo_status_path);
-    let mut reporter = RepoStatusReporter::new(status_path, options.progress);
-    let output = match analyze_with_discovery_and_progress(
+    let mut reporter = RepoStatusReporter::new(
+        status_path,
+        partial_path.clone(),
+        options.progress,
+        check.format.clone(),
+    )?;
+    maybe_pause_for_repo_interrupt_test();
+    let output = match analyze_with_discovery_and_repo_events(
         AnalyzeInput {
             root: check.root,
             scope: Scope::Repo,
@@ -194,7 +211,7 @@ fn run_repo_check(options: RepoOptions) -> Result<(), String> {
             max_cards: check.max_cards,
         },
         options.discovery,
-        |status| reporter.record(status),
+        |event| reporter.record_event(event),
     ) {
         Ok(output) => output,
         Err(err) => {
@@ -248,26 +265,56 @@ fn render_repo_file_list(root: &Path, files: &[PathBuf]) -> String {
 struct RepoStatusReporter {
     status_path: Option<PathBuf>,
     progress: bool,
-    last_status: Option<RepoScanStatus>,
+    last_status: Arc<Mutex<Option<RepoScanStatus>>>,
+    partial_output: Arc<Mutex<Option<AnalyzeOutput>>>,
     last_phase: Option<String>,
     last_discovery_heartbeat: usize,
     last_scan_heartbeat: usize,
+    _signal_guard: Option<RepoSignalGuard>,
 }
 
 impl RepoStatusReporter {
-    fn new(status_path: Option<PathBuf>, progress: bool) -> Self {
-        Self {
+    fn new(
+        status_path: Option<PathBuf>,
+        partial_path: Option<PathBuf>,
+        progress: bool,
+        format: Format,
+    ) -> Result<Self, String> {
+        let last_status = Arc::new(Mutex::new(None));
+        let partial_output = Arc::new(Mutex::new(None));
+        let signal_guard = install_repo_signal_guard(
+            status_path.clone(),
+            partial_path.clone(),
+            last_status.clone(),
+            partial_output.clone(),
+            format,
+        )?;
+        Ok(Self {
             status_path,
             progress,
-            last_status: None,
+            last_status,
+            partial_output,
             last_phase: None,
             last_discovery_heartbeat: 0,
             last_scan_heartbeat: 0,
-        }
+            _signal_guard: signal_guard,
+        })
     }
 
-    fn record(&mut self, status: &RepoScanStatus) -> Result<(), String> {
-        self.last_status = Some(status.clone());
+    fn record_event(&mut self, event: &RepoScanEvent) -> Result<(), String> {
+        let status = &event.status;
+        *self
+            .last_status
+            .lock()
+            .map_err(|err| format!("repo status lock poisoned: {err}"))? = Some(status.clone());
+        if let Some(output) = &event.partial_output {
+            *self
+                .partial_output
+                .lock()
+                .map_err(|err| format!("repo partial output lock poisoned: {err}"))? =
+                Some(output.clone());
+        }
+        maybe_pause_for_repo_interrupt_after_scan(status);
         if let Some(path) = &self.status_path {
             ensure_parent_dir(path)?;
             fs::write(path, render_repo_scan_status(status)?)
@@ -288,10 +335,15 @@ impl RepoStatusReporter {
             return Ok(None);
         };
         ensure_parent_dir(&path)?;
+        let last_status = self
+            .last_status
+            .lock()
+            .map_err(|err| format!("repo status lock poisoned: {err}"))?
+            .clone();
         fs::write(
             &path,
             render_repo_scan_incomplete_status(
-                self.last_status.as_ref(),
+                last_status.as_ref(),
                 error,
                 partial_path.filter(|path| path.exists()),
             )?,
@@ -322,6 +374,176 @@ impl RepoStatusReporter {
     }
 }
 
+#[cfg(unix)]
+struct RepoSignalState {
+    status_path: Option<PathBuf>,
+    partial_path: Option<PathBuf>,
+    last_status: Arc<Mutex<Option<RepoScanStatus>>>,
+    partial_output: Arc<Mutex<Option<AnalyzeOutput>>>,
+    format: Format,
+}
+
+#[cfg(unix)]
+struct RepoInterruptedArtifacts {
+    status_path: PathBuf,
+    partial_path: Option<PathBuf>,
+}
+
+#[cfg(unix)]
+impl RepoSignalState {
+    fn record_interrupted(
+        &self,
+        signal_name: &str,
+    ) -> Result<Option<RepoInterruptedArtifacts>, String> {
+        let Some(path) = self.status_path.as_ref() else {
+            return Ok(None);
+        };
+        let last_status = self
+            .last_status
+            .lock()
+            .map_err(|err| format!("repo status lock poisoned: {err}"))?
+            .clone();
+        let partial_path = self.write_interrupted_partial()?;
+        ensure_parent_dir(path)?;
+        fs::write(
+            path,
+            render_repo_scan_interrupted_status(
+                last_status.as_ref(),
+                signal_name,
+                partial_path.as_deref(),
+            )?,
+        )
+        .map_err(|err| format!("write {} failed: {err}", path.display()))?;
+        Ok(Some(RepoInterruptedArtifacts {
+            status_path: path.clone(),
+            partial_path,
+        }))
+    }
+
+    fn write_interrupted_partial(&self) -> Result<Option<PathBuf>, String> {
+        let Some(path) = self.partial_path.as_ref() else {
+            return Ok(None);
+        };
+        let partial_output = self
+            .partial_output
+            .lock()
+            .map_err(|err| format!("repo partial output lock poisoned: {err}"))?
+            .clone();
+        let Some(output) = partial_output else {
+            return Ok(None);
+        };
+        ensure_parent_dir(path)?;
+        fs::write(path, render_with_format(&output, &self.format))
+            .map_err(|err| format!("write partial repo report {} failed: {err}", path.display()))?;
+        Ok(Some(path.clone()))
+    }
+}
+
+#[cfg(unix)]
+struct RepoSignalGuard {
+    handle: SignalHandle,
+    thread: Option<thread::JoinHandle<()>>,
+}
+
+#[cfg(not(unix))]
+struct RepoSignalGuard;
+
+#[cfg(unix)]
+impl Drop for RepoSignalGuard {
+    fn drop(&mut self) {
+        self.handle.close();
+        if let Some(thread) = self.thread.take() {
+            let _joined = thread.join();
+        }
+    }
+}
+
+fn install_repo_signal_guard(
+    status_path: Option<PathBuf>,
+    partial_path: Option<PathBuf>,
+    last_status: Arc<Mutex<Option<RepoScanStatus>>>,
+    partial_output: Arc<Mutex<Option<AnalyzeOutput>>>,
+    format: Format,
+) -> Result<Option<RepoSignalGuard>, String> {
+    install_repo_signal_guard_impl(
+        status_path,
+        partial_path,
+        last_status,
+        partial_output,
+        format,
+    )
+}
+
+#[cfg(unix)]
+fn install_repo_signal_guard_impl(
+    status_path: Option<PathBuf>,
+    partial_path: Option<PathBuf>,
+    last_status: Arc<Mutex<Option<RepoScanStatus>>>,
+    partial_output: Arc<Mutex<Option<AnalyzeOutput>>>,
+    format: Format,
+) -> Result<Option<RepoSignalGuard>, String> {
+    let state = RepoSignalState {
+        status_path,
+        partial_path,
+        last_status,
+        partial_output,
+        format,
+    };
+    let mut signals = Signals::new([SIGTERM, SIGINT])
+        .map_err(|err| format!("install repo signal handler failed: {err}"))?;
+    let handle = signals.handle();
+    let thread = thread::spawn(move || {
+        if let Some(signal) = signals.forever().next() {
+            let signal_name = repo_signal_name(signal);
+            match state.record_interrupted(signal_name) {
+                Ok(Some(artifacts)) => {
+                    eprintln!(
+                        "unsafe-review repo: interrupted by {signal_name}; incomplete repo status written to {}",
+                        artifacts.status_path.display()
+                    );
+                    if let Some(partial_path) = artifacts.partial_path {
+                        eprintln!(
+                            "unsafe-review repo: partial repo report kept at {}",
+                            partial_path.display()
+                        );
+                    }
+                }
+                Ok(None) => eprintln!(
+                    "unsafe-review repo: interrupted by {signal_name}; rerun with --out to keep <out>.status.json"
+                ),
+                Err(err) => eprintln!(
+                    "unsafe-review repo: interrupted by {signal_name}; failed to write incomplete repo status: {err}"
+                ),
+            }
+            std::process::exit(128 + signal);
+        }
+    });
+    Ok(Some(RepoSignalGuard {
+        handle,
+        thread: Some(thread),
+    }))
+}
+
+#[cfg(not(unix))]
+fn install_repo_signal_guard_impl(
+    _status_path: Option<PathBuf>,
+    _partial_path: Option<PathBuf>,
+    _last_status: Arc<Mutex<Option<RepoScanStatus>>>,
+    _partial_output: Arc<Mutex<Option<AnalyzeOutput>>>,
+    _format: Format,
+) -> Result<Option<RepoSignalGuard>, String> {
+    Ok(None)
+}
+
+#[cfg(unix)]
+fn repo_signal_name(signal: i32) -> &'static str {
+    match signal {
+        SIGTERM => "SIGTERM",
+        SIGINT => "SIGINT",
+        _ => "signal",
+    }
+}
+
 fn render_repo_scan_status(status: &RepoScanStatus) -> Result<String, String> {
     let value = serde_json::json!({
         "schema_version": status.schema_version.as_str(),
@@ -333,6 +555,7 @@ fn render_repo_scan_status(status: &RepoScanStatus) -> Result<String, String> {
         "last_path": status.last_path.as_ref().map(|path| path.display().to_string()),
         "completed": status.completed,
         "error": null,
+        "signal": null,
         "partial_path": null,
     });
     let mut rendered = serde_json::to_string_pretty(&value)
@@ -360,6 +583,36 @@ fn render_repo_scan_incomplete_status(
             .map(|path| path.display().to_string()),
         "completed": false,
         "error": error,
+        "signal": null,
+        "partial_path": partial_path.map(|path| path.display().to_string()),
+    });
+    let mut rendered = serde_json::to_string_pretty(&value)
+        .map_err(|err| format!("render repo status JSON failed: {err}"))?;
+    rendered.push('\n');
+    Ok(rendered)
+}
+
+#[cfg(unix)]
+fn render_repo_scan_interrupted_status(
+    status: Option<&RepoScanStatus>,
+    signal_name: &str,
+    partial_path: Option<&Path>,
+) -> Result<String, String> {
+    let value = serde_json::json!({
+        "schema_version": status
+            .map(|status| status.schema_version.as_str())
+            .unwrap_or("repo-scan-status/v1"),
+        "phase": "terminated",
+        "elapsed_ms": status.map_or(0, |status| status.elapsed_ms),
+        "files_discovered": status.map_or(0, |status| status.files_discovered),
+        "files_scanned": status.map_or(0, |status| status.files_scanned),
+        "cards_found": status.map_or(0, |status| status.cards_found),
+        "last_path": status
+            .and_then(|status| status.last_path.as_ref())
+            .map(|path| path.display().to_string()),
+        "completed": false,
+        "error": format!("repo scan interrupted by {signal_name}"),
+        "signal": signal_name,
         "partial_path": partial_path.map(|path| path.display().to_string()),
     });
     let mut rendered = serde_json::to_string_pretty(&value)
@@ -451,6 +704,46 @@ fn repo_incomplete_error(
     message
 }
 
+#[cfg(debug_assertions)]
+fn maybe_pause_for_repo_interrupt_test() {
+    let Ok(raw) = std::env::var("UNSAFE_REVIEW_INTERNAL_REPO_SIGNAL_TEST_PAUSE_MS") else {
+        return;
+    };
+    let Ok(ms) = raw.parse::<u64>() else {
+        return;
+    };
+    std::thread::sleep(Duration::from_millis(ms));
+}
+
+#[cfg(not(debug_assertions))]
+fn maybe_pause_for_repo_interrupt_test() {}
+
+#[cfg(debug_assertions)]
+fn maybe_pause_for_repo_interrupt_after_scan(status: &RepoScanStatus) {
+    let Ok(raw_threshold) =
+        std::env::var("UNSAFE_REVIEW_INTERNAL_REPO_SIGNAL_TEST_PAUSE_AFTER_SCANNED")
+    else {
+        return;
+    };
+    let Ok(threshold) = raw_threshold.parse::<usize>() else {
+        return;
+    };
+    if status.phase != RepoScanPhase::Scanning
+        || status.completed
+        || status.files_scanned < threshold
+    {
+        return;
+    }
+    let ms = std::env::var("UNSAFE_REVIEW_INTERNAL_REPO_SIGNAL_TEST_PAUSE_MS")
+        .ok()
+        .and_then(|raw| raw.parse::<u64>().ok())
+        .unwrap_or(5_000);
+    std::thread::sleep(Duration::from_millis(ms));
+}
+
+#[cfg(not(debug_assertions))]
+fn maybe_pause_for_repo_interrupt_after_scan(_status: &RepoScanStatus) {}
+
 fn first_pr(options: FirstPrOptions) -> Result<(), String> {
     let mut check = options.check;
     check.policy = PolicyMode::Advisory;
@@ -474,6 +767,7 @@ fn first_pr(options: FirstPrOptions) -> Result<(), String> {
         include_unchanged_tests: true,
         max_cards: check.max_cards,
     })?;
+    let manual_candidates = load_manual_candidates(&root)?;
 
     fs::create_dir_all(&options.out_dir)
         .map_err(|err| format!("create {} failed: {err}", options.out_dir.display()))?;
@@ -483,6 +777,10 @@ fn first_pr(options: FirstPrOptions) -> Result<(), String> {
     write_artifact(
         &options.out_dir.join(RECEIPT_AUDIT_ARTIFACT),
         render_receipt_audit_markdown(&receipt_audit),
+    )?;
+    write_artifact(
+        &options.out_dir.join(MANUAL_CANDIDATES_ARTIFACT),
+        first_pr::render_manual_candidates_artifact(&manual_candidates),
     )?;
     write_artifact(
         &options.out_dir.join(REVIEW_KIT_ARTIFACT),
@@ -1197,14 +1495,15 @@ fn print_repo_help() {
         "- --out renders to <out>.partial, then renames it to <out> only after a successful render."
     );
     println!(
-        "- <out>.status.json records phase, elapsed time, discovered files, scanned files, cards found, last path, completion, and normal errors."
+        "- <out>.status.json records phase, elapsed time, discovered files, scanned files, cards found, last path, completion, normal errors, and Unix interruption signals."
     );
     println!(
         "- On normal errors, incomplete status is kept; if a rendered partial report exists, it is left at <out>.partial."
     );
     println!(
-        "- If interrupted before rendering, the latest status sidecar is the durable artifact; a dedicated signal handler is deferred."
+        "- On Unix SIGTERM/SIGINT, repo records phase=terminated and the signal in <out>.status.json when --out is set; after completed files it also keeps the latest partial report at <out>.partial."
     );
+    println!("- Without --out, Unix SIGTERM/SIGINT prints an interruption diagnostic to stderr.");
     println!();
     println!("Trust boundary:");
     println!(

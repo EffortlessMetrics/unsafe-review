@@ -246,8 +246,32 @@ unsafe-review candidate witness-plan R4R2-S001
 ```
 
 Manual candidate projections preserve the manual marker and external evidence
-references. They do not execute witnesses, post comments, edit source, enforce
-policy, prove UB, prove site execution, or prove repository safety.
+references. Receipts may reference the same manual candidate ID and audit as a
+manual/advisory target:
+
+```bash
+unsafe-review receipt template R4R2-S001 \
+  --tool human-deep-review \
+  --strength test_targeted \
+  --author unsafe-scout \
+  --recorded-at 2026-05-31T00:00:00Z \
+  --expires-at 2026-08-18 \
+  --out .unsafe-review/receipts/R4R2-S001.json
+
+unsafe-review receipt audit --format json
+```
+
+Manual candidate receipt audit preserves `source = "manual"`,
+`manual_candidate = true`, and `analyzer_discovered = false`. It does not turn
+the candidate into analyzer-discovered ReviewCard witness evidence.
+
+`first-pr` writes a separate `manual-candidates.json` index for imported
+`.unsafe-review/candidates/*.json` artifacts. `cards.json`, SARIF, comment-plan,
+saved LSP, repair-queue, and policy-report surfaces remain ReviewCard-only.
+
+Manual candidate projections do not execute witnesses, post comments, edit
+source, enforce policy, prove UB, prove site execution, or prove repository
+safety.
 
 ## Repo Posture And Badges
 
@@ -262,11 +286,14 @@ When `repo` writes a report with `--out`, it renders to `<out>.partial` and
 renames that file to `<out>` only after a successful render. It also updates
 `<out>.status.json` while analysis runs. The status sidecar records the scan
 phase, elapsed time, discovered files, scanned files, cards found, last path,
-completion, and normal errors. Add `--progress` to print a small stderr
-heartbeat from the same status stream. If a normal write or rename error occurs
-after rendering, the partial report is kept at `<out>.partial`; if the process
-is interrupted before rendering, the latest status sidecar is the durable
-artifact.
+completion, normal errors, and Unix interruption signals. Add `--progress` to
+print a small stderr heartbeat from the same status stream. If a normal write
+or rename error occurs after rendering, the partial report is kept at
+`<out>.partial`. On Unix SIGTERM/SIGINT before rendering, `repo` records
+`phase = terminated` and the signal in `<out>.status.json` when `--out` is set.
+If at least one file finished scanning, `repo` also writes the latest
+completed-file report snapshot to `<out>.partial` and records that path in the
+status sidecar. Without `--out`, it prints an interruption diagnostic to stderr.
 
 Repo Markdown also includes a related sink cluster section. The cluster section
 groups existing ReviewCards by source file and inferred owner/helper so a
