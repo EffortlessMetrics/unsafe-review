@@ -99,6 +99,7 @@ target/unsafe-review/cards.sarif
 target/unsafe-review/comment-plan.json
 target/unsafe-review/witness-plan.md
 target/unsafe-review/receipt-audit.md
+target/unsafe-review/manual-candidates.json
 target/unsafe-review/lsp.json
 target/unsafe-review/repair-queue.json
 ```
@@ -114,6 +115,12 @@ The bundle also includes `receipt-audit.md`, and the terminal handoff prints the
 matching `unsafe-review receipt audit` command so reviewers can check whether
 saved witness receipt metadata still matches the current first-pr cards. The
 audit is metadata-only and does not run the witness.
+
+When imported manual candidates are present, the terminal handoff and
+`review-kit.json` also point to `manual-candidates.json` and copy-only
+`explain`, `context --json`, and `candidate witness-plan` commands for the
+first manual candidate. Those candidates remain manual/advisory targets, not
+analyzer ReviewCards, not policy inputs, and not witness execution.
 
 ## Output Formats
 
@@ -228,13 +235,16 @@ fixture-backed examples of repair-ready and human-review-only packets.
 Import a manually discovered advisory candidate:
 
 ```bash
-unsafe-review candidate import target/unsafe-scout/textdecoder-candidate.json \
+unsafe-review candidate import docs/examples/manual-candidates/textdecoder-sab.json \
   --out .unsafe-review/candidates/R4R2-S001.json
 ```
 
 The imported artifact is canonicalized with `source = "manual"` and
 `manual_candidate = true`. It remains advisory and must not be described as an
 analyzer-discovered finding.
+
+The example input above is a committed smoke fixture. In a real scout lane,
+replace it with the candidate JSON produced by the external investigation.
 
 After import, `explain` and `context` can load the candidate by ID from
 `.unsafe-review/candidates/` when no analyzer ReviewCard with that ID exists:
@@ -268,6 +278,9 @@ the candidate into analyzer-discovered ReviewCard witness evidence.
 `first-pr` writes a separate `manual-candidates.json` index for imported
 `.unsafe-review/candidates/*.json` artifacts. `cards.json`, SARIF, comment-plan,
 saved LSP, repair-queue, and policy-report surfaces remain ReviewCard-only.
+The first-pr terminal handoff and `review-kit.json` may include copy-only
+commands for manual candidate explain/context/witness-plan projection, while
+still labeling them manual/advisory and not analyzer-discovered.
 
 Manual candidate projections do not execute witnesses, post comments, edit
 source, enforce policy, prove UB, prove site execution, or prove repository
@@ -287,9 +300,12 @@ renames that file to `<out>` only after a successful render. It also updates
 `<out>.status.json` while analysis runs. The status sidecar records the scan
 phase, elapsed time, discovered files, scanned files, cards found, last path,
 completion, normal errors, and Unix interruption signals. Add `--progress` to
-print a small stderr heartbeat from the same status stream. If a normal write
-or rename error occurs after rendering, the partial report is kept at
-`<out>.partial`. On Unix SIGTERM/SIGINT before rendering, `repo` records
+print a small stderr heartbeat from the same status stream. Add
+`--timeout-seconds <n>` to stop analysis cooperatively after roughly `n`
+seconds at repo event boundaries; with `--out`, a timeout is recorded like other
+incomplete scans. If a normal analysis, timeout, write, or rename error occurs
+after at least one file completed, the latest completed-file report snapshot is
+kept at `<out>.partial`. On Unix SIGTERM/SIGINT before rendering, `repo` records
 `phase = terminated` and the signal in `<out>.status.json` when `--out` is set.
 If at least one file finished scanning, `repo` also writes the latest
 completed-file report snapshot to `<out>.partial` and records that path in the
@@ -312,6 +328,7 @@ unsafe-review repo \
   --exclude 'vendor/**' \
   --exclude 'build/**' \
   --exclude '**/generated/**' \
+  --timeout-seconds 300 \
   --format markdown \
   --out target/unsafe-review/repo-posture.md
 ```
@@ -336,6 +353,9 @@ unsafe-review repo \
 `--list-files` prints the selected root-relative Rust files and exits without
 running analysis. `--max-files <n>` truncates the selected file list after
 sorting, so it bounds both `--list-files` output and repo analysis input.
+`--timeout-seconds <n>` bounds repo analysis wall time cooperatively; it does
+not interrupt a single file mid-scan, but it prevents a long scan from looking
+successful after the configured budget expires.
 
 Badge JSON reports open review gaps, not raw unsafe usage and not safety status:
 
