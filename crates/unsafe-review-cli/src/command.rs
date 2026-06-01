@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use unsafe_review_core::PolicyMode;
+use unsafe_review_core::{DiscoveryOptions, PolicyMode};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum DiffInput {
@@ -60,6 +60,25 @@ impl Default for FirstPrOptions {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RepoOptions {
+    pub check: CheckOptions,
+    pub discovery: DiscoveryOptions,
+    pub list_files: bool,
+    pub progress: bool,
+}
+
+impl Default for RepoOptions {
+    fn default() -> Self {
+        Self {
+            check: CheckOptions::default(),
+            discovery: DiscoveryOptions::repo_defaults(),
+            list_files: false,
+            progress: false,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct ReceiptTemplateOptions {
     pub card_id: String,
@@ -96,15 +115,35 @@ pub(crate) struct OutcomeOptions {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum CandidateCommand {
+    Import(CandidateImportOptions),
+    WitnessPlan(CandidateWitnessPlanOptions),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CandidateImportOptions {
+    pub input: PathBuf,
+    pub out: Option<PathBuf>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CandidateWitnessPlanOptions {
+    pub root: PathBuf,
+    pub id: String,
+    pub out: Option<PathBuf>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Command {
     Help,
+    RepoHelp,
     Version,
     Support,
     Doctor {
         root: PathBuf,
     },
     Check(CheckOptions),
-    Repo(CheckOptions),
+    Repo(RepoOptions),
     Pilot(CheckOptions),
     FirstPr(FirstPrOptions),
     Badges {
@@ -120,6 +159,7 @@ pub(crate) enum Command {
         root: PathBuf,
         id: String,
     },
+    Candidate(CandidateCommand),
     ReceiptTemplate(ReceiptTemplateOptions),
     ReceiptValidate {
         root: PathBuf,

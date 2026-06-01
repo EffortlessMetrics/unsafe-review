@@ -6,6 +6,7 @@
 
 mod analysis;
 pub mod api;
+mod candidate;
 mod domain;
 mod input;
 mod output;
@@ -13,14 +14,21 @@ mod policy;
 mod util;
 
 pub use api::{
-    AnalysisMode, AnalyzeInput, AnalyzeOutput, DiffSource, OutcomeReport, PolicyMode, PolicyReport,
-    ReceiptAuditReport, Scope, analyze, audit_witness_receipts, collect_context,
-    compare_outcome_json, evaluate_policy_report, explain_card, project_editor, render_badge_jsons,
-    render_comment_plan, render_github_summary, render_human, render_json, render_lsp,
-    render_markdown, render_outcome_json, render_outcome_markdown, render_policy_report_json,
-    render_policy_report_markdown, render_pr_summary, render_receipt_audit_json,
-    render_receipt_audit_markdown, render_repair_queue, render_sarif, render_witness_plan,
-    validate_witness_receipts,
+    AnalysisMode, AnalyzeInput, AnalyzeOutput, DiffSource, DiscoveryOptions, OutcomeReport,
+    PolicyMode, PolicyReport, ReceiptAuditReport, RepoScanPhase, RepoScanStatus, Scope, analyze,
+    analyze_with_discovery, analyze_with_discovery_and_progress, audit_witness_receipts,
+    collect_context, compare_outcome_json, discover_repo_files, evaluate_policy_report,
+    explain_card, project_editor, render_badge_jsons, render_comment_plan, render_github_summary,
+    render_human, render_json, render_lsp, render_markdown, render_outcome_json,
+    render_outcome_markdown, render_policy_report_json, render_policy_report_markdown,
+    render_pr_summary, render_receipt_audit_json, render_receipt_audit_markdown,
+    render_repair_queue, render_sarif, render_witness_plan, validate_witness_receipts,
+};
+pub use candidate::{
+    MANUAL_CANDIDATE_SCHEMA_VERSION, ManualCandidate, ManualCandidateEvidence,
+    ManualCandidateLocation, load_manual_candidate, manual_candidate_path, read_manual_candidate,
+    render_manual_candidate_context, render_manual_candidate_explain,
+    render_manual_candidate_witness_plan,
 };
 pub use domain::{
     CardId, CargoCarefulReceiptInput, ConcurrencyReceiptInput, Confidence, ContractEvidence,

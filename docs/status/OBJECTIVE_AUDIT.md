@@ -58,14 +58,33 @@ The active calibration rail is now recorded in
 `.unsafe-review-spec/lanes/accuracy-calibration/implementation-plan.md`,
 `policy/accuracy-calibration.toml`, and
 `docs/accuracy/CALIBRATION_REPORT.md`. The checked report currently records 34
-fixture-pinned claims, 446 calibration cases, 34 label ledgers, and 459 label
+fixture-pinned claims, 491 calibration cases, 34 label ledgers, and 504 label
 samples. It records zero dogfood-measured, labeled-calibrated, or
 policy-eligible claims. That is intentional: the current report is a
 claim-scoped fixture-pinned proof index, not a global precision/recall result
 or support-tier promotion. The latest MaybeUninit assume-init slice recognizes
-narrow same-slot `write`, open-branch `write`, and `MaybeUninit::new`
-initialization evidence while rejecting other-slot writes, closed conditional
-writes, and stale writes after reassignment.
+narrow same-slot `write` evidence for `assume_init`, `assume_init_read`,
+`assume_init_ref`, `assume_init_mut`, and `assume_init_drop`, open-branch
+`write` evidence for `assume_init`, `assume_init_read`, `assume_init_ref`,
+`assume_init_mut`, and `assume_init_drop`, same-slot `MaybeUninit::new` initialization evidence for
+`assume_init`, `assume_init_read`, `assume_init_ref`, `assume_init_mut`, and
+`assume_init_drop`, and open-branch `MaybeUninit::new`
+evidence for `assume_init`, `assume_init_read`, `assume_init_ref`,
+`assume_init_mut`, and `assume_init_drop` while rejecting other-slot writes for `assume_init`,
+`assume_init_read`, `assume_init_ref`,
+`assume_init_mut`, and `assume_init_drop`, closed conditional writes for
+`assume_init`, `assume_init_read`, `assume_init_ref`, `assume_init_mut`, and
+`assume_init_drop`, and stale writes for `assume_init`, `assume_init_read`,
+`assume_init_ref`, `assume_init_mut`, and `assume_init_drop` after
+reassignment, stale `MaybeUninit::new` evidence for `assume_init`,
+`assume_init_read`, `assume_init_ref`, `assume_init_mut`, and
+`assume_init_drop`, closed conditional `MaybeUninit::new` evidence for `assume_init`,
+`assume_init_read`, `assume_init_ref`, `assume_init_mut`, and `assume_init_drop`,
+prefixed-slot `MaybeUninit::new` evidence for `assume_init`,
+`assume_init_read`, `assume_init_ref`, `assume_init_mut`, and
+`assume_init_drop`, plus shadowed slot evidence for `assume_init`,
+`assume_init_read`, `assume_init_ref`, `assume_init_mut`, and
+`assume_init_drop`.
 The latest `Vec::set_len` dogfood follow-up pins the `arrayvec#288`
 `Self::new()` capacity shape as a false-positive control: visible
 initialization evidence may be present, but capacity evidence remains missing
@@ -144,7 +163,8 @@ These are not failures; they are the next unsupported or weakly verified areas:
   `set_len`;
   `arrayvec#288` has a rerun receipt;
   `MaybeUninit::assume_init` now has fixture coverage for same-slot `write` and
-  `MaybeUninit::new` initialization evidence while still rejecting stale writes;
+  `MaybeUninit::new` initialization evidence while still rejecting other-slot
+  writes, stale writes, and stale `MaybeUninit::new` evidence;
   non-zero shrink and `set_len(0)` clear evidence also have fixture and
   dogfood-rerun coverage, start-bound shrink evidence has fixture and
   `rust-smallvec#277` dogfood-rerun coverage, and last-index shrink evidence

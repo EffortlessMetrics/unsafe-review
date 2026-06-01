@@ -1,4 +1,7 @@
-use crate::command::{CheckOptions, Command, DiffInput, FirstPrOptions, Format, OutcomeOptions};
+use crate::command::{
+    CandidateCommand, CandidateImportOptions, CandidateWitnessPlanOptions, CheckOptions, Command,
+    DiffInput, FirstPrOptions, Format, OutcomeOptions, RepoOptions,
+};
 use std::path::PathBuf;
 use unsafe_review_core::PolicyMode;
 
@@ -13,21 +16,23 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, S
     if rest.is_empty() {
         return Ok(Command::Help);
     }
-    if rest
-        .iter()
-        .any(|arg| matches!(arg.as_str(), "--help" | "-h"))
-    {
+    let command = rest.remove(0);
+    if matches!(command.as_str(), "--help" | "-h" | "help") {
         return Ok(Command::Help);
     }
-    let command = rest.remove(0);
+    if command == "repo" && (has_help_flag(&rest) || is_exact_help_word(&rest)) {
+        return Ok(Command::RepoHelp);
+    }
+    if has_help_flag(&rest) {
+        return Ok(Command::Help);
+    }
     match command.as_str() {
-        "--help" | "-h" | "help" => Ok(Command::Help),
         "--version" | "-V" => Ok(Command::Version),
         "support" => parse_support(rest),
         "doctor" => parse_doctor(rest),
         "check" => parse_check(rest).map(Command::Check),
         "first-pr" | "review" => parse_first_pr(rest).map(Command::FirstPr),
-        "repo" => parse_check(rest).map(Command::Repo),
+        "repo" => parse_repo(rest).map(Command::Repo),
         "pilot" => parse_check(rest).map(|mut options| {
             options.max_cards = Some(options.max_cards.unwrap_or(5));
             Command::Pilot(options)
@@ -35,6 +40,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, S
         "badges" => parse_badges(rest),
         "explain" => parse_explain(rest),
         "context" => parse_context(rest),
+        "candidate" => parse_candidate(rest).map(Command::Candidate),
         "outcome" => parse_outcome(rest).map(Command::Outcome),
         "policy" => policy::parse_policy_command(rest),
         "receipt" => receipt::parse_receipt(rest),
@@ -44,6 +50,91 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, S
             "unknown command `{other}`. Run `unsafe-review --help`."
         )),
     }
+}
+
+fn parse_candidate(args: Vec<String>) -> Result<CandidateCommand, String> {
+    let mut rest = args.into_iter();
+    let Some(subcommand) = rest.next() else {
+        return Err("missing candidate subcommand".to_string());
+    };
+    let rest = rest.collect::<Vec<_>>();
+    match subcommand.as_str() {
+        "import" => parse_candidate_import(rest).map(CandidateCommand::Import),
+        "witness-plan" => parse_candidate_witness_plan(rest).map(CandidateCommand::WitnessPlan),
+        other => Err(format!("unknown candidate subcommand `{other}`")),
+    }
+}
+
+fn parse_candidate_import(args: Vec<String>) -> Result<CandidateImportOptions, String> {
+    let mut input: Option<PathBuf> = None;
+    let mut out = None;
+    let mut idx = 0usize;
+    while idx < args.len() {
+        match args[idx].as_str() {
+            "--out" => {
+                idx += 1;
+                out = Some(parse_path_value(&args, idx, "--out")?);
+            }
+            arg if arg.starts_with("--out=") => {
+                out = Some(parse_inline_path_value(arg, "--out")?);
+            }
+            value if value.starts_with('-') => {
+                return Err(format!("unknown candidate import argument `{value}`"));
+            }
+            value => {
+                set_single_path(&mut input, value, "manual candidate input")?;
+            }
+        }
+        idx += 1;
+    }
+    Ok(CandidateImportOptions {
+        input: input.ok_or_else(|| "missing manual candidate input".to_string())?,
+        out,
+    })
+}
+
+fn parse_candidate_witness_plan(args: Vec<String>) -> Result<CandidateWitnessPlanOptions, String> {
+    let mut root = PathBuf::from(".");
+    let mut id: Option<String> = None;
+    let mut out = None;
+    let mut idx = 0usize;
+    while idx < args.len() {
+        match args[idx].as_str() {
+            "--root" => {
+                idx += 1;
+                root = parse_path_value(&args, idx, "--root")?;
+            }
+            arg if arg.starts_with("--root=") => {
+                root = parse_inline_path_value(arg, "--root")?;
+            }
+            "--out" => {
+                idx += 1;
+                out = Some(parse_path_value(&args, idx, "--out")?);
+            }
+            arg if arg.starts_with("--out=") => {
+                out = Some(parse_inline_path_value(arg, "--out")?);
+            }
+            value if value.starts_with('-') => {
+                return Err(format!("unknown candidate witness-plan argument `{value}`"));
+            }
+            value => set_card_id(&mut id, value)?,
+        }
+        idx += 1;
+    }
+    Ok(CandidateWitnessPlanOptions {
+        root,
+        id: id.ok_or_else(|| "missing manual candidate id".to_string())?,
+        out,
+    })
+}
+
+fn has_help_flag(args: &[String]) -> bool {
+    args.iter()
+        .any(|arg| matches!(arg.as_str(), "--help" | "-h"))
+}
+
+fn is_exact_help_word(args: &[String]) -> bool {
+    matches!(args, [arg] if arg == "help")
 }
 
 fn parse_support(args: Vec<String>) -> Result<Command, String> {
@@ -106,6 +197,70 @@ fn parse_check(args: Vec<String>) -> Result<CheckOptions, String> {
         idx += check_parse::apply_check_arg(&args, idx, &mut options)?;
     }
     validate_check_options(&options)?;
+    Ok(options)
+}
+
+fn parse_repo(args: Vec<String>) -> Result<RepoOptions, String> {
+    let mut options = RepoOptions::default();
+    let mut idx = 0usize;
+    while idx < args.len() {
+        if let Some(consumed) = check_parse::try_apply_check_arg(&args, idx, &mut options.check)? {
+            idx += consumed;
+            continue;
+        }
+        match args[idx].as_str() {
+            "--include" => {
+                idx += 1;
+                options
+                    .discovery
+                    .include
+                    .push(value(&args, idx, "--include")?.to_string());
+            }
+            arg if arg.starts_with("--include=") => {
+                options
+                    .discovery
+                    .include
+                    .push(inline_value(arg, "--include")?.to_string());
+            }
+            "--exclude" => {
+                idx += 1;
+                options
+                    .discovery
+                    .exclude
+                    .push(value(&args, idx, "--exclude")?.to_string());
+            }
+            arg if arg.starts_with("--exclude=") => {
+                options
+                    .discovery
+                    .exclude
+                    .push(inline_value(arg, "--exclude")?.to_string());
+            }
+            "--list-files" => {
+                options.list_files = true;
+            }
+            "--progress" => {
+                options.progress = true;
+            }
+            "--respect-gitignore" => {
+                options.discovery.respect_gitignore = true;
+            }
+            "--no-respect-gitignore" | "--no-gitignore" => {
+                options.discovery.respect_gitignore = false;
+            }
+            "--max-files" => {
+                idx += 1;
+                options.discovery.max_files =
+                    Some(parse_max_files(value(&args, idx, "--max-files")?)?);
+            }
+            arg if arg.starts_with("--max-files=") => {
+                options.discovery.max_files =
+                    Some(parse_max_files(inline_value(arg, "--max-files")?)?);
+            }
+            other => return Err(format!("unknown repo argument `{other}`")),
+        }
+        idx += 1;
+    }
+    validate_check_options(&options.check)?;
     Ok(options)
 }
 
@@ -337,9 +492,21 @@ fn set_card_id(id: &mut Option<String>, value: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn set_single_path(path: &mut Option<PathBuf>, value: &str, name: &str) -> Result<(), String> {
+    if path.replace(PathBuf::from(value)).is_some() {
+        return Err(format!("expected exactly one {name}"));
+    }
+    Ok(())
+}
+
 fn parse_max_cards(raw: &str) -> Result<usize, String> {
     raw.parse::<usize>()
         .map_err(|err| format!("invalid --max-cards `{raw}`: {err}"))
+}
+
+fn parse_max_files(raw: &str) -> Result<usize, String> {
+    raw.parse::<usize>()
+        .map_err(|err| format!("invalid --max-files `{raw}`: {err}"))
 }
 
 fn parse_format(raw: &str) -> Result<Format, String> {
@@ -440,6 +607,23 @@ mod tests {
     }
 
     #[test]
+    fn parses_repo_help_as_repo_specific_help() -> Result<(), String> {
+        assert_eq!(
+            parse(args(["unsafe-review", "repo", "--help"]))?,
+            Command::RepoHelp
+        );
+        assert_eq!(
+            parse(args(["unsafe-review", "repo", "-h"]))?,
+            Command::RepoHelp
+        );
+        assert_eq!(
+            parse(args(["unsafe-review", "repo", "help"]))?,
+            Command::RepoHelp
+        );
+        Ok(())
+    }
+
+    #[test]
     fn parses_support_command() -> Result<(), String> {
         assert_eq!(parse(args(["unsafe-review", "support"]))?, Command::Support);
         assert_eq!(
@@ -462,6 +646,113 @@ mod tests {
         };
         assert_eq!(options.format, Format::GithubSummary);
         Ok(())
+    }
+
+    #[test]
+    fn parses_candidate_import_command() -> Result<(), String> {
+        let command = parse(args([
+            "unsafe-review",
+            "candidate",
+            "import",
+            "candidate.json",
+            "--out",
+            ".unsafe-review/candidates/R4R2-S001.json",
+        ]))?;
+
+        let Command::Candidate(CandidateCommand::Import(options)) = command else {
+            return Err("expected candidate import command".to_string());
+        };
+        assert_eq!(options.input, PathBuf::from("candidate.json"));
+        assert_eq!(
+            options.out,
+            Some(PathBuf::from(".unsafe-review/candidates/R4R2-S001.json"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn parses_candidate_witness_plan_command() -> Result<(), String> {
+        let command = parse(args([
+            "unsafe-review",
+            "candidate",
+            "witness-plan",
+            "--root",
+            ".",
+            "R4R2-S001",
+            "--out=target/manual-witness-plan.md",
+        ]))?;
+
+        let Command::Candidate(CandidateCommand::WitnessPlan(options)) = command else {
+            return Err("expected candidate witness-plan command".to_string());
+        };
+        assert_eq!(options.root, PathBuf::from("."));
+        assert_eq!(options.id, "R4R2-S001");
+        assert_eq!(
+            options.out,
+            Some(PathBuf::from("target/manual-witness-plan.md"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn parses_repo_file_selection_options() -> Result<(), String> {
+        let command = parse(args([
+            "unsafe-review",
+            "repo",
+            "--root=.",
+            "--include",
+            "src/**/*.rs",
+            "--include=packages/**/*.rs",
+            "--exclude",
+            "vendor/**",
+            "--exclude=**/generated/**",
+            "--list-files",
+            "--max-files=25",
+            "--no-respect-gitignore",
+        ]))?;
+
+        let Command::Repo(options) = command else {
+            return Err("expected repo command".to_string());
+        };
+        assert_eq!(options.check.root, PathBuf::from("."));
+        assert_eq!(
+            options.discovery.include,
+            vec!["src/**/*.rs".to_string(), "packages/**/*.rs".to_string()]
+        );
+        assert_eq!(
+            options.discovery.exclude,
+            vec!["vendor/**".to_string(), "**/generated/**".to_string()]
+        );
+        assert_eq!(options.discovery.max_files, Some(25));
+        assert!(!options.discovery.respect_gitignore);
+        assert!(options.list_files);
+        assert!(!options.progress);
+        Ok(())
+    }
+
+    #[test]
+    fn parses_repo_progress_option() -> Result<(), String> {
+        let command = parse(args(["unsafe-review", "repo", "--progress"]))?;
+
+        let Command::Repo(options) = command else {
+            return Err("expected repo command".to_string());
+        };
+        assert!(options.progress);
+        Ok(())
+    }
+
+    #[test]
+    fn check_rejects_repo_only_file_selection_options() {
+        let command = parse(args(["unsafe-review", "check", "--include", "src/**/*.rs"]));
+
+        assert_eq!(command, Err("unknown argument `--include`".to_string()));
+    }
+
+    #[test]
+    fn check_rejects_repo_only_progress_option() {
+        let command = parse(args(["unsafe-review", "check", "--progress"]));
+
+        assert_eq!(command, Err("unknown argument `--progress`".to_string()));
     }
 
     #[test]

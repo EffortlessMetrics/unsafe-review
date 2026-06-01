@@ -34,19 +34,61 @@ required_core_fixtures = [
   "maybeuninit_assume_init_comment_not_guard",
   "maybeuninit_assume_init_write_guard",
   "maybeuninit_assume_init_read_write_guard",
+  "maybeuninit_assume_init_ref_write_guard",
+  "maybeuninit_assume_init_mut_write_guard",
+  "maybeuninit_assume_init_drop_write_guard",
   "maybeuninit_assume_init_open_branch_write_guard",
+  "maybeuninit_assume_init_read_open_branch_write_guard",
+  "maybeuninit_assume_init_ref_open_branch_write_guard",
+  "maybeuninit_assume_init_mut_open_branch_write_guard",
+  "maybeuninit_assume_init_drop_open_branch_write_guard",
   "maybeuninit_assume_init_open_branch_new_guard",
+  "maybeuninit_assume_init_read_open_branch_new_guard",
+  "maybeuninit_assume_init_ref_open_branch_new_guard",
+  "maybeuninit_assume_init_mut_open_branch_new_guard",
+  "maybeuninit_assume_init_drop_open_branch_new_guard",
   "maybeuninit_assume_init_closed_branch_write_not_guard",
+  "maybeuninit_assume_init_read_closed_branch_write_not_guard",
+  "maybeuninit_assume_init_ref_closed_branch_write_not_guard",
+  "maybeuninit_assume_init_mut_closed_branch_write_not_guard",
+  "maybeuninit_assume_init_drop_closed_branch_write_not_guard",
   "maybeuninit_assume_init_closed_branch_new_not_guard",
+  "maybeuninit_assume_init_read_closed_branch_new_not_guard",
+  "maybeuninit_assume_init_ref_closed_branch_new_not_guard",
+  "maybeuninit_assume_init_mut_closed_branch_new_not_guard",
+  "maybeuninit_assume_init_drop_closed_branch_new_not_guard",
   "maybeuninit_assume_init_new_guard",
+  "maybeuninit_assume_init_read_new_guard",
+  "maybeuninit_assume_init_ref_new_guard",
+  "maybeuninit_assume_init_mut_method_new_guard",
   "maybeuninit_assume_init_mut_new_guard",
+  "maybeuninit_assume_init_drop_new_guard",
   "maybeuninit_assume_init_other_slot_write_not_guard",
   "maybeuninit_assume_init_stale_write_not_guard",
   "maybeuninit_assume_init_read_stale_write_not_guard",
+  "maybeuninit_assume_init_ref_stale_write_not_guard",
+  "maybeuninit_assume_init_mut_stale_write_not_guard",
+  "maybeuninit_assume_init_drop_stale_write_not_guard",
+  "maybeuninit_assume_init_read_other_slot_write_not_guard",
+  "maybeuninit_assume_init_ref_other_slot_write_not_guard",
+  "maybeuninit_assume_init_mut_other_slot_write_not_guard",
+  "maybeuninit_assume_init_drop_other_slot_write_not_guard",
   "maybeuninit_assume_init_stale_field_write_not_guard",
   "maybeuninit_assume_init_stale_new_not_guard",
+  "maybeuninit_assume_init_read_stale_new_not_guard",
+  "maybeuninit_assume_init_ref_stale_new_not_guard",
+  "maybeuninit_assume_init_mut_stale_new_not_guard",
+  "maybeuninit_assume_init_drop_stale_new_not_guard",
   "maybeuninit_assume_init_shadowed_slot_not_guard",
+  "maybeuninit_assume_init_read_shadowed_slot_not_guard",
+  "maybeuninit_assume_init_ref_shadowed_slot_not_guard",
+  "maybeuninit_assume_init_mut_shadowed_slot_not_guard",
+  "maybeuninit_assume_init_drop_shadowed_slot_not_guard",
   "maybeuninit_assume_init_mutslot_new_not_guard",
+  "maybeuninit_assume_init_read_mutslot_new_not_guard",
+  "maybeuninit_assume_init_ref_mutslot_new_not_guard",
+  "maybeuninit_assume_init_mut_mutslot_new_not_guard",
+  "maybeuninit_assume_init_drop_mutslot_new_not_guard",
   "maybeuninit_assume_init_partial_field_not_guard",
   "maybeuninit_assume_init_partial_array_not_guard",
   "maybeuninit_assume_init_read",
@@ -199,8 +241,11 @@ required_core_fixtures = [
   "ptr_copy_slice_range_disjunctive_early_return_shadowed_count_not_guard",
   "ptr_copy_slice_range_disjunctive_early_return_reassigned_src_not_guard",
   "ptr_copy_slice_range_disjunctive_early_return_reassigned_src_path_not_guard",
+  "ptr_copy_slice_range_disjunctive_early_return_shadowed_src_path_not_guard",
   "ptr_copy_slice_range_disjunctive_early_return_shadowed_src_not_guard",
   "ptr_copy_slice_range_disjunctive_early_return_reassigned_dst_not_guard",
+  "ptr_copy_slice_range_disjunctive_early_return_reassigned_dst_path_not_guard",
+  "ptr_copy_slice_range_disjunctive_early_return_shadowed_dst_path_not_guard",
   "ptr_copy_slice_range_disjunctive_early_return_shadowed_dst_not_guard",
   "ptr_copy_slice_range_open_branch_reassigned_count_not_guard",
   "ptr_copy_slice_range_open_branch_compound_reassigned_count_not_guard",
@@ -771,9 +816,79 @@ expected_operation_family = "maybe_uninit_assume_init"
 expected_hazard = "initialized_memory"
 
 [[cases]]
+fixture = "maybeuninit_assume_init_ref_write_guard"
+kind = "positive"
+claim = "MaybeUninit::assume_init_ref recognizes same-slot write initialization evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_mut_write_guard"
+kind = "positive"
+claim = "MaybeUninit::assume_init_mut recognizes same-slot write initialization evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_drop_write_guard"
+kind = "positive"
+claim = "MaybeUninit::assume_init_drop recognizes same-slot write initialization evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
 fixture = "maybeuninit_assume_init_open_branch_write_guard"
 kind = "positive"
 claim = "MaybeUninit::assume_init recognizes same-slot write evidence in an open branch containing the assume_init operation"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_read_open_branch_write_guard"
+kind = "positive"
+claim = "MaybeUninit::assume_init_read recognizes same-slot write evidence in an open branch containing the assume_init_read operation"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_ref_open_branch_write_guard"
+kind = "positive"
+claim = "MaybeUninit::assume_init_ref recognizes same-slot write evidence in an open branch containing the assume_init_ref operation"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_mut_open_branch_write_guard"
+kind = "positive"
+claim = "MaybeUninit::assume_init_mut recognizes same-slot write evidence in an open branch containing the assume_init_mut operation"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_drop_open_branch_write_guard"
+kind = "positive"
+claim = "MaybeUninit::assume_init_drop recognizes same-slot write evidence in an open branch containing the assume_init_drop operation"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guarded_unwitnessed"
@@ -791,9 +906,89 @@ expected_operation_family = "maybe_uninit_assume_init"
 expected_hazard = "initialized_memory"
 
 [[cases]]
+fixture = "maybeuninit_assume_init_read_open_branch_new_guard"
+kind = "positive"
+claim = "MaybeUninit::assume_init_read recognizes same-slot MaybeUninit::new evidence in an open branch containing the assume_init_read operation"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_ref_open_branch_new_guard"
+kind = "positive"
+claim = "MaybeUninit::assume_init_ref recognizes same-slot MaybeUninit::new evidence in an open branch containing the assume_init_ref operation"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_mut_open_branch_new_guard"
+kind = "positive"
+claim = "MaybeUninit::assume_init_mut recognizes same-slot MaybeUninit::new evidence in an open branch containing the assume_init_mut operation"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_drop_open_branch_new_guard"
+kind = "positive"
+claim = "MaybeUninit::assume_init_drop recognizes same-slot MaybeUninit::new evidence in an open branch containing the assume_init_drop operation"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
 fixture = "maybeuninit_assume_init_closed_branch_write_not_guard"
 kind = "false_positive_control"
 claim = "MaybeUninit::assume_init rejects closed conditional write evidence before the assume_init operation"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_read_closed_branch_write_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init_read rejects closed conditional write evidence before the assume_init_read operation"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_ref_closed_branch_write_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init_ref rejects closed conditional write evidence before the assume_init_ref operation"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_mut_closed_branch_write_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init_mut rejects closed conditional write evidence before the assume_init_mut operation"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_drop_closed_branch_write_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init_drop rejects closed conditional write evidence before the assume_init_drop operation"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"
@@ -811,9 +1006,89 @@ expected_operation_family = "maybe_uninit_assume_init"
 expected_hazard = "initialized_memory"
 
 [[cases]]
+fixture = "maybeuninit_assume_init_read_closed_branch_new_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init_read rejects closed conditional MaybeUninit::new evidence before the assume_init_read operation"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_ref_closed_branch_new_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init_ref rejects closed conditional MaybeUninit::new evidence before the assume_init_ref operation"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_mut_closed_branch_new_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init_mut rejects closed conditional MaybeUninit::new evidence before the assume_init_mut operation"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_drop_closed_branch_new_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init_drop rejects closed conditional MaybeUninit::new evidence before the assume_init_drop operation"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
 fixture = "maybeuninit_assume_init_new_guard"
 kind = "positive"
 claim = "MaybeUninit::assume_init recognizes same-slot MaybeUninit::new initialization evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_read_new_guard"
+kind = "positive"
+claim = "MaybeUninit::assume_init_read recognizes same-slot MaybeUninit::new initialization evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_ref_new_guard"
+kind = "positive"
+claim = "MaybeUninit::assume_init_ref recognizes same-slot MaybeUninit::new initialization evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_mut_method_new_guard"
+kind = "positive"
+claim = "MaybeUninit::assume_init_mut recognizes same-slot MaybeUninit::new initialization evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_drop_new_guard"
+kind = "positive"
+claim = "MaybeUninit::assume_init_drop recognizes same-slot MaybeUninit::new initialization evidence"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guarded_unwitnessed"
@@ -861,6 +1136,76 @@ expected_operation_family = "maybe_uninit_assume_init"
 expected_hazard = "initialized_memory"
 
 [[cases]]
+fixture = "maybeuninit_assume_init_ref_stale_write_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init_ref rejects stale same-slot write evidence after reassignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_mut_stale_write_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init_mut rejects stale same-slot write evidence after reassignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_drop_stale_write_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init_drop rejects stale same-slot write evidence after reassignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_read_other_slot_write_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init_read rejects write evidence for a different slot"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_ref_other_slot_write_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init_ref rejects write evidence for a different slot"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_mut_other_slot_write_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init_mut rejects write evidence for a different slot"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_drop_other_slot_write_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init_drop rejects write evidence for a different slot"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
 fixture = "maybeuninit_assume_init_stale_field_write_not_guard"
 kind = "false_positive_control"
 claim = "MaybeUninit::assume_init rejects stale field-slot write evidence after reassignment"
@@ -881,6 +1226,46 @@ expected_operation_family = "maybe_uninit_assume_init"
 expected_hazard = "initialized_memory"
 
 [[cases]]
+fixture = "maybeuninit_assume_init_read_stale_new_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init_read rejects stale same-slot MaybeUninit::new evidence after reassignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_ref_stale_new_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init_ref rejects stale same-slot MaybeUninit::new evidence after reassignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_mut_stale_new_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init_mut rejects stale same-slot MaybeUninit::new evidence after reassignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_drop_stale_new_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init_drop rejects stale same-slot MaybeUninit::new evidence after reassignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
 fixture = "maybeuninit_assume_init_shadowed_slot_not_guard"
 kind = "false_positive_control"
 claim = "MaybeUninit::assume_init rejects same-slot write evidence after the initialized slot is shadowed"
@@ -891,9 +1276,89 @@ expected_operation_family = "maybe_uninit_assume_init"
 expected_hazard = "initialized_memory"
 
 [[cases]]
+fixture = "maybeuninit_assume_init_read_shadowed_slot_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init_read rejects same-slot write evidence after the initialized slot is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_ref_shadowed_slot_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init_ref rejects same-slot write evidence after the initialized slot is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_mut_shadowed_slot_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init_mut rejects same-slot write evidence after the initialized slot is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_drop_shadowed_slot_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init_drop rejects same-slot write evidence after the initialized slot is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
 fixture = "maybeuninit_assume_init_mutslot_new_not_guard"
 kind = "false_positive_control"
 claim = "MaybeUninit::assume_init rejects MaybeUninit::new evidence for a prefixed slot name"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_read_mutslot_new_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init_read rejects MaybeUninit::new evidence for a prefixed slot name"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_ref_mutslot_new_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init_ref rejects MaybeUninit::new evidence for a prefixed slot name"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_mut_mutslot_new_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init_mut rejects MaybeUninit::new evidence for a prefixed slot name"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "maybe_uninit_assume_init"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "maybeuninit_assume_init_drop_mutslot_new_not_guard"
+kind = "false_positive_control"
+claim = "MaybeUninit::assume_init_drop rejects MaybeUninit::new evidence for a prefixed slot name"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"
@@ -2871,6 +3336,16 @@ expected_operation_family = "ptr_copy"
 expected_hazard = "pointer_validity"
 
 [[cases]]
+fixture = "ptr_copy_slice_range_disjunctive_early_return_shadowed_src_path_not_guard"
+kind = "false_positive_control"
+claim = "ptr::copy rejects stale disjunctive invalid-range early-return source path evidence after the source receiver path is shadowed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "ptr_copy"
+expected_hazard = "pointer_validity"
+
+[[cases]]
 fixture = "ptr_copy_slice_range_disjunctive_early_return_shadowed_src_not_guard"
 kind = "false_positive_control"
 claim = "ptr::copy rejects stale disjunctive invalid-range early-return source evidence after the source receiver is shadowed"
@@ -2884,6 +3359,26 @@ expected_hazard = "pointer_validity"
 fixture = "ptr_copy_slice_range_disjunctive_early_return_reassigned_dst_not_guard"
 kind = "false_positive_control"
 claim = "ptr::copy rejects stale disjunctive invalid-range early-return destination evidence after the destination receiver is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "ptr_copy"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "ptr_copy_slice_range_disjunctive_early_return_reassigned_dst_path_not_guard"
+kind = "false_positive_control"
+claim = "ptr::copy rejects stale disjunctive invalid-range early-return destination path evidence after the destination receiver path is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "ptr_copy"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "ptr_copy_slice_range_disjunctive_early_return_shadowed_dst_path_not_guard"
+kind = "false_positive_control"
+claim = "ptr::copy rejects stale disjunctive invalid-range early-return destination path evidence after the destination receiver path is shadowed"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"

@@ -603,6 +603,82 @@ fn context_packet_queues_contract_gaps_for_public_safety_docs() -> Result<(), Bo
 }
 
 #[test]
+fn manual_candidate_import_explain_context_and_witness_plan_preserve_manual_marker()
+-> Result<(), Box<dyn Error>> {
+    let temp = TempDir::new("unsafe-review-manual-candidate-e2e")?;
+    let input = temp.path().join("candidate.json");
+    let out = temp.path().join(".unsafe-review/candidates/R4R2-S001.json");
+    fs::create_dir_all(out.parent().ok_or("candidate output missing parent")?)?;
+    fs::write(&input, manual_candidate_json())?;
+
+    let imported = run_success([
+        os("candidate"),
+        os("import"),
+        input.as_os_str().to_os_string(),
+        os("--out"),
+        out.as_os_str().to_os_string(),
+    ])?;
+    let imported_stdout = stdout_text(&imported)?;
+    assert!(imported_stdout.contains("wrote manual candidate"));
+    assert!(imported_stdout.contains("source: manual"));
+
+    let canonical = parse_json(&fs::read_to_string(&out)?)?;
+    assert_eq!(canonical["schema_version"], "manual-candidate/v1");
+    assert_eq!(canonical["source"], "manual");
+    assert_eq!(canonical["manual_candidate"], true);
+    assert_eq!(canonical["id"], "R4R2-S001");
+
+    let explain = run_success([
+        os("explain"),
+        os("--root"),
+        temp.path().as_os_str().to_os_string(),
+        os("R4R2-S001"),
+    ])?;
+    let explain = stdout_text(&explain)?;
+    assert!(explain.contains("unsafe-review manual candidate"));
+    assert!(explain.contains("Source: `manual`"));
+    assert!(explain.contains("Analyzer-discovered: `false`"));
+    assert!(explain.contains("not analyzer-discovered"));
+
+    let explain_json = run_success([
+        os("explain"),
+        os("--root"),
+        temp.path().as_os_str().to_os_string(),
+        os("--json"),
+        os("R4R2-S001"),
+    ])?;
+    let explain_packet = parse_json(&stdout_text(&explain_json)?)?;
+    assert_eq!(explain_packet["source"], "manual");
+    assert_eq!(explain_packet["manual_candidate"], true);
+    assert_eq!(explain_packet["analyzer_discovered"], false);
+
+    let context = run_success([
+        os("context"),
+        os("--root"),
+        temp.path().as_os_str().to_os_string(),
+        os("R4R2-S001"),
+    ])?;
+    let context_packet = parse_json(&stdout_text(&context)?)?;
+    assert_eq!(context_packet["source"], "manual");
+    assert_eq!(context_packet["manual_candidate"], true);
+
+    let witness_plan = run_success([
+        os("candidate"),
+        os("witness-plan"),
+        os("--root"),
+        temp.path().as_os_str().to_os_string(),
+        os("R4R2-S001"),
+    ])?;
+    let witness_plan = stdout_text(&witness_plan)?;
+    assert!(witness_plan.contains("manual candidate witness plan"));
+    assert!(witness_plan.contains("does not run witnesses"));
+    assert!(witness_plan.contains("unsafe-review receipt template R4R2-S001"));
+    assert!(witness_plan.contains("not analyzer-discovered"));
+
+    Ok(())
+}
+
+#[test]
 fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error>> {
     let fixture = fixture_root("raw_pointer_alignment");
     let temp = TempDir::new("unsafe-review-first-pr-e2e")?;
@@ -1130,6 +1206,31 @@ fn help_reports_first_run_trust_boundary_without_overclaims() -> Result<(), Box<
 }
 
 #[test]
+fn repo_help_reports_repo_specific_scale_guidance() -> Result<(), Box<dyn Error>> {
+    let output = run_success([os("repo"), os("--help")])?;
+    let text = stdout_text(&output)?;
+
+    assert!(text.contains("unsafe-review repo: advisory unsafe contract review"));
+    assert!(text.contains("What repo scans today:"));
+    assert!(text.contains("Repo mode scans the selected Rust files"));
+    assert!(text.contains("--base and --diff are accepted"));
+    assert!(text.contains("--include <glob>"));
+    assert!(text.contains("--exclude <glob>"));
+    assert!(text.contains("--list-files prints selected Rust files"));
+    assert!(text.contains("--progress prints scan-status heartbeats"));
+    assert!(text.contains("--max-files <N>"));
+    assert!(text.contains("<out>.partial"));
+    assert!(text.contains("<out>.status.json"));
+    assert!(text.contains("incomplete status is kept"));
+    assert!(text.contains("dedicated signal handler is deferred"));
+    assert!(text.contains("Trust boundary:"));
+    assert!(!text.contains("unsafe-review: cheap unsafe contract review for Rust"));
+    assert!(!text.contains("status artifacts are not implemented yet"));
+
+    Ok(())
+}
+
+#[test]
 fn check_reports_missing_diff_file_as_cli_failure() -> Result<(), Box<dyn Error>> {
     let fixture = fixture_root("safe_code_no_cards");
     let missing_diff = fixture.join("missing.diff");
@@ -1155,6 +1256,58 @@ fn check_reports_missing_diff_file_as_cli_failure() -> Result<(), Box<dyn Error>
         stderr.contains("missing.diff"),
         "stderr should include the missing diff path: {stderr}"
     );
+
+    Ok(())
+}
+
+#[test]
+fn repo_list_files_honors_selection_controls() -> Result<(), Box<dyn Error>> {
+    let temp = TempDir::new("unsafe-review-repo-list-files")?;
+    write_e2e_file(temp.path(), "src/lib.rs")?;
+    write_e2e_file(temp.path(), "packages/pkg/src/lib.rs")?;
+    write_e2e_file(temp.path(), "packages/pkg/src/skip.rs")?;
+    write_e2e_file(temp.path(), "vendor/pkg/lib.rs")?;
+    write_e2e_file(temp.path(), "build/out/lib.rs")?;
+    write_e2e_file(temp.path(), "crates/pkg/generated/lib.rs")?;
+    write_e2e_file(temp.path(), "ignored/lib.rs")?;
+    fs::write(temp.path().join(".gitignore"), "ignored/\n")?;
+
+    let output = run_success([
+        os("repo"),
+        os("--root"),
+        temp.path().as_os_str().to_os_string(),
+        os("--include"),
+        os("src/**/*.rs"),
+        os("--include"),
+        os("packages/**/*.rs"),
+        os("--exclude"),
+        os("packages/**/skip.rs"),
+        os("--list-files"),
+        os("--max-files"),
+        os("2"),
+    ])?;
+    let text = stdout_text(&output)?;
+
+    assert!(text.contains("unsafe-review repo file list"));
+    assert!(text.contains("files: 2"));
+    assert!(text.contains("src/lib.rs"));
+    assert!(text.contains("packages/pkg/src/lib.rs"));
+    assert!(!text.contains("skip.rs"));
+    assert!(!text.contains("vendor/pkg/lib.rs"));
+    assert!(!text.contains("build/out/lib.rs"));
+    assert!(!text.contains("generated/lib.rs"));
+    assert!(!text.contains("ignored/lib.rs"));
+
+    let ignored = run_success([
+        os("repo"),
+        os("--root"),
+        temp.path().as_os_str().to_os_string(),
+        os("--include"),
+        os("ignored/**/*.rs"),
+        os("--list-files"),
+        os("--no-respect-gitignore"),
+    ])?;
+    assert!(stdout_text(&ignored)?.contains("ignored/lib.rs"));
 
     Ok(())
 }
@@ -1400,13 +1553,118 @@ fn repo_inventory_and_badges_count_open_gaps_without_safety_claim() -> Result<()
     assert!(repo_markdown.contains("## Top operation families"));
     assert!(repo_markdown.contains("| `raw_pointer_read` | 1 |"));
     assert!(repo_markdown.contains(
-        "| ID | Class | Operation family | Operation | Missing evidence | Route | Next action |"
+        "| ID | Class | Location | Operation family | Operation | Missing evidence | Route | Next action |"
     ));
+    assert!(repo_markdown.contains("src/lib.rs:8"));
     assert!(repo_markdown.contains("unsafe { ptr.cast::<Header>().read() }"));
     assert!(repo_markdown.contains("## Trust boundary"));
     assert!(repo_markdown.contains("Add or expose the local guard"));
     assert!(repo_markdown.contains("not raw unsafe usage"));
     assert!(repo_markdown.contains("not UB-free status"));
+
+    Ok(())
+}
+
+#[test]
+fn repo_progress_writes_status_sidecar_for_out_reports() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_alignment");
+    let temp = TempDir::new("unsafe-review-repo-status-e2e")?;
+    let report_path = temp.path().join("repo.json");
+    let partial_path = temp.path().join("repo.json.partial");
+    let status_path = temp.path().join("repo.json.status.json");
+
+    let output = run_success([
+        os("repo"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--format"),
+        os("json"),
+        os("--out"),
+        report_path.as_os_str().to_os_string(),
+        os("--progress"),
+    ])?;
+
+    assert_eq!(stdout_text(&output)?.trim(), "");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unsafe-review repo: phase=complete"),
+        "stderr should include a final progress heartbeat: {stderr}"
+    );
+    let report = parse_json(&fs::read_to_string(&report_path)?)?;
+    assert_eq!(report["scope"], "repo");
+    assert!(
+        !partial_path.exists(),
+        "successful repo output should promote and remove the partial report"
+    );
+    let status = parse_json(&fs::read_to_string(&status_path)?)?;
+    assert_eq!(status["schema_version"], "repo-scan-status/v1");
+    assert_eq!(status["phase"], "complete");
+    assert_eq!(status["completed"], true);
+    assert_eq!(status["files_discovered"], 1);
+    assert_eq!(status["files_scanned"], 1);
+    assert_eq!(status["cards_found"], 1);
+    assert_eq!(status["last_path"], "src/lib.rs");
+    assert!(status["elapsed_ms"].as_u64().is_some());
+    assert!(status["error"].is_null());
+    assert!(status["partial_path"].is_null());
+
+    Ok(())
+}
+
+#[test]
+fn repo_output_failure_keeps_partial_and_marks_status_incomplete() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_alignment");
+    let temp = TempDir::new("unsafe-review-repo-partial-e2e")?;
+    let report_path = temp.path().join("repo.json");
+    let partial_path = temp.path().join("repo.json.partial");
+    let status_path = temp.path().join("repo.json.status.json");
+    fs::create_dir(&report_path)?;
+
+    let output = run_failure([
+        os("repo"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--format"),
+        os("json"),
+        os("--out"),
+        report_path.as_os_str().to_os_string(),
+    ])?;
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("rename partial repo report"),
+        "stderr should explain the failed promotion: {stderr}"
+    );
+    assert!(
+        stderr.contains("incomplete repo status written to"),
+        "stderr should point to the incomplete status sidecar: {stderr}"
+    );
+    assert!(
+        stderr.contains("partial repo report kept at"),
+        "stderr should point to the retained partial report: {stderr}"
+    );
+    assert!(partial_path.exists(), "partial report should be retained");
+    let partial = parse_json(&fs::read_to_string(&partial_path)?)?;
+    assert_eq!(partial["scope"], "repo");
+    let status = parse_json(&fs::read_to_string(&status_path)?)?;
+    assert_eq!(status["schema_version"], "repo-scan-status/v1");
+    assert_eq!(status["phase"], "failed");
+    assert_eq!(status["completed"], false);
+    assert_eq!(status["files_discovered"], 1);
+    assert_eq!(status["files_scanned"], 1);
+    assert_eq!(status["cards_found"], 1);
+    assert!(
+        status["error"]
+            .as_str()
+            .unwrap_or("")
+            .contains("rename partial repo report")
+    );
+    assert!(
+        status["partial_path"]
+            .as_str()
+            .unwrap_or("")
+            .ends_with("repo.json.partial")
+    );
 
     Ok(())
 }
@@ -2492,6 +2750,42 @@ review_after = "2026-08-01"
         ),
     )?;
     Ok(())
+}
+
+fn write_e2e_file(root: &Path, rel: &str) -> Result<(), Box<dyn Error>> {
+    let path = root.join(rel);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, "unsafe fn fixture_data() {}\n")?;
+    Ok(())
+}
+
+fn manual_candidate_json() -> &'static str {
+    r#"{
+  "schema_version": "manual-candidate/v1",
+  "id": "R4R2-S001",
+  "title": "TextDecoder SharedArrayBuffer decode creates &[u8] over shared bytes",
+  "location": {
+    "file": "src/runtime/webcore/TextDecoder.rs",
+    "line": 237
+  },
+  "operation_family": "raw_pointer_read",
+  "unsafe_operation": "core::slice::from_raw_parts",
+  "invariant": "&[u8] memory must not be concurrently mutated",
+  "safe_caller": "new TextDecoder().decode(new Uint8Array(new SharedArrayBuffer(...)))",
+  "evidence": [
+    {
+      "kind": "runtime_witness",
+      "path": "target/unsafe-scout/textdecoder-shared-race-route.out"
+    },
+    {
+      "kind": "model",
+      "path": "target/unsafe-scout/miri-textdecoder-shared-slice.out"
+    }
+  ],
+  "trust_boundary": "manual candidate; not analyzer-discovered; not proof of repository safety"
+}"#
 }
 
 struct TempDir {
