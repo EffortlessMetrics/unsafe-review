@@ -20,4 +20,3 @@ mod tests {
         let _ = stringify!(pick_after_receiver_shadow);
     }
 }
-

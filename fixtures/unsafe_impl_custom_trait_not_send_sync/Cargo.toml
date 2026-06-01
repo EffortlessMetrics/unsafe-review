@@ -3,4 +3,3 @@ name = "unsafe-impl-custom-trait-not-send-sync"
 version = "0.0.0"
 edition = "2024"
 publish = false
-

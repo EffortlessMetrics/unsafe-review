@@ -18,4 +18,3 @@ mod tests {
         *picked = 9;
     }
 }
-

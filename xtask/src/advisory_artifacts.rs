@@ -2570,13 +2570,11 @@ fn expected_non_selection_reason_code(
 ) -> &'static str {
     if !changed_line {
         "outside_changed_hunk"
-    } else if !class_is_actionable(&card.class_name) {
+    } else if !class_is_actionable(&card.class_name) || card.operation_family == "unknown" {
         "human_deep_review_only"
-    } else if card.operation_family == "unknown" {
-        "human_deep_review_only"
-    } else if matches!(card.confidence.as_str(), "low" | "unknown") {
-        "lower_relevance"
-    } else if !(card.priority == "high" || card.confidence == "high") {
+    } else if matches!(card.confidence.as_str(), "low" | "unknown")
+        || !(card.priority == "high" || card.confidence == "high")
+    {
         "lower_relevance"
     } else if selected_budget_keys.contains(&comment_budget_key(card)) {
         "covered_by_selected_family_obligation"

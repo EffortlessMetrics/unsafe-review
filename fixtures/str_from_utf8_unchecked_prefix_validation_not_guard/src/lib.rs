@@ -16,4 +16,3 @@ mod tests {
         assert_eq!(decode(b"ok", 1), "ok");
     }
 }
-

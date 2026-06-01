@@ -17,4 +17,3 @@ mod tests {
         let _value = byte_to_bool_conjunct(1, true);
     }
 }
-

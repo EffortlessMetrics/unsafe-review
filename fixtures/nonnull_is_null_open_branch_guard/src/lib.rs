@@ -18,4 +18,3 @@ mod tests {
         let _ = stringify!(expose_nonnull_if_non_null);
     }
 }
-

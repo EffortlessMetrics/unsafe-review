@@ -15,4 +15,3 @@ mod tests {
         let _ = stringify!(reset_after_capacity);
     }
 }
-

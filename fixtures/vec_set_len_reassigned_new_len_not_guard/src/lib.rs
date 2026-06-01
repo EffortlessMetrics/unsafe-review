@@ -14,4 +14,3 @@ mod tests {
         let _ = stringify!(extend_after_stale_new_len);
     }
 }
-

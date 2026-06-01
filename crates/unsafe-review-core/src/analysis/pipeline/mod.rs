@@ -14,6 +14,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+type RepoProgressFn<'a> = &'a mut dyn FnMut(&RepoScanStatus) -> Result<(), String>;
+
 pub(crate) fn analyze(input: AnalyzeInput) -> Result<AnalyzeOutput, String> {
     let discovery = default_discovery_for(&input);
     analyze_with_receipts(input, true, discovery, None)
@@ -54,7 +56,7 @@ fn analyze_with_receipts(
     input: AnalyzeInput,
     import_receipts: bool,
     discovery: DiscoveryOptions,
-    mut progress: Option<&mut dyn FnMut(&RepoScanStatus) -> Result<(), String>>,
+    mut progress: Option<RepoProgressFn<'_>>,
 ) -> Result<AnalyzeOutput, String> {
     let started = Instant::now();
     let repo_mode = matches!(input.scope, Scope::Repo) || matches!(input.mode, AnalysisMode::Repo);
@@ -204,7 +206,7 @@ fn analyze_with_receipts(
 }
 
 fn emit_repo_status(
-    progress: &mut Option<&mut dyn FnMut(&RepoScanStatus) -> Result<(), String>>,
+    progress: &mut Option<RepoProgressFn<'_>>,
     status: RepoScanStatus,
 ) -> Result<(), String> {
     if let Some(progress) = progress.as_deref_mut() {

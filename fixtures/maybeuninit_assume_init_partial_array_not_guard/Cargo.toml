@@ -3,4 +3,3 @@ name = "maybeuninit-assume-init-partial-array-not-guard"
 version = "0.0.0"
 edition = "2024"
 publish = false
-

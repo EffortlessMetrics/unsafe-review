@@ -16,4 +16,3 @@ mod tests {
         let _value = copy_byte_to_bool_disjunct_return(1, false);
     }
 }
-

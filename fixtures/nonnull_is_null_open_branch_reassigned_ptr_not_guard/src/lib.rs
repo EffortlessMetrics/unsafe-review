@@ -22,4 +22,3 @@ mod tests {
         let _ = stringify!(expose_nonnull_after_stale_open_branch);
     }
 }
-

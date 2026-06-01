@@ -14,4 +14,3 @@ mod tests {
         let _ = stringify!(byte_to_bool_checked_other);
     }
 }
-

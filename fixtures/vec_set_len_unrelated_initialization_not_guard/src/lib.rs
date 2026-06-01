@@ -19,4 +19,3 @@ mod tests {
         let _ = stringify!(unrelated_init);
     }
 }
-

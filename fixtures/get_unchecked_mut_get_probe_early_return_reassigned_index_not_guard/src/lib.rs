@@ -19,4 +19,3 @@ mod tests {
         let _ = stringify!(pick_after_stale_get_probe_return);
     }
 }
-

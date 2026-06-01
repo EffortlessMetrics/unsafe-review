@@ -23,4 +23,3 @@ diff --git a/src/lib.rs b/src/lib.rs
 +        assert_eq!(fallback, src);
 +    }
 +}
-

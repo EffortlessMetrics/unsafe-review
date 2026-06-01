@@ -3525,6 +3525,10 @@ mod dogfood_checks {
     }
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the dogfood manifest/index cross-check uses independent counts from separate sources"
+)]
 fn check_dogfood_index(
     target_count: usize,
     repository_count: usize,
@@ -11469,7 +11473,12 @@ Snapshot reports:
         let result = check_first_pr_artifacts(&dir);
 
         fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
-        let err = result.expect_err("unknown top card should fail review-kit verification");
+        let err = match result {
+            Ok(()) => {
+                return Err("unknown top card should fail review-kit verification".to_string());
+            }
+            Err(err) => err,
+        };
         assert!(
             err.contains("review-kit.json top_card_id `missing-card` is not present"),
             "{err}"
@@ -11495,7 +11504,12 @@ Snapshot reports:
         let result = check_first_pr_artifacts(&dir);
 
         fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
-        let err = result.expect_err("top-card handoff drift should fail verification");
+        let err = match result {
+            Ok(()) => {
+                return Err("top-card handoff drift should fail verification".to_string());
+            }
+            Err(err) => err,
+        };
         assert!(
             err.contains("review-kit.json handoff top_card context_json"),
             "{err}"
@@ -11521,7 +11535,12 @@ Snapshot reports:
         let result = check_first_pr_artifacts(&dir);
 
         fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
-        let err = result.expect_err("receipt-audit handoff drift should fail verification");
+        let err = match result {
+            Ok(()) => {
+                return Err("receipt-audit handoff drift should fail verification".to_string());
+            }
+            Err(err) => err,
+        };
         assert!(
             err.contains("review-kit.json handoff receipt_audit_markdown"),
             "{err}"
@@ -11554,7 +11573,12 @@ Snapshot reports:
         let result = check_first_pr_artifacts(&dir);
 
         fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
-        let err = result.expect_err("missing review-kit artifact should fail verification");
+        let err = match result {
+            Ok(()) => {
+                return Err("missing review-kit artifact should fail verification".to_string());
+            }
+            Err(err) => err,
+        };
         assert!(
             err.contains("review-kit.json lists missing artifact `sidecar.json`"),
             "{err}"
@@ -11584,7 +11608,12 @@ Snapshot reports:
         let result = check_first_pr_artifacts(&dir);
 
         fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
-        let err = result.expect_err("zero-card top-card handoff should fail verification");
+        let err = match result {
+            Ok(()) => {
+                return Err("zero-card top-card handoff should fail verification".to_string());
+            }
+            Err(err) => err,
+        };
         assert!(
             err.contains("review-kit.json handoff top_card must be null"),
             "{err}"

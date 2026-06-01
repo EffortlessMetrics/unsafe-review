@@ -16,4 +16,3 @@ mod tests {
         let _ = stringify!(copy_overlapping_checked);
     }
 }
-

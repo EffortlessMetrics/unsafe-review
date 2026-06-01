@@ -558,12 +558,12 @@ mod tests {
             .ok_or("repair queue buckets should be an object")?;
         let mut names = buckets
             .iter()
-            .filter_map(|(name, entries)| {
+            .filter(|(_name, entries)| {
                 entries
                     .as_array()
                     .is_some_and(|entries| !entries.is_empty())
-                    .then(|| name.clone())
             })
+            .map(|(name, _entries)| name.clone())
             .collect::<Vec<_>>();
         names.sort();
         Ok(names)

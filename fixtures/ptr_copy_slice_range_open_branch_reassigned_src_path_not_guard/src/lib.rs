@@ -30,4 +30,3 @@ mod tests {
         assert_eq!(&*buffers.dst, fallback.as_slice());
     }
 }
-

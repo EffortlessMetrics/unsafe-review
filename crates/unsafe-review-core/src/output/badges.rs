@@ -319,7 +319,7 @@ mod tests {
             .as_u64()
             .ok_or_else(|| format!("{field} must be an unsigned count"))?
             .try_into()
-            .map_err(|_| format!("{field} does not fit in usize"))
+            .map_err(|_err| format!("{field} does not fit in usize"))
     }
 
     fn parse_json(text: &str) -> Result<serde_json::Value, String> {

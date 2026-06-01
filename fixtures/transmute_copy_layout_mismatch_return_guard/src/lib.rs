@@ -15,4 +15,3 @@ mod tests {
         let _value = copy_byte_to_bool_layout_mismatch_return(1);
     }
 }
-

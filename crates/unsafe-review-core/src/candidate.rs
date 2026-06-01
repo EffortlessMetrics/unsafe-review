@@ -310,8 +310,8 @@ mod tests {
     }
 
     #[test]
-    fn manual_candidate_rejects_wrong_schema() {
-        let err = ManualCandidate::from_json_str(
+    fn manual_candidate_rejects_wrong_schema() -> Result<(), String> {
+        let err = match ManualCandidate::from_json_str(
             r#"{
               "schema_version": "manual-candidate/v0",
               "id": "R4R2-S001",
@@ -324,10 +324,13 @@ mod tests {
               "evidence": [],
               "trust_boundary": "manual candidate"
             }"#,
-        )
-        .unwrap_err();
+        ) {
+            Ok(_) => return Err("manual candidate unexpectedly accepted wrong schema".to_string()),
+            Err(err) => err,
+        };
 
         assert!(err.contains("schema_version"));
+        Ok(())
     }
 
     #[test]

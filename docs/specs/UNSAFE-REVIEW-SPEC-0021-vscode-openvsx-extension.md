@@ -10,7 +10,7 @@ Linked ADRs:
 - UNSAFE-REVIEW-ADR-0006-live-lsp-server-is-read-only.md
 Linked lane:
 - .unsafe-review-spec/lanes/editor-extension/tracker.toml
-Support-tier impact: yes  
+Support-tier impact: yes
 Policy impact: no
 
 ## Problem
