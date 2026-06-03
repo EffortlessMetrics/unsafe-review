@@ -2396,7 +2396,7 @@ fn repo_sigterm_writes_interrupted_status_sidecar() -> Result<(), Box<dyn Error>
         .stderr(Stdio::piped())
         .spawn()?;
 
-    std::thread::sleep(Duration::from_millis(500));
+    std::thread::sleep(std::time::Duration::from_millis(500));
     let kill_status = Command::new("kill")
         .arg("-TERM")
         .arg(child.id().to_string())
@@ -2471,7 +2471,7 @@ fn repo_sigterm_keeps_completed_file_partial_report() -> Result<(), Box<dyn Erro
         .stderr(Stdio::piped())
         .spawn()?;
 
-    std::thread::sleep(Duration::from_millis(500));
+    std::thread::sleep(std::time::Duration::from_millis(500));
     let kill_status = Command::new("kill")
         .arg("-TERM")
         .arg(child.id().to_string())
