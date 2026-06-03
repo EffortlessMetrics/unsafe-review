@@ -136,7 +136,8 @@ must include copy-only handoff commands for the reviewer summary, receipt audit,
   and top-card explain/context commands when a top card exists
 must include manual candidate handoff metadata pointing to
   manual-candidates.json, with analyzer_discovered = 0 and copy-only
-  explain/context/witness-plan commands when manual candidates exist
+  explain/context/witness-plan commands plus implementer handoff cues when
+  manual candidates exist
 must list every required first-pr artifact with relative paths
 must include artifact kind, format, and schema_version/null metadata
 must include trust boundary wording
@@ -530,11 +531,13 @@ do_not_do
 trust_boundary
 ```
 
-`agent_readiness.state` must use the closed vocabulary `ready`,
-`needs_human_review`, or `not_recommended`, and it must agree with
-`agent_readiness.ready`. `agent_readiness.reasons` must contain at least one
-explanation. Empty reasons fail artifact verification because a queue entry
-without a readiness rationale is not a bounded work order.
+`agent_readiness.state` must use the closed vocabulary `ready_for_agent`,
+`requires_human_review`, `requires_witness_receipt`, or `unsupported`, and it
+must agree with `agent_readiness.ready`: `ready = true` requires
+`ready_for_agent`, and `ready = false` requires any other closed state.
+`agent_readiness.reasons` must contain at least one explanation. Empty reasons
+fail artifact verification because a queue entry without a readiness rationale
+is not a bounded work order.
 
 The same `card_id` must not repeat within one repair queue bucket. The same card
 may appear in multiple buckets only when the bucket reasons are distinct and

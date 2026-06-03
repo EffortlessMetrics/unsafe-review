@@ -102,6 +102,9 @@ unsafe-review support
 `target/unsafe-review/`. It is advisory-only: it does not run witnesses, post
 comments, edit source, or enforce blocking policy.
 
+For the end-to-end maintainer path from first card to fix, witness receipt, and
+outcome comparison, see [Find and fix UB-risk review seams](docs/FIND_AND_FIX_UB.md).
+
 ## Add badges to your repo
 
 ```bash
@@ -180,10 +183,13 @@ posture live in the status docs.
 |---|---|
 | Support posture | [Support summary](docs/status/SUPPORT_SUMMARY.md) |
 | Claim-to-proof ledger | [Support tiers](docs/status/SUPPORT_TIERS.md) |
+| Find/fix workflow | [Find and fix UB-risk review seams](docs/FIND_AND_FIX_UB.md) |
+| Advisory CI cookbook | [UB-risk review CI cookbook](docs/ci/UB_RISK_REVIEW_CI.md) |
 | First-use guide | [First-use guide](docs/FIRST_USE.md) |
 | First-hour guide | [First-hour guide](docs/FIRST_HOUR.md) |
 | ReviewCard trust boundary | [ReviewCard explanation](docs/explanation/review-cards-and-trust-boundary.md) |
 | Explain examples | [Reviewer examples](docs/explanation/explain-examples.md) |
+| Agent repair workflow | [Bounded agent repair workflow](docs/explanation/agent-repair-workflow.md) |
 | Dogfood evidence | [Dogfood index](docs/dogfood/index.md) |
 | CLI reference | [CLI guide](docs/CLI.md) |
 
@@ -219,8 +225,10 @@ cargo run --locked -p xtask -- check-dogfood
 - [Roadmap](docs/ROADMAP.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [CLI guide](docs/CLI.md)
+- [UB-risk review CI cookbook](docs/ci/UB_RISK_REVIEW_CI.md)
 - [ReviewCard trust boundary](docs/explanation/review-cards-and-trust-boundary.md)
 - [Explain examples](docs/explanation/explain-examples.md)
+- [Bounded agent repair workflow](docs/explanation/agent-repair-workflow.md)
 - [Specifications](docs/specs/README.md)
 - [ADRs](docs/adr/README.md)
 - [Implementation plan](plans/0.2.0/implementation-plan.md)

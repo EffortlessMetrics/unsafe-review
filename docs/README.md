@@ -4,14 +4,15 @@
 |---|---|---|
 | Mission / vision | product purpose and end state | `docs/MISSION.md`, `docs/VISION.md` |
 | Roadmap | release direction | `docs/ROADMAP.md` |
+| Find/fix workflow | end-to-end UB-risk review seam workflow from first-pr through explain, agent packet, witness receipt, and outcome comparison | `docs/FIND_AND_FIX_UB.md` |
 | First-use guide | install and first useful local run from crates.io | `docs/FIRST_USE.md` |
 | First-hour guide | maintainer first-hour walkthrough from install to one credible review action | `docs/FIRST_HOUR.md` |
 | CLI guide | current user-facing commands and artifact surfaces | `docs/CLI.md` |
-| CI and PR artifacts | advisory CI lanes, first-pr packets, comment plans, and future trusted poster design | `docs/ci/PR_CI.md`, `docs/ci/COMMENT_PLAN_EXAMPLES.md`, `docs/ci/TRUSTED_COMMENT_POSTER.md` |
+| CI and PR artifacts | advisory CI lanes, UB-risk review cookbook, first-pr packets, comment plans, and future trusted poster design | `docs/ci/UB_RISK_REVIEW_CI.md`, `docs/ci/PR_CI.md`, `docs/ci/COMMENT_PLAN_EXAMPLES.md`, `docs/ci/TRUSTED_COMMENT_POSTER.md` |
 | GitHub Actions user guide | copy-paste drop-in workflow for downstream Rust repositories | `docs/ci/github-actions.md`, `.github/examples/unsafe-review-first-pr.yml` |
 | Coverage telemetry | advisory cargo-llvm-cov + Codecov execution-surface signal, not unsafe correctness | `docs/ci/coverage.md`, `.github/workflows/coverage.yml` |
 | Analysis design | analyzer evidence applicability and refactor rails | `docs/analysis/` |
-| Explanations | concept notes, trust boundaries, reviewer examples, and agent packet examples | `docs/explanation/` |
+| Explanations | concept notes, trust boundaries, reviewer examples, fix recipes, agent repair workflow, and agent packet examples | `docs/explanation/` |
 | Editor workflow | saved read-only editor projection walkthrough | `docs/editor/saved-lsp-json.md` |
 | Editor extension MVP | publishable saved-lsp viewer extension scope and non-goals | `docs/editor/extension-mvp.md` |
 | Editor marketplace publication | owner pre-publication checklist and manual publish workflow | `docs/editor/marketplace-publication.md`, `.github/workflows/editor-publish.yml` |
@@ -20,7 +21,7 @@
 | Specs | behavior contracts | `docs/specs/` |
 | ADRs | durable architecture decisions | `docs/adr/` |
 | Templates | reusable proposal, spec, plan, closeout, swarm digest, and publication receipt skeletons | `docs/templates/` |
-| Contribution process | swarm-to-main routing, source PR requirements, and source history catch-up | `docs/contributing/SWARM_TO_MAIN.md`, `docs/contributing/SOURCE_HISTORY_CATCHUP.md` |
+| Contribution process | swarm-to-main routing, PR disposition, source PR requirements, and source history catch-up | `docs/contributing/SWARM_TO_MAIN.md`, `docs/contributing/SOURCE_HISTORY_CATCHUP.md` |
 | Spec style | durable source-of-truth ownership boundaries and artifact role split | `docs/spec-style.md` |
 | Spec rails guide | contributor workflow for source-of-truth rails and tool-state boundaries | `docs/contributing/spec-rails.md` |
 | Implementation plans | PR-sized sequence and proof commands | `plans/` |

@@ -1,16 +1,23 @@
+mod action_summary;
 mod card_builder;
+mod card_identity;
+mod input_loading;
+mod summary;
 
+use self::action_summary::next_action_summary;
+#[cfg(test)]
+use self::card_identity::unsafe_call_path;
+use self::input_loading::{load_diff_index, package_name};
+use self::summary::summarize;
 use super::{receipts, scanner};
 use crate::api::{
-    AnalysisMode, AnalyzeInput, AnalyzeOutput, DiffSource, DiscoveryOptions, RepoScanEvent,
-    RepoScanPhase, RepoScanStatus, Scope, Summary,
+    AnalysisMode, AnalyzeInput, AnalyzeOutput, DiscoveryOptions, RepoScanEvent, RepoScanPhase,
+    RepoScanStatus, Scope,
 };
-use crate::domain::{CardId, ReviewCard};
-use crate::input::{diff, workspace};
+use crate::domain::ReviewCard;
+use crate::input::workspace;
 use crate::policy::PolicyState;
-use crate::util::{slug, stable_hash_hex};
 use std::collections::BTreeMap;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -292,309 +299,12 @@ fn repo_status(
     }
 }
 
-fn package_name(root: &std::path::Path) -> String {
-    let Ok(text) = fs::read_to_string(root.join("Cargo.toml")) else {
-        return root
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("workspace")
-            .to_string();
-    };
-    let mut in_package = false;
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with('[') {
-            in_package = trimmed == "[package]";
-            continue;
-        }
-        if !in_package || !trimmed.starts_with("name") {
-            continue;
-        }
-        let Some((_key, value)) = trimmed.split_once('=') else {
-            continue;
-        };
-        let name = value.trim().trim_matches('"');
-        if !name.is_empty() {
-            return name.to_string();
-        }
-    }
-    root.file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("workspace")
-        .to_string()
-}
-
-fn load_diff_index(source: &DiffSource) -> Result<diff::DiffIndex, String> {
-    match source {
-        DiffSource::NoneRepoScan => Ok(diff::DiffIndex::default()),
-        DiffSource::Text(text) => Ok(diff::parse_unified_diff(text)),
-        DiffSource::File(path) => {
-            let text = fs::read_to_string(path)
-                .map_err(|err| format!("read diff {} failed: {err}", path.display()))?;
-            Ok(diff::parse_unified_diff(&text))
-        }
-    }
-}
-
-fn summarize(rust_files: usize, changed_rust_files: usize, cards: &[ReviewCard]) -> Summary {
-    let mut summary = Summary {
-        rust_files,
-        changed_rust_files,
-        unsafe_sites: cards.len(),
-        cards: cards.len(),
-        ..Summary::default()
-    };
-    for card in cards {
-        if card.class.is_actionable() {
-            summary.open_actionable_gaps += 1;
-        }
-        match &card.class {
-            crate::domain::ReviewClass::ContractMissing => summary.contract_missing += 1,
-            crate::domain::ReviewClass::GuardMissing => summary.guard_missing += 1,
-            crate::domain::ReviewClass::GuardedUnwitnessed => summary.guarded_unwitnessed += 1,
-            crate::domain::ReviewClass::UnsafeUnreached => summary.unsafe_unreached += 1,
-            crate::domain::ReviewClass::RequiresLoom => summary.requires_loom += 1,
-            crate::domain::ReviewClass::MiriUnsupported => summary.miri_unsupported += 1,
-            crate::domain::ReviewClass::StaticUnknown => summary.static_unknown += 1,
-            _ => {}
-        }
-    }
-    summary
-}
-
-fn next_action_summary(
-    class: &crate::domain::ReviewClass,
-    operation: &str,
-    public_api_surface: bool,
-    routes: &[crate::domain::WitnessRoute],
-) -> String {
-    match class {
-        crate::domain::ReviewClass::ContractMissing if public_api_surface => {
-            "Add a precise public `# Safety` section that names the required caller obligations."
-                .to_string()
-        }
-        crate::domain::ReviewClass::ContractMissing => "Add a precise `# Safety` section or `SAFETY:` / `Safety:` comment that names the required conditions.".to_string(),
-        crate::domain::ReviewClass::GuardMissing if operation == "unknown" => "Review the unsafe site manually and add the missing obligation-specific guard once the contract is identified.".to_string(),
-        crate::domain::ReviewClass::GuardMissing if operation == "unsafe_fn_call" => "Review the `unsafe_fn_call` callee contract manually and add obligation-specific guard evidence for this call.".to_string(),
-        crate::domain::ReviewClass::GuardMissing if operation == "inline_asm" => "Review the `inline_asm` register, memory, and target invariants manually; add explicit guard evidence, and attach a human deep-review receipt only as witness evidence.".to_string(),
-        crate::domain::ReviewClass::GuardMissing if operation == "pin_unchecked" => "Review the `pin_unchecked` move-prevention and projection invariants manually; add explicit guard evidence, and attach a human deep-review receipt only as witness evidence.".to_string(),
-        crate::domain::ReviewClass::GuardMissing => format!("Add or expose the local guard that discharges the `{operation}` safety obligation."),
-        crate::domain::ReviewClass::GuardedUnwitnessed
-            if has_witness_route(routes, crate::domain::WitnessKind::HumanDeepReview) =>
-        {
-            "Attach a human deep-review witness receipt or mark the static limitation explicitly."
-                .to_string()
-        }
-        crate::domain::ReviewClass::GuardedUnwitnessed
-            if has_witness_route(routes, crate::domain::WitnessKind::Miri)
-                && has_witness_route(routes, crate::domain::WitnessKind::CargoCareful) =>
-        {
-            "Attach a focused Miri or cargo-careful witness receipt or mark the static limitation explicitly.".to_string()
-        }
-        crate::domain::ReviewClass::GuardedUnwitnessed
-            if has_witness_route(routes, crate::domain::WitnessKind::Miri) =>
-        {
-            "Attach a focused Miri witness receipt or mark the static limitation explicitly."
-                .to_string()
-        }
-        crate::domain::ReviewClass::GuardedUnwitnessed
-            if has_witness_route(routes, crate::domain::WitnessKind::CargoCareful) =>
-        {
-            "Attach a focused cargo-careful witness receipt or mark the static limitation explicitly.".to_string()
-        }
-        crate::domain::ReviewClass::ReachableUnwitnessed => "Attach a focused witness receipt for the reached unsafe seam or mark the static limitation explicitly.".to_string(),
-        crate::domain::ReviewClass::WitnessMismatch => "Review the witness identity or tool mismatch and attach a matching receipt for this card.".to_string(),
-        crate::domain::ReviewClass::RequiresLoom => "Add or update a Loom/Shuttle model for the changed concurrency invariant.".to_string(),
-        crate::domain::ReviewClass::RequiresSanitizer => "Run a focused sanitizer or cargo-careful witness and attach the receipt with limitations.".to_string(),
-        crate::domain::ReviewClass::RequiresKaniOrCrux => "Run a bounded Kani/Crux proof harness or attach the receipt with limitations.".to_string(),
-        crate::domain::ReviewClass::MiriUnsupported => "Use sanitizer/cargo-careful or an explicit FFI boundary contract; Miri may not exercise this seam.".to_string(),
-        crate::domain::ReviewClass::StaticUnknown => "Review the unsafe site manually; identify the missing contract, guard, test, or witness route before claiming progress.".to_string(),
-        crate::domain::ReviewClass::UnsafeUnreached => "Add or identify a focused test path that reaches the safe wrapper around this unsafe seam.".to_string(),
-        crate::domain::ReviewClass::BaselineKnown => "Known baseline card; keep the ledger owner and review date current.".to_string(),
-        crate::domain::ReviewClass::Suppressed => "Suppressed card; keep the owner, reason, evidence, and review or expiry date current.".to_string(),
-        _ => "Attach a focused witness receipt or mark the static limitation explicitly.".to_string(),
-    }
-}
-
-fn has_witness_route(
-    routes: &[crate::domain::WitnessRoute],
-    kind: crate::domain::WitnessKind,
-) -> bool {
-    routes.iter().any(|route| route.kind == kind)
-}
-
-fn card_id(
-    package: &str,
-    scanned: &scanner::ScannedSite,
-    hazards: &[crate::domain::HazardKind],
-    identity_counts: &mut BTreeMap<String, usize>,
-) -> CardId {
-    let base = card_identity_base(package, scanned, hazards);
-    let next = identity_counts.entry(base.clone()).or_insert(0);
-    *next += 1;
-    CardId(format!("{base}-c{}", *next))
-}
-
-fn card_identity_base(
-    package: &str,
-    scanned: &scanner::ScannedSite,
-    hazards: &[crate::domain::HazardKind],
-) -> String {
-    let file = scanned
-        .site
-        .location
-        .file
-        .to_string_lossy()
-        .replace(['/', '\\'], "_");
-    let owner = scanned
-        .site
-        .owner
-        .clone()
-        .unwrap_or_else(|| "unknown".to_string());
-    let normalized = normalize_snippet(&scanned.operation.expression);
-    let snippet_hash = stable_hash_hex(&normalized);
-    let hazard = hazards.first().map_or("unknown", |hazard| hazard.as_str());
-    format!(
-        "UR-{}-{}-{}-{}-{}-{}-{}-{}",
-        slug(package),
-        slug(&file),
-        slug(&owner),
-        scanned.site.kind.as_str(),
-        scanned.operation.family.as_str(),
-        slug(&operation_path(scanned)),
-        &snippet_hash[..12],
-        hazard
-    )
-}
-
-fn normalize_snippet(value: &str) -> String {
-    value.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-fn operation_path(scanned: &scanner::ScannedSite) -> String {
-    if scanned.operation.family == crate::domain::OperationFamily::RawPointerDeref {
-        return "deref".to_string();
-    }
-    if scanned.operation.family == crate::domain::OperationFamily::UnreachableUnchecked {
-        return "unreachable_unchecked".to_string();
-    }
-    if scanned.operation.family == crate::domain::OperationFamily::UnsafeFnCall {
-        return unsafe_call_path(&scanned.operation.expression);
-    }
-    if scanned.operation.family == crate::domain::OperationFamily::Unknown {
-        return scanned
-            .site
-            .owner
-            .clone()
-            .unwrap_or_else(|| scanned.site.kind.as_str().to_string());
-    }
-    let normalized = normalize_snippet(&scanned.operation.expression);
-    let target = normalized
-        .split('(')
-        .next()
-        .unwrap_or(normalized.as_str())
-        .trim();
-    if let Some((_prefix, method)) = target.rsplit_once('.') {
-        return method.trim_matches(':').to_string();
-    }
-    if let Some((_prefix, function)) = target.rsplit_once("::") {
-        return function.trim_matches(':').to_string();
-    }
-    scanned.operation.family.as_str().to_string()
-}
-
-fn unsafe_call_path(expression: &str) -> String {
-    let normalized = normalize_snippet(expression);
-    if contains_call_name(&normalized, "new_unchecked") {
-        return "new_unchecked".to_string();
-    }
-    let call = normalized
-        .split_once("unsafe")
-        .and_then(|(_prefix, after_unsafe)| {
-            after_unsafe.split_once('{').map(|(_open, after)| after)
-        })
-        .unwrap_or(normalized.as_str())
-        .split('(')
-        .next()
-        .unwrap_or("unsafe_fn_call")
-        .trim()
-        .trim_start_matches("match")
-        .trim();
-    let call = strip_trailing_turbofish(call);
-    if call.is_empty() {
-        "unsafe_fn_call".to_string()
-    } else if let Some((_prefix, method)) = call.rsplit_once('.') {
-        method.trim_matches(':').to_string()
-    } else if let Some((_prefix, function)) = call.rsplit_once("::") {
-        function.trim_matches(':').to_string()
-    } else {
-        call.trim_matches(':').to_string()
-    }
-}
-
-fn strip_trailing_turbofish(call: &str) -> &str {
-    let call = call.trim();
-    if !call.ends_with('>') {
-        return call;
-    }
-
-    let mut depth = 0usize;
-    for (idx, ch) in call.char_indices().rev() {
-        match ch {
-            '>' => depth += 1,
-            '<' => {
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    let prefix = &call[..idx];
-                    if let Some(without_colons) = prefix.strip_suffix("::") {
-                        return without_colons;
-                    }
-                    return call;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    call
-}
-
-fn contains_call_name(line: &str, name: &str) -> bool {
-    let mut cursor = line;
-    while let Some(pos) = cursor.find(name) {
-        let before = cursor[..pos].chars().next_back();
-        let after = &cursor[pos + name.len()..];
-        let starts_on_boundary = before.is_none_or(|ch| !is_ident_continue(ch));
-        if starts_on_boundary && call_suffix(after) {
-            return true;
-        }
-        cursor = &after[after
-            .char_indices()
-            .next()
-            .map_or(after.len(), |(idx, ch)| idx + ch.len_utf8())..];
-    }
-    false
-}
-
-fn call_suffix(after_name: &str) -> bool {
-    let rest = after_name.trim_start();
-    if rest.starts_with('(') {
-        return true;
-    }
-    rest.strip_prefix("::")
-        .is_some_and(|after_colons| after_colons.trim_start().starts_with('<'))
-}
-
-fn is_ident_continue(ch: char) -> bool {
-    ch == '_' || ch.is_ascii_alphanumeric()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::api::{AnalysisMode, DiffSource, DiscoveryOptions, PolicyMode, Scope};
     use crate::domain::{
-        HazardKind, OperationFamily, Priority, ReviewCard, ReviewClass, UnsafeSiteKind,
+        CardId, HazardKind, OperationFamily, Priority, ReviewCard, ReviewClass, UnsafeSiteKind,
         WitnessKind, WitnessRoute,
     };
     use std::fs;
@@ -1690,6 +1400,7 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
             "nonnull_new_shadowed_ptr_not_guard",
             "nonnull_cast_checked_pointer_not_guard",
             "nonnull_method_receiver_reassigned_not_guard",
+            "nonnull_method_receiver_shadowed_not_guard",
             "nonnull_is_null_reassigned_ptr_not_guard",
             "nonnull_is_null_shadowed_ptr_not_guard",
             "nonnull_is_null_open_branch_shadowed_ptr_not_guard",
@@ -1741,6 +1452,415 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
         assert!(card.hazards.contains(&HazardKind::Bounds));
         assert!(!obligation_discharge_present(card, "bounds"));
         assert!(card.id.0.contains("get-unchecked-mut"));
+        Ok(())
+    }
+
+    #[test]
+    fn get_unchecked_mut_get_probe_bounds_evidence_is_discharged() -> Result<(), String> {
+        for fixture in [
+            "get_unchecked_mut_get_probe_guard",
+            "get_unchecked_mut_get_probe_early_return_guard",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
+
+            assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+            assert_eq!(card.operation.family, OperationFamily::GetUnchecked);
+            assert_eq!(card.class, ReviewClass::GuardedUnwitnessed);
+            assert!(card.discharge.present);
+            assert!(obligation_discharge_present(card, "bounds"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn get_unchecked_mut_get_probe_pattern_evidence_is_discharged() -> Result<(), String> {
+        for fixture in [
+            "get_unchecked_mut_if_let_get_guard",
+            "get_unchecked_mut_let_else_get_guard",
+            "get_unchecked_mut_match_get_guard",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
+
+            assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+            assert_eq!(card.operation.family, OperationFamily::GetUnchecked);
+            assert_eq!(card.class, ReviewClass::GuardedUnwitnessed);
+            assert!(card.discharge.present);
+            assert!(obligation_discharge_present(card, "bounds"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn get_unchecked_mut_len_branch_evidence_respects_branch_shape() -> Result<(), String> {
+        let conjunct = fixture_output("get_unchecked_mut_conjunct_len_guard")?;
+        let conjunct_card = single_card("get_unchecked_mut_conjunct_len_guard", &conjunct)?;
+        assert_eq!(conjunct_card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(
+            conjunct_card.operation.family,
+            OperationFamily::GetUnchecked
+        );
+        assert_eq!(conjunct_card.class, ReviewClass::GuardedUnwitnessed);
+        assert!(conjunct_card.discharge.present);
+        assert!(obligation_discharge_present(conjunct_card, "bounds"));
+
+        let disjunct = fixture_output("get_unchecked_mut_disjunct_len_not_guard")?;
+        let disjunct_card = single_card("get_unchecked_mut_disjunct_len_not_guard", &disjunct)?;
+        assert_eq!(disjunct_card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(
+            disjunct_card.operation.family,
+            OperationFamily::GetUnchecked
+        );
+        assert_eq!(disjunct_card.class, ReviewClass::GuardMissing);
+        assert!(!disjunct_card.discharge.present);
+        assert!(!obligation_discharge_present(disjunct_card, "bounds"));
+        Ok(())
+    }
+
+    #[test]
+    fn get_unchecked_mut_len_evidence_rejects_comment_only_return() -> Result<(), String> {
+        let output = fixture_output("get_unchecked_mut_return_comment_not_guard")?;
+        let card = single_card("get_unchecked_mut_return_comment_not_guard", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::GetUnchecked);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(!card.discharge.present);
+        assert!(!obligation_discharge_present(card, "bounds"));
+        Ok(())
+    }
+
+    #[test]
+    fn get_unchecked_mut_len_evidence_rejects_other_receiver() -> Result<(), String> {
+        let output = fixture_output("get_unchecked_mut_other_len_not_guard")?;
+        let card = single_card("get_unchecked_mut_other_len_not_guard", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::GetUnchecked);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(!card.discharge.present);
+        assert!(!obligation_discharge_present(card, "bounds"));
+        Ok(())
+    }
+
+    #[test]
+    fn get_unchecked_mut_len_evidence_rejects_post_check() -> Result<(), String> {
+        let output = fixture_output("get_unchecked_mut_post_check_not_guard")?;
+        let card = single_card("get_unchecked_mut_post_check_not_guard", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::GetUnchecked);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(!card.discharge.present);
+        assert!(!obligation_discharge_present(card, "bounds"));
+        Ok(())
+    }
+
+    #[test]
+    fn get_unchecked_mut_len_evidence_rejects_observed_bounds() -> Result<(), String> {
+        let output = fixture_output("get_unchecked_mut_bounds_observed_not_guard")?;
+        let card = single_card("get_unchecked_mut_bounds_observed_not_guard", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::GetUnchecked);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(!card.discharge.present);
+        assert!(!obligation_discharge_present(card, "bounds"));
+        Ok(())
+    }
+
+    #[test]
+    fn get_unchecked_mut_len_evidence_rejects_closed_bounds() -> Result<(), String> {
+        let output = fixture_output("get_unchecked_mut_closed_bounds_not_guard")?;
+        let card = single_card("get_unchecked_mut_closed_bounds_not_guard", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::GetUnchecked);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(!card.discharge.present);
+        assert!(!obligation_discharge_present(card, "bounds"));
+        Ok(())
+    }
+
+    #[test]
+    fn get_unchecked_mut_len_evidence_rejects_reassigned_index() -> Result<(), String> {
+        let output = fixture_output("get_unchecked_mut_reassigned_index_not_guard")?;
+        let card = single_card("get_unchecked_mut_reassigned_index_not_guard", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::GetUnchecked);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(!card.discharge.present);
+        assert!(!obligation_discharge_present(card, "bounds"));
+        Ok(())
+    }
+
+    #[test]
+    fn get_unchecked_mut_len_evidence_rejects_compound_reassigned_index() -> Result<(), String> {
+        let output = fixture_output("get_unchecked_mut_compound_reassigned_index_not_guard")?;
+        let card = single_card(
+            "get_unchecked_mut_compound_reassigned_index_not_guard",
+            &output,
+        )?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::GetUnchecked);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(!card.discharge.present);
+        assert!(!obligation_discharge_present(card, "bounds"));
+        Ok(())
+    }
+
+    #[test]
+    fn get_unchecked_mut_len_evidence_rejects_shadowed_index() -> Result<(), String> {
+        let output = fixture_output("get_unchecked_mut_shadowed_index_not_guard")?;
+        let card = single_card("get_unchecked_mut_shadowed_index_not_guard", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::GetUnchecked);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(!card.discharge.present);
+        assert!(!obligation_discharge_present(card, "bounds"));
+        Ok(())
+    }
+
+    #[test]
+    fn get_unchecked_mut_get_probe_evidence_rejects_reassigned_index() -> Result<(), String> {
+        for fixture in [
+            "get_unchecked_mut_get_probe_reassigned_index_not_guard",
+            "get_unchecked_mut_get_probe_early_return_reassigned_index_not_guard",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
+
+            assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+            assert_eq!(card.operation.family, OperationFamily::GetUnchecked);
+            assert_eq!(card.class, ReviewClass::GuardMissing);
+            assert!(!card.discharge.present);
+            assert!(!obligation_discharge_present(card, "bounds"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn get_unchecked_mut_get_probe_evidence_rejects_shadowed_index() -> Result<(), String> {
+        for fixture in [
+            "get_unchecked_mut_get_probe_shadowed_index_not_guard",
+            "get_unchecked_mut_get_probe_early_return_shadowed_index_not_guard",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
+
+            assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+            assert_eq!(card.operation.family, OperationFamily::GetUnchecked);
+            assert_eq!(card.class, ReviewClass::GuardMissing);
+            assert!(!card.discharge.present);
+            assert!(!obligation_discharge_present(card, "bounds"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn get_unchecked_mut_get_probe_evidence_rejects_reassigned_receiver() -> Result<(), String> {
+        for fixture in [
+            "get_unchecked_mut_get_probe_reassigned_receiver_not_guard",
+            "get_unchecked_mut_get_probe_early_return_reassigned_receiver_not_guard",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
+
+            assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+            assert_eq!(card.operation.family, OperationFamily::GetUnchecked);
+            assert_eq!(card.class, ReviewClass::GuardMissing);
+            assert!(!card.discharge.present);
+            assert!(!obligation_discharge_present(card, "bounds"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn get_unchecked_mut_get_probe_evidence_rejects_shadowed_receiver() -> Result<(), String> {
+        for fixture in [
+            "get_unchecked_mut_get_probe_shadowed_receiver_not_guard",
+            "get_unchecked_mut_get_probe_early_return_shadowed_receiver_not_guard",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
+
+            assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+            assert_eq!(card.operation.family, OperationFamily::GetUnchecked);
+            assert_eq!(card.class, ReviewClass::GuardMissing);
+            assert!(!card.discharge.present);
+            assert!(!obligation_discharge_present(card, "bounds"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn get_unchecked_mut_get_probe_evidence_rejects_reassigned_receiver_path() -> Result<(), String>
+    {
+        let output =
+            fixture_output("get_unchecked_mut_get_probe_reassigned_receiver_path_not_guard")?;
+        let card = single_card(
+            "get_unchecked_mut_get_probe_reassigned_receiver_path_not_guard",
+            &output,
+        )?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::GetUnchecked);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(!card.discharge.present);
+        assert!(!obligation_discharge_present(card, "bounds"));
+        Ok(())
+    }
+
+    #[test]
+    fn get_unchecked_mut_get_probe_evidence_rejects_shadowed_receiver_path() -> Result<(), String> {
+        let output =
+            fixture_output("get_unchecked_mut_get_probe_shadowed_receiver_path_not_guard")?;
+        let card = single_card(
+            "get_unchecked_mut_get_probe_shadowed_receiver_path_not_guard",
+            &output,
+        )?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::GetUnchecked);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(!card.discharge.present);
+        assert!(!obligation_discharge_present(card, "bounds"));
+        Ok(())
+    }
+
+    #[test]
+    fn get_unchecked_mut_get_probe_evidence_rejects_other_slice() -> Result<(), String> {
+        let output = fixture_output("get_unchecked_mut_get_probe_other_slice_not_guard")?;
+        let card = single_card("get_unchecked_mut_get_probe_other_slice_not_guard", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::GetUnchecked);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(!card.discharge.present);
+        assert!(!obligation_discharge_present(card, "bounds"));
+        Ok(())
+    }
+
+    #[test]
+    fn get_unchecked_mut_get_probe_pattern_evidence_rejects_reassigned_index() -> Result<(), String>
+    {
+        for fixture in [
+            "get_unchecked_mut_if_let_get_reassigned_index_not_guard",
+            "get_unchecked_mut_let_else_get_reassigned_index_not_guard",
+            "get_unchecked_mut_match_get_reassigned_index_not_guard",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
+
+            assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+            assert_eq!(card.operation.family, OperationFamily::GetUnchecked);
+            assert_eq!(card.class, ReviewClass::GuardMissing);
+            assert!(!card.discharge.present);
+            assert!(!obligation_discharge_present(card, "bounds"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn get_unchecked_mut_get_probe_pattern_evidence_rejects_shadowed_index() -> Result<(), String> {
+        for fixture in [
+            "get_unchecked_mut_if_let_get_shadowed_index_not_guard",
+            "get_unchecked_mut_let_else_get_shadowed_index_not_guard",
+            "get_unchecked_mut_match_get_shadowed_index_not_guard",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
+
+            assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+            assert_eq!(card.operation.family, OperationFamily::GetUnchecked);
+            assert_eq!(card.class, ReviewClass::GuardMissing);
+            assert!(!card.discharge.present);
+            assert!(!obligation_discharge_present(card, "bounds"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn get_unchecked_mut_get_probe_pattern_evidence_rejects_reassigned_receiver()
+    -> Result<(), String> {
+        for fixture in [
+            "get_unchecked_mut_if_let_get_reassigned_receiver_not_guard",
+            "get_unchecked_mut_let_else_get_reassigned_receiver_not_guard",
+            "get_unchecked_mut_match_get_reassigned_receiver_not_guard",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
+
+            assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+            assert_eq!(card.operation.family, OperationFamily::GetUnchecked);
+            assert_eq!(card.class, ReviewClass::GuardMissing);
+            assert!(!card.discharge.present);
+            assert!(!obligation_discharge_present(card, "bounds"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn get_unchecked_mut_get_probe_pattern_evidence_rejects_shadowed_receiver() -> Result<(), String>
+    {
+        for fixture in [
+            "get_unchecked_mut_if_let_get_shadowed_receiver_not_guard",
+            "get_unchecked_mut_let_else_get_shadowed_receiver_not_guard",
+            "get_unchecked_mut_match_get_shadowed_receiver_not_guard",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
+
+            assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+            assert_eq!(card.operation.family, OperationFamily::GetUnchecked);
+            assert_eq!(card.class, ReviewClass::GuardMissing);
+            assert!(!card.discharge.present);
+            assert!(!obligation_discharge_present(card, "bounds"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn get_unchecked_mut_get_probe_pattern_evidence_rejects_reassigned_receiver_path()
+    -> Result<(), String> {
+        for fixture in [
+            "get_unchecked_mut_if_let_get_reassigned_receiver_path_not_guard",
+            "get_unchecked_mut_let_else_get_reassigned_receiver_path_not_guard",
+            "get_unchecked_mut_match_get_reassigned_receiver_path_not_guard",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
+
+            assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+            assert_eq!(card.operation.family, OperationFamily::GetUnchecked);
+            assert_eq!(card.class, ReviewClass::GuardMissing);
+            assert!(!card.discharge.present);
+            assert!(!obligation_discharge_present(card, "bounds"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn get_unchecked_mut_get_probe_pattern_evidence_rejects_shadowed_receiver_path()
+    -> Result<(), String> {
+        for fixture in [
+            "get_unchecked_mut_if_let_get_shadowed_receiver_path_not_guard",
+            "get_unchecked_mut_let_else_get_shadowed_receiver_path_not_guard",
+            "get_unchecked_mut_match_get_shadowed_receiver_path_not_guard",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
+
+            assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+            assert_eq!(card.operation.family, OperationFamily::GetUnchecked);
+            assert_eq!(card.class, ReviewClass::GuardMissing);
+            assert!(!card.discharge.present);
+            assert!(!obligation_discharge_present(card, "bounds"));
+        }
         Ok(())
     }
 
@@ -2266,6 +2386,44 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
         );
         assert!(!obligation_discharge_present(
             stale_match_probe_receiver_card,
+            "bounds"
+        ));
+
+        let stale_match_probe_receiver_path =
+            fixture_output("get_unchecked_mut_match_get_reassigned_receiver_path_not_guard")?;
+        let stale_match_probe_receiver_path_card = single_card(
+            "get_unchecked_mut_match_get_reassigned_receiver_path_not_guard",
+            &stale_match_probe_receiver_path,
+        )?;
+        assert_eq!(
+            stale_match_probe_receiver_path_card.operation.family,
+            OperationFamily::GetUnchecked
+        );
+        assert_eq!(
+            stale_match_probe_receiver_path_card.class,
+            ReviewClass::GuardMissing
+        );
+        assert!(!obligation_discharge_present(
+            stale_match_probe_receiver_path_card,
+            "bounds"
+        ));
+
+        let shadowed_match_probe_receiver_path =
+            fixture_output("get_unchecked_mut_match_get_shadowed_receiver_path_not_guard")?;
+        let shadowed_match_probe_receiver_path_card = single_card(
+            "get_unchecked_mut_match_get_shadowed_receiver_path_not_guard",
+            &shadowed_match_probe_receiver_path,
+        )?;
+        assert_eq!(
+            shadowed_match_probe_receiver_path_card.operation.family,
+            OperationFamily::GetUnchecked
+        );
+        assert_eq!(
+            shadowed_match_probe_receiver_path_card.class,
+            ReviewClass::GuardMissing
+        );
+        assert!(!obligation_discharge_present(
+            shadowed_match_probe_receiver_path_card,
             "bounds"
         ));
 
@@ -3299,12 +3457,38 @@ pub fn zstd_sync(
             "str_from_utf8_unchecked_other_buffer_not_guard",
             "str_from_utf8_unchecked_prefix_validation_not_guard",
             "str_from_utf8_unchecked_suffix_validation_not_guard",
+            "str_from_utf8_unchecked_if_let_err_return_comment_not_guard",
+            "str_from_utf8_unchecked_if_let_err_return_string_not_guard",
             "str_from_utf8_unchecked_is_err_return_comment_not_guard",
+            "str_from_utf8_unchecked_is_err_return_string_not_guard",
             "str_from_utf8_unchecked_is_ok_observed_not_guard",
+            "str_from_utf8_unchecked_is_ok_comment_not_guard",
+            "str_from_utf8_unchecked_is_ok_string_not_guard",
             "str_from_utf8_unchecked_guard_then_reassigned_not_guard",
             "str_from_utf8_unchecked_guard_then_mutated_not_guard",
             "str_from_utf8_unchecked_guard_then_shadowed_not_guard",
+            "str_from_utf8_unchecked_is_err_return_reassigned_not_guard",
+            "str_from_utf8_unchecked_is_err_return_shadowed_not_guard",
+            "str_from_utf8_unchecked_if_let_ok_comment_not_guard",
+            "str_from_utf8_unchecked_if_let_ok_string_not_guard",
+            "str_from_utf8_unchecked_question_mark_comment_not_guard",
+            "str_from_utf8_unchecked_question_mark_string_not_guard",
+            "str_from_utf8_unchecked_match_return_comment_not_guard",
+            "str_from_utf8_unchecked_match_return_string_not_guard",
+            "str_from_utf8_unchecked_if_let_ok_reassigned_not_guard",
             "str_from_utf8_unchecked_if_let_ok_shadowed_not_guard",
+            "str_from_utf8_unchecked_if_let_err_reassigned_not_guard",
+            "str_from_utf8_unchecked_if_let_err_shadowed_not_guard",
+            "str_from_utf8_unchecked_match_err_reassigned_not_guard",
+            "str_from_utf8_unchecked_match_err_shadowed_not_guard",
+            "str_from_utf8_unchecked_let_else_ok_comment_not_guard",
+            "str_from_utf8_unchecked_let_else_ok_string_not_guard",
+            "str_from_utf8_unchecked_let_else_ok_reassigned_not_guard",
+            "str_from_utf8_unchecked_let_else_ok_shadowed_not_guard",
+            "str_from_utf8_unchecked_match_ok_comment_not_guard",
+            "str_from_utf8_unchecked_match_ok_string_not_guard",
+            "str_from_utf8_unchecked_match_ok_reassigned_not_guard",
+            "str_from_utf8_unchecked_match_ok_shadowed_not_guard",
         ] {
             let output = fixture_output(fixture)?;
             let card = single_card(fixture, &output)?;
@@ -3328,9 +3512,13 @@ pub fn zstd_sync(
     fn str_from_utf8_unchecked_validation_guards_are_discharged() -> Result<(), String> {
         for fixture in [
             "str_from_utf8_unchecked_is_ok_guard",
+            "str_from_utf8_unchecked_if_let_ok_guard",
+            "str_from_utf8_unchecked_if_let_err_return_guard",
             "str_from_utf8_unchecked_is_err_return_guard",
             "str_from_utf8_unchecked_question_mark_guard",
             "str_from_utf8_unchecked_match_return_guard",
+            "str_from_utf8_unchecked_let_else_ok_guard",
+            "str_from_utf8_unchecked_match_ok_guard",
         ] {
             let output = fixture_output(fixture)?;
             let card = single_card(fixture, &output)?;
@@ -3355,6 +3543,8 @@ pub fn zstd_sync(
             "transmute_bool_comment_not_guard",
             "transmute_bool_other_value_not_guard",
             "transmute_bool_prior_guarded_call_not_guard",
+            "transmute_bool_disjunct_branch_not_guard",
+            "transmute_bool_conjunct_return_not_guard",
             "transmute_bool_value_observed_not_guard",
             "transmute_bool_closed_if_observed_not_guard",
             "transmute_bool_invalid_return_comment_not_guard",
@@ -3396,6 +3586,8 @@ pub fn zstd_sync(
 
         for fixture in [
             "transmute_layout_disjunct_branch_not_guard",
+            "transmute_layout_closed_branch_not_guard",
+            "transmute_layout_observed_not_guard",
             "transmute_copy_layout_disjunct_branch_not_guard",
         ] {
             let disjunct = fixture_output(fixture)?;
@@ -3448,7 +3640,9 @@ pub fn zstd_sync(
     fn transmute_bool_value_domain_guards_are_discharged() -> Result<(), String> {
         for fixture in [
             "transmute_bool_valid_value_guard",
+            "transmute_bool_conjunct_branch_guard",
             "transmute_bool_invalid_return_guard",
+            "transmute_bool_disjunct_return_guard",
         ] {
             let output = fixture_output(fixture)?;
             let card = single_card(fixture, &output)?;
@@ -3537,6 +3731,21 @@ pub fn zstd_sync(
                 evidence.obligation.key == "valid-zero" && !evidence.discharge.present
             }),
             "valid-zero obligation should remain missing without target-type evidence"
+        );
+
+        let valid_output = fixture_output("zeroed_valid_u32")?;
+        let valid_card = single_card("zeroed_valid_u32", &valid_output)?;
+
+        assert_eq!(valid_card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(valid_card.operation.family, OperationFamily::Zeroed);
+        assert_eq!(valid_card.class, ReviewClass::GuardedUnwitnessed);
+        assert!(valid_card.hazards.contains(&HazardKind::InvalidValue));
+        assert!(valid_card.id.0.contains("zeroed"));
+        assert!(
+            valid_card.obligation_evidence.iter().any(|evidence| {
+                evidence.obligation.key == "valid-zero" && evidence.discharge.present
+            }),
+            "valid-zero obligation should be discharged for known valid-zero target types"
         );
         Ok(())
     }
@@ -3704,6 +3913,26 @@ pub fn zstd_sync(
     }
 
     #[test]
+    fn undocumented_target_feature_declaration_requires_contract() -> Result<(), String> {
+        let output = fixture_output("target_feature_missing_safety_docs")?;
+        let card = single_card("target_feature_missing_safety_docs", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::TargetFeature);
+        assert_eq!(card.class, ReviewClass::ContractMissing);
+        assert!(!card.contract.present);
+        assert!(!card.discharge.present);
+        assert!(!obligation_discharge_present(card, "target-feature"));
+        assert!(
+            card.routes
+                .iter()
+                .any(|route| route.kind == WitnessKind::HumanDeepReview),
+            "undocumented target_feature sites should route to manual contract review"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn unwrap_unchecked_uses_concrete_operation_family() -> Result<(), String> {
         let output = fixture_output("unwrap_unchecked_result")?;
         let card = single_card("unwrap_unchecked_result", &output)?;
@@ -3742,6 +3971,24 @@ pub fn zstd_sync(
     }
 
     #[test]
+    fn unwrap_unchecked_direct_state_evidence_is_discharged() -> Result<(), String> {
+        for fixture in [
+            "unwrap_unchecked_is_some_guard",
+            "unwrap_unchecked_is_ok_guard",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
+
+            assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+            assert_eq!(card.operation.family, OperationFamily::UnwrapUnchecked);
+            assert_eq!(card.class, ReviewClass::GuardedUnwitnessed);
+            assert!(card.discharge.present);
+            assert!(obligation_discharge_present(card, "valid-value"));
+        }
+        Ok(())
+    }
+
+    #[test]
     fn unwrap_unchecked_if_let_as_ref_evidence_is_discharged() -> Result<(), String> {
         for fixture in [
             "unwrap_unchecked_if_let_some_guard",
@@ -3754,6 +4001,128 @@ pub fn zstd_sync(
             assert_eq!(card.operation.family, OperationFamily::UnwrapUnchecked);
             assert_eq!(card.class, ReviewClass::GuardedUnwitnessed);
             assert!(obligation_discharge_present(card, "valid-value"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn unwrap_unchecked_let_else_state_evidence_is_discharged() -> Result<(), String> {
+        for fixture in [
+            "unwrap_unchecked_let_else_some_guard",
+            "unwrap_unchecked_let_else_ok_guard",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
+
+            assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+            assert_eq!(card.operation.family, OperationFamily::UnwrapUnchecked);
+            assert_eq!(card.class, ReviewClass::GuardedUnwitnessed);
+            assert!(card.discharge.present);
+            assert!(obligation_discharge_present(card, "valid-value"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn unwrap_unchecked_match_state_evidence_is_discharged() -> Result<(), String> {
+        for fixture in [
+            "unwrap_unchecked_match_some_guard",
+            "unwrap_unchecked_match_ok_guard",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
+
+            assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+            assert_eq!(card.operation.family, OperationFamily::UnwrapUnchecked);
+            assert_eq!(card.class, ReviewClass::GuardedUnwitnessed);
+            assert!(card.discharge.present);
+            assert!(obligation_discharge_present(card, "valid-value"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn unwrap_unchecked_early_return_state_evidence_is_discharged() -> Result<(), String> {
+        for fixture in [
+            "unwrap_unchecked_is_none_return_guard",
+            "unwrap_unchecked_is_err_return_guard",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
+
+            assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+            assert_eq!(card.operation.family, OperationFamily::UnwrapUnchecked);
+            assert_eq!(card.class, ReviewClass::GuardedUnwitnessed);
+            assert!(card.discharge.present);
+            assert!(obligation_discharge_present(card, "valid-value"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn unwrap_unchecked_early_return_state_evidence_rejects_comment_only_return()
+    -> Result<(), String> {
+        let output = fixture_output("unwrap_unchecked_is_none_return_comment_not_guard")?;
+        let card = single_card("unwrap_unchecked_is_none_return_comment_not_guard", &output)?;
+
+        assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+        assert_eq!(card.operation.family, OperationFamily::UnwrapUnchecked);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(!card.discharge.present);
+        assert!(!obligation_discharge_present(card, "valid-value"));
+        Ok(())
+    }
+
+    #[test]
+    fn unwrap_unchecked_direct_state_evidence_rejects_reassignment() -> Result<(), String> {
+        for fixture in [
+            "unwrap_unchecked_is_some_reassigned_not_guard",
+            "unwrap_unchecked_is_ok_reassigned_not_guard",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
+
+            assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+            assert_eq!(card.operation.family, OperationFamily::UnwrapUnchecked);
+            assert_eq!(card.class, ReviewClass::GuardMissing);
+            assert!(!card.discharge.present);
+            assert!(!obligation_discharge_present(card, "valid-value"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn unwrap_unchecked_let_else_state_evidence_rejects_reassignment() -> Result<(), String> {
+        for fixture in [
+            "unwrap_unchecked_let_else_some_reassigned_not_guard",
+            "unwrap_unchecked_let_else_ok_reassigned_not_guard",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
+
+            assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+            assert_eq!(card.operation.family, OperationFamily::UnwrapUnchecked);
+            assert_eq!(card.class, ReviewClass::GuardMissing);
+            assert!(!card.discharge.present);
+            assert!(!obligation_discharge_present(card, "valid-value"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn unwrap_unchecked_match_state_evidence_rejects_reassignment() -> Result<(), String> {
+        for fixture in [
+            "unwrap_unchecked_match_some_reassigned_not_guard",
+            "unwrap_unchecked_match_ok_reassigned_not_guard",
+        ] {
+            let output = fixture_output(fixture)?;
+            let card = single_card(fixture, &output)?;
+
+            assert_eq!(card.site.kind, UnsafeSiteKind::Operation);
+            assert_eq!(card.operation.family, OperationFamily::UnwrapUnchecked);
+            assert_eq!(card.class, ReviewClass::GuardMissing);
+            assert!(!card.discharge.present);
+            assert!(!obligation_discharge_present(card, "valid-value"));
         }
         Ok(())
     }
@@ -3939,6 +4308,37 @@ pub fn zstd_sync(
     }
 
     #[test]
+    fn ffi_extern_block_identity_changes_when_signature_changes() -> Result<(), String> {
+        let original = temp_source_output(
+            "unsafe-review-ffi-identity-original",
+            r#"
+unsafe extern "C" {
+    fn strlen(ptr: *const u8) -> usize;
+}
+"#,
+        )?;
+        let changed = temp_source_output(
+            "unsafe-review-ffi-identity-changed",
+            r#"
+unsafe extern "C" {
+    fn strlen(ptr: *const core::ffi::c_char) -> usize;
+}
+"#,
+        )?;
+        let original_card = single_card("ffi original", &original)?;
+        let changed_card = single_card("ffi changed", &changed)?;
+
+        assert_eq!(original_card.operation.family, OperationFamily::Ffi);
+        assert_eq!(changed_card.operation.family, OperationFamily::Ffi);
+        assert_ne!(
+            identity_without_count(&original_card.id),
+            identity_without_count(&changed_card.id),
+            "FFI extern-block identity must include the declaration lines, not only the block opener"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn card_identity_counts_duplicate_sites() -> Result<(), String> {
         let output = fixture_output("duplicate_raw_pointer_reads")?;
         if output.cards.len() != 2 {
@@ -4086,6 +4486,96 @@ pub fn zstd_sync(
         );
         assert!(card.witness.summary.contains("loom"));
         assert!(card.missing.iter().any(|missing| missing.kind == "witness"));
+        assert!(
+            card.obligation_evidence
+                .iter()
+                .all(|evidence| !evidence.witness.present)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn ffi_human_review_receipt_marks_witness_evidence_present_only() -> Result<(), String> {
+        let root =
+            copy_fixture_to_temp("ffi_missing_boundary_contract", "unsafe-review-ffi-receipt")?;
+        let card_id = single_card("ffi_missing_boundary_contract", &fixture_output_at(&root)?)?
+            .id
+            .0
+            .clone();
+        write_receipt_with_tool_and_strength(&root, &card_id, "human-deep-review", "reviewed")?;
+
+        let output = fixture_output_at(&root)?;
+        let card = single_card("ffi_missing_boundary_contract receipt", &output)?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp fixture failed: {err}"))?;
+        assert_eq!(card.operation.family, OperationFamily::Ffi);
+        assert!(
+            card.routes
+                .iter()
+                .any(|route| route.kind == crate::domain::WitnessKind::HumanDeepReview)
+        );
+        assert!(card.witness.present);
+        assert!(card.witness.summary.contains("human-deep-review"));
+        assert!(card.witness.summary.contains("reviewed"));
+        assert!(!card.missing.iter().any(|missing| missing.kind == "witness"));
+        assert!(
+            card.missing
+                .iter()
+                .any(|missing| missing.kind == "contract")
+        );
+        assert!(card.missing.iter().any(|missing| missing.kind == "guard"));
+        assert!(card.missing.iter().any(|missing| missing.kind == "reach"));
+        assert!(
+            card.obligation_evidence
+                .iter()
+                .all(|evidence| evidence.witness.present)
+        );
+        assert!(
+            card.obligation_evidence
+                .iter()
+                .any(|evidence| !evidence.discharge.present),
+            "human review receipts must not become static guard/discharge evidence"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn external_integration_receipt_marks_reach_evidence_present_only() -> Result<(), String> {
+        let root = copy_fixture_to_temp(
+            "ffi_missing_boundary_contract",
+            "unsafe-review-external-reach-receipt",
+        )?;
+        let card_id = single_card("ffi_missing_boundary_contract", &fixture_output_at(&root)?)?
+            .id
+            .0
+            .clone();
+        write_receipt_with_tool_and_strength(
+            &root,
+            &card_id,
+            "external-integration-test",
+            "site_reached",
+        )?;
+
+        let output = fixture_output_at(&root)?;
+        let card = single_card("ffi_missing_boundary_contract reach receipt", &output)?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp fixture failed: {err}"))?;
+        assert_eq!(card.reach.state, "external_reached");
+        assert!(card.reach.summary.contains("external-integration-test"));
+        assert!(!card.missing.iter().any(|missing| missing.kind == "reach"));
+        assert!(card.missing.iter().any(|missing| missing.kind == "witness"));
+        assert!(!card.witness.present);
+        assert!(
+            card.missing
+                .iter()
+                .any(|missing| missing.kind == "contract")
+        );
+        assert!(card.missing.iter().any(|missing| missing.kind == "guard"));
+        assert!(
+            card.obligation_evidence
+                .iter()
+                .all(|evidence| evidence.reach.present)
+        );
         assert!(
             card.obligation_evidence
                 .iter()
@@ -4279,11 +4769,18 @@ evidence = "test fixture"
         tool: &str,
         strength: &str,
     ) -> Result<(), String> {
+        let command = if tool == "human-deep-review" {
+            "manual review of cited foreign declaration and Rust extern signature"
+        } else if tool == "external-integration-test" {
+            "bun test test/js/sab-copy-to-unshared.test.ts"
+        } else {
+            "cargo +nightly miri test read_header"
+        };
         let receipt_dir = root.join(".unsafe-review").join("receipts");
         fs::create_dir_all(&receipt_dir)
             .map_err(|err| format!("create {} failed: {err}", receipt_dir.display()))?;
         fs::write(
-            receipt_dir.join("miri.json"),
+            receipt_dir.join(format!("{}.json", tool.replace('-', "_"))),
             format!(
                 r#"{{
   "schema_version": "0.1",
@@ -4294,7 +4791,7 @@ evidence = "test fixture"
   "recorded_at": "2026-05-18T00:00:00Z",
   "expires_at": "2026-08-18",
   "summary": "focused fixture witness passed",
-  "command": "cargo +nightly miri test read_header",
+  "command": "{command}",
   "limitations": ["fixture only"]
 }}"#
             ),

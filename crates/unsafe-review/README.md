@@ -61,6 +61,10 @@ changed unsafe seam
 -> optional witness route or receipt
 ```
 
+For the full maintainer path from first card to fix, witness receipt, and
+outcome comparison, see
+[docs/FIND_AND_FIX_UB.md](https://github.com/EffortlessMetrics/unsafe-review/blob/main/docs/FIND_AND_FIX_UB.md).
+
 ## Artifact Bundle
 
 `first-pr` writes a standard advisory bundle under `target/unsafe-review/`:
@@ -143,12 +147,14 @@ artifacts.
 | Topic | Link |
 |---|---|
 | Repository | [EffortlessMetrics/unsafe-review](https://github.com/EffortlessMetrics/unsafe-review) |
+| Find/fix workflow | [docs/FIND_AND_FIX_UB.md](https://github.com/EffortlessMetrics/unsafe-review/blob/main/docs/FIND_AND_FIX_UB.md) |
 | First-use guide | [docs/FIRST_USE.md](https://github.com/EffortlessMetrics/unsafe-review/blob/main/docs/FIRST_USE.md) |
 | CLI guide | [docs/CLI.md](https://github.com/EffortlessMetrics/unsafe-review/blob/main/docs/CLI.md) |
 | Support summary | [docs/status/SUPPORT_SUMMARY.md](https://github.com/EffortlessMetrics/unsafe-review/blob/main/docs/status/SUPPORT_SUMMARY.md) |
 | Support tiers | [docs/status/SUPPORT_TIERS.md](https://github.com/EffortlessMetrics/unsafe-review/blob/main/docs/status/SUPPORT_TIERS.md) |
 | ReviewCard trust boundary | [docs/explanation/review-cards-and-trust-boundary.md](https://github.com/EffortlessMetrics/unsafe-review/blob/main/docs/explanation/review-cards-and-trust-boundary.md) |
 | Explain examples | [docs/explanation/explain-examples.md](https://github.com/EffortlessMetrics/unsafe-review/blob/main/docs/explanation/explain-examples.md) |
+| Agent repair workflow | [docs/explanation/agent-repair-workflow.md](https://github.com/EffortlessMetrics/unsafe-review/blob/main/docs/explanation/agent-repair-workflow.md) |
 | Dogfood evidence | [docs/dogfood/index.md](https://github.com/EffortlessMetrics/unsafe-review/blob/main/docs/dogfood/index.md) |
 
 ## License

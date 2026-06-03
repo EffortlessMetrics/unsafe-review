@@ -22,13 +22,17 @@ and limitations. The current implementation imports JSON receipts from:
 Each receipt is matched by exact counted `card_id`. A matching receipt marks the
 card's top-level witness evidence present and marks obligation-level witness
 evidence present only when the receipt tool matches one of the current card's
-routed witness tools and the receipt strength records a saved witness run:
-`ran`, `test_targeted`, or `site_reached`. A `configured`, expired, or
-wrong-tool receipt remains valid receipt metadata for audit, but it does not
-remove the missing witness gap. Card-level witness summaries should surface that
-same-card metadata-only state so reviewers can see why a saved receipt did not
-import as current witness evidence. Receipt import does not discharge contracts,
-guards, or reach evidence.
+routed witness tools and the receipt strength records a saved witness run
+(`ran`, `test_targeted`, or `site_reached`) or human-review-only `reviewed`
+strength. A `configured`, expired, wrong-tool, or non-human `reviewed` receipt
+remains valid receipt metadata for audit or is rejected by validation as
+specified below, but it does not remove the missing witness gap. Card-level
+witness summaries should surface same-card metadata-only state so reviewers can
+see why a saved receipt did not import as current witness evidence. Receipt
+import does not discharge contracts or guards. Receipt import does not discharge
+reach evidence except for the explicitly reach-only
+`tool = "external-integration-test"` / `strength = "site_reached"` receipt
+described below.
 
 The receipt shape is represented in the core SDK as the serde-backed
 `WitnessReceipt` DTO. Importers and future native adapters must use that same
@@ -43,6 +47,28 @@ matches the exact `command` string in the same receipt.
 The CLI may render a receipt template from explicit user-provided metadata. That
 template output is only a JSON authoring aid; it must not run witness commands or
 claim that a witness succeeded.
+
+For reviewed C++ or other foreign FFI seams, a `human-deep-review` receipt may
+record that a reviewer checked the current Rust extern declaration against the
+cited foreign declaration or ownership contract. It imports as witness evidence
+with `strength = "reviewed"` only when the current ReviewCard routes
+`human-deep-review` and the receipt matches the exact counted card identity. It
+does not execute code, does not discharge contract, guard, or reach evidence,
+and does not prove the foreign side or repository safe. If the extern
+declaration changes enough to change the ReviewCard identity, the old receipt
+becomes stale metadata until reviewed again.
+
+For Rust unsafe seams reached through another language's integration suite, an
+`external-integration-test` receipt may record the external command and reviewer
+summary for an exact current ReviewCard identity. It imports as reach evidence
+with `strength = "site_reached"` only when the receipt matches the exact counted
+card identity, is current, and has no duplicate reach-importing receipt for that
+card. It does not import witness evidence, does not execute the external test,
+does not independently prove site execution, does not discharge contract or
+guard evidence, and does not prove memory safety. The `command` field is
+required for this tool so the external harness remains auditable. If the
+ReviewCard identity changes, the old receipt becomes stale metadata until the
+external reach evidence is reviewed again.
 
 The CLI may import a receipt from saved Miri output. The adapter must read an
 existing log file, reject empty output, reject failure-looking output, require
@@ -85,12 +111,18 @@ separate receipt truth.
 The CLI may audit receipt files against the current `ReviewCard` set. Receipt
 audit must report matched, unmatched, stale, expired, wrong-identity,
 wrong-tool, weaker-than-required, command-hash-mismatch, duplicate, and invalid
-receipt metadata without running witnesses, inferring site reach, making policy
-decisions, or claiming safety. Audit must also mark the subset of receipts that
-would import as current ReviewCard witness evidence with
+receipt metadata without running witnesses or external integration tests,
+making policy decisions, or claiming safety. Audit must also mark the subset of
+receipts that would import as current ReviewCard witness evidence with
 `imports_witness_evidence`; this requires a current card match, a routed tool,
-saved-run strength (`ran`, `test_targeted`, or `site_reached`), no expiry, no
-validation error, and no duplicate receipt for the same card. Matched receipt
+importable run strength (`ran`, `test_targeted`, or `site_reached`) or
+human-review `reviewed` strength, no expiry, no validation error, and no
+duplicate witness-importing receipt for the same card. Audit must mark the
+subset of receipts that would import as current ReviewCard reach evidence with
+`imports_reach_evidence`; this requires a current card match,
+`tool = "external-integration-test"`, `strength = "site_reached"`, no expiry,
+no validation error, and no duplicate reach-importing receipt for the same
+card. Matched receipt
 entries include current card operation, missing-count, and next-action context.
 Audit entries include the current card's routed witness tools so a reviewer can
 compare the saved receipt tool against the ReviewCard route. Audit entries also
@@ -103,12 +135,14 @@ treating any of them as proof that the command ran or covered the unsafe site.
 When a matching receipt is imported as ReviewCard witness evidence, the
 evidence summary also includes the saved `command_hash` when present so
 card-level projections keep the same drift key visible.
-This lets a receipt improve witness evidence without erasing remaining guard or
-contract gaps. The audit is an advisory metadata report over saved receipts and
-current cards. JSON and Markdown audit output must include explicit limitations
-saying the audit uses saved metadata only, does not execute witness tools, does
-not prove site reach or safety, and does not erase remaining contract, guard, or
-reach gaps.
+This lets a receipt improve witness or external reach evidence without erasing
+remaining guard, contract, witness, or reach gaps outside that exact evidence
+kind. The audit is an advisory metadata report over saved receipts and current
+cards. JSON and Markdown audit output must include explicit limitations saying
+the audit uses saved metadata only, does not execute witness tools or external
+integration tests, does not independently prove site reach or safety, and does
+not erase remaining contract, guard, witness, or reach gaps outside the imported
+evidence kind.
 
 Receipt JSON fields:
 
@@ -134,8 +168,9 @@ Receipt JSON fields:
 - `ran`
 - `test_targeted`
 - `site_reached`
+- `reviewed` (only for `tool = "human-deep-review"`)
 
-`tool` must be one of the supported witness lanes:
+`tool` must be one of the supported receipt lanes:
 
 - `miri`
 - `cargo-careful`
@@ -148,11 +183,14 @@ Receipt JSON fields:
 - `kani`
 - `crux`
 - `human-deep-review`
+- `external-integration-test`
 - `unsupported`
 
 `author` must be non-empty. `recorded_at` must be a calendar-valid UTC
 timestamp in `YYYY-MM-DDTHH:MM:SSZ` form. `expires_at` must be a
 calendar-valid `YYYY-MM-DD` date on or after the `recorded_at` date.
+`external-integration-test` receipts must use `strength = "site_reached"` and
+must include a non-empty `command`.
 
 ## Non-goals
 
@@ -173,10 +211,24 @@ calendar-valid `YYYY-MM-DD` date on or after the `recorded_at` date.
 
 ## Acceptance examples
 
-- A matching routed-tool `ran`, `test_targeted`, or `site_reached` receipt
-  removes the `witness` missing-evidence item.
-- A matching routed-tool `ran`, `test_targeted`, or `site_reached` receipt
-  marks obligation-level witness evidence present.
+- A matching routed-tool `ran`, `test_targeted`, `site_reached`, or
+  human-review-only `reviewed` receipt removes the `witness` missing-evidence
+  item.
+- A matching routed-tool `ran`, `test_targeted`, `site_reached`, or
+  human-review-only `reviewed` receipt marks obligation-level witness evidence
+  present.
+- A matching `human-deep-review` receipt for an FFI card removes only the
+  witness missing-evidence item and leaves contract, guard, and reach gaps
+  visible when they remain statically unresolved.
+- A matching `external-integration-test` receipt removes only the `reach`
+  missing-evidence item and leaves contract, guard, and witness gaps visible
+  when they remain unresolved.
+- A matching routed witness receipt and a matching external integration reach
+  receipt may coexist for the same ReviewCard identity.
+- A `reviewed` receipt whose tool is not `human-deep-review` is rejected.
+- An `external-integration-test` receipt whose strength is not `site_reached`
+  is rejected.
+- An `external-integration-test` receipt without a command is rejected.
 - A matching `configured` receipt validates and appears in receipt audit, but
   does not remove the `witness` missing-evidence item.
 - A matching wrong-tool receipt validates and appears in receipt audit, but does
