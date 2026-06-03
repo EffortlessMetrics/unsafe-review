@@ -63,12 +63,15 @@ Each `evidence[]` item must include:
   `source_trace`, `node_parity`, `human_review`, or `other`.
 - `path`: local artifact path, when evidence is file-backed.
 - `summary`: optional concise description of what the evidence supports.
+- `command`: optional exact external command that produced the evidence.
+- `limitation`: optional concise statement of what the evidence does not prove.
 
 Import command shape:
 
 ```bash
 unsafe-review candidate import target/unsafe-scout/textdecoder-candidate.json \
   --out .unsafe-review/candidates/R4R2-S001.json
+unsafe-review candidate list --format json
 ```
 
 The repository keeps the example below at
@@ -120,11 +123,17 @@ links to the same manual ID through a reviewed linkage field.
   "evidence": [
     {
       "kind": "runtime_witness",
-      "path": "target/unsafe-scout/textdecoder-shared-race-route.out"
+      "path": "target/unsafe-scout/textdecoder-shared-race-route.out",
+      "summary": "Bun TextDecoder route reaches shared backing bytes through safe JS",
+      "command": "bun test test/js/webcore/textdecoder-sharedarraybuffer.test.ts",
+      "limitation": "runtime route evidence only; not memory-safety proof and not analyzer-discovered"
     },
     {
       "kind": "model",
-      "path": "target/unsafe-scout/miri-textdecoder-shared-slice.out"
+      "path": "target/unsafe-scout/miri-textdecoder-shared-slice.out",
+      "summary": "Miri model covers shared-slice aliasing shape outside Bun runtime",
+      "command": "cargo +nightly miri test textdecoder_shared_slice_model",
+      "limitation": "model evidence only; does not prove the Bun site executed under Miri"
     }
   ],
   "trust_boundary": "manual candidate; not analyzer-discovered; not proof of repository safety"
@@ -137,6 +146,23 @@ Manual candidate projections must reuse existing ReviewCard vocabulary where it
 fits, including operation family, location, next action, witness route, missing
 evidence, and trust-boundary fields. They must not create another classification
 truth or silently drop fields that identify the candidate as manual.
+
+Manual candidate context and witness-plan projections may include a derived
+implementer handoff. That handoff must come from the imported candidate fields,
+including file:line, safe caller route, unsafe operation, operation family,
+invariant, external evidence references, evidence commands and limitations,
+non-goals, and stop condition. It must
+remain copy-only and must not mark the candidate analyzer-discovered, run
+witnesses, edit source, or broaden the task to unrelated unsafe sites.
+
+Manual candidate list/reporting projections must load only
+`.unsafe-review/candidates/*.json` artifacts, preserve sorted manual IDs,
+include `source = manual`, `manual_candidate = true`, and
+`analyzer_discovered = false`, include copy-only implementer handoff cues for
+the file:line target, safe caller route, invariant, evidence packet, non-goals,
+and stop line when available, and repeat the ReviewCard-only artifact
+relationship. They must not add manual candidates to `cards.json`, SARIF,
+comment-plan, saved LSP, repair-queue, or policy-report surfaces.
 
 If a manual candidate cannot be projected faithfully into a surface, that
 surface must reject or omit it with an explicit reason instead of degrading it
@@ -158,6 +184,9 @@ into an analyzer ReviewCard.
 
 - schema parser tests for valid and invalid `manual-candidate/v1` JSON
 - CLI import e2e coverage for `candidate import`
+- CLI list e2e coverage for `candidate list --format json`, Markdown output,
+  sorted imported candidates, copy-only explain/context/witness-plan commands,
+  and ReviewCard-only artifact relationship wording
 - projection tests proving `source = manual` and `manual_candidate = true` are
   preserved with `analyzer_discovered = false` in explain, context,
   witness-plan, saved JSON, first-pr `manual-candidates.json`, and outcome
@@ -173,6 +202,14 @@ into an analyzer ReviewCard.
 - `explain` and `context` for a manual candidate state that it is manual and
   advisory, and they include the external evidence packet without claiming that
   unsafe-review found the issue.
+- `context` and `witness-plan` carry an implementer handoff that names the
+  file:line, safe caller route, invariant at risk, external evidence references,
+  evidence commands and limitations, non-goals, and stop line from the same
+  manual candidate.
+- `candidate list` reports imported candidates as a manual/advisory ledger with
+  sorted IDs, file:line locations, compact implementer handoff cues, evidence
+  counts, copy-only projection commands, and ReviewCard-only artifact
+  boundaries.
 - `witness-plan` routes manual evidence as suggested follow-up work without
   executing witnesses.
 - A receipt against a manual candidate ID can be imported or audited only as

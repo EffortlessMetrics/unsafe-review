@@ -102,6 +102,12 @@ const REPAIR_QUEUE_BUCKETS: [&str; 6] = [
     "requires_human_review",
     "do_not_auto_repair",
 ];
+const REPAIR_QUEUE_READINESS_STATES: [&str; 4] = [
+    "ready_for_agent",
+    "requires_human_review",
+    "requires_witness_receipt",
+    "unsupported",
+];
 const FIRST_PR_BUNDLE_ARTIFACTS: [&str; 11] = [
     "review-kit.json",
     "cards.json",
@@ -278,19 +284,20 @@ fn check_receipt_audit_artifact(dir: &Path) -> Result<(), String> {
     let text = super::read_to_string(&path)?;
 
     super::require_text_contains(&text, "# unsafe-review receipt audit", &path)?;
-    super::require_text_contains(
-        &text,
-        "Static audit of saved witness receipt metadata",
-        &path,
-    )?;
+    super::require_text_contains(&text, "Static audit of saved receipt metadata", &path)?;
     super::require_text_contains(&text, "## Summary", &path)?;
     super::require_text_contains(&text, "## Reviewer front panel", &path)?;
     super::require_text_contains(&text, "## Trust boundary", &path)?;
     super::require_text_contains(&text, "does not execute witnesses", &path)?;
-    super::require_text_contains(&text, "does not prove site reach", &path)?;
+    super::require_text_contains(&text, "does not independently prove site reach", &path)?;
     super::require_text_contains(
         &text,
-        "matched receipts improve witness evidence only",
+        "matched witness receipts improve witness evidence only",
+        &path,
+    )?;
+    super::require_text_contains(
+        &text,
+        "manual candidate receipts attach external evidence",
         &path,
     )?;
 
@@ -451,6 +458,24 @@ fn check_manual_candidate_artifact_entry(candidate: &serde_json::Value) -> Resul
         candidate,
         "witness_plan_command",
         "manual-candidates.json candidate",
+    )?;
+    let handoff = candidate.get("implementer_handoff").ok_or_else(|| {
+        "manual-candidates.json candidate is missing implementer_handoff".to_string()
+    })?;
+    if !handoff.is_object() {
+        return Err(
+            "manual-candidates.json candidate implementer_handoff must be an object".to_string(),
+        );
+    }
+    super::require_non_empty_json_str(
+        handoff,
+        "invariant_at_risk",
+        "manual-candidates.json candidate implementer_handoff",
+    )?;
+    super::require_non_empty_json_str(
+        handoff,
+        "stop_condition",
+        "manual-candidates.json candidate implementer_handoff",
     )?;
     let boundary = super::require_non_empty_json_str(
         candidate,
@@ -745,6 +770,26 @@ fn check_review_kit_first_manual_candidate_handoff(
                 .to_string(),
         );
     }
+    let handoff = first_candidate.get("implementer_handoff").ok_or_else(|| {
+        "review-kit.json handoff manual_candidates first_candidate is missing implementer_handoff"
+            .to_string()
+    })?;
+    if !handoff.is_object() {
+        return Err(
+            "review-kit.json handoff manual_candidates first_candidate implementer_handoff must be an object"
+                .to_string(),
+        );
+    }
+    super::require_non_empty_json_str(
+        handoff,
+        "invariant_at_risk",
+        "review-kit.json handoff manual_candidates first_candidate implementer_handoff",
+    )?;
+    super::require_non_empty_json_str(
+        handoff,
+        "stop_condition",
+        "review-kit.json handoff manual_candidates first_candidate implementer_handoff",
+    )?;
     for (field, command) in [
         ("explain", "unsafe-review explain "),
         ("context_json", "unsafe-review context "),
@@ -2212,23 +2257,21 @@ fn check_repair_queue_readiness(
     };
     let state =
         super::require_non_empty_json_str(readiness, "state", "repair-queue.json agent_readiness")?;
-    match state {
-        "ready" | "needs_human_review" | "not_recommended" => {}
-        _ => {
-            return Err(format!(
-                "repair-queue.json agent_readiness.state must be `ready`, `needs_human_review`, or `not_recommended`; got `{state}`"
-            ));
-        }
+    if !REPAIR_QUEUE_READINESS_STATES.contains(&state) {
+        return Err(format!(
+            "repair-queue.json agent_readiness.state must be `ready_for_agent`, `requires_human_review`, `requires_witness_receipt`, or `unsupported`; got `{state}`"
+        ));
     }
-    if ready && state != "ready" {
+    if ready && state != "ready_for_agent" {
         return Err(
-            "repair-queue.json agent_readiness.state must be `ready` when ready is true"
+            "repair-queue.json agent_readiness.state must be `ready_for_agent` when ready is true"
                 .to_string(),
         );
     }
-    if !ready && state == "ready" {
+    if !ready && state == "ready_for_agent" {
         return Err(
-            "repair-queue.json agent_readiness.state `ready` requires ready = true".to_string(),
+            "repair-queue.json agent_readiness.state `ready_for_agent` requires ready = true"
+                .to_string(),
         );
     }
     let reasons = super::json_array_at(readiness, "/reasons", "repair-queue.json agent_readiness")?;

@@ -215,6 +215,8 @@ required_core_fixtures = [
   "get_unchecked_mut_match_get_reassigned_index_not_guard",
   "get_unchecked_mut_match_get_shadowed_index_not_guard",
   "get_unchecked_mut_match_get_reassigned_receiver_not_guard",
+  "get_unchecked_mut_match_get_reassigned_receiver_path_not_guard",
+  "get_unchecked_mut_match_get_shadowed_receiver_path_not_guard",
   "get_unchecked_mut_match_get_shadowed_receiver_not_guard",
   "pin_new_unchecked",
   "raw_pointer_write_bytes",
@@ -328,25 +330,48 @@ required_core_fixtures = [
   "str_from_utf8_unchecked_comment_not_guard",
   "str_from_utf8_unchecked_is_ok_guard",
   "str_from_utf8_unchecked_if_let_ok_guard",
+  "str_from_utf8_unchecked_if_let_ok_comment_not_guard",
+  "str_from_utf8_unchecked_if_let_ok_string_not_guard",
   "str_from_utf8_unchecked_if_let_err_return_guard",
+  "str_from_utf8_unchecked_if_let_err_return_comment_not_guard",
+  "str_from_utf8_unchecked_if_let_err_return_string_not_guard",
   "str_from_utf8_unchecked_is_err_return_guard",
   "str_from_utf8_unchecked_is_err_return_comment_not_guard",
+  "str_from_utf8_unchecked_is_err_return_string_not_guard",
+  "str_from_utf8_unchecked_is_err_return_reassigned_not_guard",
+  "str_from_utf8_unchecked_is_err_return_shadowed_not_guard",
   "str_from_utf8_unchecked_question_mark_guard",
+  "str_from_utf8_unchecked_question_mark_comment_not_guard",
+  "str_from_utf8_unchecked_question_mark_string_not_guard",
   "str_from_utf8_unchecked_match_return_guard",
+  "str_from_utf8_unchecked_match_return_comment_not_guard",
+  "str_from_utf8_unchecked_match_return_string_not_guard",
+  "str_from_utf8_unchecked_match_err_reassigned_not_guard",
+  "str_from_utf8_unchecked_match_err_shadowed_not_guard",
   "str_from_utf8_unchecked_let_else_ok_guard",
   "str_from_utf8_unchecked_match_ok_guard",
+  "str_from_utf8_unchecked_match_ok_comment_not_guard",
+  "str_from_utf8_unchecked_match_ok_string_not_guard",
   "str_from_utf8_unchecked_post_validation_not_guard",
   "str_from_utf8_unchecked_other_buffer_not_guard",
   "str_from_utf8_unchecked_prefix_validation_not_guard",
   "str_from_utf8_unchecked_suffix_validation_not_guard",
   "str_from_utf8_unchecked_is_ok_observed_not_guard",
+  "str_from_utf8_unchecked_is_ok_comment_not_guard",
+  "str_from_utf8_unchecked_is_ok_string_not_guard",
   "str_from_utf8_unchecked_guard_then_reassigned_not_guard",
   "str_from_utf8_unchecked_guard_then_mutated_not_guard",
   "str_from_utf8_unchecked_guard_then_shadowed_not_guard",
+  "str_from_utf8_unchecked_if_let_ok_reassigned_not_guard",
   "str_from_utf8_unchecked_if_let_ok_shadowed_not_guard",
   "str_from_utf8_unchecked_if_let_err_reassigned_not_guard",
+  "str_from_utf8_unchecked_if_let_err_shadowed_not_guard",
+  "str_from_utf8_unchecked_let_else_ok_comment_not_guard",
+  "str_from_utf8_unchecked_let_else_ok_string_not_guard",
   "str_from_utf8_unchecked_let_else_ok_reassigned_not_guard",
+  "str_from_utf8_unchecked_let_else_ok_shadowed_not_guard",
   "str_from_utf8_unchecked_match_ok_reassigned_not_guard",
+  "str_from_utf8_unchecked_match_ok_shadowed_not_guard",
   "zeroed_invalid_value",
   "zeroed_valid_u32",
   "inline_asm_human_review",
@@ -471,6 +496,7 @@ required_core_fixtures = [
   "nonnull_new_shadowed_ptr_not_guard",
   "nonnull_cast_checked_pointer_not_guard",
   "nonnull_method_receiver_reassigned_not_guard",
+  "nonnull_method_receiver_shadowed_not_guard",
   "nonnull_if_let_new_guard",
   "nonnull_let_else_new_guard",
   "nonnull_match_new_guard",
@@ -2633,6 +2659,26 @@ expected_operation_family = "get_unchecked"
 expected_hazard = "bounds"
 
 [[cases]]
+fixture = "get_unchecked_mut_match_get_reassigned_receiver_path_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept match get probe evidence after the checked receiver path is reassigned before use"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
+fixture = "get_unchecked_mut_match_get_shadowed_receiver_path_not_guard"
+kind = "false_positive_control"
+claim = "get_unchecked_mut does not accept match get probe evidence after the checked receiver path is shadowed before use"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "get_unchecked"
+expected_hazard = "bounds"
+
+[[cases]]
 fixture = "get_unchecked_mut_match_get_shadowed_receiver_not_guard"
 kind = "false_positive_control"
 claim = "get_unchecked_mut does not accept match get probe evidence after the checked receiver is shadowed before use"
@@ -3763,12 +3809,52 @@ expected_operation_family = "str_from_utf8_unchecked"
 expected_hazard = "invalid_value"
 
 [[cases]]
+fixture = "str_from_utf8_unchecked_if_let_ok_comment_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not treat comment-only if-let Ok validation text as UTF-8 evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_if_let_ok_string_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not treat string-literal if-let Ok validation text as UTF-8 evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
 fixture = "str_from_utf8_unchecked_if_let_err_return_guard"
 kind = "positive"
 claim = "str::from_utf8_unchecked recognizes same-buffer from_utf8 if-let Err early-return evidence"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guarded_unwitnessed"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_if_let_err_return_comment_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not treat comment-only return text in an if-let Err branch as UTF-8 validation evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_if_let_err_return_string_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not treat string-literal return text in an if-let Err branch as UTF-8 validation evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
 expected_operation_family = "str_from_utf8_unchecked"
 expected_hazard = "invalid_value"
 
@@ -3793,12 +3879,62 @@ expected_operation_family = "str_from_utf8_unchecked"
 expected_hazard = "invalid_value"
 
 [[cases]]
+fixture = "str_from_utf8_unchecked_is_err_return_string_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not treat string-literal return text in an is_err branch as UTF-8 validation evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_is_err_return_reassigned_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not accept is_err early-return evidence after buffer reassignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_is_err_return_shadowed_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not accept is_err early-return evidence after buffer shadowing"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
 fixture = "str_from_utf8_unchecked_question_mark_guard"
 kind = "positive"
 claim = "str::from_utf8_unchecked recognizes same-buffer from_utf8 question-mark propagation evidence"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guarded_unwitnessed"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_question_mark_comment_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not treat comment-only question-mark validation text as UTF-8 evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_question_mark_string_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not treat string-literal question-mark validation text as UTF-8 evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
 expected_operation_family = "str_from_utf8_unchecked"
 expected_hazard = "invalid_value"
 
@@ -3813,6 +3949,26 @@ expected_operation_family = "str_from_utf8_unchecked"
 expected_hazard = "invalid_value"
 
 [[cases]]
+fixture = "str_from_utf8_unchecked_match_return_comment_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not accept comment-only match-return text as UTF-8 validation evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_match_return_string_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not accept string-literal match-return text as UTF-8 validation evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
 fixture = "str_from_utf8_unchecked_let_else_ok_guard"
 kind = "positive"
 claim = "str::from_utf8_unchecked recognizes same-buffer from_utf8 let-else Ok evidence"
@@ -3823,12 +3979,52 @@ expected_operation_family = "str_from_utf8_unchecked"
 expected_hazard = "invalid_value"
 
 [[cases]]
+fixture = "str_from_utf8_unchecked_let_else_ok_comment_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not accept comment-only let-else Ok validation as UTF-8 evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_let_else_ok_string_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not accept string-literal let-else Ok validation as UTF-8 evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
 fixture = "str_from_utf8_unchecked_match_ok_guard"
 kind = "positive"
 claim = "str::from_utf8_unchecked recognizes same-buffer from_utf8 match Ok-arm evidence"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guarded_unwitnessed"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_match_ok_comment_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not accept comment-only match Ok-arm validation as UTF-8 evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_match_ok_string_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not accept string-literal match Ok-arm validation as UTF-8 evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
 expected_operation_family = "str_from_utf8_unchecked"
 expected_hazard = "invalid_value"
 
@@ -3883,6 +4079,26 @@ expected_operation_family = "str_from_utf8_unchecked"
 expected_hazard = "invalid_value"
 
 [[cases]]
+fixture = "str_from_utf8_unchecked_is_ok_comment_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not accept comment-only is_ok validation as UTF-8 evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_is_ok_string_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not accept string-literal is_ok validation as UTF-8 evidence"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
 fixture = "str_from_utf8_unchecked_guard_then_reassigned_not_guard"
 kind = "false_positive_control"
 claim = "str::from_utf8_unchecked does not accept UTF-8 validation evidence that is stale after buffer reassignment"
@@ -3913,6 +4129,16 @@ expected_operation_family = "str_from_utf8_unchecked"
 expected_hazard = "invalid_value"
 
 [[cases]]
+fixture = "str_from_utf8_unchecked_if_let_ok_reassigned_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not accept if-let Ok branch validation evidence after buffer reassignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
 fixture = "str_from_utf8_unchecked_if_let_ok_shadowed_not_guard"
 kind = "false_positive_control"
 claim = "str::from_utf8_unchecked does not accept if-let Ok branch validation evidence after buffer shadowing"
@@ -3933,6 +4159,36 @@ expected_operation_family = "str_from_utf8_unchecked"
 expected_hazard = "invalid_value"
 
 [[cases]]
+fixture = "str_from_utf8_unchecked_if_let_err_shadowed_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not accept if-let Err early-return evidence after buffer shadowing"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_match_err_reassigned_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not accept match Err early-return evidence after buffer reassignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_match_err_shadowed_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not accept match Err early-return evidence after buffer shadowing"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
 fixture = "str_from_utf8_unchecked_let_else_ok_reassigned_not_guard"
 kind = "false_positive_control"
 claim = "str::from_utf8_unchecked does not accept let-else Ok UTF-8 evidence after buffer reassignment"
@@ -3943,9 +4199,29 @@ expected_operation_family = "str_from_utf8_unchecked"
 expected_hazard = "invalid_value"
 
 [[cases]]
+fixture = "str_from_utf8_unchecked_let_else_ok_shadowed_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not accept let-else Ok UTF-8 evidence after buffer shadowing"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
 fixture = "str_from_utf8_unchecked_match_ok_reassigned_not_guard"
 kind = "false_positive_control"
 claim = "str::from_utf8_unchecked does not accept match Ok-arm UTF-8 evidence after buffer reassignment"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "str_from_utf8_unchecked"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "str_from_utf8_unchecked_match_ok_shadowed_not_guard"
+kind = "false_positive_control"
+claim = "str::from_utf8_unchecked does not accept match Ok-arm UTF-8 evidence after buffer shadowing"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"
@@ -5164,6 +5440,16 @@ expected_hazard = "pointer_validity"
 fixture = "nonnull_method_receiver_reassigned_not_guard"
 kind = "false_positive_control"
 claim = "NonNull::new_unchecked does not accept method-receiver nullability evidence after the checked receiver is reassigned"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "nonnull_unchecked"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "nonnull_method_receiver_shadowed_not_guard"
+kind = "false_positive_control"
+claim = "NonNull::new_unchecked does not accept method-receiver nullability evidence after the checked receiver is shadowed"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"

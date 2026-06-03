@@ -111,6 +111,11 @@ The command analyzes once and renders every artifact from the same
 `ReviewCard`s. It stays advisory-only: it does not execute witness tools, post
 comments, edit source, or enforce blocking policy.
 
+For the full maintainer workflow that starts with `first-pr` and continues
+through `pr-summary.md`, `explain`, `context --json`, `witness-plan.md`,
+receipt audit, and `outcome`, see
+[Find and fix UB-risk review seams](FIND_AND_FIX_UB.md).
+
 The bundle also includes `receipt-audit.md`, and the terminal handoff prints the
 matching `unsafe-review receipt audit` command so reviewers can check whether
 saved witness receipt metadata still matches the current first-pr cards. The
@@ -144,6 +149,17 @@ into copy-only guard, contract, test, witness, human-review, and
 do-not-auto-repair buckets, each pointing back to
 `unsafe-review context <card-id> --json`. It is not a standalone `--format`
 yet, and it does not run agents.
+
+Each repair-queue entry carries `agent_readiness` with a closed state:
+`ready_for_agent`, `requires_human_review`, `requires_witness_receipt`, or
+`unsupported`. Only `ready_for_agent` may have `ready = true`. Every other
+state is copy-only context for a reviewer: do not hand it to an agent as an
+edit task unless the reviewer first narrows the work. The entry's
+`allowed_repairs`, `do_not_do`, and `context_command` define what work is
+allowed, what must not be done, and which card packet proves whether the repair
+improved ReviewCard evidence after rerun. See
+[Bounded agent repair workflow](explanation/agent-repair-workflow.md) for the
+human handoff path.
 
 The default human output is for terminal review. It names the card identity,
 operation family, operation expression, obligation evidence, witness route, next
@@ -250,13 +266,26 @@ After import, `explain` and `context` can load the candidate by ID from
 `.unsafe-review/candidates/` when no analyzer ReviewCard with that ID exists:
 
 ```bash
+unsafe-review candidate list
+unsafe-review candidate list --format json --out target/unsafe-review/manual-candidates-list.json
 unsafe-review explain R4R2-S001
 unsafe-review context R4R2-S001
 unsafe-review candidate witness-plan R4R2-S001
 ```
 
+`candidate list` reports the imported manual candidate ledger from
+`.unsafe-review/candidates/`. It preserves sorted manual candidate IDs,
+file:line locations, compact implementer handoff cues, ReviewCard-only artifact
+boundaries, and copy-only explain/context/witness-plan commands without adding
+those candidates to `cards.json`, SARIF, comment plans, saved LSP diagnostics,
+repair queues, or policy reports.
+
 Manual candidate projections preserve the manual marker and external evidence
-references. Receipts may reference the same manual candidate ID and audit as a
+references, including optional exact evidence commands and limitations. The
+context JSON and witness plan also include a derived, copy-only implementer
+handoff with the file:line target, safe caller route, invariant at risk,
+external evidence references, non-goals, and stop line.
+Receipts may reference the same manual candidate ID and audit as a
 manual/advisory target:
 
 ```bash
@@ -278,6 +307,8 @@ the candidate into analyzer-discovered ReviewCard witness evidence.
 `first-pr` writes a separate `manual-candidates.json` index for imported
 `.unsafe-review/candidates/*.json` artifacts. `cards.json`, SARIF, comment-plan,
 saved LSP, repair-queue, and policy-report surfaces remain ReviewCard-only.
+The saved index keeps the same copy-only implementer handoff cues as
+`candidate list`.
 The first-pr terminal handoff and `review-kit.json` may include copy-only
 commands for manual candidate explain/context/witness-plan projection, while
 still labeling them manual/advisory and not analyzer-discovered.
@@ -298,9 +329,12 @@ unsafe-review repo --format markdown --out target/unsafe-review/repo-posture.md
 When `repo` writes a report with `--out`, it renders to `<out>.partial` and
 renames that file to `<out>` only after a successful render. It also updates
 `<out>.status.json` while analysis runs. The status sidecar records the scan
-phase, elapsed time, discovered files, scanned files, cards found, last path,
-completion, normal errors, and Unix interruption signals. Add `--progress` to
-print a small stderr heartbeat from the same status stream. Add
+scope, phase, elapsed time, discovered files, scanned files, remaining files,
+cards found, last path, completion, normal errors, and Unix interruption
+signals. The scan scope records the root, include/exclude filters,
+gitignore/default-ignore posture, and `--max-files` value so interrupted scans
+can be replayed from the sidecar. Add `--progress` to print a small stderr
+heartbeat from the same status stream, including remaining files. Add
 `--timeout-seconds <n>` to stop analysis cooperatively after roughly `n`
 seconds at repo event boundaries; with `--out`, a timeout is recorded like other
 incomplete scans. If a normal analysis, timeout, write, or rename error occurs
@@ -394,8 +428,13 @@ identities:
 A receipt must include exact counted `card_id`, `tool`, `strength`, `author`,
 `recorded_at`, `expires_at`, and optional command/limitations details. Matching
 receipts whose `tool` matches the card's routed witness tools and whose
-`strength` is `ran`, `test_targeted`, or `site_reached` mark witness evidence
-present, but they do not discharge missing contracts, guards, or reach evidence.
+`strength` is `ran`, `test_targeted`, `site_reached`, or human-review-only
+`reviewed` mark witness evidence present, but they do not discharge missing
+contracts, guards, or reach evidence.
+An `external-integration-test` receipt with `strength = "site_reached"` is a
+reach-only exception: when it matches the exact current card identity, it can
+clear the static reach gap while leaving witness, contract, and guard evidence
+unchanged.
 A `configured` receipt or a receipt whose tool is not routed for the current
 card remains valid audit metadata and does not remove the missing witness gap.
 
@@ -423,6 +462,54 @@ The template command validates the receipt shape and writes JSON. It still does
 not run the witness command. When `--command` is present, the generated JSON also
 includes a stable `command_hash` for drift checks; the hash is not proof that the
 command ran.
+
+For a reviewed C++ or other foreign FFI seam, use the same template command
+with `--tool human-deep-review` after the Rust extern declaration has been
+checked against the cited foreign declaration or ownership contract:
+
+```bash
+unsafe-review receipt template <card-id> \
+  --tool human-deep-review \
+  --strength reviewed \
+  --author reviewer/name \
+  --recorded-at 2026-06-02T00:00:00Z \
+  --expires-at 2026-09-02 \
+  --summary "checked Rust extern signature against C++ symbol Foo__bar" \
+  --command "manual review of Foo__bar C++ declaration and Rust extern signature" \
+  --limitation "manual FFI ABI review only; no witness executed" \
+  --out .unsafe-review/receipts/foo-bar-ffi-review.json
+```
+
+This can import as witness evidence only for a current FFI ReviewCard that
+routes `human-deep-review` and matches the exact counted card identity. It does
+not run code, discharge contract, guard, or reach evidence, prove site
+execution, or prove the foreign side safe. If the extern declaration changes and
+the ReviewCard identity changes, the old receipt remains audit metadata rather
+than current witness evidence.
+
+For unsafe seams reached only through another language's integration suite, use
+the template command with `--tool external-integration-test` and
+`--strength site_reached` after the external command has been run outside
+`unsafe-review`:
+
+```bash
+unsafe-review receipt template <card-id> \
+  --tool external-integration-test \
+  --strength site_reached \
+  --author reviewer/name \
+  --recorded-at 2026-06-02T00:00:00Z \
+  --expires-at 2026-09-02 \
+  --summary "Bun TS SAB-backed Blob/S3 integration tests cover copy_to_unshared" \
+  --command "bun test test/js/blob-sab-copy.test.ts test/js/s3-sab-copy.test.ts" \
+  --limitation "external integration reach only; unsafe-review did not run the command" \
+  --out .unsafe-review/receipts/copy-to-unshared-external-reach.json
+```
+
+This can import as reach evidence only for an exact current ReviewCard identity.
+It does not import witness evidence, does not prove the unsafe site executed,
+does not prove memory safety, and does not discharge contract or guard evidence.
+If the card identity changes, the old receipt remains audit metadata until the
+external reach evidence is reviewed again.
 
 Import a receipt from saved Miri output after Miri has been run outside
 `unsafe-review`:
@@ -556,9 +643,13 @@ author, command hash, and limitations are saved metadata only, not proof that
 the command ran or covered the unsafe site. It is advisory only: it does not
 execute witness commands, infer site reach, make policy decisions, or claim
 safety. A receipt entry gets `imports_witness_evidence` only when it is a
-current-card match with a routed tool, saved-run strength, no expiry, no
-validation error, and no duplicate for that card. JSON and Markdown output
-include report-level limitations that keep the saved-metadata boundary explicit.
+current-card match with a routed tool, importable run or review strength, no
+expiry, no validation error, and no duplicate witness import for that card. A
+receipt entry gets `imports_reach_evidence` only when it is a current-card
+`external-integration-test` receipt with `site_reached` strength, no expiry, no
+validation error, and no duplicate reach import for that card. JSON and Markdown
+output include report-level limitations that keep the saved-metadata boundary
+explicit.
 When a receipt matches a card, the ReviewCard witness evidence summary also
 keeps the saved command hash visible when present.
 

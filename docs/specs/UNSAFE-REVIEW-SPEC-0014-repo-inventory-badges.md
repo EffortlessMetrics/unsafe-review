@@ -39,10 +39,13 @@ When repo analysis writes a report through `--out`, it renders to
 `<out>.partial` and renames that file to `<out>` only after a successful render.
 It also updates a `<out>.status.json` sidecar while discovery and scanning run.
 The sidecar is operational scan status, not a second ReviewCard truth. It
-records `schema_version`, `phase`, `elapsed_ms`, `files_discovered`,
-`files_scanned`, `cards_found`, `last_path`, `completed`, `error`, and
-`signal`, and `partial_path`. `--progress` prints stderr heartbeats from the
-same status stream. On normal analysis, write, or rename errors, the command
+records `schema_version`, `phase`, `scan_scope`, `elapsed_ms`,
+`files_discovered`, `files_scanned`, `files_remaining`, `cards_found`,
+`last_path`, `completed`, `error`, `signal`, and `partial_path`. `scan_scope`
+records the root, include/exclude filters, gitignore/default-ignore posture,
+and `--max-files` value so an interrupted large-repo scan can be replayed from
+the sidecar. `--progress` prints stderr heartbeats from the same status stream,
+including `files_remaining`. On normal analysis, write, or rename errors, the command
 marks status incomplete. A `--timeout-seconds` expiration is a normal incomplete
 scan with `phase = failed`, an explicit timeout `error`, and `signal = null`.
 If at least one file completed before the error or timeout, the command keeps
@@ -119,8 +122,9 @@ claim repository safety.
 
 Outcome comparison also includes a compact `reviewer_delta` front panel derived
 from the same grouped card outcomes. It reports new/resolved/improved/regressed
-counts, receipt-strength movement, and top remaining gaps from the after
-snapshot. It does not introduce another classification path.
+counts, receipt-strength movement, capped movement reasons, and top remaining
+gaps from the after snapshot. It does not introduce another classification
+path.
 
 Baseline-known items, suppressions, and no-new-debt policy promotion remain
 separate policy surfaces and are not part of badge proof.
@@ -194,8 +198,8 @@ the current `unsafe-review badges` repo projection.
   `cards.improved`, `cards.regressed`, and `cards.unchanged` arrays, explicit
   limitations, and the trust boundary.
 - Outcome JSON includes `reviewer_delta` with compact reviewer counts,
-  receipt movement, and top remaining gaps projected from the same outcome
-  cards.
+  receipt movement, capped movement reasons, and top remaining gaps projected
+  from the same outcome cards.
 - Each outcome card includes a reason that explains the snapshot movement, such
   as a class change, missing-evidence count change, witness receipt strength
   movement, new card, or resolved card.

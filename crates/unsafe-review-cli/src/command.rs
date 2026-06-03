@@ -119,12 +119,20 @@ pub(crate) struct OutcomeOptions {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum CandidateCommand {
     Import(CandidateImportOptions),
+    List(CandidateListOptions),
     WitnessPlan(CandidateWitnessPlanOptions),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CandidateImportOptions {
     pub input: PathBuf,
+    pub out: Option<PathBuf>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CandidateListOptions {
+    pub root: PathBuf,
+    pub format: Format,
     pub out: Option<PathBuf>,
 }
 
@@ -139,6 +147,7 @@ pub(crate) struct CandidateWitnessPlanOptions {
 pub(crate) enum Command {
     Help,
     RepoHelp,
+    CandidateHelp,
     Version,
     Support,
     Doctor {

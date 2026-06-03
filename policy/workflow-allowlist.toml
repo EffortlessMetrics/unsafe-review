@@ -26,7 +26,7 @@ actions = [
   "Swatinem/rust-cache@v2",
   "actions/upload-artifact@v7",
 ]
-reason = "Advisory unsafe-review first-pr packet workflow. It uploads cards.json, pr-summary.md, cards.sarif, comment-plan.json, witness-plan.md, and lsp.json without witness execution, comment posting, source edits, or write permissions."
+reason = "Advisory unsafe-review first-pr packet workflow, routed to the EM shared self-hosted rust-small tier behind the maintainer-applied full-ci label gate. It uploads cards.json, pr-summary.md, cards.sarif, comment-plan.json, witness-plan.md, and lsp.json without witness execution, comment posting, source edits, or write permissions."
 created = "2026-05-18"
 review_after = "2026-06-18"
 
@@ -78,6 +78,18 @@ actions = [
   "codecov/codecov-action@v6",
   "actions/upload-artifact@v7",
 ]
-reason = "Advisory cargo-llvm-cov + Codecov telemetry workflow. It uploads LCOV as execution-surface telemetry without threshold gating, without PR comment posting, without witness execution, without default branch-protection blocking, and without claiming memory safety, UB-free status, Miri-clean status, or site-execution proof."
+reason = "Advisory cargo-llvm-cov + Codecov telemetry workflow, routed to the EM shared self-hosted 16 GB Rust tier on trusted push(main)/dispatch refs only. It uploads LCOV as execution-surface telemetry without threshold gating, without PR comment posting, without witness execution, without default branch-protection blocking, and without claiming memory safety, UB-free status, Miri-clean status, or site-execution proof."
 created = "2026-05-23"
 review_after = "2026-08-23"
+
+[[workflow]]
+id = "workflow-0007"
+path = ".github/workflows/droid-pr-review.yml"
+permissions = "contents: read, id-token: write, pull-requests: write"
+actions = [
+  "actions/checkout@v6",
+  "Factory-AI/droid-action@8ea31f351ee6636ebef918ccb64682f477af7184",
+]
+reason = "Owner-requested advisory Droid PR review bot. It configures Factory BYOK with MiniMax M3 via the Anthropic-compatible MiniMax endpoint, uses Droid's shallow review preset with low reasoning effort, disables Droid security review blocking, passes the scoped workflow GitHub token to Droid, grants id-token: write for the pinned Factory Droid validator OIDC path, runs only on non-draft pull requests, bounds the Droid action step with a timeout and continue-on-error so review-bot failures stay advisory, cancels superseded PR review runs per PR, clears ambient Anthropic globals, posts advisory review/security comments through Factory, and does not run unsafe-review witnesses, edit source, publish artifacts, or make unsafe-correctness claims."
+created = "2026-06-01"
+review_after = "2026-07-01"

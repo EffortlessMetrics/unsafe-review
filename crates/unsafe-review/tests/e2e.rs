@@ -5,7 +5,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
 fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Box<dyn Error>> {
@@ -480,7 +480,7 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     );
     assert!(packet["witness_routes"].is_array());
     assert_eq!(packet["agent_readiness"]["ready"], true);
-    assert_eq!(packet["agent_readiness"]["state"], "ready");
+    assert_eq!(packet["agent_readiness"]["state"], "ready_for_agent");
     let allowed_repairs = serde_json::to_string(&packet["allowed_repairs"])?;
     assert!(allowed_repairs.contains("alignment guard"));
     assert!(allowed_repairs.contains("witness receipt"));
@@ -588,7 +588,7 @@ fn context_packet_queues_contract_gaps_for_public_safety_docs() -> Result<(), Bo
     assert!(repair_queue.contains("requires_human_review"));
     assert!(repair_queue.contains("do_not_auto_repair"));
     assert_eq!(packet["agent_readiness"]["ready"], false);
-    assert_eq!(packet["agent_readiness"]["state"], "needs_human_review");
+    assert_eq!(packet["agent_readiness"]["state"], "requires_human_review");
     let reasons = serde_json::to_string(&packet["agent_readiness"]["reasons"])?;
     assert!(reasons.contains("operation family `unknown`"));
     assert!(reasons.contains("no verify command"));
@@ -627,6 +627,16 @@ fn manual_candidate_import_explain_context_and_witness_plan_preserve_manual_mark
     assert_eq!(canonical["manual_candidate"], true);
     assert_eq!(canonical["analyzer_discovered"], false);
     assert_eq!(canonical["id"], "R4R2-S001");
+    assert_eq!(
+        canonical["evidence"][0]["command"],
+        "bun test test/js/webcore/textdecoder-sharedarraybuffer.test.ts"
+    );
+    assert!(
+        canonical["evidence"][0]["limitation"]
+            .as_str()
+            .unwrap_or("")
+            .contains("not analyzer-discovered")
+    );
 
     let empty_snapshot = temp.path().join("empty-snapshot.json");
     fs::write(&empty_snapshot, empty_review_card_snapshot_json())?;
@@ -704,6 +714,9 @@ fn manual_candidate_import_explain_context_and_witness_plan_preserve_manual_mark
     assert!(explain.contains("unsafe-review manual candidate"));
     assert!(explain.contains("Source: `manual`"));
     assert!(explain.contains("Analyzer-discovered: `false`"));
+    assert!(explain.contains("## Implementer handoff"));
+    assert!(explain.contains("Inspect: `src/runtime/webcore/TextDecoder.rs:237`"));
+    assert!(explain.contains("Stop line: stop before source edits"));
     assert!(explain.contains("not analyzer-discovered"));
 
     let explain_json = run_success([
@@ -717,6 +730,38 @@ fn manual_candidate_import_explain_context_and_witness_plan_preserve_manual_mark
     assert_eq!(explain_packet["source"], "manual");
     assert_eq!(explain_packet["manual_candidate"], true);
     assert_eq!(explain_packet["analyzer_discovered"], false);
+    assert_eq!(
+        explain_packet["implementer_handoff"]["target"]["location_text"],
+        "src/runtime/webcore/TextDecoder.rs:237"
+    );
+    assert_eq!(
+        explain_packet["implementer_handoff"]["route"]["safe_caller"],
+        "new TextDecoder().decode(new Uint8Array(new SharedArrayBuffer(...)))"
+    );
+    assert_eq!(
+        explain_packet["implementer_handoff"]["invariant_at_risk"],
+        "&[u8] memory must not be concurrently mutated"
+    );
+    assert_eq!(
+        explain_packet["implementer_handoff"]["external_evidence"][0]["kind"],
+        "runtime_witness"
+    );
+    assert_eq!(
+        explain_packet["implementer_handoff"]["external_evidence"][0]["command"],
+        "bun test test/js/webcore/textdecoder-sharedarraybuffer.test.ts"
+    );
+    assert!(
+        explain_packet["implementer_handoff"]["external_evidence"][0]["limitation"]
+            .as_str()
+            .unwrap_or("")
+            .contains("runtime route evidence only")
+    );
+    assert!(
+        explain_packet["implementer_handoff"]["stop_condition"]
+            .as_str()
+            .unwrap_or("")
+            .contains("stop before source edits")
+    );
 
     let context = run_success([
         os("context"),
@@ -727,6 +772,18 @@ fn manual_candidate_import_explain_context_and_witness_plan_preserve_manual_mark
     let context_packet = parse_json(&stdout_text(&context)?)?;
     assert_eq!(context_packet["source"], "manual");
     assert_eq!(context_packet["manual_candidate"], true);
+    assert_eq!(
+        context_packet["implementer_handoff"]["route"]["unsafe_operation"],
+        "core::slice::from_raw_parts"
+    );
+    assert!(
+        serde_json::to_string(&context_packet["implementer_handoff"]["non_goals"])?
+            .contains("do not treat this as analyzer-discovered")
+    );
+    assert_eq!(
+        context_packet["evidence"][0]["command"],
+        "bun test test/js/webcore/textdecoder-sharedarraybuffer.test.ts"
+    );
 
     let witness_plan = run_success([
         os("candidate"),
@@ -737,9 +794,159 @@ fn manual_candidate_import_explain_context_and_witness_plan_preserve_manual_mark
     ])?;
     let witness_plan = stdout_text(&witness_plan)?;
     assert!(witness_plan.contains("manual candidate witness plan"));
+    assert!(witness_plan.contains("## Implementer handoff"));
+    assert!(witness_plan.contains("Route: `new TextDecoder().decode"));
+    assert!(witness_plan.contains("command `bun test"));
+    assert!(witness_plan.contains("limitation: runtime route evidence only"));
     assert!(witness_plan.contains("does not run witnesses"));
     assert!(witness_plan.contains("unsafe-review receipt template R4R2-S001"));
     assert!(witness_plan.contains("not analyzer-discovered"));
+
+    Ok(())
+}
+
+#[test]
+fn manual_candidate_list_reports_imported_advisory_ledger() -> Result<(), Box<dyn Error>> {
+    let temp = TempDir::new("unsafe-review-manual-candidate-list-e2e")?;
+    let candidate_dir = temp.path().join(".unsafe-review/candidates");
+    fs::create_dir_all(&candidate_dir)?;
+    fs::write(
+        candidate_dir.join("R4R2-S002.json"),
+        manual_candidate_json().replace("\"id\": \"R4R2-S001\"", "\"id\": \"R4R2-S002\""),
+    )?;
+    fs::write(
+        candidate_dir.join("R4R2-S001.json"),
+        manual_candidate_json(),
+    )?;
+
+    let json = run_success([
+        os("candidate"),
+        os("list"),
+        os("--root"),
+        temp.path().as_os_str().to_os_string(),
+        os("--format"),
+        os("json"),
+    ])?;
+    let ledger = parse_json(&stdout_text(&json)?)?;
+
+    assert_eq!(ledger["schema_version"], "manual-candidates/v1");
+    assert_eq!(ledger["mode"], "manual_candidate_index");
+    assert_eq!(ledger["source"], "candidate_list");
+    assert_eq!(ledger["root"], temp.path().display().to_string());
+    assert_eq!(ledger["summary"]["manual_candidates"], 2);
+    assert_eq!(ledger["summary"]["external_evidence_refs"], 4);
+    assert_eq!(ledger["summary"]["analyzer_discovered"], 0);
+    assert_eq!(ledger["candidates"][0]["id"], "R4R2-S001");
+    assert_eq!(ledger["candidates"][1]["id"], "R4R2-S002");
+    assert_eq!(ledger["candidates"][0]["source"], "manual");
+    assert_eq!(ledger["candidates"][0]["manual_candidate"], true);
+    assert_eq!(ledger["candidates"][0]["analyzer_discovered"], false);
+    assert_eq!(
+        ledger["candidates"][0]["location_text"],
+        "src/runtime/webcore/TextDecoder.rs:237"
+    );
+    assert_eq!(
+        ledger["candidates"][0]["implementer_handoff"]["target"]["location_text"],
+        "src/runtime/webcore/TextDecoder.rs:237"
+    );
+    assert_eq!(
+        ledger["candidates"][0]["implementer_handoff"]["route"]["safe_caller"],
+        "new TextDecoder().decode(new Uint8Array(new SharedArrayBuffer(...)))"
+    );
+    assert_eq!(
+        ledger["candidates"][0]["implementer_handoff"]["route"]["unsafe_operation"],
+        "core::slice::from_raw_parts"
+    );
+    assert_eq!(
+        ledger["candidates"][0]["implementer_handoff"]["invariant_at_risk"],
+        "&[u8] memory must not be concurrently mutated"
+    );
+    assert!(
+        ledger["candidates"][0]["implementer_handoff"]["stop_condition"]
+            .as_str()
+            .unwrap_or("")
+            .contains("stop before source edits")
+    );
+    assert!(
+        ledger["candidates"][0]["explain_command"]
+            .as_str()
+            .unwrap_or("")
+            .contains("unsafe-review explain --root")
+    );
+    assert!(
+        ledger["candidates"][0]["context_json_command"]
+            .as_str()
+            .unwrap_or("")
+            .contains("unsafe-review context --root")
+    );
+    assert!(
+        ledger["candidates"][0]["witness_plan_command"]
+            .as_str()
+            .unwrap_or("")
+            .contains("unsafe-review candidate witness-plan --root")
+    );
+    assert!(
+        ledger["reviewcard_artifact_relationship"]["cards.json"]
+            .as_str()
+            .unwrap_or("")
+            .contains("ReviewCard-only analyzer output")
+    );
+    assert!(
+        ledger["reviewcard_artifact_relationship"]["repair-queue.json"]
+            .as_str()
+            .unwrap_or("")
+            .contains("not automatic repair tasks")
+    );
+    assert!(
+        ledger["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("not analyzer-discovered ReviewCards")
+    );
+    assert!(
+        ledger["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("unsafe-review did not run witnesses")
+    );
+
+    let markdown = run_success([
+        os("candidate"),
+        os("list"),
+        os("--root"),
+        temp.path().as_os_str().to_os_string(),
+    ])?;
+    let markdown = stdout_text(&markdown)?;
+    assert!(markdown.contains("# unsafe-review manual candidate list"));
+    assert!(markdown.contains("Manual candidates: `2`"));
+    assert!(markdown.contains("Analyzer-discovered: `0`"));
+    assert!(markdown.contains("### `R4R2-S001`"));
+    assert!(markdown.contains("Location: `src/runtime/webcore/TextDecoder.rs:237`"));
+    assert!(markdown.contains("#### Implementer Handoff"));
+    assert!(markdown.contains("Route: `new TextDecoder().decode"));
+    assert!(markdown.contains("Invariant at risk: &[u8] memory must not be concurrently mutated"));
+    assert!(markdown.contains("Stop line: stop before source edits"));
+    assert!(markdown.contains("Context: `unsafe-review context --root"));
+    assert!(markdown.contains("ReviewCard-only repair queue"));
+    assert!(markdown.contains("not analyzer-discovered ReviewCards"));
+    assert!(markdown.contains("did not run witnesses"));
+
+    let out = temp.path().join("manual-candidates-list.json");
+    let wrote = run_success([
+        os("candidate"),
+        os("list"),
+        os("--root"),
+        temp.path().as_os_str().to_os_string(),
+        os("--format"),
+        os("json"),
+        os("--out"),
+        out.as_os_str().to_os_string(),
+    ])?;
+    assert_eq!(stdout_text(&wrote)?.trim(), "");
+    assert_eq!(
+        parse_json(&fs::read_to_string(out)?)?["summary"]["manual_candidates"],
+        2
+    );
 
     Ok(())
 }
@@ -1021,6 +1228,27 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
         review_kit["handoff"]["manual_candidates"]["first_candidate"]["analyzer_discovered"],
         false
     );
+    assert_eq!(
+        review_kit["handoff"]["manual_candidates"]["first_candidate"]["implementer_handoff"]["target"]
+            ["location_text"],
+        "src/runtime/webcore/TextDecoder.rs:237"
+    );
+    assert_eq!(
+        review_kit["handoff"]["manual_candidates"]["first_candidate"]["implementer_handoff"]["route"]
+            ["safe_caller"],
+        "new TextDecoder().decode(new Uint8Array(new SharedArrayBuffer(...)))"
+    );
+    assert_eq!(
+        review_kit["handoff"]["manual_candidates"]["first_candidate"]["implementer_handoff"]["invariant_at_risk"],
+        "&[u8] memory must not be concurrently mutated"
+    );
+    assert!(
+        review_kit["handoff"]["manual_candidates"]["first_candidate"]["implementer_handoff"]
+            ["stop_condition"]
+            .as_str()
+            .unwrap_or("")
+            .contains("stop before source edits")
+    );
     assert!(
         review_kit["handoff"]["manual_candidates"]["first_candidate"]["explain"]
             .as_str()
@@ -1175,11 +1403,51 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
         manual_candidates["candidates"][0]["location_text"],
         "src/runtime/webcore/TextDecoder.rs:237"
     );
+    assert_eq!(
+        manual_candidates["candidates"][0]["evidence"][0]["command"],
+        "bun test test/js/webcore/textdecoder-sharedarraybuffer.test.ts"
+    );
+    assert!(
+        manual_candidates["candidates"][0]["evidence"][0]["limitation"]
+            .as_str()
+            .unwrap_or("")
+            .contains("runtime route evidence only")
+    );
     assert!(
         manual_candidates["candidates"][0]["explain_command"]
             .as_str()
             .unwrap_or("")
-            .contains("unsafe-review explain R4R2-S001")
+            .contains("unsafe-review explain --root")
+    );
+    assert!(
+        manual_candidates["candidates"][0]["context_command"]
+            .as_str()
+            .unwrap_or("")
+            .contains("unsafe-review context --root")
+    );
+    assert!(
+        manual_candidates["candidates"][0]["witness_plan_command"]
+            .as_str()
+            .unwrap_or("")
+            .contains("unsafe-review candidate witness-plan --root")
+    );
+    assert_eq!(
+        manual_candidates["candidates"][0]["implementer_handoff"]["target"]["location_text"],
+        "src/runtime/webcore/TextDecoder.rs:237"
+    );
+    assert_eq!(
+        manual_candidates["candidates"][0]["implementer_handoff"]["route"]["unsafe_operation"],
+        "core::slice::from_raw_parts"
+    );
+    assert_eq!(
+        manual_candidates["candidates"][0]["implementer_handoff"]["invariant_at_risk"],
+        "&[u8] memory must not be concurrently mutated"
+    );
+    assert!(
+        manual_candidates["candidates"][0]["implementer_handoff"]["stop_condition"]
+            .as_str()
+            .unwrap_or("")
+            .contains("stop before source edits")
     );
     assert!(
         manual_candidates["reviewcard_artifact_relationship"]["cards.json"]
@@ -1208,12 +1476,12 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
 
     let receipt_audit = fs::read_to_string(out_dir.join("receipt-audit.md"))?;
     assert!(receipt_audit.contains("# unsafe-review receipt audit"));
-    assert!(receipt_audit.contains("Static audit of saved witness receipt metadata"));
+    assert!(receipt_audit.contains("Static audit of saved receipt metadata"));
     assert!(receipt_audit.contains("## Reviewer front panel"));
     assert!(receipt_audit.contains("No receipt files found."));
     assert!(receipt_audit.contains("does not execute witnesses"));
-    assert!(receipt_audit.contains("does not prove site reach"));
-    assert!(receipt_audit.contains("matched receipts improve witness evidence only"));
+    assert!(receipt_audit.contains("does not independently prove site reach"));
+    assert!(receipt_audit.contains("matched witness receipts improve witness evidence only"));
 
     let sarif = parse_json(&fs::read_to_string(out_dir.join("cards.sarif"))?)?;
     assert_eq!(sarif["version"], "2.1.0");
@@ -1390,7 +1658,7 @@ fn first_pr_clean_output_stays_advisory_not_all_clear() -> Result<(), Box<dyn Er
     assert!(receipt_audit.contains("# unsafe-review receipt audit"));
     assert!(receipt_audit.contains("No receipt files found."));
     assert!(receipt_audit.contains("does not execute witnesses"));
-    assert!(receipt_audit.contains("does not prove site reach"));
+    assert!(receipt_audit.contains("does not independently prove site reach"));
 
     let witness_plan = fs::read_to_string(out_dir.join("witness-plan.md"))?;
     assert!(witness_plan.contains("No changed unsafe-review gaps were found."));
@@ -1832,6 +2100,13 @@ fn repo_progress_writes_status_sidecar_for_out_reports() -> Result<(), Box<dyn E
         os("repo"),
         os("--root"),
         fixture.as_os_str().to_os_string(),
+        os("--include"),
+        os("src/lib.rs"),
+        os("--exclude"),
+        os("src/generated.rs"),
+        os("--max-files"),
+        os("5"),
+        os("--no-respect-gitignore"),
         os("--format"),
         os("json"),
         os("--out"),
@@ -1845,6 +2120,10 @@ fn repo_progress_writes_status_sidecar_for_out_reports() -> Result<(), Box<dyn E
         stderr.contains("unsafe-review repo: phase=complete"),
         "stderr should include a final progress heartbeat: {stderr}"
     );
+    assert!(
+        stderr.contains("files_remaining=0"),
+        "stderr should include remaining file count: {stderr}"
+    );
     let report = parse_json(&fs::read_to_string(&report_path)?)?;
     assert_eq!(report["scope"], "repo");
     assert!(
@@ -1854,9 +2133,16 @@ fn repo_progress_writes_status_sidecar_for_out_reports() -> Result<(), Box<dyn E
     let status = parse_json(&fs::read_to_string(&status_path)?)?;
     assert_eq!(status["schema_version"], "repo-scan-status/v1");
     assert_eq!(status["phase"], "complete");
+    assert_eq!(status["scan_scope"]["root"], fixture.display().to_string());
+    assert_eq!(status["scan_scope"]["include"][0], "src/lib.rs");
+    assert_eq!(status["scan_scope"]["exclude"][0], "src/generated.rs");
+    assert_eq!(status["scan_scope"]["respect_gitignore"], false);
+    assert_eq!(status["scan_scope"]["large_repo_ignores"], true);
+    assert_eq!(status["scan_scope"]["max_files"], 5);
     assert_eq!(status["completed"], true);
     assert_eq!(status["files_discovered"], 1);
     assert_eq!(status["files_scanned"], 1);
+    assert_eq!(status["files_remaining"], 0);
     assert_eq!(status["cards_found"], 1);
     assert_eq!(status["last_path"], "src/lib.rs");
     assert!(status["elapsed_ms"].as_u64().is_some());
@@ -1904,6 +2190,7 @@ fn repo_output_failure_keeps_partial_and_marks_status_incomplete() -> Result<(),
     let status = parse_json(&fs::read_to_string(&status_path)?)?;
     assert_eq!(status["schema_version"], "repo-scan-status/v1");
     assert_eq!(status["phase"], "failed");
+    assert_default_repo_status_scope(&status, &fixture, 0)?;
     assert_eq!(status["completed"], false);
     assert_eq!(status["files_discovered"], 1);
     assert_eq!(status["files_scanned"], 1);
@@ -1975,6 +2262,7 @@ fn repo_analysis_failure_keeps_completed_file_partial_snapshot() -> Result<(), B
     let status = parse_json(&fs::read_to_string(&status_path)?)?;
     assert_eq!(status["schema_version"], "repo-scan-status/v1");
     assert_eq!(status["phase"], "failed");
+    assert_default_repo_status_scope(&status, &scan_root, 1)?;
     assert_eq!(status["completed"], false);
     assert_eq!(status["files_discovered"], 2);
     assert_eq!(status["files_scanned"], 1);
@@ -2062,6 +2350,7 @@ fn repo_timeout_keeps_completed_file_partial_snapshot() -> Result<(), Box<dyn Er
     let status = parse_json(&fs::read_to_string(&status_path)?)?;
     assert_eq!(status["schema_version"], "repo-scan-status/v1");
     assert_eq!(status["phase"], "failed");
+    assert_default_repo_status_scope(&status, &scan_root, 1)?;
     assert_eq!(status["completed"], false);
     assert_eq!(status["files_discovered"], 2);
     assert_eq!(status["files_scanned"], 1);
@@ -2107,7 +2396,7 @@ fn repo_sigterm_writes_interrupted_status_sidecar() -> Result<(), Box<dyn Error>
         .stderr(Stdio::piped())
         .spawn()?;
 
-    std::thread::sleep(Duration::from_millis(500));
+    std::thread::sleep(std::time::Duration::from_millis(500));
     let kill_status = Command::new("kill")
         .arg("-TERM")
         .arg(child.id().to_string())
@@ -2138,6 +2427,7 @@ fn repo_sigterm_writes_interrupted_status_sidecar() -> Result<(), Box<dyn Error>
     let status = parse_json(&fs::read_to_string(&status_path)?)?;
     assert_eq!(status["schema_version"], "repo-scan-status/v1");
     assert_eq!(status["phase"], "terminated");
+    assert_default_repo_status_scope(&status, &fixture, 0)?;
     assert_eq!(status["completed"], false);
     assert_eq!(status["signal"], "SIGTERM");
     assert!(
@@ -2181,7 +2471,7 @@ fn repo_sigterm_keeps_completed_file_partial_report() -> Result<(), Box<dyn Erro
         .stderr(Stdio::piped())
         .spawn()?;
 
-    std::thread::sleep(Duration::from_millis(500));
+    std::thread::sleep(std::time::Duration::from_millis(500));
     let kill_status = Command::new("kill")
         .arg("-TERM")
         .arg(child.id().to_string())
@@ -2221,6 +2511,7 @@ fn repo_sigterm_keeps_completed_file_partial_report() -> Result<(), Box<dyn Erro
     let status = parse_json(&fs::read_to_string(&status_path)?)?;
     assert_eq!(status["schema_version"], "repo-scan-status/v1");
     assert_eq!(status["phase"], "terminated");
+    assert_default_repo_status_scope(&status, &scan_root, 1)?;
     assert_eq!(status["completed"], false);
     assert_eq!(status["signal"], "SIGTERM");
     assert_eq!(status["files_discovered"], 2);
@@ -2510,6 +2801,63 @@ fn receipt_template_writes_valid_receipt_json_without_running_witnesses()
     assert_eq!(receipt["command"], "cargo +nightly miri test read_header");
     assert_eq!(receipt["command_hash"], "3e163b0bce29ff2e");
     assert_eq!(receipt["limitations"][0], "fixture only");
+
+    Ok(())
+}
+
+#[test]
+fn receipt_template_writes_external_integration_reach_receipt() -> Result<(), Box<dyn Error>> {
+    let temp = TempDir::new("unsafe-review-external-reach-template-e2e")?;
+    let receipt_path = temp.path().join("external-reach.json");
+    let card_id =
+        "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1";
+
+    let output = run_success([
+        os("receipt"),
+        os("template"),
+        os(card_id),
+        os("--tool"),
+        os("external-integration-test"),
+        os("--strength"),
+        os("site_reached"),
+        os("--author"),
+        os("core/fixtures"),
+        os("--recorded-at"),
+        os("2026-06-02T00:00:00Z"),
+        os("--expires-at"),
+        os("2026-09-02"),
+        os("--summary"),
+        os("TS integration suite reaches the unsafe seam"),
+        os("--command"),
+        os("bun test test/js/sab-copy-to-unshared.test.ts"),
+        os("--limitation"),
+        os("external integration reach only; unsafe-review did not run the command"),
+        os("--out"),
+        receipt_path.as_os_str().to_os_string(),
+    ])?;
+
+    assert_eq!(stdout_text(&output)?.trim(), "");
+    let receipt = parse_json(&fs::read_to_string(receipt_path)?)?;
+    assert_eq!(receipt["schema_version"], "0.1");
+    assert_eq!(receipt["card_id"], card_id);
+    assert_eq!(receipt["tool"], "external-integration-test");
+    assert_eq!(receipt["strength"], "site_reached");
+    assert_eq!(receipt["author"], "core/fixtures");
+    assert_eq!(receipt["recorded_at"], "2026-06-02T00:00:00Z");
+    assert_eq!(receipt["expires_at"], "2026-09-02");
+    assert_eq!(
+        receipt["summary"],
+        "TS integration suite reaches the unsafe seam"
+    );
+    assert_eq!(
+        receipt["command"],
+        "bun test test/js/sab-copy-to-unshared.test.ts"
+    );
+    assert!(json_str(&receipt["command_hash"], "command_hash")?.len() >= 16);
+    assert_eq!(
+        receipt["limitations"][0],
+        "external integration reach only; unsafe-review did not run the command"
+    );
 
     Ok(())
 }
@@ -3289,6 +3637,27 @@ fn json_array<'a>(value: &'a Value, path: &str) -> Result<&'a Vec<Value>, Box<dy
     value
         .as_array()
         .ok_or_else(|| format!("{path} should be an array").into())
+}
+
+fn assert_default_repo_status_scope(
+    status: &Value,
+    root: &Path,
+    files_remaining: u64,
+) -> Result<(), Box<dyn Error>> {
+    assert_eq!(status["scan_scope"]["root"], root.display().to_string());
+    assert_eq!(
+        json_array(&status["scan_scope"]["include"], "scan_scope.include")?.len(),
+        0
+    );
+    assert_eq!(
+        json_array(&status["scan_scope"]["exclude"], "scan_scope.exclude")?.len(),
+        0
+    );
+    assert_eq!(status["scan_scope"]["respect_gitignore"], true);
+    assert_eq!(status["scan_scope"]["large_repo_ignores"], true);
+    assert!(status["scan_scope"]["max_files"].is_null());
+    assert_eq!(status["files_remaining"], files_remaining);
+    Ok(())
 }
 
 fn fixture_root(name: &str) -> PathBuf {
