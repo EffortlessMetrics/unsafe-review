@@ -1416,6 +1416,8 @@ fn render_candidate_list_json(
         .iter()
         .map(|candidate| candidate.evidence.len())
         .sum::<usize>();
+    let operation_families = first_pr::manual_candidate_operation_family_counts(candidates);
+    let evidence_kinds = first_pr::manual_candidate_evidence_kind_counts(candidates);
     let value = serde_json::json!({
         "schema_version": "manual-candidates/v1",
         "tool": "unsafe-review",
@@ -1426,6 +1428,8 @@ fn render_candidate_list_json(
         "summary": {
             "manual_candidates": candidates.len(),
             "external_evidence_refs": evidence_refs,
+            "operation_families": operation_families,
+            "evidence_kinds": evidence_kinds,
             "analyzer_discovered": 0,
         },
         "candidates": candidates
@@ -1483,6 +1487,8 @@ fn render_candidate_list_markdown(
         .iter()
         .map(|candidate| candidate.evidence.len())
         .sum::<usize>();
+    let operation_families = first_pr::manual_candidate_operation_family_counts(candidates);
+    let evidence_kinds = first_pr::manual_candidate_evidence_kind_counts(candidates);
     let mut out = String::new();
     out.push_str("# unsafe-review manual candidate list\n\n");
     out.push_str("This is a manual/advisory candidate ledger. It lists imported `.unsafe-review/candidates/*.json` artifacts and does not make them analyzer-discovered ReviewCards.\n\n");
@@ -1490,6 +1496,14 @@ fn render_candidate_list_markdown(
     out.push_str(&format!("- Root: `{}`\n", root.display()));
     out.push_str(&format!("- Manual candidates: `{}`\n", candidates.len()));
     out.push_str(&format!("- External evidence refs: `{evidence_refs}`\n"));
+    out.push_str(&format!(
+        "- Operation families: `{}`\n",
+        first_pr::render_count_map(&operation_families)
+    ));
+    out.push_str(&format!(
+        "- Evidence kinds: `{}`\n",
+        first_pr::render_count_map(&evidence_kinds)
+    ));
     out.push_str("- Analyzer-discovered: `0`\n\n");
     if candidates.is_empty() {
         out.push_str("No imported manual candidates found.\n\n");
