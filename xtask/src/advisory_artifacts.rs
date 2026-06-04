@@ -33,6 +33,7 @@ struct CardProjection {
     class_name: String,
     priority: String,
     confidence: String,
+    proof_path: String,
     hazards: Vec<String>,
     path: String,
     line: u64,
@@ -153,6 +154,13 @@ const COMMENT_PLAN_NON_SELECTION_REASON_CODES: &[&str] = &[
     "covered_by_selected_family_obligation",
     "budget_exhausted",
     "not_selected_by_policy",
+];
+const KNOWN_PROOF_PATHS: &[&str] = &[
+    "observable_red_green",
+    "mutation_miri_model",
+    "source_route_only",
+    "helper_gated",
+    "human_review_only",
 ];
 const REPAIR_QUEUE_BUCKETS: [&str; 6] = [
     "repairable_by_guard",
@@ -2810,6 +2818,7 @@ fn require_markdown_top_card_projection(
     let mut top_card_location = None;
     let mut top_card_operation = None;
     let mut top_card_operation_family = None;
+    let mut top_card_proof_path = None;
     let mut top_card_missing_evidence = None;
     let mut top_card_primary_route = None;
     let mut top_card_next_action = None;
@@ -2850,6 +2859,11 @@ fn require_markdown_top_card_projection(
                 continue;
             };
             top_card_operation_family = Some(operation_family.to_string());
+        } else if let Some(rest) = trimmed.strip_prefix("- Proof path: `") {
+            let Some((proof_path, _)) = rest.split_once('`') else {
+                continue;
+            };
+            top_card_proof_path = Some(proof_path.to_string());
         } else if let Some(missing_evidence) = trimmed
             .strip_prefix("- Missing evidence: ")
             .or_else(|| trimmed.strip_prefix("- Missing/weak evidence: "))
@@ -2944,6 +2958,18 @@ fn require_markdown_top_card_projection(
         &actual_operation_family,
         &card.operation_family,
         &format!("{} top card `{card_id}` operation family", path.display()),
+    )?;
+
+    let Some(actual_proof_path) = top_card_proof_path else {
+        return Err(format!(
+            "{} must include a top ReviewCard proof path line",
+            path.display()
+        ));
+    };
+    require_expected_value(
+        &actual_proof_path,
+        &card.proof_path,
+        &format!("{} top card `{card_id}` proof path", path.display()),
     )?;
 
     let Some(actual_missing_evidence) = top_card_missing_evidence else {
@@ -3365,6 +3391,12 @@ fn check_sarif_result_projection<'a>(
         properties,
         "confidence",
         &card_projection.confidence,
+        "cards.sarif result properties",
+    )?;
+    require_projected_str(
+        properties,
+        "proofPath",
+        &card_projection.proof_path,
         "cards.sarif result properties",
     )?;
     require_projected_str(
@@ -3951,6 +3983,12 @@ fn check_repair_queue_entry(
     )?;
     require_projected_str(
         entry,
+        "proof_path",
+        &card.proof_path,
+        "repair-queue.json entry",
+    )?;
+    require_projected_str(
+        entry,
         "operation_family",
         &card.operation_family,
         "repair-queue.json entry",
@@ -4171,6 +4209,16 @@ fn require_known_advisory_scope(scope: &str) -> Result<(), String> {
     }
 }
 
+fn require_known_proof_path(proof_path: &str, context: &str) -> Result<(), String> {
+    if KNOWN_PROOF_PATHS.contains(&proof_path) {
+        Ok(())
+    } else {
+        Err(format!(
+            "{context} must use a known proof_path; got `{proof_path}`"
+        ))
+    }
+}
+
 fn require_comment_body_boundary(body: &str) -> Result<(), String> {
     for expected in [
         "artifact-only inline comment candidate",
@@ -4206,6 +4254,7 @@ fn require_comment_body_card_projection(
             "missing evidence",
             format!("Missing evidence: {}", expected_missing_summary(card)),
         ),
+        ("proof_path", format!("Proof path: `{}`.", card.proof_path)),
         ("next_action", format!("Next action: {}", card.next_action)),
     ] {
         if !body.contains(&expected) {
@@ -4264,6 +4313,9 @@ fn advisory_card_projections(
             super::require_non_empty_json_str(card, "priority", "cards.json card")?.to_string();
         let confidence =
             super::require_non_empty_json_str(card, "confidence", "cards.json card")?.to_string();
+        let proof_path =
+            super::require_non_empty_json_str(card, "proof_path", "cards.json card")?.to_string();
+        require_known_proof_path(&proof_path, "cards.json card proof_path")?;
         let hazards = card
             .get("hazards")
             .map(|hazards| {
@@ -4415,6 +4467,7 @@ fn advisory_card_projections(
                 class_name,
                 priority,
                 confidence,
+                proof_path,
                 hazards,
                 path,
                 line,
@@ -4504,6 +4557,7 @@ fn require_lsp_hover_card_projection(
             "operation family",
             format!("`{}` unsafe operation", card.operation_family),
         ),
+        ("proof_path", format!("Proof path: `{}`", card.proof_path)),
         ("location", format!("Location: {}:{}", card.path, card.line)),
         ("operation", format!("- Operation: `{}`", card.operation)),
         ("next action", format!("- {}", card.next_action)),
@@ -4633,6 +4687,7 @@ fn require_comment_card_projection(
     require_projected_str(comment, "class", &card.class_name, context)?;
     require_projected_str(comment, "priority", &card.priority, context)?;
     require_projected_str(comment, "confidence", &card.confidence, context)?;
+    require_projected_str(comment, "proof_path", &card.proof_path, context)?;
     require_projected_str(comment, "path", &card.path, context)?;
     require_projected_u64(comment, "line", card.line, context)?;
     require_projected_str(comment, "operation", &card.operation, context)?;
@@ -4650,6 +4705,7 @@ fn require_not_selected_card_projection(
     require_projected_str(card, "class", &projection.class_name, context)?;
     require_projected_str(card, "priority", &projection.priority, context)?;
     require_projected_str(card, "confidence", &projection.confidence, context)?;
+    require_projected_str(card, "proof_path", &projection.proof_path, context)?;
     require_projected_str(card, "path", &projection.path, context)?;
     require_projected_u64(card, "line", projection.line, context)?;
     require_projected_str(card, "operation", &projection.operation, context)?;
@@ -5102,6 +5158,13 @@ fn require_witness_plan_card_projections(
             section,
             path,
             card_id,
+            "proof path",
+            &format!("- Proof path: `{}`", card.proof_path),
+        )?;
+        require_witness_plan_card_line(
+            section,
+            path,
+            card_id,
             "location",
             &format!("- Location: {}:{}", card.path, card.line),
         )?;
@@ -5341,9 +5404,10 @@ fn require_pr_summary_card_table_projection(
     super::require_text_contains(text, "## Card table", path)?;
     for (card_id, card) in card_projections {
         let expected = format!(
-            "| `{}` | `{}` | {} | `{}` | `{}` | {} | `{}` | {} |",
+            "| `{}` | `{}` | `{}` | {} | `{}` | `{}` | {} | `{}` | {} |",
             markdown_table_cell(card_id),
             card.class_name,
+            card.proof_path,
             markdown_table_cell(&format!("{}:{}", card.path, card.line)),
             card.operation_family,
             markdown_table_cell(&card.operation),
@@ -5829,6 +5893,12 @@ fn require_lsp_diagnostic_card_projection(
     require_projected_str(diagnostic, "code", &card.class_name, "lsp.json diagnostic")?;
     require_projected_str(
         diagnostic,
+        "proof_path",
+        &card.proof_path,
+        "lsp.json diagnostic",
+    )?;
+    require_projected_str(
+        diagnostic,
         "operation",
         &card.operation,
         "lsp.json diagnostic",
@@ -6189,6 +6259,12 @@ fn check_lsp_code_action_payload(
         payload,
         "kind",
         expected_kind,
+        "lsp.json code_action payload",
+    )?;
+    require_projected_str(
+        payload,
+        "proof_path",
+        &card_projection.proof_path,
         "lsp.json code_action payload",
     )?;
     let boundary = payload

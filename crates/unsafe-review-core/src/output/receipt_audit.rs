@@ -211,9 +211,10 @@ fn matched_target(
     }
     if let Some(card) = card {
         return format!(
-            "`{}` / `{}` / source `{}` / `{}` / {} missing; next: {}",
+            "`{}` / `{}` / proof `{}` / source `{}` / `{}` / {} missing; next: {}",
             card.class_name,
             card.operation_family,
+            card.proof_path,
             card.source,
             markdown_cell(&card.operation),
             card.missing_count,
@@ -362,6 +363,7 @@ mod tests {
                         class_name: "guard_missing".to_string(),
                         operation: "unsafe { ptr.cast::<Header>().read() }".to_string(),
                         operation_family: "raw_pointer_read".to_string(),
+                        proof_path: "source_route_only".to_string(),
                         missing_count: 2,
                         next_action: "Add or expose guard | witness\nThen attach receipt"
                             .to_string(),
@@ -402,6 +404,7 @@ mod tests {
                         class_name: "guard_missing".to_string(),
                         operation: "unsafe { ptr.cast::<Header>().read() }".to_string(),
                         operation_family: "raw_pointer_read".to_string(),
+                        proof_path: "source_route_only".to_string(),
                         missing_count: 2,
                         next_action: "Add or expose guard | witness\nThen attach receipt"
                             .to_string(),
@@ -460,7 +463,9 @@ mod tests {
             markdown.contains("receipt tool `loom` is not one of this card's routed witness tools")
         );
         assert!(markdown.contains("receipt strength `configured` is weaker"));
-        assert!(markdown.contains("`guard_missing` / `raw_pointer_read` / source `analyzer`"));
+        assert!(markdown.contains(
+            "`guard_missing` / `raw_pointer_read` / proof `source_route_only` / source `analyzer`"
+        ));
         assert!(markdown.contains("unsafe { ptr.cast::<Header>().read() }"));
         assert!(markdown.contains("Add or expose guard \\| witness Then attach receipt"));
         assert!(markdown.contains("## Limitations"));

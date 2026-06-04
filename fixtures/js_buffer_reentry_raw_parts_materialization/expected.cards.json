@@ -16,6 +16,7 @@
     },
     "operation": "let bytes = unsafe { core::slice::from_raw_parts(input.ptr, input.len) };",
     "operation_family": "slice_from_raw_parts",
+    "proof_path": "source_route_only",
     "hazards": [
       "pointer_validity",
       "alignment",
@@ -174,6 +175,7 @@
     },
     "operation": "JS-backed buffer descriptor captured before possible JS reentry and materialized afterward; capture: let input = StringOrBuffer::from_js(global, arg0)?;; reentry: let level = options.get(global, \"\")?;; materialize: let bytes = unsafe { core::slice::from_raw_parts(input.ptr, input.len) };",
     "operation_family": "unsafe_fn_call",
+    "proof_path": "human_review_only",
     "hazards": [
       "unknown"
     ],

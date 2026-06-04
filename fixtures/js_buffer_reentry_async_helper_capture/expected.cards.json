@@ -16,6 +16,7 @@
     },
     "operation": "JS-backed buffer descriptor captured before possible JS reentry and materialized afterward; capture: let input = from_js_maybe_async_into::<StringOrBuffer>(global, arg0)?;; reentry: callback.call(global)?;; materialize: finish_async_input(&input)",
     "operation_family": "unsafe_fn_call",
+    "proof_path": "human_review_only",
     "hazards": [
       "unknown"
     ],
