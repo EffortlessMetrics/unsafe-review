@@ -57,9 +57,9 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
         os("markdown"),
     ])?;
     let markdown = stdout_text(&markdown)?;
-    assert!(
-        markdown.contains("| ID | Class | Operation | Hazard | Missing | Route | Next action |")
-    );
+    assert!(markdown.contains(
+        "| ID | Class | Proof path | Operation | Hazard | Missing | Route | Next action |"
+    ));
     assert!(markdown.contains("unsafe { ptr.cast::<Header>().read() }"));
     assert!(markdown.contains("Add or expose the local guard"));
 
@@ -131,7 +131,10 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     assert!(summary_text.contains("## Card table"));
     assert!(summary_text.contains("- Operation: `unsafe { ptr.cast::<Header>().read() }`"));
     assert!(summary_text.contains("- Operation family: `raw_pointer_read`"));
-    assert!(summary_text.contains("| ID | Class | Location | Operation family | Operation |"));
+    assert!(
+        summary_text
+            .contains("| ID | Class | Proof path | Location | Operation family | Operation |")
+    );
     assert!(summary_text.contains("unsafe { ptr.cast::<Header>().read() }"));
     assert!(summary_text.contains("| `raw_pointer_read` |"));
     assert!(summary_text.contains("## Trust boundary"));
@@ -3127,7 +3130,7 @@ fn repo_inventory_and_badges_count_open_gaps_without_safety_claim() -> Result<()
     assert!(repo_markdown.contains("## Top operation families"));
     assert!(repo_markdown.contains("| `raw_pointer_read` | 1 |"));
     assert!(repo_markdown.contains(
-        "| ID | Class | Location | Operation family | Operation | Missing evidence | Route | Next action |"
+        "| ID | Class | Proof path | Location | Operation family | Operation | Missing evidence | Route | Next action |"
     ));
     assert!(repo_markdown.contains("src/lib.rs:8"));
     assert!(repo_markdown.contains("unsafe { ptr.cast::<Header>().read() }"));
@@ -3732,9 +3735,9 @@ fn outcome_compares_existing_json_snapshots_without_safety_claim() -> Result<(),
     assert!(markdown.contains("- `new`"));
     assert!(markdown.contains("new card: appears in the after snapshot"));
     assert!(markdown.contains("Top remaining gaps"));
-    assert!(
-        markdown.contains("| Card | Class | Priority | Operation family | Missing | Next action |")
-    );
+    assert!(markdown.contains(
+        "| Card | Class | Priority | Proof path | Operation family | Missing | Next action |"
+    ));
     assert!(markdown.contains("guard_missing"));
     assert!(markdown.contains("high"));
     assert!(markdown.contains("| 2 |"));
@@ -4449,7 +4452,7 @@ fn policy_report_is_advisory_and_counts_baseline_state() -> Result<(), Box<dyn E
     assert_eq!(report["mode"], "policy-report");
     assert_eq!(report["policy"], "advisory");
     assert_eq!(report["schema_version"], "0.1");
-    assert_eq!(report["limitations"].as_array().map(Vec::len), Some(4));
+    assert_eq!(report["limitations"].as_array().map(Vec::len), Some(5));
     assert!(
         json_str(
             &report["classification_explanations"]["new_gap"],
