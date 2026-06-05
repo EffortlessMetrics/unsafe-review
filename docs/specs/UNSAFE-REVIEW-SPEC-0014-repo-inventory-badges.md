@@ -30,6 +30,13 @@ ReviewCards or running witness tools. `--max-files` truncates the selected
 file list after deterministic ordering and applies to both dry-run listing and
 repo analysis input.
 
+`--list-files` supports human, JSON, and Markdown output. Its machine-readable
+artifact uses `schema_version = repo-file-list/v1`, records the selected files,
+the replayable scan scope, and summary booleans showing that analysis,
+ReviewCard creation, and witness execution did not run. ReviewCard-derived
+formats such as SARIF, comment-plan, LSP, and witness-plan are not valid
+`--list-files` outputs.
+
 `--timeout-seconds` bounds repo analysis wall time cooperatively. The command
 checks the timeout at repo status event boundaries during discovery and
 scanning. It does not interrupt a single file mid-scan, and it does not execute
@@ -41,11 +48,16 @@ It also updates a `<out>.status.json` sidecar while discovery and scanning run.
 The sidecar is operational scan status, not a second ReviewCard truth. It
 records `schema_version`, `phase`, `scan_scope`, `elapsed_ms`,
 `files_discovered`, `files_scanned`, `files_remaining`, `cards_found`,
-`last_path`, `completed`, `error`, `signal`, and `partial_path`. `scan_scope`
-records the root, include/exclude filters, gitignore/default-ignore posture,
-and `--max-files` value so an interrupted large-repo scan can be replayed from
-the sidecar. `--progress` prints stderr heartbeats from the same status stream,
-including `files_remaining`. On normal analysis, write, or rename errors, the command
+`last_path`, `completed`, `error`, `signal`, `partial_path`, and `operator`.
+The `operator` block records state, whether a partial report is available, the
+partial-report limitation, a next action, and the claim boundary. Partial
+reports are completed-file snapshots only; they are not complete repo posture,
+witness execution, proof, UB-free status, Miri-clean status, site-execution
+proof, or policy gating. `scan_scope` records the root, include/exclude
+filters, gitignore/default-ignore posture, and `--max-files` value so an
+interrupted large-repo scan can be replayed from the sidecar. `--progress`
+prints stderr heartbeats from the same status stream, including
+`files_remaining`. On normal analysis, write, or rename errors, the command
 marks status incomplete. A `--timeout-seconds` expiration is a normal incomplete
 scan with `phase = failed`, an explicit timeout `error`, and `signal = null`.
 If at least one file completed before the error or timeout, the command keeps
@@ -74,7 +86,9 @@ The `summary` object must include:
 
 ```text
 rust_files
+changed_files
 changed_rust_files
+changed_non_rust_files
 unsafe_sites
 cards
 open_actionable_gaps
@@ -86,6 +100,10 @@ requires_loom
 miri_unsupported
 static_unknown
 ```
+
+For diff-backed runs, `changed_files` and `changed_non_rust_files` summarize
+the input diff breadth so mixed-language PRs can show non-Rust scale without
+creating non-Rust ReviewCards or changing the Rust scan candidates.
 
 The `cards` array must reuse the canonical `ReviewCard` JSON shape. Repo JSON
 must not reclassify cards, invent a separate evidence model, or summarize raw
@@ -202,10 +220,11 @@ the current `unsafe-review badges` repo projection.
   from the same outcome cards.
 - Each outcome card includes a reason that explains the snapshot movement, such
   as a class change, missing-evidence count change, witness receipt strength
-  movement, new card, or resolved card.
+  movement, proof-path route movement, new card, or resolved card.
 - Outcome card states include saved ReviewCard operation expression, operation
-  family, and next action when present in the input snapshots, without changing
-  outcome classification.
+  family, proof path, and next action when present in the input snapshots.
+  Proof-path route movement may affect saved-snapshot outcome classification,
+  but remains reviewability posture only.
 - If evidence is not knowable statically, repo output and badges count the
   card state instead of overclaiming.
 

@@ -1,4 +1,8 @@
 use crate::domain::{Confidence, OperationFamily, Priority, ReviewCard, ReviewClass};
+use crate::output::REVIEWCARD_TRUST_BOUNDARY;
+use crate::output::confirmation::{
+    build_this_first, confirmation_step, hypothesis_to_confirm, minimal_repro_comment,
+};
 
 const PLAN_BOUNDARY: &str = "Plan boundary: artifact-only inline comment candidate; unsafe-review did not post this comment, run witnesses, or make a policy decision.";
 
@@ -133,7 +137,24 @@ pub(super) fn comment_body(card: &ReviewCard) -> String {
         card.operation.family.as_str()
     ));
     body.push_str(&format!("Missing evidence: {}\n\n", missing_summary(card)));
+    body.push_str(&format!("Proof path: `{}`.\n\n", card.proof_path.as_str()));
+    body.push_str(&format!(
+        "Hypothesis to confirm: {}.\n\n",
+        hypothesis_to_confirm(card)
+    ));
     body.push_str(&format!("Next action: {}\n\n", card.next_action.summary));
+    body.push_str(&format!(
+        "Build/run this first: {}\n\n",
+        build_this_first(card).summary
+    ));
+    body.push_str(&format!(
+        "Minimal repro cue: {}.\n\n",
+        minimal_repro_comment(card)
+    ));
+    body.push_str(&format!(
+        "Confirmation step: {}\n\n",
+        confirmation_step(card)
+    ));
     if let Some(route) = card.routes.first() {
         body.push_str(&format!(
             "Witness route: `{}` because {}.\n\n",
@@ -146,7 +167,8 @@ pub(super) fn comment_body(card: &ReviewCard) -> String {
     }
     body.push_str(PLAN_BOUNDARY);
     body.push_str("\n\n");
-    body.push_str("Trust boundary: static unsafe contract review only; not memory-safety proof, not UB-free status, and not a Miri result unless a witness receipt is attached.");
+    body.push_str("Trust boundary: ");
+    body.push_str(REVIEWCARD_TRUST_BOUNDARY);
     body
 }
 

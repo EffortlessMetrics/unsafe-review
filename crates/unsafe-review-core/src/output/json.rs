@@ -1,9 +1,9 @@
 use crate::api::{AnalyzeOutput, Scope, Summary};
 use crate::domain::{EvidenceState, ObligationEvidence, ReviewCard, WitnessRoute};
+use crate::output::REVIEWCARD_TRUST_BOUNDARY as TRUST_BOUNDARY;
+use crate::output::confirmation::ConfirmationCue;
 use crate::util::path_display;
 use serde::Serialize;
-
-const TRUST_BOUNDARY: &str = "Static unsafe contract review only; this is not a proof of memory safety, not UB-free status, and not a Miri result unless a witness receipt is attached.";
 
 pub(crate) fn render(output: &AnalyzeOutput) -> String {
     render_pretty(&JsonAnalyzeOutput::from(output))
@@ -48,7 +48,9 @@ impl<'a> From<&'a AnalyzeOutput> for JsonAnalyzeOutput<'a> {
 #[derive(Serialize)]
 struct JsonSummary {
     rust_files: usize,
+    changed_files: usize,
     changed_rust_files: usize,
+    changed_non_rust_files: usize,
     unsafe_sites: usize,
     cards: usize,
     open_actionable_gaps: usize,
@@ -65,7 +67,9 @@ impl From<&Summary> for JsonSummary {
     fn from(summary: &Summary) -> Self {
         Self {
             rust_files: summary.rust_files,
+            changed_files: summary.changed_files,
             changed_rust_files: summary.changed_rust_files,
+            changed_non_rust_files: summary.changed_non_rust_files,
             unsafe_sites: summary.unsafe_sites,
             cards: summary.cards,
             open_actionable_gaps: summary.open_actionable_gaps,
@@ -87,6 +91,7 @@ struct JsonCard<'a> {
     class_name: &'static str,
     priority: &'static str,
     confidence: &'static str,
+    proof_path: &'static str,
     site: JsonSite<'a>,
     operation: &'a str,
     operation_family: &'static str,
@@ -101,6 +106,7 @@ struct JsonCard<'a> {
     missing: Vec<&'a str>,
     next_action: &'a str,
     verify_commands: &'a [String],
+    confirmation_cue: ConfirmationCue,
 }
 
 impl<'a> From<&'a ReviewCard> for JsonCard<'a> {
@@ -110,6 +116,7 @@ impl<'a> From<&'a ReviewCard> for JsonCard<'a> {
             class_name: card.class.as_str(),
             priority: card.priority.as_str(),
             confidence: card.confidence.as_str(),
+            proof_path: card.proof_path.as_str(),
             site: JsonSite::from(card),
             operation: &card.operation.expression,
             operation_family: card.operation.family.as_str(),
@@ -136,6 +143,7 @@ impl<'a> From<&'a ReviewCard> for JsonCard<'a> {
                 .collect(),
             next_action: &card.next_action.summary,
             verify_commands: &card.next_action.verify_commands,
+            confirmation_cue: ConfirmationCue::from(card),
         }
     }
 }
@@ -313,7 +321,35 @@ mod tests {
         "nested_unsafe_operation_call_dedupe",
         "adjacent_unchanged_unsafe_fn_no_card",
         "js_buffer_reentry_sync_compression",
+        "js_buffer_reentry_async_helper_capture",
+        "js_buffer_reentry_node_fs_rab_scalar_write",
+        "js_buffer_reentry_node_fs_rab_encoded_write_file",
+        "js_buffer_reentry_raw_parts_materialization",
+        "js_buffer_reentry_coerce_after_as_array_buffer",
+        "js_buffer_reentry_vector_materialization",
+        "js_buffer_reentry_as_ptr_materialization",
+        "stable_byte_native_ffi_zstd_handoff",
+        "stable_byte_native_ffi_zstd_owned_copy_control",
+        "stable_byte_sab_borrowed_slice",
+        "stable_byte_sab_mysql_blob_rawslice",
+        "stable_byte_sab_snapshot_no_card",
+        "stable_byte_sab_mysql_blob_owned_copy_no_card",
         "js_buffer_reentry_options_before_capture_no_card",
+        "js_buffer_reentry_recapture_after_reentry_no_card",
+        "js_buffer_reentry_refetch_after_coercion_no_card",
+        "js_buffer_reentry_vector_refetch_after_coercion_no_card",
+        "js_buffer_reentry_as_ptr_refetch_after_coercion_no_card",
+        "js_buffer_reentry_async_options_before_capture_no_card",
+        "js_buffer_reentry_async_recapture_after_reentry_no_card",
+        "js_buffer_reentry_node_fs_rab_scalar_write_scheduled_before_capture_no_card",
+        "js_buffer_reentry_node_fs_rab_encoded_write_scheduled_before_capture_no_card",
+        "js_buffer_reentry_node_fs_rab_encoded_write_recapture_after_dispatch_no_card",
+        "panic_from_safe_js_direct_try_from_expect",
+        "panic_from_safe_js_bound_try_from_unwrap",
+        "panic_from_safe_js_observed_only_not_guard",
+        "panic_from_safe_js_inline_max_no_card",
+        "panic_from_safe_js_return_guard_no_card",
+        "panic_from_safe_js_non_js_signed_no_card",
         "split_unsafe_block",
         "raw_pointer_deref",
         "raw_pointer_read_unaligned",
@@ -782,7 +818,7 @@ mod tests {
             value["trust_boundary"]
                 .as_str()
                 .unwrap_or("")
-                .contains("not a Miri result")
+                .contains("not a site-execution claim")
         );
         assert_eq!(value["summary"]["cards"], 1);
         assert_eq!(value["cards"][0]["class"], "guard_missing");
@@ -803,6 +839,22 @@ mod tests {
                 .contains("Add or expose the local guard")
         );
         assert!(value["cards"][0]["verify_commands"].is_array());
+        assert_eq!(
+            value["cards"][0]["confirmation_cue"]["build_this_first"]["kind"],
+            "verify_command"
+        );
+        assert!(
+            value["cards"][0]["confirmation_cue"]["hypothesis_to_confirm"]
+                .as_str()
+                .unwrap_or("")
+                .contains("confirm with external evidence")
+        );
+        assert!(
+            value["cards"][0]["confirmation_cue"]["minimal_repro"]["limitation"]
+                .as_str()
+                .unwrap_or("")
+                .contains("unsafe-review did not run this command")
+        );
         Ok(())
     }
 

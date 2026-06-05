@@ -470,6 +470,8 @@ required_core_fixtures = [
   "ffi_call_sanitizer_route",
   "ffi_qualified_call_sanitizer_route",
   "ffi_libc_call_sanitizer_route",
+  "stable_byte_native_ffi_zstd_handoff",
+  "stable_byte_native_ffi_zstd_owned_copy_control",
   "ffi_non_libc_wrapper_call_not_route",
   "ffi_local_libc_module_call_not_route",
   "safe_code_no_cards",
@@ -526,7 +528,33 @@ required_core_fixtures = [
   "nested_unsafe_operation_call_dedupe",
   "adjacent_unchanged_unsafe_fn_no_card",
   "js_buffer_reentry_sync_compression",
+  "js_buffer_reentry_async_helper_capture",
+  "js_buffer_reentry_node_fs_rab_scalar_write",
+  "js_buffer_reentry_node_fs_rab_encoded_write_file",
+  "js_buffer_reentry_raw_parts_materialization",
+  "js_buffer_reentry_coerce_after_as_array_buffer",
+  "js_buffer_reentry_vector_materialization",
+  "js_buffer_reentry_as_ptr_materialization",
   "js_buffer_reentry_options_before_capture_no_card",
+  "js_buffer_reentry_recapture_after_reentry_no_card",
+  "js_buffer_reentry_refetch_after_coercion_no_card",
+  "js_buffer_reentry_vector_refetch_after_coercion_no_card",
+  "js_buffer_reentry_as_ptr_refetch_after_coercion_no_card",
+  "js_buffer_reentry_async_options_before_capture_no_card",
+  "js_buffer_reentry_async_recapture_after_reentry_no_card",
+  "js_buffer_reentry_node_fs_rab_scalar_write_scheduled_before_capture_no_card",
+  "js_buffer_reentry_node_fs_rab_encoded_write_scheduled_before_capture_no_card",
+  "js_buffer_reentry_node_fs_rab_encoded_write_recapture_after_dispatch_no_card",
+  "stable_byte_sab_borrowed_slice",
+  "stable_byte_sab_mysql_blob_rawslice",
+  "stable_byte_sab_snapshot_no_card",
+  "stable_byte_sab_mysql_blob_owned_copy_no_card",
+  "panic_from_safe_js_direct_try_from_expect",
+  "panic_from_safe_js_bound_try_from_unwrap",
+  "panic_from_safe_js_observed_only_not_guard",
+  "panic_from_safe_js_inline_max_no_card",
+  "panic_from_safe_js_return_guard_no_card",
+  "panic_from_safe_js_non_js_signed_no_card",
   "comment_alignment_not_guard",
 ]
 
@@ -5211,6 +5239,26 @@ expected_operation_family = "ffi"
 expected_hazard = "ffi_abi"
 
 [[cases]]
+fixture = "stable_byte_native_ffi_zstd_handoff"
+kind = "positive"
+claim = "JS-backed byte capture before a zstd-style native FFI pointer/length read emits one advisory native-FFI stable-byte ReviewCard while retaining the generic FFI card"
+support_tier = "Stable-byte native FFI heuristic"
+expected_cards = 2
+expected_class = "guard_missing"
+expected_operation_family = "stable_byte_source_native_ffi_read"
+expected_hazard = "stable_byte_source"
+
+[[cases]]
+fixture = "stable_byte_native_ffi_zstd_owned_copy_control"
+kind = "false_positive_control"
+claim = "native-FFI stable-byte heuristic does not emit a stable-byte ReviewCard after JS-backed bytes are copied into owned storage before the zstd-style FFI handoff"
+support_tier = "Stable-byte native FFI heuristic"
+expected_cards = 1
+expected_class = "miri_unsupported"
+expected_operation_family = "ffi"
+expected_hazard = "ffi_abi"
+
+[[cases]]
 fixture = "ffi_non_libc_wrapper_call_not_route"
 kind = "false_positive_control"
 claim = "local Rust wrapper calls whose module names only resemble libc remain generic unsafe function calls even when a same-named extern declaration exists"
@@ -5741,15 +5789,233 @@ kind = "positive"
 claim = "JS-backed buffer descriptor capture before options getter reentry and later byte materialization emits one advisory ReviewCard"
 support_tier = "JS-backed buffer reentry heuristic"
 expected_cards = 1
-expected_class = "contract_missing"
-expected_operation_family = "unsafe_fn_call"
-expected_hazard = "unknown"
+expected_class = "guard_missing"
+expected_operation_family = "stable_byte_source_getter_reentry"
+expected_hazard = "stable_byte_source"
+
+[[cases]]
+fixture = "js_buffer_reentry_async_helper_capture"
+kind = "positive"
+claim = "RAB-backed buffer descriptor capture through an async helper before callback reentry and later byte materialization emits one advisory ReviewCard"
+support_tier = "Stable-byte RAB async heuristic"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "stable_byte_source_rab_async"
+expected_hazard = "stable_byte_source"
+
+[[cases]]
+fixture = "js_buffer_reentry_node_fs_rab_scalar_write"
+kind = "positive"
+claim = "node:fs-style RAB-backed scalar write capture before async worker dispatch and worker-side byte materialization emits one advisory RAB async ReviewCard"
+support_tier = "Stable-byte RAB async heuristic"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "stable_byte_source_rab_async"
+expected_hazard = "stable_byte_source"
+
+[[cases]]
+fixture = "js_buffer_reentry_node_fs_rab_encoded_write_file"
+kind = "positive"
+claim = "node:fs-style RAB-backed encoded writeFile capture through the encoding-aware async helper before async worker dispatch and worker-side slice materialization emits one advisory RAB async ReviewCard"
+support_tier = "Stable-byte RAB async heuristic"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "stable_byte_source_rab_async"
+expected_hazard = "stable_byte_source"
+
+[[cases]]
+fixture = "js_buffer_reentry_raw_parts_materialization"
+kind = "positive"
+claim = "JS-backed buffer descriptor capture before options getter reentry and direct raw-parts materialization emits an advisory JS reentry ReviewCard while retaining the raw-parts operation card"
+support_tier = "JS-backed buffer reentry heuristic"
+expected_cards = 2
+expected_class = "guard_missing"
+expected_operation_family = "stable_byte_source_getter_reentry"
+expected_hazard = "stable_byte_source"
+
+[[cases]]
+fixture = "js_buffer_reentry_coerce_after_as_array_buffer"
+kind = "positive"
+claim = "JS ArrayBuffer descriptor capture before user-JS coercion and later stale byte materialization emits one advisory getter-reentry ReviewCard"
+support_tier = "JS-backed buffer reentry heuristic"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "stable_byte_source_getter_reentry"
+expected_hazard = "stable_byte_source"
+
+[[cases]]
+fixture = "js_buffer_reentry_vector_materialization"
+kind = "positive"
+claim = "JS ArrayBuffer descriptor capture before user-JS coercion and later vector pointer materialization emits one advisory getter-reentry ReviewCard"
+support_tier = "JS-backed buffer reentry heuristic"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "stable_byte_source_getter_reentry"
+expected_hazard = "stable_byte_source"
+
+[[cases]]
+fixture = "js_buffer_reentry_as_ptr_materialization"
+kind = "positive"
+claim = "JS ArrayBuffer descriptor capture before user-JS coercion and later as_ptr materialization emits one advisory getter-reentry ReviewCard"
+support_tier = "JS-backed buffer reentry heuristic"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "stable_byte_source_getter_reentry"
+expected_hazard = "stable_byte_source"
 
 [[cases]]
 fixture = "js_buffer_reentry_options_before_capture_no_card"
 kind = "false_positive_control"
 claim = "JS-backed buffer reentry heuristic does not emit a ReviewCard when options are parsed before descriptor capture"
 support_tier = "JS-backed buffer reentry heuristic"
+expected_cards = 0
+
+[[cases]]
+fixture = "js_buffer_reentry_recapture_after_reentry_no_card"
+kind = "false_positive_control"
+claim = "JS-backed buffer reentry heuristic does not emit a ReviewCard when a descriptor is recaptured and materialized after reentry"
+support_tier = "JS-backed buffer reentry heuristic"
+expected_cards = 0
+
+[[cases]]
+fixture = "js_buffer_reentry_refetch_after_coercion_no_card"
+kind = "false_positive_control"
+claim = "JS-backed buffer reentry heuristic does not emit a ReviewCard when an ArrayBuffer descriptor is re-fetched and materialized after coercion"
+support_tier = "JS-backed buffer reentry heuristic"
+expected_cards = 0
+
+[[cases]]
+fixture = "js_buffer_reentry_vector_refetch_after_coercion_no_card"
+kind = "false_positive_control"
+claim = "JS-backed buffer reentry heuristic does not emit a ReviewCard when an ArrayBuffer descriptor is re-fetched after coercion and then materialized through vector"
+support_tier = "JS-backed buffer reentry heuristic"
+expected_cards = 0
+
+[[cases]]
+fixture = "js_buffer_reentry_as_ptr_refetch_after_coercion_no_card"
+kind = "false_positive_control"
+claim = "JS-backed buffer reentry heuristic does not emit a ReviewCard when an ArrayBuffer descriptor is re-fetched after coercion and then materialized through as_ptr"
+support_tier = "JS-backed buffer reentry heuristic"
+expected_cards = 0
+
+[[cases]]
+fixture = "js_buffer_reentry_async_options_before_capture_no_card"
+kind = "false_positive_control"
+claim = "JS-backed buffer reentry heuristic does not emit a ReviewCard when callback reentry occurs before async descriptor capture"
+support_tier = "JS-backed buffer reentry heuristic"
+expected_cards = 0
+
+[[cases]]
+fixture = "js_buffer_reentry_async_recapture_after_reentry_no_card"
+kind = "false_positive_control"
+claim = "JS-backed buffer reentry heuristic does not emit a ReviewCard when an async descriptor is recaptured and materialized after reentry"
+support_tier = "JS-backed buffer reentry heuristic"
+expected_cards = 0
+
+[[cases]]
+fixture = "js_buffer_reentry_node_fs_rab_scalar_write_scheduled_before_capture_no_card"
+kind = "false_positive_control"
+claim = "Stable-byte RAB async heuristic does not emit a ReviewCard when async scheduling occurs before scalar write input capture"
+support_tier = "Stable-byte RAB async heuristic"
+expected_cards = 0
+
+[[cases]]
+fixture = "js_buffer_reentry_node_fs_rab_encoded_write_scheduled_before_capture_no_card"
+kind = "false_positive_control"
+claim = "Stable-byte RAB async heuristic does not emit a ReviewCard when async scheduling occurs before encoded write input capture through the encoding-aware helper"
+support_tier = "Stable-byte RAB async heuristic"
+expected_cards = 0
+
+[[cases]]
+fixture = "js_buffer_reentry_node_fs_rab_encoded_write_recapture_after_dispatch_no_card"
+kind = "false_positive_control"
+claim = "Stable-byte RAB async heuristic does not emit a ReviewCard when encoded write input is recaptured into a fresh container after async dispatch"
+support_tier = "Stable-byte RAB async heuristic"
+expected_cards = 0
+
+[[cases]]
+fixture = "stable_byte_sab_borrowed_slice"
+kind = "positive"
+claim = "SharedArrayBuffer-backed bytes reaching borrowed raw-parts materialization emit one advisory SAB stable-byte ReviewCard while retaining the raw-parts operation card"
+support_tier = "Stable-byte SAB race heuristic"
+expected_cards = 2
+expected_class = "guard_missing"
+expected_operation_family = "stable_byte_source_sab_race"
+expected_hazard = "stable_byte_source"
+
+[[cases]]
+fixture = "stable_byte_sab_mysql_blob_rawslice"
+kind = "positive"
+claim = "MySQL BLOB SharedArrayBuffer bytes reaching temporary raw-slice storage emit one advisory SAB stable-byte ReviewCard while retaining the raw-parts operation card"
+support_tier = "Stable-byte SAB race heuristic"
+expected_cards = 2
+expected_class = "guard_missing"
+expected_operation_family = "stable_byte_source_sab_race"
+expected_hazard = "stable_byte_source"
+
+[[cases]]
+fixture = "stable_byte_sab_snapshot_no_card"
+kind = "false_positive_control"
+claim = "Stable-byte SAB race heuristic does not emit a ReviewCard when shared bytes are copied into owned storage before decode"
+support_tier = "Stable-byte SAB race heuristic"
+expected_cards = 0
+
+[[cases]]
+fixture = "stable_byte_sab_mysql_blob_owned_copy_no_card"
+kind = "false_positive_control"
+claim = "Stable-byte SAB race heuristic does not emit a ReviewCard when MySQL BLOB shared bytes are copied into owned storage before packet data storage"
+support_tier = "Stable-byte SAB race heuristic"
+expected_cards = 0
+
+[[cases]]
+fixture = "panic_from_safe_js_direct_try_from_expect"
+kind = "positive"
+claim = "JS-derived signed value converted directly through panicking unsigned try_from emits a panic-safety guard-missing ReviewCard"
+support_tier = "Panic-from-safe-JS heuristic"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "panic_from_safe_js"
+expected_hazard = "panic_safety"
+
+[[cases]]
+fixture = "panic_from_safe_js_bound_try_from_unwrap"
+kind = "positive"
+claim = "JS-derived signed binding converted through panicking unsigned try_from emits a panic-safety guard-missing ReviewCard"
+support_tier = "Panic-from-safe-JS heuristic"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "panic_from_safe_js"
+expected_hazard = "panic_safety"
+
+[[cases]]
+fixture = "panic_from_safe_js_observed_only_not_guard"
+kind = "false_positive_control"
+claim = "JS-derived signed binding with an observed-only negative branch still emits a panic-safety guard-missing ReviewCard"
+support_tier = "Panic-from-safe-JS heuristic"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "panic_from_safe_js"
+expected_hazard = "panic_safety"
+
+[[cases]]
+fixture = "panic_from_safe_js_inline_max_no_card"
+kind = "false_positive_control"
+claim = "JS-derived signed value clamped inline before unsigned try_from stays a no-card control"
+support_tier = "Panic-from-safe-JS heuristic"
+expected_cards = 0
+
+[[cases]]
+fixture = "panic_from_safe_js_return_guard_no_card"
+kind = "false_positive_control"
+claim = "JS-derived signed binding with an explicit negative-value error return stays a no-card control"
+support_tier = "Panic-from-safe-JS heuristic"
+expected_cards = 0
+
+[[cases]]
+fixture = "panic_from_safe_js_non_js_signed_no_card"
+kind = "false_positive_control"
+claim = "Non-JS signed Rust locals converted through panicking unsigned try_from stay outside the panic-from-safe-JS heuristic"
+support_tier = "Panic-from-safe-JS heuristic"
 expected_cards = 0
 
 [[cases]]

@@ -1,6 +1,6 @@
 # Objective audit
 
-Date: 2026-05-30
+Date: 2026-06-04
 Status: active objective partially achieved; fixture-pinned calibration rail is
 installed; dogfood-backed evidence remains experimental; continue broader
 calibration before support-tier or policy promotion
@@ -9,12 +9,15 @@ This audit maps the current product objective to concrete repo evidence. It is a
 status artifact, not a support-tier promotion. `docs/status/SUPPORT_TIERS.md`
 remains the authority for public claim wording.
 
-Latest evidence-hardening notes include `get_unchecked` same-receiver
-`get(index)` probe guards, including if-let, let-else, and match Some-arm forms, plus
-false-positive controls for bare predicate observations, closed positive
-branches, comment-only early-return text, and checked indexes or checked
-receivers reassigned before the unchecked access. `NonNull::new_unchecked`
-nullability evidence now also
+Latest evidence-hardening notes include the `get_unchecked` applicability
+closeout: same-receiver and same-index len guards plus `get(index)` probes are
+fixture-pinned across direct, early-return, if-let, let-else, and match forms,
+while wrong receiver/slice/path, bare observations, closed branches, comments,
+post-checks, and reassigned, compound-mutated, or shadowed checked targets
+remain review gaps. This maps to the public fix recipe as a fixture evidence
+rail only; it is not a machine-applicable repair, arbitrary `get_unchecked`
+soundness, dogfood-outcome, support-promotion, proof, or policy-readiness claim.
+`NonNull::new_unchecked` nullability evidence now also
 recognizes same-pointer if-let and let-else `NonNull::new` guards while
 rejecting stale reassigned pointers.
 Raw pointer alignment evidence now also has fixture-backed controls for
@@ -57,8 +60,8 @@ The active calibration rail is now recorded in
 `docs/specs/UNSAFE-REVIEW-SPEC-0026-accuracy-validation-and-calibration.md`,
 `.unsafe-review-spec/lanes/accuracy-calibration/implementation-plan.md`,
 `policy/accuracy-calibration.toml`, and
-`docs/accuracy/CALIBRATION_REPORT.md`. The checked report currently records 35
-fixture-pinned claims, 526 calibration cases, 35 label ledgers, and 539 label
+`docs/accuracy/CALIBRATION_REPORT.md`. The checked report currently records 39
+fixture-pinned claims, 554 calibration cases, 39 label ledgers, and 567 label
 samples. It records zero dogfood-measured, labeled-calibrated, or
 policy-eligible claims. That is intentional: the current report is a
 claim-scoped fixture-pinned proof index, not a global precision/recall result
@@ -115,6 +118,7 @@ witnesses by default.
 | Copy range evidence stays operation-specific | `copy_nonoverlapping_slice_range_guard`, `copy_nonoverlapping_slice_range_conjunctive_assert_guard`, `copy_nonoverlapping_slice_range_early_return_guard`, `copy_nonoverlapping_slice_range_disjunctive_early_return_guard`, `copy_nonoverlapping_slice_range_open_branch_guard`, `copy_nonoverlapping_slice_range_conjunctive_open_branch_guard`, `ptr_copy_slice_range_guard`, `ptr_copy_slice_range_conjunctive_assert_guard`, `ptr_copy_slice_range_early_return_guard`, `ptr_copy_slice_range_disjunctive_early_return_guard`, `ptr_copy_slice_range_open_branch_guard`, and `ptr_copy_slice_range_conjunctive_open_branch_guard` prove same-call source/destination slice length assertions, conjunctive assertions, early returns, disjunctive invalid-range early returns, or open branches discharge only `valid-range`, while `copy_nonoverlapping_slice_range_src_only_not_guard`, `copy_nonoverlapping_slice_range_dst_only_not_guard`, `ptr_copy_slice_range_src_only_not_guard`, `ptr_copy_slice_range_dst_only_not_guard`, `copy_nonoverlapping_slice_range_closed_branch_not_guard`, `ptr_copy_slice_range_closed_branch_not_guard`, `copy_nonoverlapping_slice_range_or_branch_not_guard`, `ptr_copy_slice_range_or_branch_not_guard`, `copy_nonoverlapping_slice_range_disjunctive_early_return_block_comment_not_guard`, `ptr_copy_slice_range_disjunctive_early_return_block_comment_not_guard`, `copy_nonoverlapping_slice_range_disjunctive_early_return_reassigned_count_not_guard`, `copy_nonoverlapping_slice_range_disjunctive_early_return_reassigned_src_not_guard`, `copy_nonoverlapping_slice_range_disjunctive_early_return_reassigned_dst_not_guard`, `ptr_copy_slice_range_disjunctive_early_return_reassigned_count_not_guard`, `ptr_copy_slice_range_disjunctive_early_return_reassigned_src_not_guard`, `ptr_copy_slice_range_disjunctive_early_return_reassigned_dst_not_guard`, `copy_nonoverlapping_slice_range_open_branch_reassigned_count_not_guard`, `copy_nonoverlapping_slice_range_open_branch_reassigned_src_not_guard`, `copy_nonoverlapping_slice_range_open_branch_reassigned_dst_not_guard`, `ptr_copy_slice_range_open_branch_reassigned_count_not_guard`, `ptr_copy_slice_range_open_branch_reassigned_src_not_guard`, `ptr_copy_slice_range_open_branch_reassigned_dst_not_guard`, `copy_nonoverlapping_slice_range_reassigned_count_not_guard`, `copy_nonoverlapping_slice_range_reassigned_src_not_guard`, `copy_nonoverlapping_slice_range_shadowed_src_path_not_guard`, `copy_nonoverlapping_slice_range_shadowed_dst_path_not_guard`, `ptr_copy_slice_range_reassigned_count_not_guard`, `ptr_copy_slice_range_reassigned_src_not_guard`, `ptr_copy_slice_range_reassigned_src_path_not_guard`, `ptr_copy_slice_range_reassigned_dst_not_guard`, `ptr_copy_slice_range_reassigned_dst_path_not_guard`, `copy_nonoverlapping_other_len_not_guard`, and `ptr_copy_other_len_not_guard` prove one-sided, closed-branch, disjunctive positive-branch, comment-only early-return text, stale, or unrelated slice length assertions do not discharge copy source/destination range obligations | Experimental | Copy range evidence beyond same-call slice length guards remains limited |
 | Stable-first implementation; no mandatory MIR or `rustc_private` | Workspace uses stable source parsing and `ra_ap_syntax`; support tiers mark MIR/nightly facts as deferred | Met for current lanes | Optional adapters still need ADR before promotion |
 | Advisory PR artifact loop | Handoff `2026-05-18-advisory-pr-artifacts-v0.2.md` records cards JSON, PR summary, SARIF, and comment-plan artifact proof plus in-workflow artifact verification; current comment-plan checks cover capped planned comments, duplicate planned-entry rejection, selected-card next actions, and not-selected card reasons | Experimental/dogfoodable | No automatic comments or blocking policy by design; trusted poster architecture remains docs-only and future |
+| Maintainer workbench loop from first review kit to outcome | `docs/FIND_AND_FIX_UB.md` links the public command loop from `doctor` and `first-pr` through `pr-summary.md`, `explain`, `context --json`, `witness-plan.md`, `receipt-audit.md`, rerun, and `outcome`; `docs/explanation/fix-recipes.md` and `docs/explanation/agent-repair-workflow.md` cover operation-family repair shapes and bounded agent handoff rules; `docs/ci/UB_RISK_REVIEW_CI.md` covers artifact-only CI publication; `xtask` checks the required workflow, fix-recipe, and agent-workflow doc shapes | Experimental | Documentation and artifact validation only; no witness execution, source edits, agent execution, automatic comments, proof, site execution, or policy gate |
 | Saved IDE projection | Handoff `2026-05-18-lsp-agent-projection-v0.3.md` records `--format lsp` saved diagnostics, hovers, status data, copy-command data, and related-test open-command data | Experimental | No live LSP server or editor extension; static related-test mentions do not prove site execution |
 | Bounded LLM packet | Handoff `2026-05-18-lsp-agent-projection-v0.3.md` records `context <card-id> --json` bounded packet proof | Experimental | Copy-only; no automated repair or source edits |
 | Repo posture and badges count open review gaps, not raw unsafe or safety status | Handoff `2026-05-18-repo-policy-v0.4.md` and support tiers cover repo JSON, badge JSON, saved-snapshot outcome comparison, and first capped `memchr` outcome dogfood | Experimental | Not release-grade posture or calibrated governance |

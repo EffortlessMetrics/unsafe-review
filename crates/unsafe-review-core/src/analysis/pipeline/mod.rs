@@ -80,6 +80,8 @@ fn analyze_with_receipts(
     let started = Instant::now();
     let repo_mode = matches!(input.scope, Scope::Repo) || matches!(input.mode, AnalysisMode::Repo);
     let diff_index = load_diff_index(&input.diff)?;
+    let changed_files = diff_index.changed_file_count();
+    let changed_non_rust_files = diff_index.changed_non_rust_file_count();
     emit_repo_status(
         &mut events,
         repo_status(RepoScanPhase::Discovering, &started, 0, 0, 0, None, false),
@@ -123,6 +125,11 @@ fn analyze_with_receipts(
             .filter(|path| diff_index.contains_file(path))
             .cloned()
             .collect::<Vec<_>>()
+    };
+    let changed_rust_files = if repo_mode || diff_index.is_empty() {
+        candidate_files.len()
+    } else {
+        diff_index.changed_rust_file_count()
     };
 
     let mut cards = Vec::new();
@@ -189,7 +196,9 @@ fn analyze_with_receipts(
             Some(partial_analyze_output(
                 &input,
                 all_rust_files.len(),
-                candidate_files.len(),
+                changed_files,
+                changed_rust_files,
+                changed_non_rust_files,
                 &cards,
             )),
         )?;
@@ -199,7 +208,13 @@ fn analyze_with_receipts(
         }
     }
     sort_cards(&mut cards);
-    let summary = summarize(all_rust_files.len(), candidate_files.len(), &cards);
+    let summary = summarize(
+        all_rust_files.len(),
+        changed_files,
+        changed_rust_files,
+        changed_non_rust_files,
+        &cards,
+    );
     let output = AnalyzeOutput {
         schema_version: "0.1".to_string(),
         tool: "unsafe-review".to_string(),
@@ -239,12 +254,20 @@ fn sort_cards(cards: &mut [ReviewCard]) {
 fn partial_analyze_output(
     input: &AnalyzeInput,
     rust_files: usize,
+    changed_files: usize,
     changed_rust_files: usize,
+    changed_non_rust_files: usize,
     cards: &[ReviewCard],
 ) -> AnalyzeOutput {
     let mut cards = cards.to_vec();
     sort_cards(&mut cards);
-    let summary = summarize(rust_files, changed_rust_files, &cards);
+    let summary = summarize(
+        rust_files,
+        changed_files,
+        changed_rust_files,
+        changed_non_rust_files,
+        &cards,
+    );
     AnalyzeOutput {
         schema_version: "0.1".to_string(),
         tool: "unsafe-review".to_string(),
@@ -304,8 +327,8 @@ mod tests {
     use super::*;
     use crate::api::{AnalysisMode, DiffSource, DiscoveryOptions, PolicyMode, Scope};
     use crate::domain::{
-        CardId, HazardKind, OperationFamily, Priority, ReviewCard, ReviewClass, UnsafeSiteKind,
-        WitnessKind, WitnessRoute,
+        CardId, HazardKind, OperationFamily, Priority, ProofPath, ReviewCard, ReviewClass,
+        UnsafeSiteKind, WitnessKind, WitnessRoute,
     };
     use std::fs;
     use std::path::Path;
@@ -1023,6 +1046,75 @@ mod tests {
             PathBuf::from("src/lib.rs")
         );
         assert_eq!(output.cards.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn diff_summary_reports_mixed_language_scope_without_scanning_non_rust_files()
+    -> Result<(), String> {
+        let root = unique_temp_dir("unsafe-review-mixed-diff-summary")?;
+        fs::create_dir_all(root.join("src")).map_err(|err| format!("create src failed: {err}"))?;
+        fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"mixed-diff-summary-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+        )
+        .map_err(|err| format!("write Cargo.toml failed: {err}"))?;
+        fs::write(root.join("src/lib.rs"), "pub unsafe fn source_root() {}\n")
+            .map_err(|err| format!("write src file failed: {err}"))?;
+        let diff = r#"diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,0 +1,1 @@
++pub unsafe fn source_root() {}
+diff --git a/src/js/buffer.ts b/src/js/buffer.ts
+--- a/src/js/buffer.ts
++++ b/src/js/buffer.ts
+@@ -1,0 +1,1 @@
++export const changed = true;
+diff --git a/src/binding.cpp b/src/binding.cpp
+--- a/src/binding.cpp
++++ b/src/binding.cpp
+@@ -1,0 +1,1 @@
++void changed() {}
+"#;
+
+        let mut partials = Vec::new();
+        let output = analyze_with_discovery_and_repo_events(
+            AnalyzeInput {
+                root: root.clone(),
+                scope: Scope::Diff,
+                diff: DiffSource::Text(diff.to_string()),
+                mode: AnalysisMode::Draft,
+                policy: PolicyMode::Advisory,
+                include_unchanged_tests: true,
+                max_cards: None,
+            },
+            DiscoveryOptions::default(),
+            |event| {
+                if let Some(partial) = &event.partial_output
+                    && event.status.phase == RepoScanPhase::Scanning
+                    && event.status.files_scanned == 1
+                {
+                    partials.push(partial.clone());
+                }
+                Ok(())
+            },
+        )?;
+
+        fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        assert_eq!(output.summary.rust_files, 1);
+        assert_eq!(output.summary.changed_files, 3);
+        assert_eq!(output.summary.changed_rust_files, 1);
+        assert_eq!(output.summary.changed_non_rust_files, 2);
+        assert_eq!(output.cards.len(), 1);
+
+        let first_partial = partials
+            .first()
+            .ok_or_else(|| "expected a partial snapshot after the first file".to_string())?;
+        assert_eq!(first_partial.summary.changed_files, 3);
+        assert_eq!(first_partial.summary.changed_rust_files, 1);
+        assert_eq!(first_partial.summary.changed_non_rust_files, 2);
+        assert_eq!(first_partial.cards.len(), 1);
         Ok(())
     }
 
@@ -2564,13 +2656,17 @@ fn native_compress(input: &StringOrBuffer, level: i32) -> Result<usize, ()> {
         )?;
         let card = single_card("js_buffer_reentry", &output)?;
 
-        assert_eq!(card.operation.family, OperationFamily::UnsafeFnCall);
-        assert_eq!(card.class, ReviewClass::ContractMissing);
+        assert_eq!(
+            card.operation.family,
+            OperationFamily::StableByteSourceGetterReentry
+        );
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert_eq!(card.proof_path, ProofPath::ObservableRedGreen);
         assert_eq!(card.site.owner.as_deref(), Some("zstd_sync"));
         assert!(
             card.operation
                 .expression
-                .contains("JS-backed buffer descriptor")
+                .contains("stable-byte-source-getter-reentry")
         );
         assert!(
             card.operation
@@ -2582,7 +2678,7 @@ fn native_compress(input: &StringOrBuffer, level: i32) -> Result<usize, ()> {
         assert!(
             card.next_action
                 .summary
-                .contains("parse options before capture")
+                .contains("observable-red-green proof path")
         );
         assert!(
             card.routes
@@ -2643,22 +2739,255 @@ pub fn zstd_sync(
         let output = fixture_output("js_buffer_reentry_sync_compression")?;
         let card = single_card("js_buffer_reentry_sync_compression", &output)?;
 
-        assert_eq!(card.operation.family, OperationFamily::UnsafeFnCall);
-        assert_eq!(card.class, ReviewClass::ContractMissing);
+        assert_eq!(
+            card.operation.family,
+            OperationFamily::StableByteSourceGetterReentry
+        );
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert_eq!(card.proof_path, ProofPath::ObservableRedGreen);
         assert_eq!(card.site.owner.as_deref(), Some("zstd_sync"));
-        assert!(card.hazards.contains(&HazardKind::Unknown));
+        assert!(card.hazards.contains(&HazardKind::StableByteSource));
         assert!(
             card.operation
                 .expression
-                .contains("JS-backed buffer descriptor")
+                .contains("stable-byte-source-getter-reentry")
         );
         assert!(
             card.next_action
                 .summary
-                .contains("parse options before capture")
+                .contains("observable-red-green proof path")
         );
         assert!(
             card.routes
+                .iter()
+                .any(|route| route.kind == WitnessKind::HumanDeepReview)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn js_buffer_reentry_fixture_pins_async_helper_capture_card() -> Result<(), String> {
+        let output = fixture_output("js_buffer_reentry_async_helper_capture")?;
+        let card = single_card("js_buffer_reentry_async_helper_capture", &output)?;
+
+        assert_eq!(
+            card.operation.family,
+            OperationFamily::StableByteSourceRabAsync
+        );
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert_eq!(card.proof_path, ProofPath::ObservableRedGreen);
+        assert_eq!(card.site.owner.as_deref(), Some("async_rab_input"));
+        assert!(
+            card.operation
+                .expression
+                .contains("stable-byte-source-rab-async")
+        );
+        assert!(
+            card.operation
+                .expression
+                .contains("from_js_maybe_async_into")
+        );
+        assert!(card.operation.expression.contains("callback.call"));
+        assert!(card.operation.expression.contains("finish_async_input"));
+        assert!(
+            card.next_action
+                .summary
+                .contains("observable-red-green proof path")
+        );
+        assert!(
+            card.routes
+                .iter()
+                .any(|route| route.kind == WitnessKind::HumanDeepReview)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn js_buffer_reentry_fixture_pins_node_fs_rab_scalar_write_card() -> Result<(), String> {
+        let output = fixture_output("js_buffer_reentry_node_fs_rab_scalar_write")?;
+        let card = single_card("js_buffer_reentry_node_fs_rab_scalar_write", &output)?;
+
+        assert_eq!(
+            card.operation.family,
+            OperationFamily::StableByteSourceRabAsync
+        );
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert_eq!(card.proof_path, ProofPath::ObservableRedGreen);
+        assert_eq!(card.site.owner.as_deref(), Some("node_fs_rab_scalar_write"));
+        assert_eq!(card.site.location.line, 36);
+        assert!(
+            card.operation
+                .expression
+                .contains("stable-byte-source-rab-async")
+        );
+        assert!(card.operation.expression.contains("dispatch_async_worker"));
+        assert!(card.operation.expression.contains("write_scalar_worker"));
+        assert!(
+            card.next_action
+                .summary
+                .contains("observable-red-green proof path")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn js_buffer_reentry_fixture_pins_node_fs_rab_encoded_write_card() -> Result<(), String> {
+        let output = fixture_output("js_buffer_reentry_node_fs_rab_encoded_write_file")?;
+        let card = single_card("js_buffer_reentry_node_fs_rab_encoded_write_file", &output)?;
+
+        assert_eq!(
+            card.operation.family,
+            OperationFamily::StableByteSourceRabAsync
+        );
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert_eq!(card.proof_path, ProofPath::ObservableRedGreen);
+        assert_eq!(
+            card.site.owner.as_deref(),
+            Some("node_fs_rab_encoded_write_file")
+        );
+        assert_eq!(card.site.location.line, 42);
+        assert!(
+            card.operation
+                .expression
+                .contains("stable-byte-source-rab-async")
+        );
+        assert!(
+            card.operation
+                .expression
+                .contains("from_js_with_encoding_maybe_async_into")
+        );
+        assert!(card.operation.expression.contains("dispatch_async_worker"));
+        assert!(card.operation.expression.contains("write_file_worker"));
+        Ok(())
+    }
+
+    #[test]
+    fn js_buffer_reentry_fixture_pins_raw_parts_materialization_card() -> Result<(), String> {
+        let output = fixture_output("js_buffer_reentry_raw_parts_materialization")?;
+        assert_eq!(output.cards.len(), 2);
+        let raw_parts_card = output
+            .cards
+            .iter()
+            .find(|card| card.operation.family == OperationFamily::SliceFromRawParts)
+            .ok_or_else(|| "fixture should retain the raw-parts operation card".to_string())?;
+        let reentry_card = output
+            .cards
+            .iter()
+            .find(|card| card.operation.family == OperationFamily::StableByteSourceGetterReentry)
+            .ok_or_else(|| "fixture should emit the JS-backed reentry card".to_string())?;
+
+        assert_eq!(raw_parts_card.site.owner.as_deref(), Some("zstd_raw_parts"));
+        assert_eq!(reentry_card.site.owner.as_deref(), Some("zstd_raw_parts"));
+        assert_eq!(raw_parts_card.site.location.line, 32);
+        assert_eq!(reentry_card.site.location.line, 32);
+        assert!(
+            raw_parts_card
+                .operation
+                .expression
+                .contains("core::slice::from_raw_parts")
+        );
+        assert!(
+            reentry_card
+                .operation
+                .expression
+                .contains("stable-byte-source-getter-reentry")
+        );
+        assert!(
+            reentry_card
+                .operation
+                .expression
+                .contains("core::slice::from_raw_parts")
+        );
+        assert!(reentry_card.operation.expression.contains("options.get"));
+        assert!(
+            reentry_card
+                .next_action
+                .summary
+                .contains("observable-red-green proof path")
+        );
+        assert!(
+            reentry_card
+                .routes
+                .iter()
+                .any(|route| route.kind == WitnessKind::HumanDeepReview)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn js_buffer_reentry_fixture_pins_as_array_buffer_coercion_card() -> Result<(), String> {
+        let output = fixture_output("js_buffer_reentry_coerce_after_as_array_buffer")?;
+        let card = single_card("js_buffer_reentry_coerce_after_as_array_buffer", &output)?;
+
+        assert_eq!(
+            card.operation.family,
+            OperationFamily::StableByteSourceGetterReentry
+        );
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert_eq!(card.proof_path, ProofPath::ObservableRedGreen);
+        assert_eq!(card.site.owner.as_deref(), Some("index_of_line"));
+        assert_eq!(card.site.location.line, 30);
+        assert!(card.hazards.contains(&HazardKind::StableByteSource));
+        assert!(
+            card.operation
+                .expression
+                .contains("stable-byte-source-getter-reentry")
+        );
+        assert!(card.operation.expression.contains("as_array_buffer"));
+        assert!(card.operation.expression.contains("coerce_to_int64"));
+        assert!(card.operation.expression.contains("byte_slice"));
+        assert!(
+            card.next_action
+                .summary
+                .contains("observable-red-green proof path")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn js_buffer_reentry_fixture_pins_vector_materialization_card() -> Result<(), String> {
+        let output = fixture_output("js_buffer_reentry_vector_materialization")?;
+        let vector_card = single_card("js_buffer_reentry_vector_materialization", &output)?;
+
+        assert_eq!(
+            vector_card.operation.family,
+            OperationFamily::StableByteSourceGetterReentry
+        );
+        assert_eq!(vector_card.class, ReviewClass::GuardMissing);
+        assert_eq!(vector_card.proof_path, ProofPath::ObservableRedGreen);
+        assert_eq!(vector_card.site.owner.as_deref(), Some("vector_route"));
+        assert_eq!(vector_card.site.location.line, 30);
+        assert!(vector_card.operation.expression.contains("vector"));
+        assert!(vector_card.operation.expression.contains("as_array_buffer"));
+        assert!(vector_card.operation.expression.contains("coerce_to_int64"));
+        assert!(
+            vector_card
+                .routes
+                .iter()
+                .any(|route| route.kind == WitnessKind::HumanDeepReview)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn js_buffer_reentry_fixture_pins_as_ptr_materialization_card() -> Result<(), String> {
+        let output = fixture_output("js_buffer_reentry_as_ptr_materialization")?;
+        let as_ptr_card = single_card("js_buffer_reentry_as_ptr_materialization", &output)?;
+
+        assert_eq!(
+            as_ptr_card.operation.family,
+            OperationFamily::StableByteSourceGetterReentry
+        );
+        assert_eq!(as_ptr_card.class, ReviewClass::GuardMissing);
+        assert_eq!(as_ptr_card.proof_path, ProofPath::ObservableRedGreen);
+        assert_eq!(as_ptr_card.site.owner.as_deref(), Some("pointer_route"));
+        assert_eq!(as_ptr_card.site.location.line, 30);
+        assert!(as_ptr_card.operation.expression.contains("as_ptr"));
+        assert!(as_ptr_card.operation.expression.contains("as_array_buffer"));
+        assert!(as_ptr_card.operation.expression.contains("coerce_to_int64"));
+        assert!(
+            as_ptr_card
+                .routes
                 .iter()
                 .any(|route| route.kind == WitnessKind::HumanDeepReview)
         );
@@ -2672,6 +3001,541 @@ pub fn zstd_sync(
         assert!(
             output.cards.is_empty(),
             "parsing options before descriptor capture should stay a no-card control"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn js_buffer_reentry_fixture_keeps_async_options_before_capture_no_card() -> Result<(), String>
+    {
+        let output = fixture_output("js_buffer_reentry_async_options_before_capture_no_card")?;
+
+        assert!(
+            output.cards.is_empty(),
+            "callback reentry before async descriptor capture should stay a no-card control"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn js_buffer_reentry_fixture_keeps_node_fs_schedule_before_capture_no_card()
+    -> Result<(), String> {
+        let output = fixture_output(
+            "js_buffer_reentry_node_fs_rab_scalar_write_scheduled_before_capture_no_card",
+        )?;
+
+        assert!(
+            output.cards.is_empty(),
+            "async scheduling before scalar write capture should stay a no-card control"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn js_buffer_reentry_fixture_keeps_node_fs_encoded_recapture_after_dispatch_no_card()
+    -> Result<(), String> {
+        let output = fixture_output(
+            "js_buffer_reentry_node_fs_rab_encoded_write_recapture_after_dispatch_no_card",
+        )?;
+
+        assert!(
+            output.cards.is_empty(),
+            "encoded write input recaptured after dispatch should stay a no-card control"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn js_buffer_reentry_fixture_keeps_recapture_after_reentry_no_card() -> Result<(), String> {
+        let output = fixture_output("js_buffer_reentry_recapture_after_reentry_no_card")?;
+
+        assert!(
+            output.cards.is_empty(),
+            "materialization of a descriptor recaptured after reentry should stay a no-card control"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn js_buffer_reentry_fixture_keeps_refetch_after_coercion_no_card() -> Result<(), String> {
+        let output = fixture_output("js_buffer_reentry_refetch_after_coercion_no_card")?;
+
+        assert!(
+            output.cards.is_empty(),
+            "re-fetching an ArrayBuffer descriptor after coercion should stay a no-card control"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn js_buffer_reentry_fixture_keeps_vector_refetch_after_coercion_no_card() -> Result<(), String>
+    {
+        let output = fixture_output("js_buffer_reentry_vector_refetch_after_coercion_no_card")?;
+
+        assert!(
+            output.cards.is_empty(),
+            "vector materialization of a re-fetched descriptor after coercion should stay a no-card control"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn js_buffer_reentry_fixture_keeps_as_ptr_refetch_after_coercion_no_card() -> Result<(), String>
+    {
+        let output = fixture_output("js_buffer_reentry_as_ptr_refetch_after_coercion_no_card")?;
+
+        assert!(
+            output.cards.is_empty(),
+            "as_ptr materialization of a re-fetched descriptor after coercion should stay a no-card control"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn js_buffer_reentry_fixture_keeps_async_recapture_after_reentry_no_card() -> Result<(), String>
+    {
+        let output = fixture_output("js_buffer_reentry_async_recapture_after_reentry_no_card")?;
+
+        assert!(
+            output.cards.is_empty(),
+            "materialization of an async descriptor recaptured after reentry should stay a no-card control"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn stable_byte_sab_fixture_pins_borrowed_slice_card() -> Result<(), String> {
+        let output = fixture_output("stable_byte_sab_borrowed_slice")?;
+        assert_eq!(output.cards.len(), 2);
+        let raw_parts_card = output
+            .cards
+            .iter()
+            .find(|card| card.operation.family == OperationFamily::SliceFromRawParts)
+            .ok_or_else(|| "fixture should retain the raw-parts operation card".to_string())?;
+        let stable_byte_card = output
+            .cards
+            .iter()
+            .find(|card| card.operation.family == OperationFamily::StableByteSourceSabRace)
+            .ok_or_else(|| "fixture should emit the SAB stable-byte card".to_string())?;
+
+        assert_eq!(
+            raw_parts_card.site.owner.as_deref(),
+            Some("textdecoder_sab_decode")
+        );
+        assert_eq!(
+            stable_byte_card.site.owner.as_deref(),
+            Some("textdecoder_sab_decode")
+        );
+        assert_eq!(raw_parts_card.site.location.line, 23);
+        assert_eq!(stable_byte_card.site.location.line, 23);
+        assert_eq!(stable_byte_card.class, ReviewClass::GuardMissing);
+        assert_eq!(stable_byte_card.proof_path, ProofPath::MutationMiriModel);
+        assert!(
+            stable_byte_card
+                .operation
+                .expression
+                .contains("stable-byte-source-sab-race")
+        );
+        assert!(
+            stable_byte_card
+                .next_action
+                .summary
+                .contains("mutation-plus-Miri/model proof path")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn stable_byte_sab_fixture_pins_mysql_blob_rawslice_card() -> Result<(), String> {
+        let output = fixture_output("stable_byte_sab_mysql_blob_rawslice")?;
+        assert_eq!(output.cards.len(), 2);
+        let raw_parts_card = output
+            .cards
+            .iter()
+            .find(|card| card.operation.family == OperationFamily::SliceFromRawParts)
+            .ok_or_else(|| "fixture should retain the raw-parts operation card".to_string())?;
+        let stable_byte_card = output
+            .cards
+            .iter()
+            .find(|card| card.operation.family == OperationFamily::StableByteSourceSabRace)
+            .ok_or_else(|| "fixture should emit the SAB stable-byte card".to_string())?;
+
+        assert_eq!(
+            raw_parts_card.site.owner.as_deref(),
+            Some("mysql_blob_sab_bind")
+        );
+        assert_eq!(
+            stable_byte_card.site.owner.as_deref(),
+            Some("mysql_blob_sab_bind")
+        );
+        assert_eq!(raw_parts_card.site.location.line, 30);
+        assert_eq!(stable_byte_card.site.location.line, 30);
+        assert_eq!(stable_byte_card.class, ReviewClass::GuardMissing);
+        assert_eq!(stable_byte_card.proof_path, ProofPath::MutationMiriModel);
+        assert!(
+            stable_byte_card
+                .operation
+                .expression
+                .contains("stable-byte-source-sab-race")
+        );
+        assert!(
+            stable_byte_card
+                .next_action
+                .summary
+                .contains("mutation-plus-Miri/model proof path")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn stable_byte_sab_fixture_keeps_snapshot_no_card() -> Result<(), String> {
+        let output = fixture_output("stable_byte_sab_snapshot_no_card")?;
+
+        assert!(
+            output.cards.is_empty(),
+            "copying shared bytes into owned storage should stay a no-card control"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn stable_byte_sab_fixture_keeps_mysql_blob_owned_copy_no_card() -> Result<(), String> {
+        let output = fixture_output("stable_byte_sab_mysql_blob_owned_copy_no_card")?;
+
+        assert!(
+            output.cards.is_empty(),
+            "copying MySQL BLOB shared bytes into owned storage should stay a no-card control"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn stable_byte_native_ffi_after_js_capture_emits_advisory_card() -> Result<(), String> {
+        let output = temp_source_output(
+            "unsafe-review-stable-byte-native-ffi",
+            r#"
+pub struct JSValue;
+pub struct GlobalObject;
+pub struct JSArrayBufferView {
+    ptr: *const u8,
+    len: usize,
+}
+
+impl JSArrayBufferView {
+    pub fn from_js(_global: &mut GlobalObject, _value: JSValue) -> Result<Self, ()> {
+        Ok(Self {
+            ptr: core::ptr::null(),
+            len: 0,
+        })
+    }
+
+    pub fn as_ptr(&self) -> *const u8 {
+        self.ptr
+    }
+
+    pub fn len(&self) -> usize {
+        self.len
+    }
+}
+
+unsafe extern "C" {
+    fn zstd_compress_into(
+        src: *const u8,
+        src_len: usize,
+        dst: *mut u8,
+        dst_len: usize,
+    ) -> usize;
+}
+
+pub fn zstd_overlap_handoff(
+    global: &mut GlobalObject,
+    value: JSValue,
+    output: &mut [u8],
+) -> Result<usize, ()> {
+    let input = JSArrayBufferView::from_js(global, value)?;
+    Ok(unsafe {
+        zstd_compress_into(input.as_ptr(), input.len(), output.as_mut_ptr(), output.len())
+    })
+}
+"#,
+        )?;
+
+        let stable_byte_card = output
+            .cards
+            .iter()
+            .find(|card| card.operation.family == OperationFamily::StableByteSourceNativeFfiRead)
+            .ok_or_else(|| "native FFI stable-byte card should be emitted".to_string())?;
+
+        assert_eq!(stable_byte_card.class, ReviewClass::GuardMissing);
+        assert_eq!(stable_byte_card.proof_path, ProofPath::ObservableRedGreen);
+        assert_eq!(
+            stable_byte_card.site.owner.as_deref(),
+            Some("zstd_overlap_handoff")
+        );
+        assert!(
+            stable_byte_card
+                .operation
+                .expression
+                .contains("stable-byte-source-native-ffi-read")
+        );
+        assert!(
+            stable_byte_card
+                .operation
+                .expression
+                .contains("JSArrayBufferView::from_js")
+        );
+        assert!(
+            stable_byte_card
+                .operation
+                .expression
+                .contains("zstd_compress_into")
+        );
+        assert!(
+            stable_byte_card
+                .hazards
+                .contains(&HazardKind::StableByteSource)
+        );
+        assert!(
+            stable_byte_card
+                .next_action
+                .summary
+                .contains("observable-red-green proof path")
+        );
+        assert!(
+            stable_byte_card
+                .routes
+                .iter()
+                .any(|route| route.kind == WitnessKind::HumanDeepReview)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn stable_byte_native_ffi_fixture_pins_zstd_handoff_card() -> Result<(), String> {
+        let output = fixture_output("stable_byte_native_ffi_zstd_handoff")?;
+        assert_eq!(output.cards.len(), 2);
+        let ffi_card = output
+            .cards
+            .iter()
+            .find(|card| card.operation.family == OperationFamily::Ffi)
+            .ok_or_else(|| "fixture should retain the generic FFI card".to_string())?;
+        let stable_byte_card = output
+            .cards
+            .iter()
+            .find(|card| card.operation.family == OperationFamily::StableByteSourceNativeFfiRead)
+            .ok_or_else(|| "fixture should emit the native FFI stable-byte card".to_string())?;
+
+        assert_eq!(ffi_card.site.owner.as_deref(), Some("zstd_overlap_handoff"));
+        assert_eq!(
+            stable_byte_card.site.owner.as_deref(),
+            Some("zstd_overlap_handoff")
+        );
+        assert_eq!(stable_byte_card.class, ReviewClass::GuardMissing);
+        assert_eq!(stable_byte_card.proof_path, ProofPath::ObservableRedGreen);
+        assert!(
+            stable_byte_card
+                .operation
+                .expression
+                .contains("stable-byte-source-native-ffi-read")
+        );
+        assert!(
+            stable_byte_card
+                .next_action
+                .summary
+                .contains("native FFI aperture")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn stable_byte_native_ffi_fixture_keeps_owned_copy_control_to_ffi_only() -> Result<(), String> {
+        let output = fixture_output("stable_byte_native_ffi_zstd_owned_copy_control")?;
+        assert_eq!(output.cards.len(), 1);
+        assert!(
+            output.cards.iter().all(|card| card.operation.family
+                != OperationFamily::StableByteSourceNativeFfiRead),
+            "owned copy before native FFI should not trigger the native FFI stable-byte heuristic"
+        );
+        assert!(
+            output
+                .cards
+                .iter()
+                .any(|card| card.operation.family == OperationFamily::Ffi),
+            "owned-copy control should still retain the generic FFI seam card"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn panic_from_safe_js_direct_try_from_expect_emits_guard_missing_card() -> Result<(), String> {
+        let output = temp_source_output(
+            "unsafe-review-panic-from-safe-js-direct",
+            r#"
+pub struct JSValue;
+
+impl JSValue {
+    pub fn to_int32(&self) -> i32 {
+        0
+    }
+}
+
+pub fn read_at(arguments: &[JSValue]) -> Result<usize, ()> {
+    let offset = usize::try_from(arguments[0].to_int32()).expect("offset");
+    Ok(offset)
+}
+"#,
+        )?;
+        let card = single_card("panic_from_safe_js_direct", &output)?;
+
+        assert_eq!(card.operation.family, OperationFamily::PanicFromSafeJs);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert_eq!(card.site.owner.as_deref(), Some("read_at"));
+        assert!(card.hazards.contains(&HazardKind::PanicSafety));
+        assert!(!obligation_discharge_present(card, "panic-guard"));
+        assert!(
+            card.missing
+                .iter()
+                .all(|missing| missing.kind != "contract"),
+            "panic-from-safe-JS cards should ask for guards, not unsafe API safety docs"
+        );
+        assert_eq!(card.proof_path, crate::domain::ProofPath::HumanReviewOnly);
+        assert!(
+            card.next_action.summary.contains("sign/range guard"),
+            "next action should steer toward a safe JS boundary"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn panic_from_safe_js_bound_try_from_unwrap_emits_guard_missing_card() -> Result<(), String> {
+        let output = temp_source_output(
+            "unsafe-review-panic-from-safe-js-bound",
+            r#"
+pub struct JSValue;
+
+impl JSValue {
+    pub fn to_int32(&self) -> i32 {
+        0
+    }
+}
+
+pub fn resize(arguments: &[JSValue]) -> Result<usize, ()> {
+    let new_len = arguments[0].to_int32();
+    let new_len = usize::try_from(new_len).unwrap();
+    Ok(new_len)
+}
+"#,
+        )?;
+        let card = single_card("panic_from_safe_js_bound", &output)?;
+
+        assert_eq!(card.operation.family, OperationFamily::PanicFromSafeJs);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert_eq!(card.site.owner.as_deref(), Some("resize"));
+        assert!(card.operation.expression.contains("new_len"));
+        Ok(())
+    }
+
+    #[test]
+    fn panic_from_safe_js_return_guard_emits_no_card() -> Result<(), String> {
+        let output = temp_source_output(
+            "unsafe-review-panic-from-safe-js-return-guard",
+            r#"
+pub struct JSValue;
+
+impl JSValue {
+    pub fn to_int32(&self) -> i32 {
+        0
+    }
+}
+
+pub fn read_at(arguments: &[JSValue]) -> Result<usize, ()> {
+    let offset = arguments[0].to_int32();
+    if offset < 0 { return Err(()); }
+    let offset = usize::try_from(offset).expect("offset");
+    Ok(offset)
+}
+"#,
+        )?;
+
+        assert!(
+            output.cards.is_empty(),
+            "an explicit negative-value error return should satisfy the local panic guard"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn panic_from_safe_js_inline_max_guard_emits_no_card() -> Result<(), String> {
+        let output = temp_source_output(
+            "unsafe-review-panic-from-safe-js-inline-max",
+            r#"
+pub struct JSValue;
+
+impl JSValue {
+    pub fn to_int32(&self) -> i32 {
+        0
+    }
+}
+
+pub fn read_at(arguments: &[JSValue]) -> Result<usize, ()> {
+    let offset = usize::try_from(arguments[0].to_int32().max(0)).expect("offset");
+    Ok(offset)
+}
+"#,
+        )?;
+
+        assert!(
+            output.cards.is_empty(),
+            "inline nonnegative clamping should stay a no-card control"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn panic_from_safe_js_observed_negative_branch_still_emits_card() -> Result<(), String> {
+        let output = temp_source_output(
+            "unsafe-review-panic-from-safe-js-observed-only",
+            r#"
+pub struct JSValue;
+
+impl JSValue {
+    pub fn to_int32(&self) -> i32 {
+        0
+    }
+}
+
+pub fn read_at(arguments: &[JSValue]) -> Result<usize, ()> {
+    let offset = arguments[0].to_int32();
+    if offset < 0 { record_negative(offset); }
+    let offset = usize::try_from(offset).expect("offset");
+    Ok(offset)
+}
+
+fn record_negative(_offset: i32) {}
+"#,
+        )?;
+        let card = single_card("panic_from_safe_js_observed_only", &output)?;
+
+        assert_eq!(card.operation.family, OperationFamily::PanicFromSafeJs);
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        Ok(())
+    }
+
+    #[test]
+    fn panic_from_safe_js_non_js_signed_local_emits_no_card() -> Result<(), String> {
+        let output = temp_source_output(
+            "unsafe-review-panic-from-safe-js-non-js",
+            r#"
+pub fn read_at(offset: i32) -> Result<usize, ()> {
+    let offset = usize::try_from(offset).expect("offset");
+    Ok(offset)
+}
+"#,
+        )?;
+
+        assert!(
+            output.cards.is_empty(),
+            "ordinary signed Rust locals are outside the JS-derived safe-caller heuristic"
         );
         Ok(())
     }

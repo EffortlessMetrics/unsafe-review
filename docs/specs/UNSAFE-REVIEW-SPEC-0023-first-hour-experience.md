@@ -14,6 +14,7 @@ Linked specs:
 Linked docs:
 - [docs/FIRST_USE.md](../FIRST_USE.md)
 - [docs/CLI.md](../CLI.md)
+- [docs/FIND_AND_FIX_UB.md](../FIND_AND_FIX_UB.md)
 - [docs/editor/saved-lsp-json.md](../editor/saved-lsp-json.md)
 - [docs/explanation/explain-examples.md](../explanation/explain-examples.md)
 - [docs/explanation/agent-packet-examples.md](../explanation/agent-packet-examples.md)
@@ -50,6 +51,7 @@ Optional next steps:
 ```bash
 unsafe-review context <card-id> --json
 unsafe-review receipt template <card-id> --tool miri
+unsafe-review receipt audit --base origin/main --format markdown --out target/unsafe-review/receipt-audit.md
 unsafe-review outcome --before before.json --after after.json
 ```
 
@@ -68,6 +70,12 @@ what evidence is missing
 what to ask the author to add
 which witness route is worth running
 what unsafe-review is not claiming
+```
+
+The public repair loop is:
+
+```text
+first-pr -> pr-summary -> explain -> context -> witness-plan -> receipt audit -> outcome
 ```
 
 Every first-hour surface must project from `ReviewCard`. No first-hour surface
@@ -101,6 +109,11 @@ may reclassify findings independently or invent a second analyzer truth.
 
 - acts as the reviewer front panel
 - names actionable cards and next evidence requests
+- frames the top card as a hypothesis, names the build/run-this-first cue, and
+  includes a minimal repro cue whose limitation states unsafe-review did not run
+  it or observe runtime behavior
+- repeats the build/run-this-first and minimal repro cues for each card in the
+  witness plan so every finding has a concrete first confirmation recipe
 - preserves no-proof/no-UB-free/no-Miri-clean wording
 
 `explain`:
@@ -144,8 +157,9 @@ cargo run --locked -p xtask -- check-pr
 - Missing evidence is obligation-specific, not a generic "unsafe issue" label.
 - No-card output says no changed unsafe-review gaps were found and preserves the
   no-proof limitation.
-- A bounded agent packet has a card-scoped task, allowed repairs, do-not-do
-  rules, verify commands, stop condition, and trust boundary.
+- A bounded agent packet has a card-scoped task, allowed repairs, confirmation
+  cue with minimal repro recipe, do-not-do rules, verify commands, stop
+  condition, and trust boundary.
 - Saved LSP data is read-only and does not imply a live editor is required.
 
 ## 8. Promotion rule

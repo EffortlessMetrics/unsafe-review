@@ -207,20 +207,14 @@ fn matched_target(
     candidate: Option<&ReceiptAuditManualCandidate>,
 ) -> String {
     if let Some(candidate) = candidate {
-        return format!(
-            "`manual_candidate` / `{}` / source `manual` / `{}` / {}; next: {}; boundary: {}",
-            candidate.operation_family,
-            markdown_cell(&candidate.operation),
-            markdown_cell(&candidate.location),
-            markdown_cell(&candidate.next_action),
-            markdown_cell(&candidate.trust_boundary)
-        );
+        return manual_candidate_target(candidate);
     }
     if let Some(card) = card {
         return format!(
-            "`{}` / `{}` / source `{}` / `{}` / {} missing; next: {}",
+            "`{}` / `{}` / proof path `{}` / source `{}` / `{}` / {} missing; next: {}",
             card.class_name,
             card.operation_family,
+            card.proof_path,
             card.source,
             markdown_cell(&card.operation),
             card.missing_count,
@@ -228,6 +222,70 @@ fn matched_target(
         );
     }
     "-".to_string()
+}
+
+fn manual_candidate_target(candidate: &ReceiptAuditManualCandidate) -> String {
+    let mut parts = vec![
+        format!(
+            "`manual_candidate` / `{}` / source `manual` / `{}` / {}",
+            candidate.operation_family,
+            markdown_cell(&candidate.operation),
+            markdown_cell(&candidate.location)
+        ),
+        format!("route: {}", markdown_cell(&candidate.safe_caller)),
+        format!("invariant: {}", markdown_cell(&candidate.invariant)),
+    ];
+    if let Some(proof_mode) = &candidate.proof_mode {
+        parts.push(format!(
+            "proof mode: `{}` / system Bun `{}`",
+            markdown_cell(&proof_mode.kind),
+            markdown_cell(&proof_mode.system_bun_expected)
+        ));
+    }
+    if let Some(oracle_map) = &candidate.oracle_map {
+        parts.push(format!(
+            "oracle: `{}` `{}` / `{}` / confidence `{}` / limitation {}",
+            markdown_cell(&oracle_map.oracle_language),
+            markdown_cell(&oracle_map.oracle_path.display().to_string()),
+            markdown_cell(&oracle_map.oracle_kind),
+            markdown_cell(&oracle_map.coverage_confidence),
+            markdown_cell(&oracle_map.limitation)
+        ));
+    }
+    if let Some(fix_boundary) = &candidate.fix_boundary {
+        parts.push(format!("fix boundary: {}", markdown_cell(fix_boundary)));
+    }
+    if let Some(pr_aperture) = &candidate.pr_aperture {
+        parts.push(format!("PR aperture: {}", markdown_cell(pr_aperture)));
+    }
+    if let Some(fix) = candidate.fix_options.first() {
+        parts.push(format!("first fix: {}", markdown_cell(fix)));
+    }
+    if let Some(target) = candidate.test_targets.first() {
+        parts.push(format!("first test: `{}`", markdown_cell(target)));
+    }
+    if let Some(note) = candidate.do_not_touch.first() {
+        parts.push(format!("first do-not-touch: {}", markdown_cell(note)));
+    }
+    if let Some(evidence) = candidate.evidence.first() {
+        let mut evidence_parts = vec![format!("first evidence: `{}`", evidence.kind)];
+        if let Some(path) = &evidence.path {
+            evidence_parts.push(format!("path `{}`", markdown_cell(path)));
+        }
+        if let Some(command) = &evidence.command {
+            evidence_parts.push(format!("command `{}`", markdown_cell(command)));
+        }
+        if let Some(limitation) = &evidence.limitation {
+            evidence_parts.push(format!("limitation {}", markdown_cell(limitation)));
+        }
+        parts.push(evidence_parts.join(", "));
+    }
+    parts.push(format!("next: {}", markdown_cell(&candidate.next_action)));
+    parts.push(format!(
+        "boundary: {}",
+        markdown_cell(&candidate.trust_boundary)
+    ));
+    parts.join("; ")
 }
 
 fn markdown_cell(value: &str) -> String {
@@ -315,6 +373,7 @@ mod tests {
                         class_name: "guard_missing".to_string(),
                         operation: "unsafe { ptr.cast::<Header>().read() }".to_string(),
                         operation_family: "raw_pointer_read".to_string(),
+                        proof_path: "source_route_only".to_string(),
                         missing_count: 2,
                         next_action: "Add or expose guard | witness\nThen attach receipt"
                             .to_string(),
@@ -355,6 +414,7 @@ mod tests {
                         class_name: "guard_missing".to_string(),
                         operation: "unsafe { ptr.cast::<Header>().read() }".to_string(),
                         operation_family: "raw_pointer_read".to_string(),
+                        proof_path: "source_route_only".to_string(),
                         missing_count: 2,
                         next_action: "Add or expose guard | witness\nThen attach receipt"
                             .to_string(),
@@ -413,7 +473,9 @@ mod tests {
             markdown.contains("receipt tool `loom` is not one of this card's routed witness tools")
         );
         assert!(markdown.contains("receipt strength `configured` is weaker"));
-        assert!(markdown.contains("`guard_missing` / `raw_pointer_read` / source `analyzer`"));
+        assert!(markdown.contains(
+            "`guard_missing` / `raw_pointer_read` / proof path `source_route_only` / source `analyzer`"
+        ));
         assert!(markdown.contains("unsafe { ptr.cast::<Header>().read() }"));
         assert!(markdown.contains("Add or expose guard \\| witness Then attach receipt"));
         assert!(markdown.contains("## Limitations"));
@@ -427,24 +489,25 @@ mod tests {
 
     #[test]
     fn markdown_projects_manual_candidate_receipt_targets() {
-        let report = ReceiptAuditReport {
-            schema_version: "0.1".to_string(),
-            tool: "unsafe-review".to_string(),
-            mode: "receipt-audit".to_string(),
-            policy: "advisory".to_string(),
-            audit_date: "2026-05-26".to_string(),
-            trust_boundary: "Static witness receipt audit only; does not execute witnesses."
-                .to_string(),
-            limitations: vec![
+        let report =
+            ReceiptAuditReport {
+                schema_version: "0.1".to_string(),
+                tool: "unsafe-review".to_string(),
+                mode: "receipt-audit".to_string(),
+                policy: "advisory".to_string(),
+                audit_date: "2026-05-26".to_string(),
+                trust_boundary: "Static witness receipt audit only; does not execute witnesses."
+                    .to_string(),
+                limitations: vec![
                 "manual candidate receipts attach external evidence to that manual candidate only"
                     .to_string(),
             ],
-            summary: ReceiptAuditSummary {
-                receipts: 1,
-                matched: 1,
-                ..ReceiptAuditSummary::default()
-            },
-            receipts: vec![ReceiptAuditEntry {
+                summary: ReceiptAuditSummary {
+                    receipts: 1,
+                    matched: 1,
+                    ..ReceiptAuditSummary::default()
+                },
+                receipts: vec![ReceiptAuditEntry {
                 path: ".unsafe-review/receipts/manual.json".to_string(),
                 card_id: Some("R4R2-S001".to_string()),
                 receipt_tool: Some("human-deep-review".to_string()),
@@ -465,11 +528,40 @@ mod tests {
                     location: "src/runtime/webcore/TextDecoder.rs:237".to_string(),
                     operation: "core::slice::from_raw_parts".to_string(),
                     operation_family: "raw_pointer_read".to_string(),
+                    safe_caller: "TextDecoder.decode SharedArrayBuffer route".to_string(),
+                    invariant: "&[u8] memory must not be concurrently mutated".to_string(),
+                    oracle_map: None,
+                    proof_mode: None,
+                    fix_boundary: None,
+                    pr_aperture: None,
+                    evidence: vec![crate::analysis::receipts::ReceiptAuditManualCandidateEvidence {
+                        kind: "runtime_witness".to_string(),
+                        path: Some(
+                            "target/unsafe-scout/textdecoder-shared-race-route.out".to_string(),
+                        ),
+                        summary: Some("Bun route reaches shared backing bytes".to_string()),
+                        command: Some(
+                            "bun test test/js/webcore/textdecoder-sharedarraybuffer.test.ts"
+                                .to_string(),
+                        ),
+                        limitation: Some(
+                            "runtime route evidence only; not memory-safety proof".to_string(),
+                        ),
+                    }],
+                    fix_options: vec![
+                        "Copy SharedArrayBuffer-backed bytes into stable owned storage".to_string(),
+                    ],
+                    test_targets: vec![
+                        "test/js/webcore/textdecoder-sharedarraybuffer.test.ts".to_string(),
+                    ],
+                    do_not_touch: vec![
+                        "Do not rewrite unrelated TextDecoder encoding paths".to_string(),
+                    ],
                     next_action:
                         "Review the manual candidate and preserve receipts as external evidence"
                             .to_string(),
                     trust_boundary:
-                        "manual candidate; not analyzer-discovered; not proof of repository safety"
+                        "manual candidate; not analyzer-discovered; not witness execution; not proof of memory safety; not UB-free status; not Miri-clean status; not site-execution proof; not policy readiness"
                             .to_string(),
                     source: "manual".to_string(),
                     manual_candidate: true,
@@ -477,13 +569,27 @@ mod tests {
                 }),
                 route_tools: Vec::new(),
             }],
-        };
+            };
 
         let markdown = render_markdown(&report);
 
         assert!(markdown.contains("manual_candidate, matched"));
         assert!(markdown.contains("`manual_candidate` / `raw_pointer_read` / source `manual`"));
         assert!(markdown.contains("src/runtime/webcore/TextDecoder.rs:237"));
+        assert!(markdown.contains("route: TextDecoder.decode SharedArrayBuffer route"));
+        assert!(markdown.contains("invariant: &[u8] memory must not be concurrently mutated"));
+        assert!(markdown.contains("first fix: Copy SharedArrayBuffer-backed bytes"));
+        assert!(
+            markdown
+                .contains("first test: `test/js/webcore/textdecoder-sharedarraybuffer.test.ts`")
+        );
+        assert!(
+            markdown.contains(
+                "first do-not-touch: Do not rewrite unrelated TextDecoder encoding paths"
+            )
+        );
+        assert!(markdown.contains("first evidence: `runtime_witness`"));
+        assert!(markdown.contains("runtime route evidence only; not memory-safety proof"));
         assert!(markdown.contains("manual candidate; not analyzer-discovered"));
         assert!(!markdown.contains("imports_witness_evidence"));
     }

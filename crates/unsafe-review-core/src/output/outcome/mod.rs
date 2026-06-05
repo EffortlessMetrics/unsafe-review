@@ -1,4 +1,7 @@
-use crate::candidate::{MANUAL_CANDIDATE_SCHEMA_VERSION, ManualCandidate};
+use crate::candidate::{
+    MANUAL_CANDIDATE_INDEX_SCHEMA_VERSION, MANUAL_CANDIDATE_SCHEMA_VERSION, ManualCandidate,
+    ManualCandidateEvidence, ManualCandidateOracleMap, ManualCandidateProofMode,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -8,7 +11,7 @@ use crate::output::{NO_CHANGED_GAPS_LIMITATION, NO_CHANGED_GAPS_MESSAGE};
 mod markdown;
 mod witness;
 
-const TRUST_BOUNDARY: &str = "Static unsafe contract review outcome only; this compares existing ReviewCard snapshots and manual candidate snapshots, not memory-safety proof, not UB-free status, and not witness execution.";
+const TRUST_BOUNDARY: &str = "Static unsafe contract review outcome only; this compares existing ReviewCard snapshots and manual candidate snapshots, not memory-safety proof, not UB-free status, not Miri-clean status, not site-execution evidence, not calibrated precision/recall, not policy-ready status, and not witness execution.";
 const MAX_REVIEWER_MOVEMENT_REASONS: usize = 5;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -78,6 +81,8 @@ pub struct OutcomeRemainingGap {
     pub priority: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub operation_family: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proof_path: Option<String>,
     pub missing_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_action: Option<String>,
@@ -118,16 +123,51 @@ pub struct OutcomeCardState {
     pub operation: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub operation_family: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proof_path: Option<String>,
     pub priority: String,
     pub missing_count: usize,
     pub witness: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub evidence_count: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub safe_caller: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub invariant: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oracle_map: Option<ManualCandidateOracleMap>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proof_mode: Option<ManualCandidateProofMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fix_boundary: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pr_aperture: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<OutcomeManualCandidateEvidence>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub fix_options: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub test_targets: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub do_not_touch: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub next_action: Option<String>,
     pub missing: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trust_boundary: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct OutcomeManualCandidateEvidence {
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limitation: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -170,6 +210,8 @@ struct SnapshotCard {
     operation: Option<String>,
     #[serde(default)]
     operation_family: Option<String>,
+    #[serde(default)]
+    proof_path: Option<String>,
     priority: String,
     #[serde(default)]
     witness: String,
@@ -181,6 +223,26 @@ struct SnapshotCard {
     trust_boundary: Option<String>,
     #[serde(default)]
     evidence_count: Option<usize>,
+    #[serde(skip)]
+    safe_caller: Option<String>,
+    #[serde(skip)]
+    invariant: Option<String>,
+    #[serde(skip)]
+    oracle_map: Option<ManualCandidateOracleMap>,
+    #[serde(skip)]
+    proof_mode: Option<ManualCandidateProofMode>,
+    #[serde(skip)]
+    fix_boundary: Option<String>,
+    #[serde(skip)]
+    pr_aperture: Option<String>,
+    #[serde(skip)]
+    evidence: Vec<OutcomeManualCandidateEvidence>,
+    #[serde(skip)]
+    fix_options: Vec<String>,
+    #[serde(skip)]
+    test_targets: Vec<String>,
+    #[serde(skip)]
+    do_not_touch: Vec<String>,
 }
 
 #[derive(Clone, Deserialize)]
@@ -192,6 +254,22 @@ struct SnapshotLocation {
 #[derive(Deserialize)]
 struct SnapshotSchema {
     schema_version: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ManualCandidateIndexSnapshot {
+    schema_version: String,
+    #[serde(default)]
+    source: Option<String>,
+    summary: ManualCandidateIndexSummary,
+    candidates: Vec<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
+struct ManualCandidateIndexSummary {
+    manual_candidates: usize,
+    #[serde(default)]
+    analyzer_discovered: usize,
 }
 
 pub fn compare_json(before_json: &str, after_json: &str) -> Result<OutcomeReport, String> {
@@ -219,6 +297,12 @@ fn parse_snapshot(text: &str, label: &str) -> Result<Snapshot, String> {
             .map_err(|err| format!("parse {label} manual candidate snapshot failed: {err}"))?;
         return Ok(snapshot_from_manual_candidate(candidate));
     }
+    if schema.schema_version.as_deref() == Some(MANUAL_CANDIDATE_INDEX_SCHEMA_VERSION) {
+        let index: ManualCandidateIndexSnapshot = serde_json::from_str(text).map_err(|err| {
+            format!("parse {label} manual candidate index snapshot failed: {err}")
+        })?;
+        return snapshot_from_manual_candidate_index(index, label);
+    }
     let snapshot: Snapshot = serde_json::from_str(text)
         .map_err(|err| format!("parse {label} unsafe-review JSON snapshot failed: {err}"))?;
     if snapshot.schema_version.trim().is_empty() {
@@ -235,38 +319,108 @@ fn parse_snapshot(text: &str, label: &str) -> Result<Snapshot, String> {
 }
 
 fn snapshot_from_manual_candidate(candidate: ManualCandidate) -> Snapshot {
-    let evidence_count = candidate.evidence.len();
     Snapshot {
-        schema_version: candidate.schema_version,
+        schema_version: candidate.schema_version.clone(),
         source: Some("manual".to_string()),
         summary: SnapshotSummary {
             cards: 1,
             open_actionable_gaps: 1,
         },
-        cards: vec![SnapshotCard {
-            id: candidate.id,
-            class_name: "manual_candidate".to_string(),
-            source: Some("manual".to_string()),
-            manual_candidate: Some(true),
-            analyzer_discovered: Some(false),
-            title: Some(candidate.title),
-            location: Some(SnapshotLocation {
-                file: candidate.location.file.display().to_string(),
-                line: candidate.location.line,
-            }),
-            operation: Some(candidate.unsafe_operation),
-            operation_family: Some(candidate.operation_family),
-            priority: "advisory".to_string(),
-            witness: "manual candidate external evidence packet; no analyzer witness execution"
+        cards: vec![snapshot_card_from_manual_candidate(candidate)],
+    }
+}
+
+fn snapshot_from_manual_candidate_index(
+    index: ManualCandidateIndexSnapshot,
+    label: &str,
+) -> Result<Snapshot, String> {
+    if index.schema_version != MANUAL_CANDIDATE_INDEX_SCHEMA_VERSION {
+        return Err(format!(
+            "{label} manual candidate index schema_version must be `{MANUAL_CANDIDATE_INDEX_SCHEMA_VERSION}`"
+        ));
+    }
+    if index.summary.manual_candidates != index.candidates.len() {
+        return Err(format!(
+            "{label} manual candidate index summary.manual_candidates {} does not match {} candidate object(s)",
+            index.summary.manual_candidates,
+            index.candidates.len()
+        ));
+    }
+    if index.summary.analyzer_discovered != 0 {
+        return Err(format!(
+            "{label} manual candidate index summary.analyzer_discovered must stay 0"
+        ));
+    }
+
+    let mut cards = Vec::with_capacity(index.candidates.len());
+    for (idx, candidate) in index.candidates.into_iter().enumerate() {
+        let candidate_text = serde_json::to_string(&candidate).map_err(|err| {
+            format!("serialize {label} manual candidate index candidate {idx} failed: {err}")
+        })?;
+        let candidate = ManualCandidate::from_json_str(&candidate_text).map_err(|err| {
+            format!("parse {label} manual candidate index candidate {idx} failed: {err}")
+        })?;
+        cards.push(snapshot_card_from_manual_candidate(candidate));
+    }
+
+    let count = cards.len();
+    Ok(Snapshot {
+        schema_version: index.schema_version,
+        source: Some(
+            index
+                .source
+                .filter(|source| !source.trim().is_empty())
+                .unwrap_or_else(|| "manual_candidate_index".to_string()),
+        ),
+        summary: SnapshotSummary {
+            cards: count,
+            open_actionable_gaps: count,
+        },
+        cards,
+    })
+}
+
+fn snapshot_card_from_manual_candidate(candidate: ManualCandidate) -> SnapshotCard {
+    let evidence_count = candidate.evidence.len();
+    let evidence = candidate
+        .evidence
+        .iter()
+        .map(OutcomeManualCandidateEvidence::from)
+        .collect();
+    SnapshotCard {
+        id: candidate.id,
+        class_name: "manual_candidate".to_string(),
+        source: Some("manual".to_string()),
+        manual_candidate: Some(true),
+        analyzer_discovered: Some(false),
+        title: Some(candidate.title),
+        location: Some(SnapshotLocation {
+            file: candidate.location.file.display().to_string(),
+            line: candidate.location.line,
+        }),
+        operation: Some(candidate.unsafe_operation),
+        operation_family: Some(candidate.operation_family),
+        proof_path: Some("human_review_only".to_string()),
+        priority: "advisory".to_string(),
+        witness: "manual candidate external evidence packet; no analyzer witness execution"
+            .to_string(),
+        next_action: Some(
+            "Review the manual candidate, preserve the external evidence packet, and attach receipts only when they match this manual candidate ID."
                 .to_string(),
-            next_action: Some(
-                "Review the manual candidate, preserve the external evidence packet, and attach receipts only when they match this manual candidate ID."
-                    .to_string(),
-            ),
-            missing: Vec::new(),
-            trust_boundary: Some(candidate.trust_boundary),
-            evidence_count: Some(evidence_count),
-        }],
+        ),
+        missing: Vec::new(),
+        trust_boundary: Some(candidate.trust_boundary),
+        evidence_count: Some(evidence_count),
+        safe_caller: Some(candidate.safe_caller),
+        invariant: Some(candidate.invariant),
+        oracle_map: candidate.oracle_map,
+        proof_mode: candidate.proof_mode,
+        fix_boundary: candidate.fix_boundary,
+        pr_aperture: candidate.pr_aperture,
+        evidence,
+        fix_options: candidate.fix_options,
+        test_targets: candidate.test_targets,
+        do_not_touch: candidate.do_not_touch,
     }
 }
 
@@ -333,6 +487,7 @@ fn compare_snapshots(before: Snapshot, after: Snapshot) -> Result<OutcomeReport,
             "compares existing saved ReviewCard JSON snapshots and manual candidate JSON artifacts only".to_string(),
             "manual candidates remain source=manual advisory artifacts, not analyzer-discovered findings".to_string(),
             "does not rerun analysis or execute witness tools".to_string(),
+            "does not claim Miri-clean status, site-execution evidence, calibrated precision/recall, or policy-ready status".to_string(),
             "does not make policy or blocking decisions".to_string(),
         ],
         before: before_summary,
@@ -454,6 +609,16 @@ fn changed_reason(status: &str, before: &SnapshotCard, after: &SnapshotCard) -> 
             after.evidence_count.unwrap_or(0)
         ));
     }
+    if before.proof_path != after.proof_path {
+        reasons.push(format!(
+            "proof path changed from `{}` to `{}`",
+            proof_path_label(before),
+            proof_path_label(after)
+        ));
+    }
+    if manual_handoff_changed(before, after) {
+        reasons.push("manual handoff guidance changed".to_string());
+    }
     if reasons.is_empty() {
         if is_manual_card(before) || is_manual_card(after) {
             reasons.push(
@@ -489,9 +654,34 @@ fn changed_status(before: &SnapshotCard, after: &SnapshotCard) -> &'static str {
         "improved"
     } else if witness::witness_state(after).rank < witness::witness_state(before).rank {
         "regressed"
+    } else if let (Some(before_rank), Some(after_rank)) =
+        (proof_path_rank(before), proof_path_rank(after))
+    {
+        if after_rank > before_rank {
+            "improved"
+        } else if after_rank < before_rank {
+            "regressed"
+        } else {
+            "unchanged"
+        }
     } else {
         "unchanged"
     }
+}
+
+fn proof_path_rank(card: &SnapshotCard) -> Option<u8> {
+    match card.proof_path.as_deref()?.trim() {
+        "human_review_only" | "human-review-only" => Some(0),
+        "source_route_only" | "source-route-only" => Some(1),
+        "helper_gated" | "helper-gated" => Some(2),
+        "mutation_miri_model" | "mutation-plus-miri" => Some(3),
+        "observable_red_green" | "observable-red-green" => Some(4),
+        _ => None,
+    }
+}
+
+fn proof_path_label(card: &SnapshotCard) -> &str {
+    card.proof_path.as_deref().unwrap_or("unknown")
 }
 
 fn is_manual_card(card: &SnapshotCard) -> bool {
@@ -548,6 +738,7 @@ fn snapshot_id(snapshot: &Snapshot) -> String {
         }
         feed_hash(&mut hash, card.operation.as_deref().unwrap_or(""));
         feed_hash(&mut hash, card.operation_family.as_deref().unwrap_or(""));
+        feed_hash(&mut hash, card.proof_path.as_deref().unwrap_or(""));
         feed_hash(&mut hash, &card.priority);
         feed_hash(&mut hash, &card.witness);
         feed_hash(
@@ -559,6 +750,40 @@ fn snapshot_id(snapshot: &Snapshot) -> String {
         );
         feed_hash(&mut hash, card.next_action.as_deref().unwrap_or(""));
         feed_hash(&mut hash, card.trust_boundary.as_deref().unwrap_or(""));
+        feed_hash(&mut hash, card.safe_caller.as_deref().unwrap_or(""));
+        feed_hash(&mut hash, card.invariant.as_deref().unwrap_or(""));
+        if let Some(oracle_map) = &card.oracle_map {
+            feed_hash(&mut hash, &oracle_map.rust_seam);
+            feed_hash(&mut hash, &oracle_map.oracle_language);
+            feed_hash(&mut hash, &oracle_map.oracle_path.display().to_string());
+            feed_hash(&mut hash, &oracle_map.oracle_kind);
+            feed_hash(&mut hash, &oracle_map.coverage_confidence);
+            feed_hash(&mut hash, &oracle_map.limitation);
+        }
+        if let Some(proof_mode) = &card.proof_mode {
+            feed_hash(&mut hash, &proof_mode.kind);
+            feed_hash(&mut hash, &proof_mode.system_bun_expected);
+            feed_hash(&mut hash, &proof_mode.mutation_required.to_string());
+            feed_hash(&mut hash, &proof_mode.miri_required.to_string());
+        }
+        feed_hash(&mut hash, card.fix_boundary.as_deref().unwrap_or(""));
+        feed_hash(&mut hash, card.pr_aperture.as_deref().unwrap_or(""));
+        for evidence in &card.evidence {
+            feed_hash(&mut hash, &evidence.kind);
+            feed_hash(&mut hash, evidence.path.as_deref().unwrap_or(""));
+            feed_hash(&mut hash, evidence.summary.as_deref().unwrap_or(""));
+            feed_hash(&mut hash, evidence.command.as_deref().unwrap_or(""));
+            feed_hash(&mut hash, evidence.limitation.as_deref().unwrap_or(""));
+        }
+        for fix_option in &card.fix_options {
+            feed_hash(&mut hash, fix_option);
+        }
+        for test_target in &card.test_targets {
+            feed_hash(&mut hash, test_target);
+        }
+        for do_not_touch in &card.do_not_touch {
+            feed_hash(&mut hash, do_not_touch);
+        }
         for missing in &card.missing {
             feed_hash(&mut hash, missing);
         }
@@ -674,6 +899,7 @@ fn top_remaining_gaps(cards: &OutcomeCards) -> Vec<OutcomeRemainingGap> {
                 class_name: after.class_name.clone(),
                 priority: after.priority.clone(),
                 operation_family: after.operation_family.clone(),
+                proof_path: after.proof_path.clone(),
                 missing_count: after.missing_count,
                 next_action: after.next_action.clone(),
             })
@@ -722,13 +948,39 @@ impl From<&SnapshotCard> for OutcomeCardState {
             location: card.location.as_ref().map(OutcomeLocation::from),
             operation: card.operation.clone(),
             operation_family: card.operation_family.clone(),
+            proof_path: card.proof_path.clone(),
             priority: card.priority.clone(),
             missing_count: card.missing.len(),
             witness: witness::witness_state(card).label,
             evidence_count: card.evidence_count,
+            safe_caller: card.safe_caller.clone(),
+            invariant: card.invariant.clone(),
+            oracle_map: card.oracle_map.clone(),
+            proof_mode: card.proof_mode.clone(),
+            fix_boundary: card.fix_boundary.clone(),
+            pr_aperture: card.pr_aperture.clone(),
+            evidence: card.evidence.clone(),
+            fix_options: card.fix_options.clone(),
+            test_targets: card.test_targets.clone(),
+            do_not_touch: card.do_not_touch.clone(),
             next_action: card.next_action.clone(),
             missing: card.missing.clone(),
             trust_boundary: card.trust_boundary.clone(),
+        }
+    }
+}
+
+impl From<&ManualCandidateEvidence> for OutcomeManualCandidateEvidence {
+    fn from(evidence: &ManualCandidateEvidence) -> Self {
+        Self {
+            kind: evidence.kind.clone(),
+            path: evidence
+                .path
+                .as_ref()
+                .map(|path| path.display().to_string()),
+            summary: evidence.summary.clone(),
+            command: evidence.command.clone(),
+            limitation: evidence.limitation.clone(),
         }
     }
 }
@@ -751,6 +1003,22 @@ impl SnapshotCard {
         self.analyzer_discovered
             .unwrap_or_else(|| !is_manual_card(self))
     }
+}
+
+fn manual_handoff_changed(before: &SnapshotCard, after: &SnapshotCard) -> bool {
+    if !is_manual_card(before) && !is_manual_card(after) {
+        return false;
+    }
+    before.safe_caller != after.safe_caller
+        || before.invariant != after.invariant
+        || before.oracle_map != after.oracle_map
+        || before.proof_mode != after.proof_mode
+        || before.fix_boundary != after.fix_boundary
+        || before.pr_aperture != after.pr_aperture
+        || before.evidence != after.evidence
+        || before.fix_options != after.fix_options
+        || before.test_targets != after.test_targets
+        || before.do_not_touch != after.do_not_touch
 }
 
 #[cfg(test)]
@@ -901,11 +1169,28 @@ mod tests {
                 .starts_with("snapshot-")
         );
         assert!(value["limitations"].is_array());
+        let trust_boundary = value["trust_boundary"].as_str().unwrap_or("");
+        for phrase in [
+            "not memory-safety proof",
+            "not UB-free status",
+            "not Miri-clean status",
+            "not site-execution evidence",
+            "not calibrated precision/recall",
+            "not policy-ready status",
+            "not witness execution",
+        ] {
+            assert!(
+                trust_boundary.contains(phrase),
+                "missing trust boundary phrase: {phrase}"
+            );
+        }
+        let limitations = value["limitations"]
+            .as_array()
+            .ok_or("limitations should be an array")?;
         assert!(
-            value["trust_boundary"]
-                .as_str()
-                .unwrap_or("")
-                .contains("not memory-safety proof")
+            limitations
+                .iter()
+                .any(|item| item.as_str().unwrap_or("").contains("Miri-clean status"))
         );
 
         let markdown = render_markdown(&report);
@@ -919,6 +1204,10 @@ mod tests {
         assert!(markdown.contains("| Status | Card | Reason | Before | After |"));
         assert!(markdown.contains("## Limitations"));
         assert!(markdown.contains("## Trust boundary"));
+        assert!(markdown.contains("not Miri-clean status"));
+        assert!(markdown.contains("not site-execution evidence"));
+        assert!(markdown.contains("not calibrated precision/recall"));
+        assert!(markdown.contains("not policy-ready status"));
         assert!(markdown.contains("UR-new-c1"));
         assert!(markdown.contains("raw_pointer_read"));
         assert!(markdown.contains("unsafe { ptr.cast::<Header>().read() }"));
@@ -953,6 +1242,54 @@ mod tests {
             Some("core::slice::from_raw_parts")
         );
         assert_eq!(after.evidence_count, Some(2));
+        assert_eq!(
+            after.safe_caller.as_deref(),
+            Some("new TextDecoder().decode(new Uint8Array(new SharedArrayBuffer(...)))")
+        );
+        assert_eq!(
+            after.invariant.as_deref(),
+            Some("&[u8] memory must not be concurrently mutated")
+        );
+        assert_eq!(
+            after.proof_mode.as_ref().map(|mode| mode.kind.as_str()),
+            Some("mutation-plus-miri")
+        );
+        assert_eq!(
+            after.fix_boundary.as_deref(),
+            Some("Snapshot shared/growable/resizable bytes before Rust receives &[u8]")
+        );
+        assert!(
+            after
+                .pr_aperture
+                .as_deref()
+                .unwrap_or("")
+                .contains("do not patch S3")
+        );
+        assert_eq!(
+            after.evidence[0].command.as_deref(),
+            Some("bun test target/unsafe-scout/evidence-0.js")
+        );
+        assert!(
+            after.evidence[0]
+                .limitation
+                .as_deref()
+                .unwrap_or("")
+                .contains("not memory-safety proof")
+        );
+        assert!(
+            after.fix_options[0].contains("Copy SharedArrayBuffer-backed bytes"),
+            "{:?}",
+            after.fix_options
+        );
+        assert_eq!(
+            after.test_targets[0],
+            "test/js/webcore/textdecoder-sharedarraybuffer.test.ts"
+        );
+        assert!(
+            after.do_not_touch[0].contains("Do not rewrite unrelated TextDecoder"),
+            "{:?}",
+            after.do_not_touch
+        );
         assert!(
             after
                 .trust_boundary
@@ -988,12 +1325,59 @@ mod tests {
             false
         );
         assert_eq!(value["cards"]["new"][0]["after"]["evidence_count"], 2);
+        assert_eq!(
+            value["cards"]["new"][0]["after"]["safe_caller"],
+            "new TextDecoder().decode(new Uint8Array(new SharedArrayBuffer(...)))"
+        );
+        assert_eq!(
+            value["cards"]["new"][0]["after"]["invariant"],
+            "&[u8] memory must not be concurrently mutated"
+        );
+        assert_eq!(
+            value["cards"]["new"][0]["after"]["proof_mode"]["kind"],
+            "mutation-plus-miri"
+        );
+        assert_eq!(
+            value["cards"]["new"][0]["after"]["fix_boundary"],
+            "Snapshot shared/growable/resizable bytes before Rust receives &[u8]"
+        );
+        assert!(
+            value["cards"]["new"][0]["after"]["pr_aperture"]
+                .as_str()
+                .unwrap_or("")
+                .contains("do not patch S3")
+        );
+        assert_eq!(
+            value["cards"]["new"][0]["after"]["evidence"][0]["command"],
+            "bun test target/unsafe-scout/evidence-0.js"
+        );
+        assert_eq!(
+            value["cards"]["new"][0]["after"]["fix_options"][0],
+            "Copy SharedArrayBuffer-backed bytes into stable owned storage before creating a Rust slice"
+        );
+        assert_eq!(
+            value["cards"]["new"][0]["after"]["test_targets"][0],
+            "test/js/webcore/textdecoder-sharedarraybuffer.test.ts"
+        );
+        assert_eq!(
+            value["cards"]["new"][0]["after"]["do_not_touch"][0],
+            "Do not rewrite unrelated TextDecoder encoding paths"
+        );
 
         let markdown = render_markdown(&report);
         assert!(markdown.contains("new manual candidate"));
         assert!(markdown.contains("source `manual`"));
         assert!(markdown.contains("manual_candidate `true`"));
         assert!(markdown.contains("analyzer-discovered `false`"));
+        assert!(markdown.contains("route `new TextDecoder().decode"));
+        assert!(markdown.contains("invariant &[u8] memory must not be concurrently mutated"));
+        assert!(markdown.contains("command `bun test target/unsafe-scout/evidence-0.js`"));
+        assert!(markdown.contains("limitation runtime route evidence only"));
+        assert!(markdown.contains("first fix: Copy SharedArrayBuffer-backed bytes"));
+        assert!(
+            markdown.contains("first test: test/js/webcore/textdecoder-sharedarraybuffer.test.ts")
+        );
+        assert!(markdown.contains("first non-goal: Do not rewrite unrelated TextDecoder"));
         assert!(markdown.contains("not analyzer-discovered"));
         Ok(())
     }
@@ -1041,6 +1425,98 @@ mod tests {
                 .contains("new card: appears in the after snapshot")
         );
         Ok(())
+    }
+
+    #[test]
+    fn outcome_compares_manual_candidate_index_json_without_analyzer_conflation()
+    -> Result<(), String> {
+        let before = snapshot_json(&[]);
+        let after = manual_candidate_index_json(&[
+            manual_candidate_json("R4R2-S001", 2),
+            manual_candidate_json("R4R2-S002", 1),
+        ]);
+
+        let report = compare_json(&before, &after)?;
+
+        assert_eq!(
+            report.after.schema_version,
+            MANUAL_CANDIDATE_INDEX_SCHEMA_VERSION
+        );
+        assert_eq!(report.after.source.as_deref(), Some("candidate_list"));
+        assert_eq!(report.after.cards, 2);
+        assert_eq!(report.after.open_actionable_gaps, 2);
+        assert_eq!(report.summary.new, 2);
+        assert_eq!(report.cards.new.len(), 2);
+        for card in &report.cards.new {
+            let after = card
+                .after
+                .as_ref()
+                .ok_or("manual candidate index card should include after state")?;
+            assert!(card.reason.contains("new manual candidate"));
+            assert_eq!(after.class_name, "manual_candidate");
+            assert_eq!(after.source.as_deref(), Some("manual"));
+            assert_eq!(after.manual_candidate, Some(true));
+            assert_eq!(after.analyzer_discovered, Some(false));
+            assert_eq!(after.operation_family.as_deref(), Some("raw_pointer_read"));
+            assert_eq!(
+                after.operation.as_deref(),
+                Some("core::slice::from_raw_parts")
+            );
+        }
+        assert_eq!(report.cards.new[0].card_id, "R4R2-S001");
+        assert_eq!(
+            report.cards.new[0]
+                .after
+                .as_ref()
+                .and_then(|state| state.evidence_count),
+            Some(2)
+        );
+        assert_eq!(
+            report.cards.new[0]
+                .after
+                .as_ref()
+                .and_then(|state| state.evidence.first())
+                .and_then(|evidence| evidence.command.as_deref()),
+            Some("bun test target/unsafe-scout/evidence-0.js")
+        );
+        assert!(
+            report.cards.new[0]
+                .after
+                .as_ref()
+                .map(|state| state.fix_options[0].contains("Copy SharedArrayBuffer-backed bytes"))
+                .unwrap_or(false)
+        );
+        assert_eq!(report.cards.new[1].card_id, "R4R2-S002");
+        assert_eq!(
+            report.cards.new[1]
+                .after
+                .as_ref()
+                .and_then(|state| state.evidence_count),
+            Some(1)
+        );
+        assert_eq!(
+            report.cards.new[1]
+                .after
+                .as_ref()
+                .and_then(|state| state.test_targets.first())
+                .map(String::as_str),
+            Some("test/js/webcore/textdecoder-sharedarraybuffer.test.ts")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn outcome_rejects_manual_candidate_index_count_drift() {
+        let before = snapshot_json(&[]);
+        let after =
+            manual_candidate_index_json_with_count(&[manual_candidate_json("R4R2-S001", 1)], 2, 0);
+
+        assert!(
+            compare_json(&before, &after)
+                .err()
+                .unwrap_or_default()
+                .contains("summary.manual_candidates 2 does not match 1 candidate object")
+        );
     }
 
     #[test]
@@ -1135,6 +1611,93 @@ mod tests {
     }
 
     #[test]
+    fn outcome_reports_proof_path_reviewability_improvement() -> Result<(), String> {
+        let before = snapshot_json(&[card_with_proof_path(
+            "UR-proof-c1",
+            "guard_missing",
+            "high",
+            &["guard"],
+            "source_route_only",
+        )]);
+        let after = snapshot_json(&[card_with_proof_path(
+            "UR-proof-c1",
+            "guard_missing",
+            "high",
+            &["guard"],
+            "observable_red_green",
+        )]);
+
+        let report = compare_json(&before, &after)?;
+
+        assert_eq!(report.summary.improved, 1);
+        assert_eq!(report.summary.regressed, 0);
+        assert_eq!(report.reviewer_delta.receipt_movement.improved, 0);
+        assert_ne!(report.before_id, report.after_id);
+        assert!(
+            report.cards.improved[0]
+                .reason
+                .contains("proof path changed from `source_route_only` to `observable_red_green`")
+        );
+        let after_state = report.cards.improved[0]
+            .after
+            .as_ref()
+            .ok_or("improved card should include after state")?;
+        assert_eq!(
+            after_state.proof_path.as_deref(),
+            Some("observable_red_green")
+        );
+        let markdown = render_markdown(&report);
+        assert!(
+            markdown
+                .contains("proof path changed from `source_route_only` to `observable_red_green`")
+        );
+        assert!(markdown.contains("proof path `observable_red_green`"));
+        Ok(())
+    }
+
+    #[test]
+    fn outcome_reports_proof_path_reviewability_regression() -> Result<(), String> {
+        let before = snapshot_json(&[card_with_proof_path(
+            "UR-proof-c1",
+            "guard_missing",
+            "high",
+            &["guard"],
+            "observable_red_green",
+        )]);
+        let after = snapshot_json(&[card_with_proof_path(
+            "UR-proof-c1",
+            "guard_missing",
+            "high",
+            &["guard"],
+            "source_route_only",
+        )]);
+
+        let report = compare_json(&before, &after)?;
+
+        assert_eq!(report.summary.improved, 0);
+        assert_eq!(report.summary.regressed, 1);
+        assert!(
+            report.cards.regressed[0]
+                .reason
+                .contains("proof path changed from `observable_red_green` to `source_route_only`")
+        );
+        let before_state = report.cards.regressed[0]
+            .before
+            .as_ref()
+            .ok_or("regressed card should include before state")?;
+        let after_state = report.cards.regressed[0]
+            .after
+            .as_ref()
+            .ok_or("regressed card should include after state")?;
+        assert_eq!(
+            before_state.proof_path.as_deref(),
+            Some("observable_red_green")
+        );
+        assert_eq!(after_state.proof_path.as_deref(), Some("source_route_only"));
+        Ok(())
+    }
+
+    #[test]
     fn outcome_rejects_duplicate_card_identity() {
         let before = snapshot_json(&[
             card("UR-dup-c1", "guard_missing", "high", &["guard"]),
@@ -1192,6 +1755,16 @@ mod tests {
         card_with_witness(id, class_name, priority, missing, "")
     }
 
+    fn card_with_proof_path(
+        id: &str,
+        class_name: &str,
+        priority: &str,
+        missing: &[&str],
+        proof_path: &str,
+    ) -> String {
+        card_with_witness_and_proof_path(id, class_name, priority, missing, "", Some(proof_path))
+    }
+
     fn card_with_witness(
         id: &str,
         class_name: &str,
@@ -1199,17 +1772,36 @@ mod tests {
         missing: &[&str],
         witness: &str,
     ) -> String {
+        card_with_witness_and_proof_path(id, class_name, priority, missing, witness, None)
+    }
+
+    fn card_with_witness_and_proof_path(
+        id: &str,
+        class_name: &str,
+        priority: &str,
+        missing: &[&str],
+        witness: &str,
+        proof_path: Option<&str>,
+    ) -> String {
         let missing = missing
             .iter()
             .map(|item| format!(r#""{item}""#))
             .collect::<Vec<_>>()
             .join(", ");
+        let proof_path = proof_path
+            .map(|value| {
+                format!(
+                    r#",
+      "proof_path": "{value}""#
+                )
+            })
+            .unwrap_or_default();
         format!(
             r#"{{
       "id": "{id}",
       "class": "{class_name}",
       "operation": "unsafe {{ ptr.cast::<Header>().read() }}",
-      "operation_family": "raw_pointer_read",
+      "operation_family": "raw_pointer_read"{proof_path},
       "priority": "{priority}",
       "witness": "{witness}",
       "next_action": "Add or expose a safety contract, guard, test, or witness for raw_pointer_read.",
@@ -1224,7 +1816,10 @@ mod tests {
                 format!(
                     r#"{{
       "kind": "other",
-      "path": "target/unsafe-scout/evidence-{idx}.txt"
+      "path": "target/unsafe-scout/evidence-{idx}.txt",
+      "summary": "runtime route evidence {idx}",
+      "command": "bun test target/unsafe-scout/evidence-{idx}.js",
+      "limitation": "runtime route evidence only; not memory-safety proof"
     }}"#
                 )
             })
@@ -1243,11 +1838,68 @@ mod tests {
   "unsafe_operation": "core::slice::from_raw_parts",
   "invariant": "&[u8] memory must not be concurrently mutated",
   "safe_caller": "new TextDecoder().decode(new Uint8Array(new SharedArrayBuffer(...)))",
+  "proof_mode": {{
+    "kind": "mutation-plus-miri",
+    "system_bun_expected": "nondiscriminating",
+    "mutation_required": true,
+    "miri_required": true
+  }},
+  "fix_boundary": "Snapshot shared/growable/resizable bytes before Rust receives &[u8]",
+  "pr_aperture": "TextDecoder shared-byte snapshot only; do not patch S3, fs, writev, or unrelated encodings",
+  "fix_options": [
+    "Copy SharedArrayBuffer-backed bytes into stable owned storage before creating a Rust slice"
+  ],
+  "test_targets": [
+    "test/js/webcore/textdecoder-sharedarraybuffer.test.ts"
+  ],
+  "do_not_touch": [
+    "Do not rewrite unrelated TextDecoder encoding paths"
+  ],
   "evidence": [
     {evidence}
   ],
-  "trust_boundary": "manual candidate; not analyzer-discovered; not proof of repository safety"
+  "trust_boundary": "manual candidate; not analyzer-discovered; not witness execution; not proof of memory safety; not UB-free status; not Miri-clean status; not site-execution proof; not policy readiness"
 }}"#
+        )
+    }
+
+    fn manual_candidate_index_json(candidates: &[String]) -> String {
+        manual_candidate_index_json_with_count(candidates, candidates.len(), 0)
+    }
+
+    fn manual_candidate_index_json_with_count(
+        candidates: &[String],
+        manual_candidates: usize,
+        analyzer_discovered: usize,
+    ) -> String {
+        let evidence_count = candidates
+            .iter()
+            .filter_map(|candidate| serde_json::from_str::<serde_json::Value>(candidate).ok())
+            .map(|candidate| {
+                candidate
+                    .get("evidence")
+                    .and_then(serde_json::Value::as_array)
+                    .map_or(0, Vec::len)
+            })
+            .sum::<usize>();
+        format!(
+            r#"{{
+  "schema_version": "manual-candidates/v1",
+  "tool": "unsafe-review",
+  "tool_version": "0.2.1-test",
+  "mode": "manual_candidate_index",
+  "source": "candidate_list",
+  "summary": {{
+    "manual_candidates": {manual_candidates},
+    "external_evidence_refs": {evidence_count},
+    "analyzer_discovered": {analyzer_discovered}
+  }},
+  "candidates": [
+    {}
+  ],
+  "trust_boundary": "manual/advisory candidates are not analyzer-discovered ReviewCards"
+}}"#,
+            candidates.join(",\n    ")
         )
     }
 }

@@ -3,9 +3,13 @@ use std::path::{Component, Path};
 
 struct AdvisoryArtifactSummary {
     card_ids: BTreeSet<String>,
+    card_order: Vec<String>,
     card_projections: BTreeMap<String, CardProjection>,
     repair_queue_projections: BTreeMap<String, RepairQueueProjection>,
     scope: String,
+    changed_files: usize,
+    changed_rust_files: usize,
+    changed_non_rust_files: usize,
     card_count: usize,
     open_actionable_gaps: usize,
     high_priority_cards: usize,
@@ -13,8 +17,12 @@ struct AdvisoryArtifactSummary {
 
 struct AdvisoryArtifactManifest {
     card_ids: BTreeSet<String>,
+    card_order: Vec<String>,
     card_projections: BTreeMap<String, CardProjection>,
     scope: String,
+    changed_files: usize,
+    changed_rust_files: usize,
+    changed_non_rust_files: usize,
     card_count: usize,
     open_actionable_gaps: usize,
     high_priority_cards: usize,
@@ -25,6 +33,7 @@ struct CardProjection {
     class_name: String,
     priority: String,
     confidence: String,
+    proof_path: String,
     hazards: Vec<String>,
     path: String,
     line: u64,
@@ -50,31 +59,117 @@ struct WitnessRouteProjection {
     required: bool,
 }
 
+struct CommentBuildFirstProjection {
+    kind: &'static str,
+    command: Option<String>,
+    route_kind: Option<String>,
+    summary: String,
+}
+
+struct CommentMinimalReproProjection {
+    kind: &'static str,
+    command: Option<String>,
+    route_kind: Option<String>,
+    steps: Vec<String>,
+    limitation: &'static str,
+}
+
 struct RepairQueueProjection {
     buckets: Vec<String>,
+    readiness_ready: bool,
     readiness_state: String,
     readiness_reasons: Vec<String>,
 }
 
 struct RepairQueueEntryProjection {
     card_id: String,
+    readiness_ready: bool,
     readiness_state: String,
     readiness_reasons: Vec<String>,
 }
 
 struct RepairQueueReadinessProjection {
+    ready: bool,
     state: String,
     reasons: Vec<String>,
 }
 
 struct ManualCandidateIndexProjection {
     ids: BTreeSet<String>,
+    candidates: Vec<ManualCandidateProjection>,
     count: usize,
     first_id: Option<String>,
+    operation_families: BTreeMap<String, usize>,
+    evidence_kinds: BTreeMap<String, usize>,
+}
+
+struct ManualRepairQueueProjection {
+    entries: Vec<ManualRepairQueueEntryProjection>,
+}
+
+struct ManualRepairQueueEntryProjection {
+    id: String,
+    bucket: String,
+    bucket_reason: String,
+    agent_handoff: serde_json::Value,
+    trust_boundary: String,
+}
+
+struct ManualCandidateProjection {
+    id: String,
+    title: String,
+    location_text: String,
+    location_file: String,
+    location_line: usize,
+    operation_family: String,
+    unsafe_operation: String,
+    invariant: String,
+    safe_caller: String,
+    proof_mode: Option<ManualCandidateProofModeProjection>,
+    fix_boundary: Option<String>,
+    pr_aperture: Option<String>,
+    oracle_map: Option<serde_json::Value>,
+    stable_byte: Option<serde_json::Value>,
+    stable_byte_source_class: Option<String>,
+    stable_byte_ledger_state: Option<String>,
+    evidence: Vec<ManualCandidateEvidenceProjection>,
+    fix_options: Vec<String>,
+    test_targets: Vec<String>,
+    do_not_touch: Vec<String>,
+    evidence_refs: usize,
+    implementer_handoff: serde_json::Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ManualCandidateProofModeProjection {
+    kind: String,
+    system_bun_expected: String,
+    mutation_required: bool,
+    miri_required: bool,
+}
+
+struct StableByteSeedPreview {
+    candidate_id: String,
+    seed_id: String,
+    owner_lane: String,
+    suggested_first_pr: String,
+    triage_labels: Vec<String>,
+}
+
+struct ManualCandidateEvidenceProjection {
+    kind: String,
+    path: Option<String>,
+    summary: Option<String>,
+    command: Option<String>,
+    limitation: Option<String>,
 }
 
 const COMMENT_PLAN_BODY_WORD_LIMIT: usize = 220;
 const COMMENT_PLAN_REVIEW_BUDGET: usize = 3;
+const MANUAL_CANDIDATE_REVIEW_KIT_QUEUE_LIMIT: usize = 5;
+const MANUAL_CANDIDATE_GITHUB_QUEUE_LIMIT: usize = 1;
+const REVIEW_CARD_REVIEW_KIT_QUEUE_LIMIT: usize = 5;
+const MINIMAL_REPRO_LIMITATION: &str = "Minimal repro cue only; unsafe-review did not run this command, observe runtime behavior, prove site execution, prove UB, or prove repository safety.";
 const COMMENT_PLAN_REVIEW_BUDGET_REASON: &str = "bounded reviewer noise";
 const COMMENT_PLAN_REVIEW_BUDGET_REASON_CODE: &str = "bounded_reviewer_noise";
 const COMMENT_PLAN_SELECTION_REASONS: &[&str] = &[
@@ -100,6 +195,28 @@ const COMMENT_PLAN_NON_SELECTION_REASON_CODES: &[&str] = &[
     "budget_exhausted",
     "not_selected_by_policy",
 ];
+const KNOWN_PROOF_PATHS: &[&str] = &[
+    "observable_red_green",
+    "mutation_miri_model",
+    "source_route_only",
+    "helper_gated",
+    "human_review_only",
+];
+const TOKMD_PACKET_PRESETS: &[&str] = &[
+    "bun-ub-handoff",
+    "bun-ub-pr-body",
+    "bun-ub-ledger-note",
+    "bun-ub-review-map",
+    "bun-ub-next-pick",
+];
+const STABLE_BYTE_SOURCE_CLASSES: &[&str] = &[
+    "stable-byte-source-rab-async",
+    "stable-byte-source-sab-race",
+    "stable-byte-source-getter-reentry",
+    "stable-byte-source-helper-dependent",
+    "stable-byte-source-pathlike-live-view",
+    "stable-byte-source-native-ffi-read",
+];
 const REPAIR_QUEUE_BUCKETS: [&str; 6] = [
     "repairable_by_guard",
     "repairable_by_safety_docs",
@@ -108,13 +225,15 @@ const REPAIR_QUEUE_BUCKETS: [&str; 6] = [
     "requires_human_review",
     "do_not_auto_repair",
 ];
+const MANUAL_REPAIR_QUEUE_BUCKET: &str = "manual_candidate_handoff";
+const MANUAL_REPAIR_QUEUE_BUCKET_REASON: &str = "manual_candidate_copy_only";
 const REPAIR_QUEUE_READINESS_STATES: [&str; 4] = [
     "ready_for_agent",
     "requires_human_review",
     "requires_witness_receipt",
     "unsupported",
 ];
-const FIRST_PR_BUNDLE_ARTIFACTS: [&str; 11] = [
+const FIRST_PR_BUNDLE_ARTIFACTS: [&str; 15] = [
     "review-kit.json",
     "cards.json",
     "pr-summary.md",
@@ -123,7 +242,11 @@ const FIRST_PR_BUNDLE_ARTIFACTS: [&str; 11] = [
     "comment-plan.json",
     "witness-plan.md",
     "receipt-audit.md",
+    "policy-report.json",
+    "policy-report.md",
     "manual-candidates.json",
+    "manual-repair-queue.json",
+    "tokmd-packets.json",
     "lsp.json",
     "repair-queue.json",
 ];
@@ -151,14 +274,19 @@ pub(crate) fn check_first_pr_artifacts(dir: &Path) -> Result<(), String> {
         "diff",
         "cards.json scope for first-pr artifacts",
     )?;
+    let manual_candidates = check_manual_candidates_artifact(dir)?;
     check_witness_plan_artifact(
         dir,
         summary.card_count,
         summary.open_actionable_gaps,
         &summary.card_projections,
+        &manual_candidates,
     )?;
     check_receipt_audit_artifact(dir)?;
-    let manual_candidates = check_manual_candidates_artifact(dir)?;
+    check_policy_report_artifacts(dir, &summary)?;
+    let manual_repair_queue = check_manual_repair_queue_artifact(dir, &manual_candidates)?;
+    check_tokmd_packets_artifact(dir, &manual_candidates, &manual_repair_queue)?;
+    check_manual_candidate_front_door_artifacts(dir, &manual_candidates)?;
     check_lsp_artifact(dir, &summary)?;
     check_github_summary_artifact(
         dir,
@@ -167,6 +295,7 @@ pub(crate) fn check_first_pr_artifacts(dir: &Path) -> Result<(), String> {
         summary.open_actionable_gaps,
         &summary.card_ids,
         &summary.card_projections,
+        &summary.repair_queue_projections,
     )?;
     check_first_pr_markdown_card_identity(
         dir,
@@ -177,10 +306,17 @@ pub(crate) fn check_first_pr_artifacts(dir: &Path) -> Result<(), String> {
     check_review_kit_manifest(
         dir,
         &summary.scope,
+        summary.changed_files,
+        summary.changed_rust_files,
+        summary.changed_non_rust_files,
         summary.card_count,
         summary.open_actionable_gaps,
         &summary.card_ids,
+        &summary.card_order,
+        &summary.card_projections,
+        &summary.repair_queue_projections,
         &manual_candidates,
+        &manual_repair_queue,
     )?;
     check_advisory_artifact_overclaims(dir)?;
 
@@ -188,7 +324,496 @@ pub(crate) fn check_first_pr_artifacts(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-const GITHUB_SUMMARY_WORD_LIMIT: usize = 600;
+const GITHUB_SUMMARY_WORD_LIMIT: usize = 750;
+
+fn check_manual_candidate_front_door_artifacts(
+    dir: &Path,
+    manual_candidates: &ManualCandidateIndexProjection,
+) -> Result<(), String> {
+    if manual_candidates.count == 0 {
+        return Ok(());
+    }
+    let stable_byte_seed_previews = review_kit_stable_byte_seed_previews(dir, manual_candidates)?;
+
+    for artifact in ["pr-summary.md", "github-summary.md"] {
+        let path = dir.join(artifact);
+        let text = super::read_to_string(&path)?;
+        let queue_limit = if artifact == "github-summary.md" {
+            MANUAL_CANDIDATE_GITHUB_QUEUE_LIMIT
+        } else {
+            MANUAL_CANDIDATE_REVIEW_KIT_QUEUE_LIMIT
+        };
+        let compact = artifact == "github-summary.md";
+        check_manual_candidate_front_door_text(
+            &text,
+            &path,
+            manual_candidates,
+            queue_limit,
+            compact,
+        )?;
+    }
+    check_stable_byte_seed_front_door_artifacts(
+        dir,
+        manual_candidates.first_id.as_deref(),
+        &stable_byte_seed_previews,
+    )?;
+    Ok(())
+}
+
+fn review_kit_stable_byte_seed_previews(
+    dir: &Path,
+    manual_candidates: &ManualCandidateIndexProjection,
+) -> Result<Vec<StableByteSeedPreview>, String> {
+    let path = dir.join("review-kit.json");
+    let review_kit = super::parse_json_file(&path)?;
+    let Ok(queue) = super::json_array_at(
+        &review_kit,
+        "/handoff/manual_candidates/candidate_queue",
+        "review-kit.json handoff manual_candidates",
+    ) else {
+        return Ok(Vec::new());
+    };
+    let mut previews = Vec::new();
+    for (index, entry) in queue.iter().enumerate() {
+        let Some(seed) = entry.get("stable_byte_seed") else {
+            continue;
+        };
+        let context = format!("review-kit.json handoff manual_candidates candidate_queue[{index}]");
+        let id = super::require_non_empty_json_str(entry, "id", &context)?;
+        if !manual_candidates.ids.contains(id) {
+            return Err(format!(
+                "{context} id `{id}` is not present in manual-candidates.json"
+            ));
+        }
+        let context = format!("{context} stable_byte_seed");
+        previews.push(StableByteSeedPreview {
+            candidate_id: id.to_string(),
+            seed_id: super::require_non_empty_json_str(seed, "seed_id", &context)?.to_string(),
+            owner_lane: super::require_non_empty_json_str(seed, "owner_lane", &context)?
+                .to_string(),
+            suggested_first_pr: super::require_non_empty_json_str(
+                seed,
+                "suggested_first_pr",
+                &context,
+            )?
+            .to_string(),
+            triage_labels: require_non_empty_string_array(seed, "triage_labels", &context)?,
+        });
+    }
+    Ok(previews)
+}
+
+fn check_stable_byte_seed_front_door_artifacts(
+    dir: &Path,
+    first_candidate_id: Option<&str>,
+    seed_previews: &[StableByteSeedPreview],
+) -> Result<(), String> {
+    if seed_previews.is_empty() {
+        return Ok(());
+    }
+
+    if let Some(first_candidate_id) = first_candidate_id {
+        let github_path = dir.join("github-summary.md");
+        let github_text = super::read_to_string(&github_path)?;
+        for seed in seed_previews
+            .iter()
+            .filter(|seed| seed.candidate_id == first_candidate_id)
+            .take(MANUAL_CANDIDATE_GITHUB_QUEUE_LIMIT)
+        {
+            check_stable_byte_seed_github_summary_text(&github_text, &github_path, seed)?;
+        }
+    }
+
+    for artifact in ["pr-summary.md", "witness-plan.md"] {
+        let path = dir.join(artifact);
+        let text = super::read_to_string(&path)?;
+        for seed in seed_previews
+            .iter()
+            .take(MANUAL_CANDIDATE_REVIEW_KIT_QUEUE_LIMIT)
+        {
+            check_stable_byte_seed_queue_preview_text(&text, &path, seed)?;
+        }
+    }
+    Ok(())
+}
+
+fn check_stable_byte_seed_github_summary_text(
+    text: &str,
+    path: &Path,
+    seed: &StableByteSeedPreview,
+) -> Result<(), String> {
+    for needle in [
+        "Stable-byte seed:",
+        &format!("`{}`", seed.seed_id),
+        "owner lane:",
+        &format!("`{}`", seed.owner_lane),
+        "suggested first PR:",
+        &format!("`{}`", seed.suggested_first_pr),
+        "triage:",
+    ] {
+        if !super::text_contains_ignore_ascii_case(text, needle) {
+            return Err(format!(
+                "{} must include stable-byte seed cockpit marker `{needle}`",
+                path.display()
+            ));
+        }
+    }
+    for label in &seed.triage_labels {
+        if !super::text_contains_ignore_ascii_case(text, label) {
+            return Err(format!(
+                "{} must include stable-byte seed triage label `{label}`",
+                path.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn check_stable_byte_seed_queue_preview_text(
+    text: &str,
+    path: &Path,
+    seed: &StableByteSeedPreview,
+) -> Result<(), String> {
+    for needle in [
+        "seed:",
+        &format!("`{}`", seed.seed_id),
+        "seed owner:",
+        &format!("`{}`", seed.owner_lane),
+        "next PR:",
+        &format!("`{}`", seed.suggested_first_pr),
+        "triage:",
+    ] {
+        if !super::text_contains_ignore_ascii_case(text, needle) {
+            return Err(format!(
+                "{} must include stable-byte queue marker `{needle}`",
+                path.display()
+            ));
+        }
+    }
+    for label in &seed.triage_labels {
+        if !super::text_contains_ignore_ascii_case(text, label) {
+            return Err(format!(
+                "{} must include stable-byte queue triage label `{label}`",
+                path.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn check_manual_candidate_front_door_text(
+    text: &str,
+    path: &Path,
+    manual_candidates: &ManualCandidateIndexProjection,
+    queue_limit: usize,
+    compact: bool,
+) -> Result<(), String> {
+    super::require_text_contains(text, "## Manual candidates", path)?;
+    super::require_text_contains(
+        text,
+        &format!(
+            "- Imported manual candidates: {} (manual/advisory; not analyzer-discovered ReviewCards)",
+            manual_candidates.count
+        ),
+        path,
+    )?;
+    super::require_text_contains(
+        text,
+        &format!(
+            "- Operation families: `{}`",
+            render_count_map(&manual_candidates.operation_families)
+        ),
+        path,
+    )?;
+    super::require_text_contains(
+        text,
+        &format!(
+            "- Evidence kinds: `{}`",
+            render_count_map(&manual_candidates.evidence_kinds)
+        ),
+        path,
+    )?;
+    let Some(first) = manual_candidates.candidates.first() else {
+        return Err(format!(
+            "{} has manual candidate count but no first candidate projection",
+            path.display()
+        ));
+    };
+    super::require_text_contains(
+        text,
+        &format!(
+            "- First manual candidate: `{}` at `{}` (`{}`)",
+            first.id, first.location_text, first.operation_family
+        ),
+        path,
+    )?;
+    if compact {
+        check_manual_candidate_front_door_compact_text(text, path, first)?;
+        check_manual_candidate_front_door_guidance_text(text, path, first, compact)?;
+    } else {
+        super::require_text_contains(
+            text,
+            &format!("- Safe caller route: {}", first.safe_caller),
+            path,
+        )?;
+        super::require_text_contains(
+            text,
+            &format!("- Invariant at risk: {}", first.invariant),
+            path,
+        )?;
+        super::require_text_contains(
+            text,
+            &format!("- External evidence refs: {}", first.evidence_refs),
+            path,
+        )?;
+        check_manual_candidate_front_door_guidance_text(text, path, first, compact)?;
+        check_manual_candidate_queue_preview_text(
+            text,
+            path,
+            manual_candidates,
+            queue_limit,
+            compact,
+        )?;
+    }
+    if !compact {
+        super::require_text_contains(text, "unsafe-review explain", path)?;
+    }
+    for expected in [
+        "unsafe-review context",
+        "unsafe-review candidate witness-plan",
+        &first.id,
+        "manual-candidates.json",
+        "manual-repair-queue.json",
+        "separate from ReviewCard `repair-queue.json`",
+        "no agent was run",
+        "ReviewCard-only outputs",
+        "not analyzer-discovered",
+        "did not discover",
+        "did not run witnesses",
+        "edit source",
+        "policy inputs",
+    ] {
+        super::require_text_contains(text, expected, path)?;
+    }
+    Ok(())
+}
+
+fn check_manual_candidate_front_door_compact_text(
+    text: &str,
+    path: &Path,
+    candidate: &ManualCandidateProjection,
+) -> Result<(), String> {
+    if let Some(proof_mode) = &candidate.proof_mode {
+        super::require_text_contains(text, &format!("- Proof mode: `{}`", proof_mode.kind), path)?;
+    }
+    super::require_text_contains(
+        text,
+        &format!(
+            "- Evidence refs: {}; full route and evidence packet in sidecars.",
+            candidate.evidence_refs
+        ),
+        path,
+    )?;
+    Ok(())
+}
+
+fn check_manual_candidate_queue_preview_text(
+    text: &str,
+    path: &Path,
+    manual_candidates: &ManualCandidateIndexProjection,
+    queue_limit: usize,
+    compact: bool,
+) -> Result<(), String> {
+    let queue_len = manual_candidates.count.min(queue_limit);
+    super::require_text_contains(
+        text,
+        &format!(
+            "- Manual candidate queue preview: first {queue_len} of {} manual candidate(s)",
+            manual_candidates.count
+        ),
+        path,
+    )?;
+    for candidate in manual_candidates.candidates.iter().take(queue_len) {
+        super::require_text_contains(
+            text,
+            &format!(
+                "`{}` at `{}` (`{}`); evidence refs: {}",
+                candidate.id,
+                candidate.location_text,
+                candidate.operation_family,
+                candidate.evidence_refs
+            ),
+            path,
+        )?;
+        if let Some((label, value)) = manual_candidate_first_guidance_cue(candidate) {
+            super::require_text_contains(text, &format!("{label}: `{value}`"), path)?;
+        }
+        if !compact {
+            for expected in [
+                "unsafe-review context",
+                "unsafe-review candidate witness-plan",
+                &candidate.id,
+            ] {
+                super::require_text_contains(text, expected, path)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn manual_candidate_first_guidance_cue(
+    candidate: &ManualCandidateProjection,
+) -> Option<(&'static str, &str)> {
+    if let Some(proof_mode) = &candidate.proof_mode {
+        return Some(("proof mode", proof_mode.kind.as_str()));
+    }
+    if let Some(value) = candidate.test_targets.first() {
+        return Some(("first test target", value.as_str()));
+    }
+    if let Some(value) = candidate.fix_options.first() {
+        return Some(("first fix option", value.as_str()));
+    }
+    if let Some(value) = candidate.do_not_touch.first() {
+        return Some(("first do-not-touch note", value.as_str()));
+    }
+    None
+}
+
+fn check_manual_candidate_front_door_guidance_text(
+    text: &str,
+    path: &Path,
+    candidate: &ManualCandidateProjection,
+    compact: bool,
+) -> Result<(), String> {
+    let guidance_count =
+        candidate.fix_options.len() + candidate.test_targets.len() + candidate.do_not_touch.len();
+    if guidance_count == 0 {
+        check_manual_candidate_front_door_stable_byte_text(text, path, candidate, compact)?;
+        check_manual_candidate_front_door_proof_mode_text(text, path, candidate)?;
+        check_manual_candidate_front_door_boundary_text(text, path, candidate)?;
+        return Ok(());
+    }
+
+    check_manual_candidate_front_door_stable_byte_text(text, path, candidate, compact)?;
+    check_manual_candidate_front_door_proof_mode_text(text, path, candidate)?;
+    check_manual_candidate_front_door_boundary_text(text, path, candidate)?;
+    super::require_text_contains(
+        text,
+        &format!(
+            "- Guidance: {} fix option(s), {} test target(s), {} do-not-touch note(s)",
+            candidate.fix_options.len(),
+            candidate.test_targets.len(),
+            candidate.do_not_touch.len()
+        ),
+        path,
+    )?;
+    if let Some(option) = candidate.fix_options.first() {
+        super::require_text_contains(text, &format!("- First fix option: {option}"), path)?;
+    }
+    if let Some(target) = candidate.test_targets.first() {
+        super::require_text_contains(text, &format!("- First test target: `{target}`"), path)?;
+    }
+    if let Some(note) = candidate.do_not_touch.first() {
+        super::require_text_contains(text, &format!("- First do-not-touch note: {note}"), path)?;
+    }
+    Ok(())
+}
+
+fn check_manual_candidate_front_door_stable_byte_text(
+    text: &str,
+    path: &Path,
+    candidate: &ManualCandidateProjection,
+    compact: bool,
+) -> Result<(), String> {
+    let Some(stable_byte) = &candidate.stable_byte else {
+        return Ok(());
+    };
+    let class = stable_byte_projection_str(stable_byte, "class", &candidate.id)?;
+    let observable = stable_byte_projection_str(stable_byte, "observable", &candidate.id)?;
+    let proof_required = stable_byte_projection_str(stable_byte, "proof_required", &candidate.id)?;
+    let ledger_state = stable_byte_projection_str(stable_byte, "ledger_state", &candidate.id)?;
+    let source = stable_byte_projection_str(stable_byte, "source", &candidate.id)?;
+    let sink = stable_byte_projection_str(stable_byte, "sink", &candidate.id)?;
+    let hazard = stable_byte_projection_str(stable_byte, "hazard", &candidate.id)?;
+
+    if compact {
+        super::require_text_contains(
+            text,
+            &format!(
+                "- Stable-byte class: `{class}`; proof `{proof_required}`; ledger `{ledger_state}`; route `{source}` -> `{sink}`; hazard in sidecars"
+            ),
+            path,
+        )?;
+        return Ok(());
+    }
+
+    super::require_text_contains(
+        text,
+        &format!(
+            "- Stable-byte class: `{class}` (observable: `{observable}`; proof required: `{proof_required}`; ledger state: `{ledger_state}`)"
+        ),
+        path,
+    )?;
+    super::require_text_contains(
+        text,
+        &format!("- Stable-byte route: source `{source}` -> sink `{sink}`"),
+        path,
+    )?;
+    super::require_text_contains(text, &format!("- Stable-byte hazard: {hazard}"), path)?;
+    Ok(())
+}
+
+fn stable_byte_projection_str<'a>(
+    stable_byte: &'a serde_json::Value,
+    field: &str,
+    candidate_id: &str,
+) -> Result<&'a str, String> {
+    stable_byte
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            format!(
+                "manual-candidates.json candidate `{candidate_id}` stable_byte.{field} must be a non-empty string"
+            )
+        })
+}
+
+fn check_manual_candidate_front_door_proof_mode_text(
+    text: &str,
+    path: &Path,
+    candidate: &ManualCandidateProjection,
+) -> Result<(), String> {
+    if let Some(proof_mode) = &candidate.proof_mode {
+        super::require_text_contains(
+            text,
+            &format!(
+                "- Proof mode: `{}` (system Bun expected: `{}`; mutation required: `{}`; Miri/model required: `{}`)",
+                proof_mode.kind,
+                proof_mode.system_bun_expected,
+                proof_mode.mutation_required,
+                proof_mode.miri_required
+            ),
+            path,
+        )?;
+    }
+    Ok(())
+}
+
+fn check_manual_candidate_front_door_boundary_text(
+    text: &str,
+    path: &Path,
+    candidate: &ManualCandidateProjection,
+) -> Result<(), String> {
+    if let Some(fix_boundary) = &candidate.fix_boundary {
+        super::require_text_contains(text, &format!("- Fix boundary: {fix_boundary}"), path)?;
+    }
+    if let Some(pr_aperture) = &candidate.pr_aperture {
+        super::require_text_contains(text, &format!("- PR aperture: {pr_aperture}"), path)?;
+        super::require_text_contains(text, "- Stop line: keep the PR inside this aperture", path)?;
+    }
+    Ok(())
+}
 
 fn check_github_summary_artifact(
     dir: &Path,
@@ -197,6 +822,7 @@ fn check_github_summary_artifact(
     open_actionable_gaps: usize,
     card_ids: &BTreeSet<String>,
     card_projections: &BTreeMap<String, CardProjection>,
+    repair_queue_projections: &BTreeMap<String, RepairQueueProjection>,
 ) -> Result<(), String> {
     let path = dir.join("github-summary.md");
     let text = super::read_to_string(&path)?;
@@ -224,7 +850,17 @@ fn check_github_summary_artifact(
     )?;
     super::require_text_contains(
         &text,
+        "- Policy report: `policy-report.md`; ReviewCard-only; manual candidates are not policy inputs.",
+        &path,
+    )?;
+    super::require_text_contains(
+        &text,
         "- Manual candidate index: `manual-candidates.json` lists imported advisory candidates separately from ReviewCards.",
+        &path,
+    )?;
+    super::require_text_contains(
+        &text,
+        "- Tokmd packets: `tokmd-packets.json`; tokmd not run.",
         &path,
     )?;
     super::require_text_contains(
@@ -241,10 +877,14 @@ fn check_github_summary_artifact(
     super::require_text_contains(&text, "not memory-safety proof", &path)?;
     super::require_text_contains(&text, "not UB-free status", &path)?;
     super::require_text_contains(&text, "not Miri-clean status", &path)?;
-    super::require_text_contains(&text, "not site-execution proof", &path)?;
+    super::require_text_contains_any(
+        &text,
+        &path,
+        &["not site-execution proof", "not a site-execution claim"],
+    )?;
     super::require_text_contains(
         &text,
-        "Full advisory bundle (review-kit.json, cards.json, pr-summary.md, github-summary.md, cards.sarif, comment-plan.json, witness-plan.md, receipt-audit.md, manual-candidates.json, lsp.json, repair-queue.json)",
+        "Full advisory bundle (review-kit.json, cards.json, pr-summary.md, github-summary.md, cards.sarif, comment-plan.json, witness-plan.md, receipt-audit.md, policy-report.json, policy-report.md, manual-candidates.json, manual-repair-queue.json, tokmd-packets.json, lsp.json, repair-queue.json)",
         &path,
     )?;
 
@@ -281,6 +921,12 @@ fn check_github_summary_artifact(
         super::require_text_contains(&text, "unsafe site executed", &path)?;
     } else {
         require_markdown_top_card_projection(&text, &path, card_projections)?;
+        require_pr_summary_top_card_repair_queue_projection(
+            &text,
+            &path,
+            card_ids,
+            repair_queue_projections,
+        )?;
     }
 
     Ok(())
@@ -306,6 +952,122 @@ fn check_receipt_audit_artifact(dir: &Path) -> Result<(), String> {
         &text,
         "manual candidate receipts attach external evidence",
         &path,
+    )?;
+
+    Ok(())
+}
+
+fn check_policy_report_artifacts(
+    dir: &Path,
+    summary: &AdvisoryArtifactSummary,
+) -> Result<(), String> {
+    let json_path = dir.join("policy-report.json");
+    let report = super::parse_json_file(&json_path)?;
+    reject_manual_candidate_markers(&report, "policy-report.json")?;
+    super::require_json_str(&report, "schema_version", "0.1", "policy-report.json")?;
+    super::require_json_str(&report, "tool", "unsafe-review", "policy-report.json")?;
+    super::require_json_str(&report, "mode", "policy-report", "policy-report.json")?;
+    super::require_json_str(&report, "policy", "advisory", "policy-report.json")?;
+    let boundary = report
+        .get("trust_boundary")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "policy-report.json is missing trust_boundary".to_string())?;
+    super::require_boundary_text(boundary, "policy-report.json")?;
+    super::require_text_contains(boundary, "does not enforce blocking policy", &json_path)?;
+    let cards = super::json_array_at(&report, "/cards", "policy-report.json")?;
+    let summary_cards = super::json_usize_at(&report, "/summary/cards", "policy-report.json")?;
+    if summary_cards != summary.card_count || cards.len() != summary.card_count {
+        return Err(format!(
+            "policy-report.json cards count must match cards.json summary.cards {}; got summary {summary_cards} and {} card entrie(s)",
+            summary.card_count,
+            cards.len()
+        ));
+    }
+    let new_gaps = super::json_usize_at(&report, "/summary/new_gaps", "policy-report.json")?;
+    if new_gaps != summary.open_actionable_gaps {
+        return Err(format!(
+            "policy-report.json summary.new_gaps is {new_gaps}, but cards.json open_actionable_gaps is {}",
+            summary.open_actionable_gaps
+        ));
+    }
+    let limitations = super::json_array_at(&report, "/limitations", "policy-report.json")?;
+    if !limitations.iter().any(|limitation| {
+        limitation.as_str().is_some_and(|text| {
+            super::text_contains_ignore_ascii_case(
+                text,
+                "manual candidates are not policy-report inputs",
+            )
+        })
+    }) {
+        return Err(
+            "policy-report.json limitations must say manual candidates are not policy-report inputs"
+                .to_string(),
+        );
+    }
+    for card in cards {
+        let card_id = require_known_card_id(card, "policy-report.json card", &summary.card_ids)?;
+        let projection = summary
+            .card_projections
+            .get(card_id)
+            .ok_or_else(|| format!("policy-report.json card `{card_id}` missing projection"))?;
+        require_projected_str(
+            card,
+            "class",
+            &projection.class_name,
+            "policy-report.json card",
+        )?;
+        require_projected_str(
+            card,
+            "operation_family",
+            &projection.operation_family,
+            "policy-report.json card",
+        )?;
+        require_projected_str(
+            card,
+            "operation",
+            &projection.operation,
+            "policy-report.json card",
+        )?;
+        let missing_count =
+            super::json_usize_at(card, "/missing_count", "policy-report.json card")?;
+        if missing_count != projection.missing.len() {
+            return Err(format!(
+                "policy-report.json card `{card_id}` missing_count is {missing_count}, but cards.json has {} missing evidence entrie(s)",
+                projection.missing.len()
+            ));
+        }
+        require_projected_str(
+            card,
+            "next_action",
+            &projection.next_action,
+            "policy-report.json card",
+        )?;
+    }
+
+    let markdown_path = dir.join("policy-report.md");
+    let markdown = super::read_to_string(&markdown_path)?;
+    super::require_text_contains(&markdown, "# unsafe-review policy report", &markdown_path)?;
+    super::require_text_contains(&markdown, "## Reviewer front panel", &markdown_path)?;
+    super::require_text_contains(&markdown, "## Current cards", &markdown_path)?;
+    super::require_text_contains(&markdown, "## Limitations", &markdown_path)?;
+    super::require_text_contains(&markdown, "## Trust boundary", &markdown_path)?;
+    super::require_text_contains(
+        &markdown,
+        "Manual candidates are not policy-report inputs",
+        &markdown_path,
+    )?;
+    super::require_text_contains(&markdown, "static unsafe contract review", &markdown_path)?;
+    super::require_text_contains(&markdown, "not a proof of memory safety", &markdown_path)?;
+    super::require_text_contains(&markdown, "not UB-free status", &markdown_path)?;
+    super::require_text_contains_any(
+        &markdown,
+        &markdown_path,
+        &["not a Miri result", "not Miri-clean status"],
+    )?;
+    super::require_text_contains(
+        &markdown,
+        "does not enforce blocking policy",
+        &markdown_path,
     )?;
 
     Ok(())
@@ -363,7 +1125,8 @@ fn check_manual_candidates_artifact(dir: &Path) -> Result<ManualCandidateIndexPr
         "comment-plan.json",
         "lsp.json",
         "repair-queue.json",
-        "policy-report",
+        "policy-report.json",
+        "policy-report.md",
     ] {
         let Some(text) = relationship
             .get(artifact)
@@ -379,6 +1142,7 @@ fn check_manual_candidates_artifact(dir: &Path) -> Result<ManualCandidateIndexPr
             ));
         }
     }
+    check_manual_candidate_reviewcard_applicability(&value, "manual-candidates.json")?;
 
     let boundary =
         super::require_non_empty_json_str(&value, "trust_boundary", "manual-candidates.json")?;
@@ -386,7 +1150,6 @@ fn check_manual_candidates_artifact(dir: &Path) -> Result<ManualCandidateIndexPr
     for expected in [
         "manual/advisory",
         "not analyzer-discovered",
-        "not site-execution proof",
         "not policy gating",
         "did not run witnesses",
         "post comments",
@@ -400,30 +1163,1872 @@ fn check_manual_candidates_artifact(dir: &Path) -> Result<ManualCandidateIndexPr
             ));
         }
     }
+    require_site_execution_boundary_text(boundary, "manual-candidates.json trust_boundary")?;
 
     let mut candidate_ids = BTreeSet::new();
-    let first_id = candidates
-        .first()
-        .and_then(|candidate| candidate.get("id"))
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string);
+    let mut candidate_projections = Vec::new();
     for candidate in candidates {
-        let id = check_manual_candidate_artifact_entry(candidate)?;
-        if !candidate_ids.insert(id.clone()) {
+        let projection = check_manual_candidate_artifact_entry(candidate)?;
+        if !candidate_ids.insert(projection.id.clone()) {
             return Err(format!(
-                "manual-candidates.json repeats candidate id `{id}`"
+                "manual-candidates.json repeats candidate id `{}`",
+                projection.id
+            ));
+        }
+        candidate_projections.push(projection);
+    }
+    let summary_evidence_refs = super::json_usize_at(
+        &value,
+        "/summary/external_evidence_refs",
+        "manual-candidates.json",
+    )?;
+    let actual_evidence_refs = candidate_projections
+        .iter()
+        .map(|projection| projection.evidence_refs)
+        .sum::<usize>();
+    if summary_evidence_refs != actual_evidence_refs {
+        return Err(format!(
+            "manual-candidates.json summary.external_evidence_refs is {summary_evidence_refs}, but candidates contain {actual_evidence_refs} evidence reference(s)"
+        ));
+    }
+    let operation_families = manual_candidate_operation_family_counts(&candidate_projections);
+    let evidence_kinds = manual_candidate_evidence_kind_counts(&candidate_projections);
+    require_summary_count_map(
+        &value,
+        "/summary/operation_families",
+        &operation_families,
+        "manual-candidates.json summary.operation_families",
+    )?;
+    require_summary_count_map(
+        &value,
+        "/summary/evidence_kinds",
+        &evidence_kinds,
+        "manual-candidates.json summary.evidence_kinds",
+    )?;
+    let first_id = candidate_projections
+        .first()
+        .map(|projection| projection.id.clone());
+
+    Ok(ManualCandidateIndexProjection {
+        ids: candidate_ids,
+        count: candidate_projections.len(),
+        first_id,
+        candidates: candidate_projections,
+        operation_families,
+        evidence_kinds,
+    })
+}
+
+fn check_manual_repair_queue_artifact(
+    dir: &Path,
+    manual_candidates: &ManualCandidateIndexProjection,
+) -> Result<ManualRepairQueueProjection, String> {
+    let path = dir.join("manual-repair-queue.json");
+    let value = super::parse_json_file(&path)?;
+    super::require_json_str(
+        &value,
+        "schema_version",
+        "manual-repair-queue/v1",
+        "manual-repair-queue.json",
+    )?;
+    super::require_json_str(&value, "tool", "unsafe-review", "manual-repair-queue.json")?;
+    super::require_json_str(
+        &value,
+        "mode",
+        "manual_candidate_repair_queue",
+        "manual-repair-queue.json",
+    )?;
+    super::require_json_str(
+        &value,
+        "source",
+        "manual_candidate",
+        "manual-repair-queue.json",
+    )?;
+    super::require_json_str(&value, "policy", "advisory", "manual-repair-queue.json")?;
+    let boundary =
+        super::require_non_empty_json_str(&value, "trust_boundary", "manual-repair-queue.json")?;
+    for expected in [
+        "Copy-only manual candidate repair queue",
+        "not analyzer-discovered ReviewCards",
+        "not an automatic repair queue",
+        "not proof of memory safety",
+        "not UB-free status",
+        "not Miri-clean status",
+        "not policy gating",
+        "not repair success",
+        "did not run agents",
+        "did not run witnesses",
+        "did not edit source",
+        "did not post comments",
+        "did not enforce blocking policy",
+    ] {
+        if !super::text_contains_ignore_ascii_case(boundary, expected) {
+            return Err(format!(
+                "manual-repair-queue.json trust_boundary must include `{expected}`"
+            ));
+        }
+    }
+    require_site_execution_boundary_text(boundary, "manual-repair-queue.json trust_boundary")?;
+
+    let summary_count = super::json_usize_at(
+        &value,
+        "/summary/manual_candidates",
+        "manual-repair-queue.json",
+    )?;
+    if summary_count != manual_candidates.count {
+        return Err(format!(
+            "manual-repair-queue.json summary.manual_candidates is {summary_count}, but manual-candidates.json has {}",
+            manual_candidates.count
+        ));
+    }
+    let queued_count = super::json_usize_at(
+        &value,
+        "/summary/queued_candidates",
+        "manual-repair-queue.json",
+    )?;
+    if queued_count != manual_candidates.count {
+        return Err(format!(
+            "manual-repair-queue.json summary.queued_candidates is {queued_count}, but manual-candidates.json has {}",
+            manual_candidates.count
+        ));
+    }
+    let analyzer_discovered = super::json_usize_at(
+        &value,
+        "/summary/analyzer_discovered",
+        "manual-repair-queue.json",
+    )?;
+    if analyzer_discovered != 0 {
+        return Err("manual-repair-queue.json summary.analyzer_discovered must stay 0".to_string());
+    }
+    let evidence_refs = super::json_usize_at(
+        &value,
+        "/summary/external_evidence_refs",
+        "manual-repair-queue.json",
+    )?;
+    let expected_evidence_refs = manual_candidates
+        .candidates
+        .iter()
+        .map(|candidate| candidate.evidence_refs)
+        .sum::<usize>();
+    if evidence_refs != expected_evidence_refs {
+        return Err(format!(
+            "manual-repair-queue.json summary.external_evidence_refs is {evidence_refs}, but manual-candidates.json has {expected_evidence_refs}"
+        ));
+    }
+    require_summary_count_map(
+        &value,
+        "/summary/operation_families",
+        &manual_candidates.operation_families,
+        "manual-repair-queue.json summary.operation_families",
+    )?;
+    require_summary_count_map(
+        &value,
+        "/summary/evidence_kinds",
+        &manual_candidates.evidence_kinds,
+        "manual-repair-queue.json summary.evidence_kinds",
+    )?;
+    require_summary_count_map(
+        &value,
+        "/summary/proof_modes",
+        &manual_candidate_proof_mode_counts(manual_candidates),
+        "manual-repair-queue.json summary.proof_modes",
+    )?;
+    require_summary_count_map(
+        &value,
+        "/summary/stable_byte_source_classes",
+        &manual_candidate_stable_byte_class_counts(manual_candidates),
+        "manual-repair-queue.json summary.stable_byte_source_classes",
+    )?;
+    require_summary_count_map(
+        &value,
+        "/summary/ledger_states",
+        &manual_candidate_ledger_state_counts(manual_candidates),
+        "manual-repair-queue.json summary.ledger_states",
+    )?;
+    require_manual_repair_guidance_count(
+        &value,
+        "with_fix_options",
+        manual_candidates
+            .candidates
+            .iter()
+            .filter(|candidate| !candidate.fix_options.is_empty())
+            .count(),
+    )?;
+    require_manual_repair_guidance_count(
+        &value,
+        "with_test_targets",
+        manual_candidates
+            .candidates
+            .iter()
+            .filter(|candidate| !candidate.test_targets.is_empty())
+            .count(),
+    )?;
+    require_manual_repair_guidance_count(
+        &value,
+        "with_do_not_touch",
+        manual_candidates
+            .candidates
+            .iter()
+            .filter(|candidate| !candidate.do_not_touch.is_empty())
+            .count(),
+    )?;
+    require_manual_repair_guidance_count(
+        &value,
+        "with_oracle_map",
+        manual_candidates
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.oracle_map.is_some())
+            .count(),
+    )?;
+    require_manual_repair_guidance_count(
+        &value,
+        "with_proof_mode",
+        manual_candidates
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.proof_mode.is_some())
+            .count(),
+    )?;
+    require_manual_repair_guidance_count(
+        &value,
+        "with_fix_boundary",
+        manual_candidates
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.fix_boundary.is_some())
+            .count(),
+    )?;
+    require_manual_repair_guidance_count(
+        &value,
+        "with_pr_aperture",
+        manual_candidates
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.pr_aperture.is_some())
+            .count(),
+    )?;
+
+    let queue = super::json_array_at(&value, "/queue", "manual-repair-queue.json")?;
+    if queue.len() != manual_candidates.count {
+        return Err(format!(
+            "manual-repair-queue.json queue has {} entrie(s), expected {}",
+            queue.len(),
+            manual_candidates.count
+        ));
+    }
+    check_manual_repair_queue_stable_byte_seed_summary(&value, queue)?;
+    let mut entries = Vec::new();
+    for (index, (entry, expected)) in queue.iter().zip(&manual_candidates.candidates).enumerate() {
+        entries.push(check_manual_repair_queue_entry(entry, expected, index)?);
+    }
+
+    Ok(ManualRepairQueueProjection { entries })
+}
+
+fn manual_candidate_proof_mode_counts(
+    manual_candidates: &ManualCandidateIndexProjection,
+) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::new();
+    for candidate in &manual_candidates.candidates {
+        if let Some(proof_mode) = &candidate.proof_mode {
+            *counts.entry(proof_mode.kind.clone()).or_insert(0) += 1;
+        }
+    }
+    counts
+}
+
+fn manual_candidate_stable_byte_class_counts(
+    manual_candidates: &ManualCandidateIndexProjection,
+) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::new();
+    for candidate in &manual_candidates.candidates {
+        if let Some(class) = &candidate.stable_byte_source_class {
+            *counts.entry(class.clone()).or_insert(0) += 1;
+        }
+    }
+    counts
+}
+
+fn manual_candidate_ledger_state_counts(
+    manual_candidates: &ManualCandidateIndexProjection,
+) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::new();
+    for candidate in &manual_candidates.candidates {
+        if let Some(ledger_state) = &candidate.stable_byte_ledger_state {
+            *counts.entry(ledger_state.clone()).or_insert(0) += 1;
+        }
+    }
+    counts
+}
+
+fn require_manual_repair_guidance_count(
+    value: &serde_json::Value,
+    field: &str,
+    expected: usize,
+) -> Result<(), String> {
+    let pointer = format!("/summary/{field}");
+    let actual = super::json_usize_at(value, &pointer, "manual-repair-queue.json")?;
+    if actual != expected {
+        return Err(format!(
+            "manual-repair-queue.json summary.{field} is {actual}, expected {expected}"
+        ));
+    }
+    Ok(())
+}
+
+fn check_manual_repair_queue_stable_byte_seed_summary(
+    value: &serde_json::Value,
+    queue: &[serde_json::Value],
+) -> Result<(), String> {
+    let context = "manual-repair-queue.json summary.stable_byte_seed_source";
+    let with_seed = super::json_usize_at(
+        value,
+        "/summary/with_stable_byte_seed",
+        "manual-repair-queue.json",
+    )?;
+    let queue_seed_count = queue
+        .iter()
+        .filter(|entry| entry.get("stable_byte_seed").is_some())
+        .count();
+    if with_seed != queue_seed_count {
+        return Err(format!(
+            "manual-repair-queue.json summary.with_stable_byte_seed is {with_seed}, but queue contains {queue_seed_count} stable_byte_seed entrie(s)"
+        ));
+    }
+    let seed_source = value
+        .pointer("/summary/stable_byte_seed_source")
+        .ok_or_else(|| {
+            "manual-repair-queue.json summary is missing stable_byte_seed_source".to_string()
+        })?;
+    if !seed_source.is_object() {
+        return Err(format!("{context} must be an object"));
+    }
+    let included = seed_source
+        .get("included")
+        .and_then(serde_json::Value::as_bool)
+        .ok_or_else(|| format!("{context}.included must be a boolean"))?;
+    let limitation = super::require_non_empty_json_str(seed_source, "limitation", context)?;
+    for expected in [
+        "advisory workflow metadata",
+        "not analyzer discovery",
+        "not witness execution",
+        "not proof",
+        "not policy readiness",
+        "not a ReviewCard truth",
+    ] {
+        if !super::text_contains_ignore_ascii_case(limitation, expected) {
+            return Err(format!("{context}.limitation must include `{expected}`"));
+        }
+    }
+    if !included {
+        if with_seed > 0 {
+            return Err(format!(
+                "manual-repair-queue.json summary.with_stable_byte_seed is {with_seed}, but stable_byte_seed_source is not included"
+            ));
+        }
+        return Ok(());
+    }
+    super::require_non_empty_json_str(seed_source, "path", context)?;
+    let rows = super::json_usize_at(seed_source, "/rows", context)?;
+    let matched = super::json_usize_at(seed_source, "/matched_manual_candidates", context)?;
+    if matched != with_seed {
+        return Err(format!(
+            "{context} matched_manual_candidates is {matched}, but summary.with_stable_byte_seed is {with_seed}"
+        ));
+    }
+    if rows < matched {
+        return Err(format!(
+            "{context} rows {rows} must be >= matched_manual_candidates {matched}"
+        ));
+    }
+    let relationship = super::require_non_empty_json_str(seed_source, "relationship", context)?;
+    for expected in ["manual-repair-queue entries", "manual candidate ID"] {
+        if !relationship.contains(expected) {
+            return Err(format!("{context}.relationship must include `{expected}`"));
+        }
+    }
+    Ok(())
+}
+
+fn check_manual_repair_queue_entry(
+    entry: &serde_json::Value,
+    expected: &ManualCandidateProjection,
+    index: usize,
+) -> Result<ManualRepairQueueEntryProjection, String> {
+    let context = format!("manual-repair-queue.json queue[{index}]");
+    require_projected_str(entry, "id", &expected.id, &context)?;
+    require_projected_str(entry, "title", &expected.title, &context)?;
+    require_projected_str(entry, "location_text", &expected.location_text, &context)?;
+    require_projected_str(
+        entry,
+        "operation_family",
+        &expected.operation_family,
+        &context,
+    )?;
+    require_projected_str(
+        entry,
+        "unsafe_operation",
+        &expected.unsafe_operation,
+        &context,
+    )?;
+    require_projected_str(entry, "safe_caller", &expected.safe_caller, &context)?;
+    require_projected_str(entry, "invariant_at_risk", &expected.invariant, &context)?;
+    super::require_json_str(entry, "source", "manual", &context)?;
+    if entry.get("manual_candidate") != Some(&serde_json::Value::Bool(true)) {
+        return Err(format!("{context} manual_candidate must be true"));
+    }
+    if entry.get("analyzer_discovered") != Some(&serde_json::Value::Bool(false)) {
+        return Err(format!("{context} analyzer_discovered must be false"));
+    }
+    let evidence_refs = super::json_usize_at(entry, "/external_evidence_refs", &context)?;
+    if evidence_refs != expected.evidence_refs {
+        return Err(format!(
+            "{context} external_evidence_refs is {evidence_refs}, expected {}",
+            expected.evidence_refs
+        ));
+    }
+    require_projected_optional_string_array(entry, "fix_options", &expected.fix_options, &context)?;
+    require_projected_optional_string_array(
+        entry,
+        "test_targets",
+        &expected.test_targets,
+        &context,
+    )?;
+    require_projected_optional_string_array(
+        entry,
+        "do_not_touch",
+        &expected.do_not_touch,
+        &context,
+    )?;
+    require_projected_optional_proof_mode(entry, "proof_mode", &expected.proof_mode, &context)?;
+    require_projected_optional_str(entry, "fix_boundary", &expected.fix_boundary, &context)?;
+    require_projected_optional_str(entry, "pr_aperture", &expected.pr_aperture, &context)?;
+    require_projected_optional_json_value(entry, "oracle_map", &expected.oracle_map, &context)?;
+    if let Some(seed) = entry.get("stable_byte_seed") {
+        check_review_kit_stable_byte_seed(seed, expected, &context)?;
+    }
+    let handoff = entry
+        .get("implementer_handoff")
+        .ok_or_else(|| format!("{context} is missing implementer_handoff"))?;
+    if handoff != &expected.implementer_handoff {
+        return Err(format!(
+            "{context} implementer_handoff must match manual-candidates.json candidate `{}` implementer_handoff",
+            expected.id
+        ));
+    }
+    require_manual_command(
+        entry,
+        "explain",
+        "unsafe-review explain",
+        &expected.id,
+        &context,
+    )?;
+    require_manual_command(
+        entry,
+        "context_json",
+        "unsafe-review context",
+        &expected.id,
+        &context,
+    )?;
+    require_manual_command(
+        entry,
+        "witness_plan",
+        "unsafe-review candidate witness-plan",
+        &expected.id,
+        &context,
+    )?;
+    let bucket = super::require_non_empty_json_str(entry, "bucket", &context)?;
+    require_expected_value(
+        bucket,
+        "manual_candidate_handoff",
+        &format!("{context} bucket"),
+    )?;
+    let bucket_reason = super::require_non_empty_json_str(entry, "bucket_reason", &context)?;
+    require_expected_value(
+        bucket_reason,
+        "manual_candidate_copy_only",
+        &format!("{context} bucket_reason"),
+    )?;
+    let agent_handoff = entry
+        .get("agent_handoff")
+        .ok_or_else(|| format!("{context} is missing agent_handoff"))?;
+    super::require_json_str(agent_handoff, "state", "copy_ready", &context)?;
+    if agent_handoff.get("automatic") != Some(&serde_json::Value::Bool(false)) {
+        return Err(format!("{context} agent_handoff.automatic must be false"));
+    }
+    let reasons = require_non_empty_string_array(agent_handoff, "reasons", &context)?;
+    for expected_text in [
+        "manual candidate includes file:line",
+        "separate from ReviewCard repair-queue.json",
+    ] {
+        if !reasons.iter().any(|reason| reason.contains(expected_text)) {
+            return Err(format!(
+                "{context} agent_handoff.reasons must include `{expected_text}`"
+            ));
+        }
+    }
+    let boundary = super::require_non_empty_json_str(entry, "trust_boundary", &context)?;
+    for expected_text in [
+        "not analyzer-discovered",
+        "not automatic repair",
+        "not witness execution",
+        "not source editing",
+        "not proof",
+        "not policy gating",
+    ] {
+        if !super::text_contains_ignore_ascii_case(boundary, expected_text) {
+            return Err(format!(
+                "{context} trust_boundary must include `{expected_text}`"
+            ));
+        }
+    }
+    Ok(ManualRepairQueueEntryProjection {
+        id: expected.id.clone(),
+        bucket: bucket.to_string(),
+        bucket_reason: bucket_reason.to_string(),
+        agent_handoff: agent_handoff.clone(),
+        trust_boundary: boundary.to_string(),
+    })
+}
+
+fn check_tokmd_packets_artifact(
+    dir: &Path,
+    manual_candidates: &ManualCandidateIndexProjection,
+    manual_repair_queue: &ManualRepairQueueProjection,
+) -> Result<(), String> {
+    let path = dir.join("tokmd-packets.json");
+    let value = super::parse_json_file(&path)?;
+    let comment_plan = super::parse_json_file(&dir.join("comment-plan.json"))?;
+    let comment_plan_projection = tokmd_comment_plan_projection(&comment_plan)?;
+    super::require_json_str(
+        &value,
+        "schema_version",
+        "tokmd-packets/v1",
+        "tokmd-packets.json",
+    )?;
+    super::require_json_str(&value, "tool", "unsafe-review", "tokmd-packets.json")?;
+    super::require_json_str(&value, "mode", "tokmd_packet_bundle", "tokmd-packets.json")?;
+    super::require_json_str(&value, "source", "first_pr", "tokmd-packets.json")?;
+    super::require_json_str(&value, "policy", "advisory", "tokmd-packets.json")?;
+    super::require_non_empty_json_str(&value, "tool_version", "tokmd-packets.json")?;
+
+    let renderer = value
+        .get("renderer")
+        .ok_or_else(|| "tokmd-packets.json is missing renderer".to_string())?;
+    if renderer
+        .get("tokmd_run")
+        .and_then(serde_json::Value::as_bool)
+        != Some(false)
+    {
+        return Err("tokmd-packets.json renderer.tokmd_run must be false".to_string());
+    }
+    require_projected_static_string_array(
+        renderer,
+        "available_presets",
+        TOKMD_PACKET_PRESETS,
+        "tokmd-packets.json renderer",
+    )?;
+    let status =
+        super::require_non_empty_json_str(renderer, "presets_status", "tokmd-packets.json")?;
+    if !super::text_contains_ignore_ascii_case(status, "did not render tokmd output") {
+        return Err(
+            "tokmd-packets.json renderer.presets_status must say tokmd output was not rendered"
+                .to_string(),
+        );
+    }
+
+    require_tokmd_summary_count(
+        &value,
+        "manual_candidates",
+        manual_candidates.count,
+        "tokmd-packets.json",
+    )?;
+    require_tokmd_summary_count(
+        &value,
+        "packets",
+        manual_candidates.count,
+        "tokmd-packets.json",
+    )?;
+    require_tokmd_summary_count(&value, "analyzer_discovered", 0, "tokmd-packets.json")?;
+    let evidence_refs = manual_candidates
+        .candidates
+        .iter()
+        .map(|candidate| candidate.evidence_refs)
+        .sum::<usize>();
+    require_tokmd_summary_count(
+        &value,
+        "external_evidence_refs",
+        evidence_refs,
+        "tokmd-packets.json",
+    )?;
+    require_summary_count_map(
+        &value,
+        "/summary/operation_families",
+        &manual_candidates.operation_families,
+        "tokmd-packets.json summary.operation_families",
+    )?;
+    require_summary_count_map(
+        &value,
+        "/summary/evidence_kinds",
+        &manual_candidates.evidence_kinds,
+        "tokmd-packets.json summary.evidence_kinds",
+    )?;
+    require_tokmd_summary_count(
+        &value,
+        "with_proof_mode",
+        manual_candidates
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.proof_mode.is_some())
+            .count(),
+        "tokmd-packets.json",
+    )?;
+    require_tokmd_summary_count(
+        &value,
+        "with_fix_boundary",
+        manual_candidates
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.fix_boundary.is_some())
+            .count(),
+        "tokmd-packets.json",
+    )?;
+    require_tokmd_summary_count(
+        &value,
+        "with_pr_aperture",
+        manual_candidates
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.pr_aperture.is_some())
+            .count(),
+        "tokmd-packets.json",
+    )?;
+    require_tokmd_summary_count(
+        &value,
+        "with_oracle_map",
+        manual_candidates
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.oracle_map.is_some())
+            .count(),
+        "tokmd-packets.json",
+    )?;
+    require_tokmd_summary_count(
+        &value,
+        "with_stable_byte_source_class",
+        manual_candidates
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.stable_byte_source_class().is_some())
+            .count(),
+        "tokmd-packets.json",
+    )?;
+    let with_stable_byte_seed = super::json_usize_at(
+        &value,
+        "/summary/with_stable_byte_seed",
+        "tokmd-packets.json",
+    )?;
+    check_tokmd_packet_inputs(&value, with_stable_byte_seed, &comment_plan_projection)?;
+
+    let packets = super::json_array_at(&value, "/packets", "tokmd-packets.json")?;
+    if packets.len() != manual_candidates.count {
+        return Err(format!(
+            "tokmd-packets.json packets has {} entrie(s), expected {}",
+            packets.len(),
+            manual_candidates.count
+        ));
+    }
+    let packet_seed_count = packets
+        .iter()
+        .filter(|packet| packet.get("stable_byte_seed").is_some())
+        .count();
+    if packet_seed_count != with_stable_byte_seed {
+        return Err(format!(
+            "tokmd-packets.json summary.with_stable_byte_seed is {with_stable_byte_seed}, expected {packet_seed_count}"
+        ));
+    }
+    if manual_repair_queue.entries.len() != manual_candidates.count {
+        return Err(format!(
+            "manual-repair-queue.json queue has {} entrie(s), expected {}",
+            manual_repair_queue.entries.len(),
+            manual_candidates.count
+        ));
+    }
+    for (index, ((entry, expected), expected_repair)) in packets
+        .iter()
+        .zip(&manual_candidates.candidates)
+        .zip(&manual_repair_queue.entries)
+        .enumerate()
+    {
+        check_tokmd_packet_entry(entry, expected, expected_repair, index)?;
+    }
+
+    let boundary =
+        super::require_non_empty_json_str(&value, "trust_boundary", "tokmd-packets.json")?;
+    for expected in [
+        "formatting inputs only",
+        "not analyzer-discovered ReviewCards",
+        "not policy inputs",
+        "not a proof of UB",
+        "not a proof of memory safety",
+        "not UB-free status",
+        "not Miri-clean status",
+        "not repair success",
+        "not policy readiness",
+        "did not run tokmd",
+        "witnesses",
+        "post comments",
+        "edit source",
+        "enforce blocking policy",
+    ] {
+        if !super::text_contains_ignore_ascii_case(boundary, expected) {
+            return Err(format!(
+                "tokmd-packets.json trust_boundary must include `{expected}`"
+            ));
+        }
+    }
+    require_site_execution_boundary_text(boundary, "tokmd-packets.json trust_boundary")?;
+    Ok(())
+}
+
+fn require_tokmd_summary_count(
+    value: &serde_json::Value,
+    field: &str,
+    expected: usize,
+    context: &str,
+) -> Result<(), String> {
+    let pointer = format!("/summary/{field}");
+    let actual = super::json_usize_at(value, &pointer, context)?;
+    if actual != expected {
+        return Err(format!(
+            "{context} summary.{field} is {actual}, expected {expected}"
+        ));
+    }
+    Ok(())
+}
+
+fn check_tokmd_packet_inputs(
+    value: &serde_json::Value,
+    with_stable_byte_seed: usize,
+    comment_plan: &TokmdCommentPlanProjection,
+) -> Result<(), String> {
+    for field in ["manual-candidates.json", "manual-repair-queue.json"] {
+        let input = value
+            .pointer(&format!("/inputs/{field}"))
+            .ok_or_else(|| format!("tokmd-packets.json inputs is missing `{field}`"))?;
+        if input.get("included").and_then(serde_json::Value::as_bool) != Some(true) {
+            return Err(format!(
+                "tokmd-packets.json inputs.{field}.included must be true"
+            ));
+        }
+        super::require_non_empty_json_str(input, "relationship", "tokmd-packets.json inputs")?;
+    }
+    for field in [
+        "cards.json",
+        "witness-plan.md",
+        "receipt-audit.md",
+        "repair-queue.json",
+    ] {
+        let input = value
+            .pointer(&format!("/inputs/{field}"))
+            .ok_or_else(|| format!("tokmd-packets.json inputs is missing `{field}`"))?;
+        if input.get("included").and_then(serde_json::Value::as_bool) != Some(false) {
+            return Err(format!(
+                "tokmd-packets.json inputs.{field}.included must be false"
+            ));
+        }
+        super::require_non_empty_json_str(input, "limitation", "tokmd-packets.json inputs")?;
+    }
+    check_tokmd_comment_plan_input(value, comment_plan)?;
+    let seed_input = value
+        .pointer("/inputs/stable-byte seed ledger")
+        .ok_or_else(|| {
+            "tokmd-packets.json inputs is missing `stable-byte seed ledger`".to_string()
+        })?;
+    let seed_included = seed_input
+        .get("included")
+        .and_then(serde_json::Value::as_bool)
+        .ok_or_else(|| {
+            "tokmd-packets.json inputs.stable-byte seed ledger.included must be a bool".to_string()
+        })?;
+    let limitation =
+        super::require_non_empty_json_str(seed_input, "limitation", "tokmd-packets.json inputs")?;
+    if seed_included {
+        super::require_non_empty_json_str(
+            seed_input,
+            "path",
+            "tokmd-packets.json inputs.stable-byte seed ledger",
+        )?;
+        super::require_non_empty_json_str(
+            seed_input,
+            "relationship",
+            "tokmd-packets.json inputs.stable-byte seed ledger",
+        )?;
+        let matched = super::json_usize_at(
+            seed_input,
+            "/matched_manual_candidates",
+            "tokmd-packets.json inputs.stable-byte seed ledger",
+        )?;
+        if matched != with_stable_byte_seed {
+            return Err(format!(
+                "tokmd-packets.json inputs.stable-byte seed ledger matched_manual_candidates is {matched}, expected {with_stable_byte_seed}"
+            ));
+        }
+        let rows = super::json_usize_at(
+            seed_input,
+            "/rows",
+            "tokmd-packets.json inputs.stable-byte seed ledger",
+        )?;
+        if rows < matched {
+            return Err(format!(
+                "tokmd-packets.json inputs.stable-byte seed ledger rows is {rows}, expected at least {matched}"
+            ));
+        }
+        for expected in [
+            "advisory workflow metadata",
+            "not analyzer-discovered",
+            "not proof",
+            "not policy-ready",
+            "not rendered tokmd output",
+        ] {
+            if !super::text_contains_ignore_ascii_case(limitation, expected) {
+                return Err(format!(
+                    "tokmd-packets.json inputs.stable-byte seed ledger limitation must include `{expected}`"
+                ));
+            }
+        }
+    } else if !super::text_contains_ignore_ascii_case(
+        limitation,
+        "packet-local stable_byte.ledger_state",
+    ) {
+        return Err(
+            "tokmd-packets.json inputs.stable-byte seed ledger limitation must mention packet-local stable_byte.ledger_state when the ledger is absent".to_string(),
+        );
+    }
+    Ok(())
+}
+
+struct TokmdCommentPlanProjection {
+    selected_count: usize,
+    not_selected_count: usize,
+    budget: usize,
+    reason: String,
+    reason_code: String,
+    selected_reason_codes: BTreeMap<String, usize>,
+    not_selected_reason_codes: BTreeMap<String, usize>,
+}
+
+fn tokmd_comment_plan_projection(
+    comment_plan: &serde_json::Value,
+) -> Result<TokmdCommentPlanProjection, String> {
+    let selected_count =
+        super::json_usize_at(comment_plan, "/summary/selected_count", "comment-plan.json")?;
+    let not_selected_count = super::json_usize_at(
+        comment_plan,
+        "/summary/not_selected_count",
+        "comment-plan.json",
+    )?;
+    let budget = super::json_usize_at(comment_plan, "/summary/budget", "comment-plan.json")?;
+    let summary = comment_plan
+        .get("summary")
+        .ok_or_else(|| "comment-plan.json is missing summary".to_string())?;
+    let reason = super::require_non_empty_json_str(summary, "reason", "comment-plan.json summary")?
+        .to_string();
+    let reason_code =
+        super::require_non_empty_json_str(summary, "reason_code", "comment-plan.json summary")?
+            .to_string();
+    Ok(TokmdCommentPlanProjection {
+        selected_count,
+        not_selected_count,
+        budget,
+        reason,
+        reason_code,
+        selected_reason_codes: tokmd_comment_plan_reason_counts(
+            comment_plan,
+            "/comments",
+            "selection_reason_code",
+            "comment-plan.json comments",
+        )?,
+        not_selected_reason_codes: tokmd_comment_plan_reason_counts(
+            comment_plan,
+            "/not_selected",
+            "reason_code",
+            "comment-plan.json not_selected",
+        )?,
+    })
+}
+
+fn tokmd_comment_plan_reason_counts(
+    comment_plan: &serde_json::Value,
+    pointer: &str,
+    field: &str,
+    context: &str,
+) -> Result<BTreeMap<String, usize>, String> {
+    let Some(entries) = comment_plan.pointer(pointer) else {
+        return Ok(BTreeMap::new());
+    };
+    let Some(entries) = entries.as_array() else {
+        return Err(format!("{context} must be an array"));
+    };
+    let mut counts = BTreeMap::new();
+    for entry in entries {
+        let value = super::require_non_empty_json_str(entry, field, context)?;
+        *counts.entry(value.to_string()).or_insert(0) += 1;
+    }
+    Ok(counts)
+}
+
+fn check_tokmd_comment_plan_input(
+    value: &serde_json::Value,
+    comment_plan: &TokmdCommentPlanProjection,
+) -> Result<(), String> {
+    let input = value
+        .pointer("/inputs/comment-plan.json")
+        .ok_or_else(|| "tokmd-packets.json inputs is missing `comment-plan.json`".to_string())?;
+    if input.get("included").and_then(serde_json::Value::as_bool) != Some(true) {
+        return Err(
+            "tokmd-packets.json inputs.comment-plan.json.included must be true".to_string(),
+        );
+    }
+    let relationship =
+        super::require_non_empty_json_str(input, "relationship", "tokmd-packets.json inputs")?;
+    for expected in [
+        "ReviewCard-only",
+        "review budget",
+        "manual candidates are not selected",
+    ] {
+        if !super::text_contains_ignore_ascii_case(relationship, expected) {
+            return Err(format!(
+                "tokmd-packets.json inputs.comment-plan.json.relationship must include `{expected}`"
+            ));
+        }
+    }
+    let context = "tokmd-packets.json inputs.comment-plan.json";
+    let selected = super::json_usize_at(input, "/summary/selected_count", context)?;
+    if selected != comment_plan.selected_count {
+        return Err(format!(
+            "{context} summary.selected_count is {selected}, expected {}",
+            comment_plan.selected_count
+        ));
+    }
+    let not_selected = super::json_usize_at(input, "/summary/not_selected_count", context)?;
+    if not_selected != comment_plan.not_selected_count {
+        return Err(format!(
+            "{context} summary.not_selected_count is {not_selected}, expected {}",
+            comment_plan.not_selected_count
+        ));
+    }
+    let budget = super::json_usize_at(input, "/summary/budget", context)?;
+    if budget != comment_plan.budget {
+        return Err(format!(
+            "{context} summary.budget is {budget}, expected {}",
+            comment_plan.budget
+        ));
+    }
+    let summary = input
+        .get("summary")
+        .ok_or_else(|| format!("{context} is missing summary"))?;
+    let reason = super::require_non_empty_json_str(summary, "reason", context)?;
+    require_expected_value(
+        reason,
+        &comment_plan.reason,
+        &format!("{context} summary.reason"),
+    )?;
+    let reason_code = super::require_non_empty_json_str(summary, "reason_code", context)?;
+    require_expected_value(
+        reason_code,
+        &comment_plan.reason_code,
+        &format!("{context} summary.reason_code"),
+    )?;
+    require_summary_count_map(
+        input,
+        "/selected_reason_codes",
+        &comment_plan.selected_reason_codes,
+        "tokmd-packets.json inputs.comment-plan.json selected_reason_codes",
+    )?;
+    require_summary_count_map(
+        input,
+        "/not_selected_reason_codes",
+        &comment_plan.not_selected_reason_codes,
+        "tokmd-packets.json inputs.comment-plan.json not_selected_reason_codes",
+    )?;
+    let boundary =
+        super::require_non_empty_json_str(input, "trust_boundary", "tokmd-packets.json inputs")?;
+    for expected in [
+        "plan-only",
+        "did not post comments",
+        "manual candidates",
+        "did not run witnesses",
+        "policy decisions",
+    ] {
+        if !super::text_contains_ignore_ascii_case(boundary, expected) {
+            return Err(format!(
+                "tokmd-packets.json inputs.comment-plan.json.trust_boundary must include `{expected}`"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn check_tokmd_packet_entry(
+    entry: &serde_json::Value,
+    expected: &ManualCandidateProjection,
+    expected_repair: &ManualRepairQueueEntryProjection,
+    index: usize,
+) -> Result<(), String> {
+    let context = format!("tokmd-packets.json packets[{index}]");
+    require_projected_str(entry, "id", &expected.id, &context)?;
+    require_projected_str(entry, "title", &expected.title, &context)?;
+    super::require_json_str(entry, "source", "manual", &context)?;
+    super::require_json_str(entry, "packet_kind", "manual_candidate", &context)?;
+    if entry.get("manual_candidate") != Some(&serde_json::Value::Bool(true)) {
+        return Err(format!("{context} manual_candidate must be true"));
+    }
+    if entry.get("analyzer_discovered") != Some(&serde_json::Value::Bool(false)) {
+        return Err(format!("{context} analyzer_discovered must be false"));
+    }
+    require_projected_static_string_array(entry, "tokmd_presets", TOKMD_PACKET_PRESETS, &context)?;
+    require_projected_optional_str(
+        entry,
+        "stable_byte_source_class",
+        &expected.stable_byte_source_class(),
+        &context,
+    )?;
+    require_projected_optional_str(
+        entry,
+        "ledger_state",
+        &expected.stable_byte_ledger_state,
+        &context,
+    )?;
+    check_tokmd_ledger_state_limitation(entry, expected, &context)?;
+    require_projected_optional_json_value(entry, "stable_byte", &expected.stable_byte, &context)?;
+    if let Some(seed) = entry.get("stable_byte_seed") {
+        check_tokmd_stable_byte_seed(seed, expected, &context)?;
+    }
+
+    let target = entry
+        .get("target")
+        .ok_or_else(|| format!("{context} is missing target"))?;
+    require_manual_candidate_target_projection(target, expected, &context)?;
+
+    let route = entry
+        .get("route")
+        .ok_or_else(|| format!("{context} is missing route"))?;
+    require_projected_str(route, "safe_caller", &expected.safe_caller, &context)?;
+    require_projected_str(
+        route,
+        "unsafe_operation",
+        &expected.unsafe_operation,
+        &context,
+    )?;
+    require_projected_str(
+        route,
+        "operation_family",
+        &expected.operation_family,
+        &context,
+    )?;
+    require_projected_str(entry, "invariant_at_risk", &expected.invariant, &context)?;
+
+    let evidence = super::json_array_at(entry, "/external_evidence", &context)?;
+    if evidence.len() != expected.evidence.len() {
+        return Err(format!(
+            "{context} external_evidence has {} entrie(s), expected {}",
+            evidence.len(),
+            expected.evidence.len()
+        ));
+    }
+    for (evidence_index, (actual, expected_evidence)) in
+        evidence.iter().zip(&expected.evidence).enumerate()
+    {
+        let evidence_context = format!("{context} external_evidence[{evidence_index}]");
+        require_projected_str(actual, "kind", &expected_evidence.kind, &evidence_context)?;
+        require_projected_optional_str(actual, "path", &expected_evidence.path, &evidence_context)?;
+        require_projected_optional_str(
+            actual,
+            "summary",
+            &expected_evidence.summary,
+            &evidence_context,
+        )?;
+        require_projected_optional_str(
+            actual,
+            "command",
+            &expected_evidence.command,
+            &evidence_context,
+        )?;
+        require_projected_optional_str(
+            actual,
+            "limitation",
+            &expected_evidence.limitation,
+            &evidence_context,
+        )?;
+    }
+
+    require_projected_optional_string_array(entry, "fix_options", &expected.fix_options, &context)?;
+    require_projected_optional_string_array(
+        entry,
+        "test_targets",
+        &expected.test_targets,
+        &context,
+    )?;
+    require_projected_optional_string_array(
+        entry,
+        "do_not_touch",
+        &expected.do_not_touch,
+        &context,
+    )?;
+    require_projected_optional_proof_mode(entry, "proof_mode", &expected.proof_mode, &context)?;
+    require_projected_optional_str(entry, "fix_boundary", &expected.fix_boundary, &context)?;
+    require_projected_optional_str(entry, "pr_aperture", &expected.pr_aperture, &context)?;
+    require_projected_optional_json_value(entry, "oracle_map", &expected.oracle_map, &context)?;
+    let handoff = entry
+        .get("implementer_handoff")
+        .ok_or_else(|| format!("{context} is missing implementer_handoff"))?;
+    if handoff != &expected.implementer_handoff {
+        return Err(format!(
+            "{context} implementer_handoff must match manual-candidates.json candidate `{}` implementer_handoff",
+            expected.id
+        ));
+    }
+    let repair_item = entry
+        .get("manual_repair_queue_item")
+        .ok_or_else(|| format!("{context} is missing manual_repair_queue_item"))?;
+    check_tokmd_manual_repair_queue_item(repair_item, expected_repair, &context)?;
+    check_tokmd_preset_inputs(entry, expected, expected_repair, &context)?;
+    let commands = entry
+        .get("commands")
+        .ok_or_else(|| format!("{context} is missing commands"))?;
+    require_manual_command(
+        commands,
+        "explain",
+        "unsafe-review explain",
+        &expected.id,
+        &context,
+    )?;
+    require_manual_command(
+        commands,
+        "context_json",
+        "unsafe-review context",
+        &expected.id,
+        &context,
+    )?;
+    require_manual_command(
+        commands,
+        "witness_plan",
+        "unsafe-review candidate witness-plan",
+        &expected.id,
+        &context,
+    )?;
+    let missing_inputs = require_non_empty_string_array(entry, "missing_inputs", &context)?;
+    for expected_input in ["ReviewCard projection", "receipt audit JSON"] {
+        if !missing_inputs.iter().any(|input| input == expected_input) {
+            return Err(format!(
+                "{context} missing_inputs must include `{expected_input}`"
+            ));
+        }
+    }
+    let has_missing_stable_byte_ledger = missing_inputs
+        .iter()
+        .any(|input| input == "stable-byte ledger state");
+    if expected.stable_byte_ledger_state.is_some() && has_missing_stable_byte_ledger {
+        return Err(format!(
+            "{context} missing_inputs must not include `stable-byte ledger state` when packet-local ledger_state is present"
+        ));
+    }
+    if expected.stable_byte_ledger_state.is_none() && !has_missing_stable_byte_ledger {
+        return Err(format!(
+            "{context} missing_inputs must include `stable-byte ledger state` when packet-local ledger_state is absent"
+        ));
+    }
+    let has_missing_stable_byte_seed_row = missing_inputs
+        .iter()
+        .any(|input| input == "stable-byte seed row");
+    if entry.get("stable_byte_seed").is_some() && has_missing_stable_byte_seed_row {
+        return Err(format!(
+            "{context} missing_inputs must not include `stable-byte seed row` when stable_byte_seed is present"
+        ));
+    }
+    let boundary = super::require_non_empty_json_str(entry, "trust_boundary", &context)?;
+    for expected_text in [
+        "not analyzer-discovered",
+        "not tokmd output",
+        "not automatic repair",
+        "not witness execution",
+        "not source editing",
+        "not proof",
+        "not policy gating",
+    ] {
+        if !super::text_contains_ignore_ascii_case(boundary, expected_text) {
+            return Err(format!(
+                "{context} trust_boundary must include `{expected_text}`"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn check_tokmd_ledger_state_limitation(
+    entry: &serde_json::Value,
+    expected: &ManualCandidateProjection,
+    context: &str,
+) -> Result<(), String> {
+    let ledger_limitation =
+        super::require_non_empty_json_str(entry, "ledger_state_limitation", context)?;
+    let has_stable_byte_seed = entry.get("stable_byte_seed").is_some();
+    if has_stable_byte_seed
+        && super::text_contains_ignore_ascii_case(
+            ledger_limitation,
+            "external seed ledger rows are not imported",
+        )
+    {
+        return Err(format!(
+            "{context} ledger_state_limitation must not say external seed ledger rows are not imported when stable_byte_seed is projected"
+        ));
+    }
+    let expected_ledger_limitation = if has_stable_byte_seed {
+        "joined seed row"
+    } else if expected.stable_byte_ledger_state.is_some() {
+        "packet-local manual candidate metadata"
+    } else {
+        "future seed JSON export"
+    };
+    if !super::text_contains_ignore_ascii_case(ledger_limitation, expected_ledger_limitation) {
+        return Err(format!(
+            "{context} ledger_state_limitation must mention `{expected_ledger_limitation}`"
+        ));
+    }
+    if has_stable_byte_seed
+        && expected.stable_byte_ledger_state.is_some()
+        && !super::text_contains_ignore_ascii_case(
+            ledger_limitation,
+            "packet-local manual candidate metadata",
+        )
+    {
+        return Err(format!(
+            "{context} ledger_state_limitation must mention `packet-local manual candidate metadata` when packet-local ledger_state is present"
+        ));
+    }
+    Ok(())
+}
+
+fn check_tokmd_preset_inputs(
+    entry: &serde_json::Value,
+    expected: &ManualCandidateProjection,
+    expected_repair: &ManualRepairQueueEntryProjection,
+    context: &str,
+) -> Result<(), String> {
+    let inputs = entry
+        .get("preset_inputs")
+        .ok_or_else(|| format!("{context} is missing preset_inputs"))?;
+    for preset in TOKMD_PACKET_PRESETS {
+        let preset_value = inputs
+            .get(preset)
+            .ok_or_else(|| format!("{context} preset_inputs is missing `{preset}`"))?;
+        super::require_non_empty_json_str(
+            preset_value,
+            "audience",
+            &format!("{context} preset_inputs.{preset}"),
+        )?;
+        require_projected_str(
+            preset_value,
+            "candidate_id",
+            &expected.id,
+            &format!("{context} preset_inputs.{preset}"),
+        )?;
+    }
+
+    let handoff = &inputs["bun-ub-handoff"];
+    let handoff_context = format!("{context} preset_inputs.bun-ub-handoff");
+    require_projected_optional_str(
+        handoff,
+        "stable_byte_family",
+        &expected.stable_byte_source_class(),
+        &handoff_context,
+    )?;
+    require_projected_str(
+        handoff,
+        "invariant_at_risk",
+        &expected.invariant,
+        &handoff_context,
+    )?;
+    require_projected_str(
+        handoff,
+        "safe_js_caller_route",
+        &expected.safe_caller,
+        &handoff_context,
+    )?;
+    require_tokmd_rust_native_seam(handoff, expected, &handoff_context)?;
+    let handoff_target = handoff
+        .get("target")
+        .ok_or_else(|| format!("{handoff_context} is missing target"))?;
+    require_manual_candidate_target_projection(handoff_target, expected, &handoff_context)?;
+    require_projected_optional_proof_mode(
+        handoff,
+        "proof_mode",
+        &expected.proof_mode,
+        &handoff_context,
+    )?;
+    require_tokmd_required_proof_action(handoff, expected, &handoff_context)?;
+    require_tokmd_evidence_projection(handoff, expected, &handoff_context)?;
+    require_projected_optional_str(
+        handoff,
+        "fix_boundary",
+        &expected.fix_boundary,
+        &handoff_context,
+    )?;
+    require_projected_optional_str(
+        handoff,
+        "pr_aperture",
+        &expected.pr_aperture,
+        &handoff_context,
+    )?;
+    require_projected_optional_string_array(
+        handoff,
+        "test_or_witness_targets",
+        &expected.test_targets,
+        &handoff_context,
+    )?;
+    require_projected_optional_string_array(
+        handoff,
+        "do_not_touch",
+        &expected.do_not_touch,
+        &handoff_context,
+    )?;
+    require_projected_optional_str(
+        handoff,
+        "ledger_state",
+        &expected.stable_byte_ledger_state,
+        &handoff_context,
+    )?;
+    super::require_non_empty_json_str(handoff, "next_action", &handoff_context)?;
+    super::require_non_empty_json_str(handoff, "stop_line", &handoff_context)?;
+
+    let pr_body = &inputs["bun-ub-pr-body"];
+    let pr_body_context = format!("{context} preset_inputs.bun-ub-pr-body");
+    require_projected_str(
+        pr_body,
+        "problem_statement",
+        &expected.title,
+        &pr_body_context,
+    )?;
+    require_projected_str(
+        pr_body,
+        "risk_statement",
+        &expected.invariant,
+        &pr_body_context,
+    )?;
+    require_projected_optional_json_value(
+        pr_body,
+        "compatibility_oracle",
+        &expected.oracle_map,
+        &pr_body_context,
+    )?;
+    require_projected_optional_string_array(
+        pr_body,
+        "tests",
+        &expected.test_targets,
+        &pr_body_context,
+    )?;
+    require_projected_optional_string_array(
+        pr_body,
+        "non_goals",
+        &expected.do_not_touch,
+        &pr_body_context,
+    )?;
+    require_tokmd_claims_not_made(pr_body, &pr_body_context)?;
+
+    let ledger = &inputs["bun-ub-ledger-note"];
+    let ledger_context = format!("{context} preset_inputs.bun-ub-ledger-note");
+    require_projected_optional_str(
+        ledger,
+        "current_ledger_state",
+        &expected.stable_byte_ledger_state,
+        &ledger_context,
+    )?;
+    let transition =
+        super::require_non_empty_json_str(ledger, "state_transition", &ledger_context)?;
+    if !super::text_contains_ignore_ascii_case(transition, "not requested") {
+        return Err(format!(
+            "{ledger_context} state_transition must say no transition was requested"
+        ));
+    }
+    require_tokmd_evidence_projection(ledger, expected, &ledger_context)?;
+    require_projected_optional_string_array(
+        ledger,
+        "remaining_outside_aperture",
+        &expected.do_not_touch,
+        &ledger_context,
+    )?;
+    let ledger_boundary =
+        super::require_non_empty_json_str(ledger, "trust_boundary", &ledger_context)?;
+    for expected_text in ["workflow metadata", "not proof", "policy readiness"] {
+        if !super::text_contains_ignore_ascii_case(ledger_boundary, expected_text) {
+            return Err(format!(
+                "{ledger_context} trust_boundary must include `{expected_text}`"
             ));
         }
     }
 
-    Ok(ManualCandidateIndexProjection {
-        ids: candidate_ids,
-        count: candidates.len(),
-        first_id,
-    })
+    let review_map = &inputs["bun-ub-review-map"];
+    let review_map_context = format!("{context} preset_inputs.bun-ub-review-map");
+    require_projected_str(
+        review_map,
+        "safe_js_caller_route",
+        &expected.safe_caller,
+        &review_map_context,
+    )?;
+    require_projected_optional_json_value(
+        review_map,
+        "oracle_map",
+        &expected.oracle_map,
+        &review_map_context,
+    )?;
+    let comment_plan = review_map
+        .get("comment_plan")
+        .ok_or_else(|| format!("{review_map_context} is missing comment_plan"))?;
+    let relationship =
+        super::require_non_empty_json_str(comment_plan, "relationship", &review_map_context)?;
+    for expected_text in ["ReviewCard-only", "manual candidates are not selected"] {
+        if !super::text_contains_ignore_ascii_case(relationship, expected_text) {
+            return Err(format!(
+                "{review_map_context} comment_plan.relationship must include `{expected_text}`"
+            ));
+        }
+    }
+    let repair_queue = review_map
+        .get("repair_queue")
+        .ok_or_else(|| format!("{review_map_context} is missing repair_queue"))?;
+    check_tokmd_manual_repair_queue_item(repair_queue, expected_repair, &review_map_context)?;
+    let no_posting = super::require_non_empty_json_str(
+        review_map,
+        "explicit_no_posting_boundary",
+        &review_map_context,
+    )?;
+    if !super::text_contains_ignore_ascii_case(no_posting, "did not post comments") {
+        return Err(format!(
+            "{review_map_context} explicit_no_posting_boundary must say comments were not posted"
+        ));
+    }
+
+    let next_pick = &inputs["bun-ub-next-pick"];
+    let next_pick_context = format!("{context} preset_inputs.bun-ub-next-pick");
+    require_projected_optional_proof_mode(
+        next_pick,
+        "proof_mode",
+        &expected.proof_mode,
+        &next_pick_context,
+    )?;
+    require_tokmd_required_proof_action(next_pick, expected, &next_pick_context)?;
+    require_projected_optional_string_array(
+        next_pick,
+        "non_goals",
+        &expected.do_not_touch,
+        &next_pick_context,
+    )?;
+    super::require_non_empty_json_str(next_pick, "next_action", &next_pick_context)?;
+    let next_boundary =
+        super::require_non_empty_json_str(next_pick, "trust_boundary", &next_pick_context)?;
+    for expected_text in ["routing metadata", "does not rank", "claim proof"] {
+        if !super::text_contains_ignore_ascii_case(next_boundary, expected_text) {
+            return Err(format!(
+                "{next_pick_context} trust_boundary must include `{expected_text}`"
+            ));
+        }
+    }
+
+    let boundary = super::require_non_empty_json_str(inputs, "trust_boundary", context)?;
+    for expected_text in [
+        "copy-only formatting inputs",
+        "did not run tokmd",
+        "post comments",
+        "execute witnesses",
+        "edit source",
+        "prove UB",
+        "policy decisions",
+    ] {
+        if !super::text_contains_ignore_ascii_case(boundary, expected_text) {
+            return Err(format!(
+                "{context} preset_inputs.trust_boundary must include `{expected_text}`"
+            ));
+        }
+    }
+    Ok(())
 }
 
-fn check_manual_candidate_artifact_entry(candidate: &serde_json::Value) -> Result<String, String> {
+fn require_site_execution_boundary_text(text: &str, context: &str) -> Result<(), String> {
+    if ["not site-execution proof", "not a site-execution claim"]
+        .iter()
+        .any(|expected| super::text_contains_ignore_ascii_case(text, expected))
+    {
+        return Ok(());
+    }
+    Err(format!(
+        "{context} must include site-execution boundary wording"
+    ))
+}
+
+fn require_tokmd_rust_native_seam(
+    value: &serde_json::Value,
+    expected: &ManualCandidateProjection,
+    context: &str,
+) -> Result<(), String> {
+    let actual = super::require_non_empty_json_str(value, "rust_native_seam", context)?;
+    if actual == expected.location_text {
+        return Ok(());
+    }
+    if let Some(stable_byte) = &expected.stable_byte {
+        if let Some(sink) = stable_byte.get("sink").and_then(serde_json::Value::as_str) {
+            if actual == sink {
+                return Ok(());
+            }
+        }
+    }
+    Err(format!(
+        "{context} rust_native_seam must match stable_byte.sink or location_text"
+    ))
+}
+
+fn require_tokmd_required_proof_action(
+    value: &serde_json::Value,
+    expected: &ManualCandidateProjection,
+    context: &str,
+) -> Result<(), String> {
+    let action = super::require_non_empty_json_str(value, "required_proof_action", context)?;
+    let expected_text = match expected
+        .proof_mode
+        .as_ref()
+        .map(|proof_mode| proof_mode.kind.as_str())
+    {
+        Some("observable-red-green") => "system-Bun red",
+        Some("mutation-plus-miri") => "Miri/model",
+        Some("source-route-only") => "source inspection alone",
+        Some("helper-gated") => "helper semantics",
+        _ => "proof mode",
+    };
+    if !super::text_contains_ignore_ascii_case(action, expected_text) {
+        return Err(format!(
+            "{context} required_proof_action must include `{expected_text}`"
+        ));
+    }
+    Ok(())
+}
+
+fn require_tokmd_evidence_projection(
+    value: &serde_json::Value,
+    expected: &ManualCandidateProjection,
+    context: &str,
+) -> Result<(), String> {
+    let evidence = super::json_array_at(value, "/current_evidence", context)
+        .or_else(|_| super::json_array_at(value, "/evidence_or_receipt", context))?;
+    if evidence.len() != expected.evidence.len() {
+        return Err(format!(
+            "{context} evidence projection has {} entrie(s), expected {}",
+            evidence.len(),
+            expected.evidence.len()
+        ));
+    }
+    for (index, (actual, expected_evidence)) in evidence.iter().zip(&expected.evidence).enumerate()
+    {
+        let evidence_context = format!("{context} evidence[{index}]");
+        require_projected_str(actual, "kind", &expected_evidence.kind, &evidence_context)?;
+        require_projected_optional_str(actual, "path", &expected_evidence.path, &evidence_context)?;
+        require_projected_optional_str(
+            actual,
+            "summary",
+            &expected_evidence.summary,
+            &evidence_context,
+        )?;
+        require_projected_optional_str(
+            actual,
+            "command",
+            &expected_evidence.command,
+            &evidence_context,
+        )?;
+        require_projected_optional_str(
+            actual,
+            "limitation",
+            &expected_evidence.limitation,
+            &evidence_context,
+        )?;
+    }
+    Ok(())
+}
+
+fn require_tokmd_claims_not_made(value: &serde_json::Value, context: &str) -> Result<(), String> {
+    let claims = require_non_empty_string_array(value, "claims_not_made", context)?;
+    for expected_claim in [
+        "not proof of UB",
+        "not proof of memory safety",
+        "not UB-free status",
+        "not Miri-clean status",
+        "not site-execution proof",
+        "not calibrated precision or recall",
+        "not policy readiness",
+        "not automatic repair",
+    ] {
+        if !claims.iter().any(|claim| claim == expected_claim) {
+            return Err(format!(
+                "{context} claims_not_made must include `{expected_claim}`"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn check_tokmd_stable_byte_seed(
+    seed: &serde_json::Value,
+    expected: &ManualCandidateProjection,
+    context: &str,
+) -> Result<(), String> {
+    let context = format!("{context} stable_byte_seed");
+    for field in [
+        "source",
+        "seed_id",
+        "ledger_state",
+        "candidate_family",
+        "surface",
+        "manual_candidate",
+        "safe_js_caller",
+        "rust_native_sink",
+        "proof_mode",
+        "suggested_first_pr",
+        "manual_candidate_pr_aperture",
+        "owner_lane",
+    ] {
+        super::require_non_empty_json_str(seed, field, &context)?;
+    }
+    require_non_empty_string_array(seed, "triage_labels", &context)?;
+    require_projected_optional_str(
+        seed,
+        "candidate_family",
+        &expected.stable_byte_source_class(),
+        &context,
+    )?;
+    require_projected_optional_str(
+        seed,
+        "ledger_state",
+        &expected.stable_byte_ledger_state,
+        &context,
+    )?;
+    require_stable_byte_seed_projection(seed, "safe_js_caller", expected, "source", &context)?;
+    require_stable_byte_seed_projection(seed, "rust_native_sink", expected, "sink", &context)?;
+    require_projected_optional_str(
+        seed,
+        "manual_candidate_pr_aperture",
+        &expected.pr_aperture,
+        &context,
+    )?;
+    if let Some(proof_mode) = &expected.proof_mode {
+        require_projected_str(seed, "proof_mode", &proof_mode.kind, &context)?;
+    }
+    let consistency = seed
+        .get("candidate_consistency")
+        .ok_or_else(|| format!("{context} is missing candidate_consistency"))?;
+    for field in [
+        "stable_byte_class_matches_manual_candidate",
+        "proof_mode_matches_manual_candidate",
+        "ledger_state_matches_manual_candidate",
+        "safe_js_caller_matches_manual_candidate",
+        "rust_native_sink_matches_manual_candidate",
+        "suggested_first_pr_has_manual_candidate_pr_aperture",
+    ] {
+        if consistency.get(field).and_then(serde_json::Value::as_bool) != Some(true) {
+            return Err(format!(
+                "{context} candidate_consistency.{field} must be true"
+            ));
+        }
+    }
+    let boundary = super::require_non_empty_json_str(seed, "trust_boundary", &context)?;
+    for expected_text in [
+        "advisory workflow metadata",
+        "not analyzer discovery",
+        "not witness execution",
+        "not proof",
+        "not policy readiness",
+        "not rendered tokmd output",
+    ] {
+        if !super::text_contains_ignore_ascii_case(boundary, expected_text) {
+            return Err(format!(
+                "{context} trust_boundary must include `{expected_text}`"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn check_tokmd_manual_repair_queue_item(
+    item: &serde_json::Value,
+    expected: &ManualRepairQueueEntryProjection,
+    context: &str,
+) -> Result<(), String> {
+    let context = format!("{context} manual_repair_queue_item");
+    super::require_json_str(item, "artifact", "manual-repair-queue.json", &context)?;
+    require_projected_str(item, "id", &expected.id, &context)?;
+    require_projected_str(item, "bucket", &expected.bucket, &context)?;
+    require_projected_str(item, "bucket_reason", &expected.bucket_reason, &context)?;
+    let agent_handoff = item
+        .get("agent_handoff")
+        .ok_or_else(|| format!("{context} is missing agent_handoff"))?;
+    if agent_handoff != &expected.agent_handoff {
+        return Err(format!(
+            "{context} agent_handoff must match manual-repair-queue.json entry `{}` agent_handoff",
+            expected.id
+        ));
+    }
+    require_projected_str(item, "trust_boundary", &expected.trust_boundary, &context)?;
+    Ok(())
+}
+
+fn require_projected_static_string_array(
+    value: &serde_json::Value,
+    field: &str,
+    expected: &[&str],
+    context: &str,
+) -> Result<(), String> {
+    let actual = require_non_empty_string_array(value, field, context)?;
+    if actual != expected {
+        return Err(format!(
+            "{context} {field} is {actual:?}, expected {expected:?}"
+        ));
+    }
+    Ok(())
+}
+
+fn require_stable_byte_seed_projection(
+    seed: &serde_json::Value,
+    seed_field: &str,
+    expected: &ManualCandidateProjection,
+    stable_byte_field: &str,
+    context: &str,
+) -> Result<(), String> {
+    let actual = super::require_non_empty_json_str(seed, seed_field, context)?;
+    let expected_value = expected_stable_byte_field(expected, stable_byte_field, context)?;
+    if actual != expected_value {
+        return Err(format!(
+            "{context} {seed_field} `{actual}` must match manual-candidates.json candidate stable_byte.{stable_byte_field} `{expected_value}`"
+        ));
+    }
+    Ok(())
+}
+
+fn expected_stable_byte_field<'a>(
+    expected: &'a ManualCandidateProjection,
+    field: &str,
+    context: &str,
+) -> Result<&'a str, String> {
+    let stable_byte = expected.stable_byte.as_ref().ok_or_else(|| {
+        format!(
+            "{context} stable_byte_seed requires manual-candidates.json candidate `{}` stable_byte.{field}",
+            expected.id
+        )
+    })?;
+    stable_byte
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            format!(
+                "{context} stable_byte_seed requires manual-candidates.json candidate `{}` stable_byte.{field}",
+                expected.id
+            )
+        })
+}
+
+fn stable_byte_source_class_from_title(title: &str) -> Option<&'static str> {
+    STABLE_BYTE_SOURCE_CLASSES
+        .iter()
+        .copied()
+        .find(|class| title.contains(class))
+}
+
+impl ManualCandidateProjection {
+    fn stable_byte_source_class(&self) -> Option<String> {
+        self.stable_byte_source_class
+            .clone()
+            .or_else(|| stable_byte_source_class_from_title(&self.title).map(str::to_string))
+    }
+}
+
+fn require_manual_command(
+    value: &serde_json::Value,
+    field: &str,
+    prefix: &str,
+    expected_id: &str,
+    context: &str,
+) -> Result<(), String> {
+    let command = super::require_non_empty_json_str(value, field, context)?;
+    if !command.starts_with(prefix) || !command.contains(expected_id) {
+        return Err(format!(
+            "{context} {field} must start with `{prefix}` and reference `{expected_id}`"
+        ));
+    }
+    if field == "context_json" && !command.contains("--json") {
+        return Err(format!("{context} context_json must include `--json`"));
+    }
+    Ok(())
+}
+
+fn manual_candidate_operation_family_counts(
+    candidates: &[ManualCandidateProjection],
+) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::new();
+    for candidate in candidates {
+        *counts
+            .entry(candidate.operation_family.clone())
+            .or_insert(0) += 1;
+    }
+    counts
+}
+
+fn manual_candidate_evidence_kind_counts(
+    candidates: &[ManualCandidateProjection],
+) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::new();
+    for candidate in candidates {
+        for evidence in &candidate.evidence {
+            *counts.entry(evidence.kind.clone()).or_insert(0) += 1;
+        }
+    }
+    counts
+}
+
+fn require_summary_count_map(
+    value: &serde_json::Value,
+    pointer: &str,
+    expected: &BTreeMap<String, usize>,
+    context: &str,
+) -> Result<(), String> {
+    let object = value
+        .pointer(pointer)
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| format!("{context} must be an object"))?;
+    let mut actual = BTreeMap::new();
+    for (key, value) in object {
+        let Some(count) = value.as_u64() else {
+            return Err(format!("{context}.{key} must be a non-negative integer"));
+        };
+        actual.insert(key.clone(), count as usize);
+    }
+    if &actual != expected {
+        return Err(format!("{context} is {actual:?}, expected {expected:?}"));
+    }
+    Ok(())
+}
+
+fn render_count_map(counts: &BTreeMap<String, usize>) -> String {
+    if counts.is_empty() {
+        return "none".to_string();
+    }
+    counts
+        .iter()
+        .map(|(key, count)| format!("{key}: {count}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn check_manual_candidate_artifact_entry(
+    candidate: &serde_json::Value,
+) -> Result<ManualCandidateProjection, String> {
     super::require_json_str(
         candidate,
         "schema_version",
@@ -431,7 +3036,11 @@ fn check_manual_candidate_artifact_entry(candidate: &serde_json::Value) -> Resul
         "manual-candidates.json candidate",
     )?;
     let id =
-        super::require_non_empty_json_str(candidate, "id", "manual-candidates.json candidate")?;
+        super::require_non_empty_json_str(candidate, "id", "manual-candidates.json candidate")?
+            .to_string();
+    let title =
+        super::require_non_empty_json_str(candidate, "title", "manual-candidates.json candidate")?
+            .to_string();
     super::require_json_str(
         candidate,
         "source",
@@ -446,26 +3055,89 @@ fn check_manual_candidate_artifact_entry(candidate: &serde_json::Value) -> Resul
             "manual-candidates.json candidate analyzer_discovered must be false".to_string(),
         );
     }
-    super::require_non_empty_json_str(
+    let operation_family = super::require_non_empty_json_str(
         candidate,
         "operation_family",
         "manual-candidates.json candidate",
-    )?;
-    super::require_non_empty_json_str(
+    )?
+    .to_string();
+    let unsafe_operation = super::require_non_empty_json_str(
         candidate,
         "unsafe_operation",
         "manual-candidates.json candidate",
-    )?;
-    super::require_non_empty_json_str(candidate, "invariant", "manual-candidates.json candidate")?;
-    super::require_non_empty_json_str(
+    )?
+    .to_string();
+    let invariant = super::require_non_empty_json_str(
+        candidate,
+        "invariant",
+        "manual-candidates.json candidate",
+    )?
+    .to_string();
+    let safe_caller = super::require_non_empty_json_str(
         candidate,
         "safe_caller",
         "manual-candidates.json candidate",
+    )?
+    .to_string();
+    let proof_mode = optional_manual_candidate_proof_mode(
+        candidate,
+        "proof_mode",
+        "manual-candidates.json candidate",
     )?;
-    super::require_non_empty_json_str(
+    let fix_boundary = optional_non_empty_json_string(
+        candidate,
+        "fix_boundary",
+        "manual-candidates.json candidate",
+    )?;
+    let pr_aperture = optional_non_empty_json_string(
+        candidate,
+        "pr_aperture",
+        "manual-candidates.json candidate",
+    )?;
+    let oracle_map = optional_manual_candidate_oracle_map(
+        candidate,
+        "oracle_map",
+        "manual-candidates.json candidate",
+    )?;
+    let stable_byte = candidate.get("stable_byte").cloned();
+    let stable_byte_source_class = stable_byte
+        .as_ref()
+        .and_then(|value| value.get("class"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    let stable_byte_ledger_state = stable_byte
+        .as_ref()
+        .and_then(|value| value.get("ledger_state"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    let location = candidate
+        .get("location")
+        .ok_or_else(|| "manual-candidates.json candidate is missing location".to_string())?;
+    let location_file = super::require_non_empty_json_str(
+        location,
+        "file",
+        "manual-candidates.json candidate location",
+    )?
+    .to_string();
+    let location_line = super::json_usize_at(
+        location,
+        "/line",
+        "manual-candidates.json candidate location",
+    )?;
+    if location_line == 0 {
+        return Err("manual-candidates.json candidate location.line must be 1-based".to_string());
+    }
+    let location_text = super::require_non_empty_json_str(
         candidate,
         "location_text",
         "manual-candidates.json candidate",
+    )?
+    .to_string();
+    let expected_location_text = format!("{location_file}:{location_line}");
+    require_expected_value(
+        &location_text,
+        &expected_location_text,
+        "manual-candidates.json candidate location_text",
     )?;
     super::require_non_empty_json_str(
         candidate,
@@ -482,6 +3154,21 @@ fn check_manual_candidate_artifact_entry(candidate: &serde_json::Value) -> Resul
         "witness_plan_command",
         "manual-candidates.json candidate",
     )?;
+    let fix_options = require_optional_string_array(
+        candidate,
+        "fix_options",
+        "manual-candidates.json candidate",
+    )?;
+    let test_targets = require_optional_string_array(
+        candidate,
+        "test_targets",
+        "manual-candidates.json candidate",
+    )?;
+    let do_not_touch = require_optional_string_array(
+        candidate,
+        "do_not_touch",
+        "manual-candidates.json candidate",
+    )?;
     let handoff = candidate.get("implementer_handoff").ok_or_else(|| {
         "manual-candidates.json candidate is missing implementer_handoff".to_string()
     })?;
@@ -490,14 +3177,34 @@ fn check_manual_candidate_artifact_entry(candidate: &serde_json::Value) -> Resul
             "manual-candidates.json candidate implementer_handoff must be an object".to_string(),
         );
     }
-    super::require_non_empty_json_str(
-        handoff,
-        "invariant_at_risk",
-        "manual-candidates.json candidate implementer_handoff",
-    )?;
-    super::require_non_empty_json_str(
-        handoff,
-        "stop_condition",
+    let evidence = check_manual_candidate_evidence(candidate)?;
+    let projection = ManualCandidateProjection {
+        id,
+        title,
+        location_text,
+        location_file,
+        location_line,
+        operation_family,
+        unsafe_operation,
+        invariant,
+        safe_caller,
+        proof_mode,
+        fix_boundary,
+        pr_aperture,
+        oracle_map,
+        stable_byte,
+        stable_byte_source_class,
+        stable_byte_ledger_state,
+        evidence_refs: evidence.len(),
+        evidence,
+        fix_options,
+        test_targets,
+        do_not_touch,
+        implementer_handoff: handoff.clone(),
+    };
+    check_manual_candidate_implementer_handoff(
+        &projection.implementer_handoff,
+        &projection,
         "manual-candidates.json candidate implementer_handoff",
     )?;
     let boundary = super::require_non_empty_json_str(
@@ -511,16 +3218,365 @@ fn check_manual_candidate_artifact_entry(candidate: &serde_json::Value) -> Resul
                 .to_string(),
         );
     }
-    Ok(id.to_string())
+    Ok(projection)
+}
+
+fn check_manual_candidate_evidence(
+    candidate: &serde_json::Value,
+) -> Result<Vec<ManualCandidateEvidenceProjection>, String> {
+    super::json_array_at(candidate, "/evidence", "manual-candidates.json candidate")?
+        .iter()
+        .enumerate()
+        .map(|(index, evidence)| {
+            let context = format!("manual-candidates.json candidate evidence[{index}]");
+            Ok(ManualCandidateEvidenceProjection {
+                kind: super::require_non_empty_json_str(evidence, "kind", &context)?.to_string(),
+                path: optional_non_empty_json_string(evidence, "path", &context)?,
+                summary: optional_non_empty_json_string(evidence, "summary", &context)?,
+                command: optional_non_empty_json_string(evidence, "command", &context)?,
+                limitation: optional_non_empty_json_string(evidence, "limitation", &context)?,
+            })
+        })
+        .collect()
+}
+
+fn check_manual_candidate_implementer_handoff(
+    handoff: &serde_json::Value,
+    expected: &ManualCandidateProjection,
+    context: &str,
+) -> Result<(), String> {
+    let target = handoff
+        .get("target")
+        .ok_or_else(|| format!("{context} is missing target"))?;
+    require_manual_candidate_target_projection(target, expected, context)?;
+
+    let route = handoff
+        .get("route")
+        .ok_or_else(|| format!("{context} is missing route"))?;
+    require_projected_str(route, "safe_caller", &expected.safe_caller, context)?;
+    require_projected_str(
+        route,
+        "unsafe_operation",
+        &expected.unsafe_operation,
+        context,
+    )?;
+    require_projected_str(
+        route,
+        "operation_family",
+        &expected.operation_family,
+        context,
+    )?;
+    require_projected_str(handoff, "invariant_at_risk", &expected.invariant, context)?;
+
+    let evidence = super::json_array_at(handoff, "/external_evidence", context)?;
+    if evidence.len() != expected.evidence.len() {
+        return Err(format!(
+            "{context} external_evidence has {} entrie(s), expected {}",
+            evidence.len(),
+            expected.evidence.len()
+        ));
+    }
+    for (index, (actual, expected)) in evidence.iter().zip(&expected.evidence).enumerate() {
+        let evidence_context = format!("{context} external_evidence[{index}]");
+        require_projected_str(actual, "kind", &expected.kind, &evidence_context)?;
+        require_projected_optional_str(actual, "path", &expected.path, &evidence_context)?;
+        require_projected_optional_str(actual, "summary", &expected.summary, &evidence_context)?;
+        require_projected_optional_str(actual, "command", &expected.command, &evidence_context)?;
+        require_projected_optional_str(
+            actual,
+            "limitation",
+            &expected.limitation,
+            &evidence_context,
+        )?;
+    }
+
+    require_projected_optional_string_array(
+        handoff,
+        "fix_options",
+        &expected.fix_options,
+        context,
+    )?;
+    require_projected_optional_string_array(
+        handoff,
+        "test_targets",
+        &expected.test_targets,
+        context,
+    )?;
+    require_projected_optional_string_array(
+        handoff,
+        "do_not_touch",
+        &expected.do_not_touch,
+        context,
+    )?;
+    require_projected_optional_proof_mode(handoff, "proof_mode", &expected.proof_mode, context)?;
+    require_projected_optional_str(handoff, "fix_boundary", &expected.fix_boundary, context)?;
+    require_projected_optional_str(handoff, "pr_aperture", &expected.pr_aperture, context)?;
+    require_projected_optional_json_value(handoff, "oracle_map", &expected.oracle_map, context)?;
+    require_non_empty_string_array(handoff, "suggested_next_steps", context)?;
+    let non_goals = require_non_empty_string_array(handoff, "non_goals", context)?;
+    for expected_text in [
+        "not treat this as analyzer-discovered",
+        "not claim proof",
+        "not broaden the task",
+    ] {
+        if !non_goals.iter().any(|item| item.contains(expected_text)) {
+            return Err(format!(
+                "{context} non_goals must include `{expected_text}`"
+            ));
+        }
+    }
+    for expected_text in &expected.do_not_touch {
+        if !non_goals.iter().any(|item| item == expected_text) {
+            return Err(format!(
+                "{context} non_goals must include candidate do_not_touch entry `{expected_text}`"
+            ));
+        }
+    }
+    let stop_condition = super::require_non_empty_json_str(handoff, "stop_condition", context)?;
+    for expected_text in [
+        "stop before source edits",
+        "route no longer matches this manual candidate",
+        "unrelated unsafe sites",
+    ] {
+        if !super::text_contains_ignore_ascii_case(stop_condition, expected_text) {
+            return Err(format!(
+                "{context} stop_condition must include `{expected_text}`"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn require_manual_candidate_target_projection(
+    target: &serde_json::Value,
+    expected: &ManualCandidateProjection,
+    context: &str,
+) -> Result<(), String> {
+    require_projected_str(target, "file", &expected.location_file, context)?;
+    let line = super::json_usize_at(target, "/line", context)?;
+    if line != expected.location_line {
+        return Err(format!(
+            "{context} target.line is {line}, expected {}",
+            expected.location_line
+        ));
+    }
+    require_projected_str(target, "location_text", &expected.location_text, context)?;
+    Ok(())
+}
+
+fn optional_non_empty_json_string(
+    value: &serde_json::Value,
+    field: &str,
+    context: &str,
+) -> Result<Option<String>, String> {
+    match value.get(field) {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::String(text)) if !text.trim().is_empty() => Ok(Some(text.clone())),
+        Some(serde_json::Value::String(_)) => Err(format!("{context} {field} must not be empty")),
+        Some(_) => Err(format!("{context} {field} must be a string")),
+    }
+}
+
+fn optional_manual_candidate_proof_mode(
+    value: &serde_json::Value,
+    field: &str,
+    context: &str,
+) -> Result<Option<ManualCandidateProofModeProjection>, String> {
+    let Some(value) = value.get(field) else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    if !value.is_object() {
+        return Err(format!("{context} {field} must be an object when present"));
+    }
+    let context = format!("{context} {field}");
+    Ok(Some(ManualCandidateProofModeProjection {
+        kind: super::require_non_empty_json_str(value, "kind", &context)?.to_string(),
+        system_bun_expected: super::require_non_empty_json_str(
+            value,
+            "system_bun_expected",
+            &context,
+        )?
+        .to_string(),
+        mutation_required: json_bool_at(value, "/mutation_required", &context)?,
+        miri_required: json_bool_at(value, "/miri_required", &context)?,
+    }))
+}
+
+fn optional_manual_candidate_oracle_map(
+    value: &serde_json::Value,
+    field: &str,
+    context: &str,
+) -> Result<Option<serde_json::Value>, String> {
+    let Some(value) = value.get(field) else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    if !value.is_object() {
+        return Err(format!("{context} {field} must be an object when present"));
+    }
+    let context = format!("{context} {field}");
+    for required in [
+        "rust_seam",
+        "oracle_language",
+        "oracle_path",
+        "oracle_kind",
+        "coverage_confidence",
+        "limitation",
+    ] {
+        super::require_non_empty_json_str(value, required, &context)?;
+    }
+    let limitation = super::require_non_empty_json_str(value, "limitation", &context)?;
+    for required in [
+        "not witness execution",
+        "site-execution proof",
+        "memory-safety proof",
+    ] {
+        if !super::text_contains_ignore_ascii_case(limitation, required) {
+            return Err(format!("{context} limitation must include `{required}`"));
+        }
+    }
+    Ok(Some(value.clone()))
+}
+
+fn json_bool_at(value: &serde_json::Value, pointer: &str, context: &str) -> Result<bool, String> {
+    value
+        .pointer(pointer)
+        .and_then(serde_json::Value::as_bool)
+        .ok_or_else(|| format!("{context} {pointer} must be a boolean"))
+}
+
+fn require_projected_optional_proof_mode(
+    value: &serde_json::Value,
+    field: &str,
+    expected: &Option<ManualCandidateProofModeProjection>,
+    context: &str,
+) -> Result<(), String> {
+    let actual = optional_manual_candidate_proof_mode(value, field, context)?;
+    if &actual != expected {
+        return Err(format!(
+            "{context} {field} must match manual-candidates.json candidate {field}"
+        ));
+    }
+    Ok(())
+}
+
+fn require_projected_optional_str(
+    value: &serde_json::Value,
+    field: &str,
+    expected: &Option<String>,
+    context: &str,
+) -> Result<(), String> {
+    match expected {
+        Some(expected) => require_projected_str(value, field, expected, context),
+        None => match value.get(field) {
+            None | Some(serde_json::Value::Null) => Ok(()),
+            Some(actual) => Err(format!(
+                "{context} {field} must be null or omitted, got `{actual}`"
+            )),
+        },
+    }
+}
+
+fn require_projected_optional_json_value(
+    value: &serde_json::Value,
+    field: &str,
+    expected: &Option<serde_json::Value>,
+    context: &str,
+) -> Result<(), String> {
+    match expected {
+        Some(expected) => match value.get(field) {
+            Some(actual) if actual == expected => Ok(()),
+            Some(_) => Err(format!(
+                "{context} {field} must match manual-candidates.json candidate {field}"
+            )),
+            None => Err(format!("{context} is missing {field}")),
+        },
+        None => match value.get(field) {
+            None | Some(serde_json::Value::Null) => Ok(()),
+            Some(_) => Err(format!("{context} {field} must be null or absent")),
+        },
+    }
+}
+
+fn require_non_empty_string_array(
+    value: &serde_json::Value,
+    field: &str,
+    context: &str,
+) -> Result<Vec<String>, String> {
+    let items = value
+        .get(field)
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| format!("{context} {field} must be an array"))?;
+    if items.is_empty() {
+        return Err(format!("{context} {field} must not be empty"));
+    }
+    items
+        .iter()
+        .map(|item| {
+            item.as_str()
+                .filter(|text| !text.trim().is_empty())
+                .map(str::to_string)
+                .ok_or_else(|| format!("{context} {field} entries must be non-empty strings"))
+        })
+        .collect()
+}
+
+fn require_optional_string_array(
+    value: &serde_json::Value,
+    field: &str,
+    context: &str,
+) -> Result<Vec<String>, String> {
+    let Some(items) = value.get(field) else {
+        return Ok(Vec::new());
+    };
+    let Some(items) = items.as_array() else {
+        return Err(format!("{context} {field} must be an array when present"));
+    };
+    items
+        .iter()
+        .map(|item| {
+            item.as_str()
+                .filter(|text| !text.trim().is_empty())
+                .map(str::to_string)
+                .ok_or_else(|| format!("{context} {field} entries must be non-empty strings"))
+        })
+        .collect()
+}
+
+fn require_projected_optional_string_array(
+    value: &serde_json::Value,
+    field: &str,
+    expected: &[String],
+    context: &str,
+) -> Result<(), String> {
+    let actual = require_optional_string_array(value, field, context)?;
+    if actual != expected {
+        return Err(format!(
+            "{context} {field} must match manual-candidates.json candidate {field}"
+        ));
+    }
+    Ok(())
 }
 
 fn check_review_kit_manifest(
     dir: &Path,
     scope: &str,
+    changed_files: usize,
+    changed_rust_files: usize,
+    changed_non_rust_files: usize,
     card_count: usize,
     open_actionable_gaps: usize,
     card_ids: &BTreeSet<String>,
+    card_order: &[String],
+    card_projections: &BTreeMap<String, CardProjection>,
+    repair_queue_projections: &BTreeMap<String, RepairQueueProjection>,
     manual_candidates: &ManualCandidateIndexProjection,
+    manual_repair_queue: &ManualRepairQueueProjection,
 ) -> Result<(), String> {
     let path = dir.join("review-kit.json");
     let review_kit = super::parse_json_file(&path)?;
@@ -536,6 +3592,24 @@ fn check_review_kit_manifest(
     super::require_json_str(&review_kit, "policy", "advisory", "review-kit.json")?;
     super::require_json_str(&review_kit, "scope", scope, "review-kit.json")?;
     super::require_non_empty_json_str(&review_kit, "tool_version", "review-kit.json")?;
+    require_review_kit_summary_count(
+        &review_kit,
+        "changed_files",
+        changed_files,
+        "cards.json summary.changed_files",
+    )?;
+    require_review_kit_summary_count(
+        &review_kit,
+        "changed_rust_files",
+        changed_rust_files,
+        "cards.json summary.changed_rust_files",
+    )?;
+    require_review_kit_summary_count(
+        &review_kit,
+        "changed_non_rust_files",
+        changed_non_rust_files,
+        "cards.json summary.changed_non_rust_files",
+    )?;
     let summary_cards = super::json_usize_at(&review_kit, "/summary/cards", "review-kit.json")?;
     if summary_cards != card_count {
         return Err(format!(
@@ -578,7 +3652,6 @@ fn check_review_kit_manifest(
     super::require_boundary_text(boundary, "review-kit.json")?;
     for expected in [
         "not Miri-clean status",
-        "not site-execution proof",
         "did not run witnesses",
         "post comments",
         "edit source",
@@ -591,12 +3664,17 @@ fn check_review_kit_manifest(
             ));
         }
     }
+    require_site_execution_boundary_text(boundary, "review-kit.json trust_boundary")?;
 
     check_review_kit_handoff(
         &review_kit,
         top_card_id.as_deref(),
         card_count,
+        card_order,
+        card_projections,
+        repair_queue_projections,
         manual_candidates,
+        manual_repair_queue,
     )?;
 
     let artifacts = super::json_array_at(&review_kit, "/artifacts", "review-kit.json")?;
@@ -641,11 +3719,31 @@ fn check_review_kit_manifest(
     Ok(())
 }
 
+fn require_review_kit_summary_count(
+    review_kit: &serde_json::Value,
+    field: &str,
+    expected: usize,
+    source: &str,
+) -> Result<(), String> {
+    let pointer = format!("/summary/{field}");
+    let actual = super::json_usize_at(review_kit, &pointer, "review-kit.json")?;
+    if actual != expected {
+        return Err(format!(
+            "review-kit.json summary.{field} is {actual}, but {source} is {expected}"
+        ));
+    }
+    Ok(())
+}
+
 fn check_review_kit_handoff(
     review_kit: &serde_json::Value,
     top_card_id: Option<&str>,
     card_count: usize,
+    card_order: &[String],
+    card_projections: &BTreeMap<String, CardProjection>,
+    repair_queue_projections: &BTreeMap<String, RepairQueueProjection>,
     manual_candidates: &ManualCandidateIndexProjection,
+    manual_repair_queue: &ManualRepairQueueProjection,
 ) -> Result<(), String> {
     let handoff = review_kit
         .get("handoff")
@@ -679,7 +3777,21 @@ fn check_review_kit_handoff(
     }
 
     check_review_kit_top_card_handoff(handoff, top_card_id, card_count)?;
+    check_review_kit_review_card_handoff(
+        handoff,
+        card_count,
+        card_order,
+        card_projections,
+        repair_queue_projections,
+    )?;
     check_review_kit_manual_candidate_handoff(handoff, manual_candidates)?;
+    check_review_kit_repair_queue_front_panel(
+        handoff,
+        card_count,
+        repair_queue_projections,
+        manual_candidates,
+        manual_repair_queue,
+    )?;
 
     let boundary =
         super::require_non_empty_json_str(handoff, "trust_boundary", "review-kit.json handoff")?;
@@ -698,6 +3810,445 @@ fn check_review_kit_handoff(
     }
 
     Ok(())
+}
+
+fn check_review_kit_repair_queue_front_panel(
+    handoff: &serde_json::Value,
+    card_count: usize,
+    repair_queue_projections: &BTreeMap<String, RepairQueueProjection>,
+    manual_candidates: &ManualCandidateIndexProjection,
+    manual_repair_queue: &ManualRepairQueueProjection,
+) -> Result<(), String> {
+    let context = "review-kit.json handoff repair_queues";
+    let repair_queues = handoff
+        .get("repair_queues")
+        .ok_or_else(|| format!("{context} is missing"))?;
+    if !repair_queues.is_object() {
+        return Err(format!("{context} must be an object"));
+    }
+
+    let review_card = repair_queues
+        .get("review_card")
+        .ok_or_else(|| format!("{context} is missing review_card"))?;
+    if !review_card.is_object() {
+        return Err(format!("{context}.review_card must be an object"));
+    }
+    super::require_json_str(
+        review_card,
+        "artifact",
+        "repair-queue.json",
+        "review-kit.json handoff repair_queues.review_card",
+    )?;
+    super::require_json_str(
+        review_card,
+        "source",
+        "review_card",
+        "review-kit.json handoff repair_queues.review_card",
+    )?;
+    let review_card_cards = super::json_usize_at(
+        review_card,
+        "/cards",
+        "review-kit.json handoff repair_queues.review_card",
+    )?;
+    if review_card_cards != card_count {
+        return Err(format!(
+            "{context}.review_card.cards is {review_card_cards}, but cards.json has {card_count}"
+        ));
+    }
+    let unique_cards = super::json_usize_at(
+        review_card,
+        "/unique_repair_queue_cards",
+        "review-kit.json handoff repair_queues.review_card",
+    )?;
+    if unique_cards != repair_queue_projections.len() {
+        return Err(format!(
+            "{context}.review_card.unique_repair_queue_cards is {unique_cards}, but repair-queue.json has {} unique card(s)",
+            repair_queue_projections.len()
+        ));
+    }
+    let agent_ready_cards = super::json_usize_at(
+        review_card,
+        "/agent_ready_cards",
+        "review-kit.json handoff repair_queues.review_card",
+    )?;
+    let expected_agent_ready = repair_queue_projections
+        .values()
+        .filter(|projection| projection.readiness_ready)
+        .count();
+    if agent_ready_cards != expected_agent_ready {
+        return Err(format!(
+            "{context}.review_card.agent_ready_cards is {agent_ready_cards}, but repair-queue.json has {expected_agent_ready} agent-ready card(s)"
+        ));
+    }
+    let bucket_counts = review_card
+        .get("bucket_counts")
+        .ok_or_else(|| format!("{context}.review_card is missing bucket_counts"))?;
+    if !bucket_counts.is_object() {
+        return Err(format!(
+            "{context}.review_card.bucket_counts must be an object"
+        ));
+    }
+    let expected_bucket_counts =
+        review_kit_expected_repair_queue_bucket_counts(repair_queue_projections);
+    for bucket in REPAIR_QUEUE_BUCKETS {
+        let actual = super::json_usize_at(
+            bucket_counts,
+            &format!("/{bucket}"),
+            "review-kit.json handoff repair_queues.review_card.bucket_counts",
+        )?;
+        let expected = expected_bucket_counts.get(bucket).copied().unwrap_or(0);
+        if actual != expected {
+            return Err(format!(
+                "{context}.review_card.bucket_counts.{bucket} is {actual}, but repair-queue.json has {expected}"
+            ));
+        }
+    }
+
+    let manual = repair_queues
+        .get("manual_candidate")
+        .ok_or_else(|| format!("{context} is missing manual_candidate"))?;
+    if !manual.is_object() {
+        return Err(format!("{context}.manual_candidate must be an object"));
+    }
+    super::require_json_str(
+        manual,
+        "artifact",
+        "manual-repair-queue.json",
+        "review-kit.json handoff repair_queues.manual_candidate",
+    )?;
+    super::require_json_str(
+        manual,
+        "source",
+        "manual_candidate",
+        "review-kit.json handoff repair_queues.manual_candidate",
+    )?;
+    let manual_count = super::json_usize_at(
+        manual,
+        "/manual_candidates",
+        "review-kit.json handoff repair_queues.manual_candidate",
+    )?;
+    if manual_count != manual_candidates.count {
+        return Err(format!(
+            "{context}.manual_candidate.manual_candidates is {manual_count}, but manual-candidates.json has {}",
+            manual_candidates.count
+        ));
+    }
+    let queued_candidates = super::json_usize_at(
+        manual,
+        "/queued_candidates",
+        "review-kit.json handoff repair_queues.manual_candidate",
+    )?;
+    if queued_candidates != manual_repair_queue.entries.len() {
+        return Err(format!(
+            "{context}.manual_candidate.queued_candidates is {queued_candidates}, but manual-repair-queue.json has {} queue entrie(s)",
+            manual_repair_queue.entries.len()
+        ));
+    }
+    super::require_json_str(
+        manual,
+        "bucket",
+        MANUAL_REPAIR_QUEUE_BUCKET,
+        "review-kit.json handoff repair_queues.manual_candidate",
+    )?;
+    super::require_json_str(
+        manual,
+        "bucket_reason",
+        MANUAL_REPAIR_QUEUE_BUCKET_REASON,
+        "review-kit.json handoff repair_queues.manual_candidate",
+    )?;
+    super::require_json_str(
+        manual,
+        "agent_handoff_state",
+        "copy_ready",
+        "review-kit.json handoff repair_queues.manual_candidate",
+    )?;
+    if manual.get("automatic").and_then(serde_json::Value::as_bool) != Some(false) {
+        return Err(format!(
+            "{context}.manual_candidate.automatic must be false"
+        ));
+    }
+
+    let separation = super::require_non_empty_json_str(repair_queues, "separation", context)?;
+    for expected in ["stay separate", "source ledgers", "side by side"] {
+        if !super::text_contains_ignore_ascii_case(separation, expected) {
+            return Err(format!("{context}.separation must include `{expected}`"));
+        }
+    }
+    let boundary = super::require_non_empty_json_str(repair_queues, "trust_boundary", context)?;
+    for expected in [
+        "does not merge manual candidates",
+        "repair-queue.json",
+        "does not run agents",
+        "does not run witnesses",
+        "does not edit source",
+        "does not post comments",
+        "not proof",
+        "repair success",
+        "policy readiness",
+    ] {
+        if !super::text_contains_ignore_ascii_case(boundary, expected) {
+            return Err(format!(
+                "{context} trust_boundary must include `{expected}`"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn review_kit_expected_repair_queue_bucket_counts(
+    repair_queue_projections: &BTreeMap<String, RepairQueueProjection>,
+) -> BTreeMap<String, usize> {
+    let mut counts = REPAIR_QUEUE_BUCKETS
+        .iter()
+        .map(|bucket| ((*bucket).to_string(), 0usize))
+        .collect::<BTreeMap<_, _>>();
+    for projection in repair_queue_projections.values() {
+        for bucket in &projection.buckets {
+            if let Some(count) = counts.get_mut(bucket) {
+                *count += 1;
+            }
+        }
+    }
+    counts
+}
+
+fn check_review_kit_review_card_handoff(
+    handoff: &serde_json::Value,
+    card_count: usize,
+    card_order: &[String],
+    card_projections: &BTreeMap<String, CardProjection>,
+    repair_queue_projections: &BTreeMap<String, RepairQueueProjection>,
+) -> Result<(), String> {
+    let review_cards = handoff
+        .get("review_cards")
+        .ok_or_else(|| "review-kit.json handoff is missing review_cards".to_string())?;
+    if !review_cards.is_object() {
+        return Err("review-kit.json handoff review_cards must be an object".to_string());
+    }
+    require_expected_value(
+        super::require_non_empty_json_str(
+            review_cards,
+            "artifact",
+            "review-kit.json handoff review_cards",
+        )?,
+        "cards.json",
+        "review-kit.json handoff review_cards artifact",
+    )?;
+    require_expected_value(
+        super::require_non_empty_json_str(
+            review_cards,
+            "repair_queue_artifact",
+            "review-kit.json handoff review_cards",
+        )?,
+        "repair-queue.json",
+        "review-kit.json handoff review_cards repair_queue_artifact",
+    )?;
+    let count = super::json_usize_at(
+        review_cards,
+        "/review_cards",
+        "review-kit.json handoff review_cards",
+    )?;
+    if count != card_count {
+        return Err(format!(
+            "review-kit.json handoff review_cards.review_cards is {count}, but cards.json has {card_count}"
+        ));
+    }
+    let limit = super::json_usize_at(
+        review_cards,
+        "/card_queue_limit",
+        "review-kit.json handoff review_cards",
+    )?;
+    if limit != REVIEW_CARD_REVIEW_KIT_QUEUE_LIMIT {
+        return Err(format!(
+            "review-kit.json handoff review_cards card_queue_limit is {limit}, expected {REVIEW_CARD_REVIEW_KIT_QUEUE_LIMIT}"
+        ));
+    }
+    let queue = super::json_array_at(
+        review_cards,
+        "/card_queue",
+        "review-kit.json handoff review_cards",
+    )?;
+    let expected_queue_len = card_count.min(limit);
+    if queue.len() != expected_queue_len {
+        return Err(format!(
+            "review-kit.json handoff review_cards card_queue has {} entries, expected {expected_queue_len}",
+            queue.len()
+        ));
+    }
+    let omitted = super::json_usize_at(
+        review_cards,
+        "/omitted_cards",
+        "review-kit.json handoff review_cards",
+    )?;
+    let expected_omitted = card_count.saturating_sub(queue.len());
+    if omitted != expected_omitted {
+        return Err(format!(
+            "review-kit.json handoff review_cards omitted_cards is {omitted}, expected {expected_omitted}"
+        ));
+    }
+    for (index, entry) in queue.iter().enumerate() {
+        let expected_id = card_order
+            .get(index)
+            .ok_or_else(|| format!("cards.json has no card at index {index}"))?;
+        check_review_kit_review_card_queue_entry(
+            entry,
+            expected_id,
+            card_projections,
+            repair_queue_projections,
+            index,
+        )?;
+    }
+    let boundary = super::require_non_empty_json_str(
+        review_cards,
+        "trust_boundary",
+        "review-kit.json handoff review_cards",
+    )?;
+    super::require_boundary_text(boundary, "review-kit.json handoff review_cards")?;
+    for expected in [
+        "cards.json",
+        "repair-queue.json",
+        "does not run agents",
+        "run witnesses",
+        "edit source",
+        "post comments",
+        "suppress cards",
+        "resolve cards",
+        "enforce blocking policy",
+        "not a proof",
+        "repair success",
+        "policy readiness",
+    ] {
+        if !super::text_contains_ignore_ascii_case(boundary, expected) {
+            return Err(format!(
+                "review-kit.json handoff review_cards trust_boundary must include `{expected}`"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn check_review_kit_review_card_queue_entry(
+    entry: &serde_json::Value,
+    expected_id: &str,
+    card_projections: &BTreeMap<String, CardProjection>,
+    repair_queue_projections: &BTreeMap<String, RepairQueueProjection>,
+    index: usize,
+) -> Result<(), String> {
+    let context = format!("review-kit.json handoff review_cards card_queue[{index}]");
+    let card_id = super::require_non_empty_json_str(entry, "card_id", &context)?;
+    if card_id != expected_id {
+        return Err(format!(
+            "{context} card_id `{card_id}` must match cards.json card `{expected_id}`"
+        ));
+    }
+    let card = card_projections
+        .get(card_id)
+        .ok_or_else(|| format!("{context} references unknown card id `{card_id}`"))?;
+    super::require_json_str(entry, "source", "review_card", &context)?;
+    if entry.get("manual_candidate").is_some() || entry.get("analyzer_discovered").is_some() {
+        return Err(format!(
+            "{context} must not include manual candidate marker fields"
+        ));
+    }
+    require_projected_str(entry, "class", &card.class_name, &context)?;
+    require_projected_str(entry, "priority", &card.priority, &context)?;
+    require_projected_str(entry, "confidence", &card.confidence, &context)?;
+    require_projected_str(entry, "path", &card.path, &context)?;
+    require_projected_u64(entry, "line", card.line, &context)?;
+    require_expected_value(
+        super::require_non_empty_json_str(entry, "location_text", &context)?,
+        &format!("{}:{}", card.path, card.line),
+        &format!("{context} location_text"),
+    )?;
+    require_projected_str(entry, "operation_family", &card.operation_family, &context)?;
+    require_projected_str(entry, "operation", &card.operation, &context)?;
+    require_projected_str(entry, "next_action", &card.next_action, &context)?;
+    require_projected_string_array(entry, "missing_evidence", &card.missing, &context)?;
+    require_projected_string_array(entry, "verify_commands", &card.verify_commands, &context)?;
+    require_projected_witness_routes(entry, &card.witness_routes, &context)?;
+
+    let repair = repair_queue_projections
+        .get(card_id)
+        .ok_or_else(|| format!("{context} card `{card_id}` is missing from repair-queue.json"))?;
+    require_projected_string_array(entry, "repair_queue_buckets", &repair.buckets, &context)?;
+    let expected_bucket_reasons = repair
+        .buckets
+        .iter()
+        .map(|bucket| expected_repair_queue_bucket_reason(bucket).to_string())
+        .collect::<Vec<_>>();
+    require_projected_string_array(
+        entry,
+        "repair_queue_bucket_reasons",
+        &expected_bucket_reasons,
+        &context,
+    )?;
+    check_review_kit_review_card_readiness(entry, repair, &context)?;
+    for (field, command) in [
+        ("explain", "unsafe-review explain "),
+        ("context_json", "unsafe-review context "),
+    ] {
+        let text = super::require_non_empty_json_str(entry, field, &context)?;
+        if !text.starts_with(command) || !text.contains(card_id) {
+            return Err(format!("{context} {field} must reference `{card_id}`"));
+        }
+        if field == "context_json" && !text.contains("--json") {
+            return Err(format!("{context} context_json must include `--json`"));
+        }
+    }
+    let boundary =
+        super::require_non_empty_json_str(entry, "trust_boundary", &format!("{context} entry"))?;
+    super::require_boundary_text(boundary, &context)?;
+    for expected in [
+        "cards.json",
+        "repair-queue.json",
+        "did not run agents",
+        "run witnesses",
+        "edit source",
+        "post comments",
+        "suppress cards",
+        "resolve cards",
+        "enforce blocking policy",
+    ] {
+        if !super::text_contains_ignore_ascii_case(boundary, expected) {
+            return Err(format!(
+                "{context} trust_boundary must include `{expected}`"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn check_review_kit_review_card_readiness(
+    entry: &serde_json::Value,
+    repair: &RepairQueueProjection,
+    context: &str,
+) -> Result<(), String> {
+    let readiness = entry
+        .get("agent_readiness")
+        .ok_or_else(|| format!("{context} is missing agent_readiness"))?;
+    if !readiness.is_object() {
+        return Err(format!("{context} agent_readiness must be an object"));
+    }
+    let Some(ready) = readiness.get("ready").and_then(serde_json::Value::as_bool) else {
+        return Err(format!("{context} agent_readiness.ready must be a boolean"));
+    };
+    if ready != repair.readiness_ready {
+        return Err(format!(
+            "{context} agent_readiness.ready must project repair-queue.json value `{}`; got `{ready}`",
+            repair.readiness_ready
+        ));
+    }
+    require_expected_value(
+        super::require_non_empty_json_str(readiness, "state", context)?,
+        &repair.readiness_state,
+        &format!("{context} agent_readiness.state"),
+    )?;
+    require_projected_string_array(
+        readiness,
+        "reasons",
+        &repair.readiness_reasons,
+        &format!("{context} agent_readiness"),
+    )
 }
 
 fn check_review_kit_manual_candidate_handoff(
@@ -740,7 +4291,106 @@ fn check_review_kit_manual_candidate_handoff(
             "review-kit.json handoff manual_candidates analyzer_discovered must stay 0".to_string(),
         );
     }
+    require_summary_count_map(
+        manual,
+        "/operation_families",
+        &manual_candidates.operation_families,
+        "review-kit.json handoff manual_candidates.operation_families",
+    )?;
+    require_summary_count_map(
+        manual,
+        "/evidence_kinds",
+        &manual_candidates.evidence_kinds,
+        "review-kit.json handoff manual_candidates.evidence_kinds",
+    )?;
+    require_summary_count_map(
+        manual,
+        "/proof_modes",
+        &manual_candidate_proof_mode_counts(manual_candidates),
+        "review-kit.json handoff manual_candidates.proof_modes",
+    )?;
+    require_summary_count_map(
+        manual,
+        "/stable_byte_source_classes",
+        &manual_candidate_stable_byte_class_counts(manual_candidates),
+        "review-kit.json handoff manual_candidates.stable_byte_source_classes",
+    )?;
+    require_summary_count_map(
+        manual,
+        "/ledger_states",
+        &manual_candidate_ledger_state_counts(manual_candidates),
+        "review-kit.json handoff manual_candidates.ledger_states",
+    )?;
+    require_review_kit_manual_guidance_count(
+        manual,
+        "with_fix_options",
+        manual_candidates
+            .candidates
+            .iter()
+            .filter(|candidate| !candidate.fix_options.is_empty())
+            .count(),
+    )?;
+    require_review_kit_manual_guidance_count(
+        manual,
+        "with_test_targets",
+        manual_candidates
+            .candidates
+            .iter()
+            .filter(|candidate| !candidate.test_targets.is_empty())
+            .count(),
+    )?;
+    require_review_kit_manual_guidance_count(
+        manual,
+        "with_do_not_touch",
+        manual_candidates
+            .candidates
+            .iter()
+            .filter(|candidate| !candidate.do_not_touch.is_empty())
+            .count(),
+    )?;
+    require_review_kit_manual_guidance_count(
+        manual,
+        "with_oracle_map",
+        manual_candidates
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.oracle_map.is_some())
+            .count(),
+    )?;
+    require_review_kit_manual_guidance_count(
+        manual,
+        "with_proof_mode",
+        manual_candidates
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.proof_mode.is_some())
+            .count(),
+    )?;
+    require_review_kit_manual_guidance_count(
+        manual,
+        "with_fix_boundary",
+        manual_candidates
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.fix_boundary.is_some())
+            .count(),
+    )?;
+    require_review_kit_manual_guidance_count(
+        manual,
+        "with_pr_aperture",
+        manual_candidates
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.pr_aperture.is_some())
+            .count(),
+    )?;
+    check_review_kit_stable_byte_seed_summary(manual, manual_candidates)?;
+    check_manual_candidate_reviewcard_applicability(
+        manual,
+        "review-kit.json handoff manual_candidates",
+    )?;
     check_review_kit_first_manual_candidate_handoff(manual, manual_candidates)?;
+    check_review_kit_manual_candidate_queue_handoff(manual, manual_candidates)?;
     let boundary = super::require_non_empty_json_str(
         manual,
         "trust_boundary",
@@ -756,6 +4406,382 @@ fn check_review_kit_manual_candidate_handoff(
         if !super::text_contains_ignore_ascii_case(boundary, expected) {
             return Err(format!(
                 "review-kit.json handoff manual_candidates trust_boundary must include `{expected}`"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn check_review_kit_stable_byte_seed_summary(
+    manual: &serde_json::Value,
+    manual_candidates: &ManualCandidateIndexProjection,
+) -> Result<(), String> {
+    let context = "review-kit.json handoff manual_candidates";
+    let Some(with_seed_value) = manual.get("with_stable_byte_seed") else {
+        return Ok(());
+    };
+    let Some(with_seed_u64) = with_seed_value.as_u64() else {
+        return Err(format!(
+            "{context}.with_stable_byte_seed must be an unsigned integer"
+        ));
+    };
+    let with_seed = usize::try_from(with_seed_u64)
+        .map_err(|err| format!("{context}.with_stable_byte_seed is too large: {err}"))?;
+    if with_seed > manual_candidates.count {
+        return Err(format!(
+            "{context}.with_stable_byte_seed is {with_seed}, but manual-candidates.json has {} candidate(s)",
+            manual_candidates.count
+        ));
+    }
+    let queue_seed_count = manual
+        .get("candidate_queue")
+        .and_then(serde_json::Value::as_array)
+        .map(|queue| {
+            queue
+                .iter()
+                .filter(|entry| entry.get("stable_byte_seed").is_some())
+                .count()
+        })
+        .unwrap_or(0);
+    if with_seed < queue_seed_count {
+        return Err(format!(
+            "{context}.with_stable_byte_seed is {with_seed}, but candidate_queue contains {queue_seed_count} stable_byte_seed entrie(s)"
+        ));
+    }
+    let source = manual
+        .get("stable_byte_seed_source")
+        .ok_or_else(|| format!("{context} is missing stable_byte_seed_source"))?;
+    if !source.is_object() {
+        return Err(format!(
+            "{context}.stable_byte_seed_source must be an object"
+        ));
+    }
+    let included = source
+        .get("included")
+        .and_then(serde_json::Value::as_bool)
+        .ok_or_else(|| format!("{context}.stable_byte_seed_source.included must be a boolean"))?;
+    let limitation = super::require_non_empty_json_str(
+        source,
+        "limitation",
+        "review-kit.json handoff manual_candidates stable_byte_seed_source",
+    )?;
+    if included {
+        super::require_non_empty_json_str(
+            source,
+            "path",
+            "review-kit.json handoff manual_candidates stable_byte_seed_source",
+        )?;
+        super::require_non_empty_json_str(
+            source,
+            "relationship",
+            "review-kit.json handoff manual_candidates stable_byte_seed_source",
+        )?;
+        let rows = super::json_usize_at(
+            source,
+            "/rows",
+            "review-kit.json handoff manual_candidates stable_byte_seed_source",
+        )?;
+        let matched = super::json_usize_at(
+            source,
+            "/matched_manual_candidates",
+            "review-kit.json handoff manual_candidates stable_byte_seed_source",
+        )?;
+        if matched != with_seed {
+            return Err(format!(
+                "{context}.stable_byte_seed_source matched {matched} manual candidate(s), but with_stable_byte_seed is {with_seed}"
+            ));
+        }
+        if rows < matched {
+            return Err(format!(
+                "{context}.stable_byte_seed_source rows {rows} must be >= matched_manual_candidates {matched}"
+            ));
+        }
+    } else if with_seed != 0 {
+        return Err(format!(
+            "{context}.with_stable_byte_seed is {with_seed}, but stable_byte_seed_source is not included"
+        ));
+    }
+    for expected in [
+        "advisory workflow metadata",
+        "not analyzer discovery",
+        "not witness execution",
+        "not proof",
+        "not policy readiness",
+        "not a ReviewCard truth",
+    ] {
+        if !super::text_contains_ignore_ascii_case(limitation, expected) {
+            return Err(format!(
+                "{context}.stable_byte_seed_source limitation must include `{expected}`"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn require_review_kit_manual_guidance_count(
+    manual: &serde_json::Value,
+    field: &str,
+    expected: usize,
+) -> Result<(), String> {
+    let pointer = format!("/{field}");
+    let actual = super::json_usize_at(
+        manual,
+        &pointer,
+        "review-kit.json handoff manual_candidates",
+    )?;
+    if actual != expected {
+        return Err(format!(
+            "review-kit.json handoff manual_candidates.{field} is {actual}, expected {expected}"
+        ));
+    }
+    Ok(())
+}
+
+fn check_manual_candidate_reviewcard_applicability(
+    value: &serde_json::Value,
+    context: &str,
+) -> Result<(), String> {
+    let applicability = value
+        .get("reviewcard_artifact_applicability")
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| format!("{context} is missing reviewcard_artifact_applicability object"))?;
+    for (artifact, decision) in [
+        ("cards.json", "reviewcard_only"),
+        ("cards.sarif", "reviewcard_only"),
+        ("comment-plan.json", "reviewcard_only"),
+        ("lsp.json", "reviewcard_only"),
+        ("repair-queue.json", "reviewcard_only"),
+        ("policy-report.json", "reviewcard_only"),
+        ("policy-report.md", "reviewcard_only"),
+    ] {
+        let entry = applicability.get(artifact).ok_or_else(|| {
+            format!("{context} reviewcard_artifact_applicability is missing `{artifact}`")
+        })?;
+        if !entry.is_object() {
+            return Err(format!(
+                "{context} reviewcard_artifact_applicability `{artifact}` must be an object"
+            ));
+        }
+        let entry_context = format!("{context} reviewcard_artifact_applicability.{artifact}");
+        super::require_json_str(entry, "decision", decision, &entry_context)?;
+        if entry
+            .get("applies_to_manual_candidates")
+            .and_then(serde_json::Value::as_bool)
+            != Some(false)
+        {
+            return Err(format!(
+                "{entry_context} applies_to_manual_candidates must be false"
+            ));
+        }
+        if entry
+            .get("manual_candidate_markers_allowed")
+            .and_then(serde_json::Value::as_bool)
+            != Some(false)
+        {
+            return Err(format!(
+                "{entry_context} manual_candidate_markers_allowed must be false"
+            ));
+        }
+        let reason = super::require_non_empty_json_str(entry, "reason", &entry_context)?;
+        if !super::text_contains_ignore_ascii_case(reason, "manual candidates") {
+            return Err(format!(
+                "{entry_context} reason must explain manual candidate applicability"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn check_review_kit_manual_candidate_queue_handoff(
+    manual: &serde_json::Value,
+    manual_candidates: &ManualCandidateIndexProjection,
+) -> Result<(), String> {
+    let limit = super::json_usize_at(
+        manual,
+        "/candidate_queue_limit",
+        "review-kit.json handoff manual_candidates",
+    )?;
+    if limit != MANUAL_CANDIDATE_REVIEW_KIT_QUEUE_LIMIT {
+        return Err(format!(
+            "review-kit.json handoff manual_candidates candidate_queue_limit is {limit}, expected {MANUAL_CANDIDATE_REVIEW_KIT_QUEUE_LIMIT}"
+        ));
+    }
+    let queue = super::json_array_at(
+        manual,
+        "/candidate_queue",
+        "review-kit.json handoff manual_candidates",
+    )?;
+    let expected_queue_len = manual_candidates.count.min(limit);
+    if queue.len() != expected_queue_len {
+        return Err(format!(
+            "review-kit.json handoff manual_candidates candidate_queue has {} entries, expected {expected_queue_len}",
+            queue.len()
+        ));
+    }
+    let omitted = super::json_usize_at(
+        manual,
+        "/omitted_candidates",
+        "review-kit.json handoff manual_candidates",
+    )?;
+    let expected_omitted = manual_candidates.count.saturating_sub(queue.len());
+    if omitted != expected_omitted {
+        return Err(format!(
+            "review-kit.json handoff manual_candidates omitted_candidates is {omitted}, expected {expected_omitted}"
+        ));
+    }
+    for (index, entry) in queue.iter().enumerate() {
+        let expected = &manual_candidates.candidates[index];
+        check_review_kit_manual_candidate_queue_entry(entry, expected, index)?;
+    }
+    Ok(())
+}
+
+fn check_review_kit_manual_candidate_queue_entry(
+    entry: &serde_json::Value,
+    expected: &ManualCandidateProjection,
+    index: usize,
+) -> Result<(), String> {
+    let context = format!("review-kit.json handoff manual_candidates candidate_queue[{index}]");
+    let id = super::require_non_empty_json_str(entry, "id", &context)?;
+    if id != expected.id {
+        return Err(format!(
+            "{context} id `{id}` must match manual-candidates.json candidate `{}`",
+            expected.id
+        ));
+    }
+    super::require_json_str(entry, "source", "manual", &context)?;
+    if entry.get("manual_candidate") != Some(&serde_json::Value::Bool(true)) {
+        return Err(format!("{context} manual_candidate must be true"));
+    }
+    if entry.get("analyzer_discovered") != Some(&serde_json::Value::Bool(false)) {
+        return Err(format!("{context} analyzer_discovered must be false"));
+    }
+    super::require_non_empty_json_str(entry, "title", &context)?;
+    require_expected_value(
+        super::require_non_empty_json_str(entry, "location_text", &context)?,
+        &expected.location_text,
+        &format!("{context} location_text"),
+    )?;
+    require_expected_value(
+        super::require_non_empty_json_str(entry, "title", &context)?,
+        &expected.title,
+        &format!("{context} title"),
+    )?;
+    require_expected_value(
+        super::require_non_empty_json_str(entry, "operation_family", &context)?,
+        &expected.operation_family,
+        &format!("{context} operation_family"),
+    )?;
+    let evidence_refs = super::json_usize_at(entry, "/evidence_refs", &context)?;
+    if evidence_refs != expected.evidence_refs {
+        return Err(format!(
+            "{context} evidence_refs is {evidence_refs}, expected {}",
+            expected.evidence_refs
+        ));
+    }
+    let handoff = entry
+        .get("implementer_handoff")
+        .ok_or_else(|| format!("{context} is missing implementer_handoff"))?;
+    if !handoff.is_object() {
+        return Err(format!("{context} implementer_handoff must be an object"));
+    }
+    if handoff != &expected.implementer_handoff {
+        return Err(format!(
+            "{context} implementer_handoff must match manual-candidates.json candidate `{}` implementer_handoff",
+            expected.id
+        ));
+    }
+    for (field, command) in [
+        ("explain", "unsafe-review explain "),
+        ("context_json", "unsafe-review context "),
+        ("witness_plan", "unsafe-review candidate witness-plan "),
+    ] {
+        let text = super::require_non_empty_json_str(entry, field, &context)?;
+        if !text.starts_with(command) || !text.contains(id) {
+            return Err(format!("{context} {field} must reference `{id}`"));
+        }
+    }
+    if let Some(seed) = entry.get("stable_byte_seed") {
+        check_review_kit_stable_byte_seed(seed, expected, &context)?;
+    }
+    Ok(())
+}
+
+fn check_review_kit_stable_byte_seed(
+    seed: &serde_json::Value,
+    expected: &ManualCandidateProjection,
+    context: &str,
+) -> Result<(), String> {
+    let context = format!("{context} stable_byte_seed");
+    for field in [
+        "source",
+        "seed_id",
+        "ledger_state",
+        "candidate_family",
+        "surface",
+        "manual_candidate",
+        "safe_js_caller",
+        "rust_native_sink",
+        "proof_mode",
+        "suggested_first_pr",
+        "manual_candidate_pr_aperture",
+        "owner_lane",
+    ] {
+        super::require_non_empty_json_str(seed, field, &context)?;
+    }
+    require_non_empty_string_array(seed, "triage_labels", &context)?;
+    require_projected_optional_str(
+        seed,
+        "candidate_family",
+        &expected.stable_byte_source_class(),
+        &context,
+    )?;
+    require_projected_optional_str(
+        seed,
+        "ledger_state",
+        &expected.stable_byte_ledger_state,
+        &context,
+    )?;
+    require_stable_byte_seed_projection(seed, "safe_js_caller", expected, "source", &context)?;
+    require_stable_byte_seed_projection(seed, "rust_native_sink", expected, "sink", &context)?;
+    require_projected_optional_str(
+        seed,
+        "manual_candidate_pr_aperture",
+        &expected.pr_aperture,
+        &context,
+    )?;
+    if let Some(proof_mode) = &expected.proof_mode {
+        require_projected_str(seed, "proof_mode", &proof_mode.kind, &context)?;
+    }
+    let consistency = seed
+        .get("candidate_consistency")
+        .ok_or_else(|| format!("{context} is missing candidate_consistency"))?;
+    for field in [
+        "stable_byte_class_matches_manual_candidate",
+        "proof_mode_matches_manual_candidate",
+        "ledger_state_matches_manual_candidate",
+        "safe_js_caller_matches_manual_candidate",
+        "rust_native_sink_matches_manual_candidate",
+        "suggested_first_pr_has_manual_candidate_pr_aperture",
+    ] {
+        if consistency.get(field).and_then(serde_json::Value::as_bool) != Some(true) {
+            return Err(format!(
+                "{context} candidate_consistency.{field} must be true"
+            ));
+        }
+    }
+    let boundary = super::require_non_empty_json_str(seed, "trust_boundary", &context)?;
+    for expected_text in [
+        "advisory workflow metadata",
+        "not analyzer discovery",
+        "not witness execution",
+        "not proof",
+        "not policy readiness",
+        "not a ReviewCard truth",
+    ] {
+        if !super::text_contains_ignore_ascii_case(boundary, expected_text) {
+            return Err(format!(
+                "{context} trust_boundary must include `{expected_text}`"
             ));
         }
     }
@@ -825,6 +4851,10 @@ fn check_review_kit_first_manual_candidate_handoff(
                 .to_string(),
         );
     }
+    let expected = manual_candidates
+        .candidates
+        .first()
+        .ok_or_else(|| "manual-candidates.json has no first candidate".to_string())?;
     let handoff = first_candidate.get("implementer_handoff").ok_or_else(|| {
         "review-kit.json handoff manual_candidates first_candidate is missing implementer_handoff"
             .to_string()
@@ -835,16 +4865,12 @@ fn check_review_kit_first_manual_candidate_handoff(
                 .to_string(),
         );
     }
-    super::require_non_empty_json_str(
-        handoff,
-        "invariant_at_risk",
-        "review-kit.json handoff manual_candidates first_candidate implementer_handoff",
-    )?;
-    super::require_non_empty_json_str(
-        handoff,
-        "stop_condition",
-        "review-kit.json handoff manual_candidates first_candidate implementer_handoff",
-    )?;
+    if handoff != &expected.implementer_handoff {
+        return Err(format!(
+            "review-kit.json handoff manual_candidates first_candidate implementer_handoff must match manual-candidates.json candidate `{}` implementer_handoff",
+            expected.id
+        ));
+    }
     for (field, command) in [
         ("explain", "unsafe-review explain "),
         ("context_json", "unsafe-review context "),
@@ -950,7 +4976,11 @@ fn expected_review_kit_artifact_kind(path: &str) -> &'static str {
         "comment-plan.json" => "comment_plan",
         "witness-plan.md" => "witness_plan",
         "receipt-audit.md" => "receipt_audit",
+        "policy-report.json" => "policy_report_json",
+        "policy-report.md" => "policy_report_markdown",
         "manual-candidates.json" => "manual_candidates",
+        "manual-repair-queue.json" => "manual_repair_queue",
+        "tokmd-packets.json" => "tokmd_packets",
         "lsp.json" => "saved_lsp",
         "repair-queue.json" => "repair_queue",
         _ => "unknown",
@@ -964,10 +4994,12 @@ fn expected_review_kit_artifact_format(path: &str) -> &'static str {
         | "comment-plan.json"
         | "lsp.json"
         | "repair-queue.json"
-        | "manual-candidates.json" => "json",
-        "pr-summary.md" | "github-summary.md" | "witness-plan.md" | "receipt-audit.md" => {
-            "markdown"
-        }
+        | "manual-candidates.json"
+        | "manual-repair-queue.json"
+        | "tokmd-packets.json"
+        | "policy-report.json" => "json",
+        "pr-summary.md" | "github-summary.md" | "witness-plan.md" | "receipt-audit.md"
+        | "policy-report.md" => "markdown",
         "cards.sarif" => "sarif",
         _ => "unknown",
     }
@@ -984,10 +5016,13 @@ fn check_review_kit_artifact_schema_version(
     };
     let expected = match path {
         "review-kit.json" | "cards.json" | "comment-plan.json" | "lsp.json"
-        | "repair-queue.json" => Some("0.1"),
+        | "repair-queue.json" | "policy-report.json" => Some("0.1"),
         "manual-candidates.json" => Some("manual-candidates/v1"),
+        "manual-repair-queue.json" => Some("manual-repair-queue/v1"),
+        "tokmd-packets.json" => Some("tokmd-packets/v1"),
         "cards.sarif" => Some("2.1.0"),
-        "pr-summary.md" | "github-summary.md" | "witness-plan.md" | "receipt-audit.md" => None,
+        "pr-summary.md" | "github-summary.md" | "witness-plan.md" | "receipt-audit.md"
+        | "policy-report.md" => None,
         _ => {
             return Err(format!("review-kit.json artifact `{path}` is unknown"));
         }
@@ -1078,6 +5113,7 @@ fn require_witness_plan_headings_known(
     path: &Path,
     card_ids: &BTreeSet<String>,
 ) -> Result<(), String> {
+    let mut seen = BTreeSet::new();
     for line in text.lines() {
         let trimmed = line.trim();
         let Some(rest) = trimmed.strip_prefix("#### `") else {
@@ -1101,6 +5137,12 @@ fn require_witness_plan_headings_known(
                 path.display()
             ));
         }
+        if !seen.insert(card_id.to_string()) {
+            return Err(format!(
+                "{} witness-plan route heading duplicates ReviewCard id `{card_id}`",
+                path.display()
+            ));
+        }
     }
     Ok(())
 }
@@ -1119,13 +5161,18 @@ fn require_markdown_top_card_projection(
     let mut top_card_location = None;
     let mut top_card_operation = None;
     let mut top_card_operation_family = None;
+    let mut top_card_proof_path = None;
+    let mut top_card_hypothesis = None;
+    let mut top_card_build_this_first = None;
     let mut top_card_missing_evidence = None;
     let mut top_card_primary_route = None;
     let mut top_card_next_action = None;
+    let mut top_card_confirmation_step = None;
     let mut top_card_explain_command = None;
     let mut top_card_agent_context_command = None;
 
-    for line in text.lines() {
+    let top_card_text = markdown_top_card_section(text);
+    for line in top_card_text.lines() {
         let trimmed = line.trim();
         if let Some(rest) = trimmed
             .strip_prefix("- ID: `")
@@ -1158,6 +5205,15 @@ fn require_markdown_top_card_projection(
                 continue;
             };
             top_card_operation_family = Some(operation_family.to_string());
+        } else if let Some(rest) = trimmed.strip_prefix("- Proof path: `") {
+            let Some((proof_path, _)) = rest.split_once('`') else {
+                continue;
+            };
+            top_card_proof_path = Some(proof_path.to_string());
+        } else if let Some(hypothesis) = trimmed.strip_prefix("- Hypothesis to confirm: ") {
+            top_card_hypothesis = Some(hypothesis.to_string());
+        } else if let Some(build_this_first) = trimmed.strip_prefix("- Build/run this first: ") {
+            top_card_build_this_first = Some(build_this_first.to_string());
         } else if let Some(missing_evidence) = trimmed
             .strip_prefix("- Missing evidence: ")
             .or_else(|| trimmed.strip_prefix("- Missing/weak evidence: "))
@@ -1179,6 +5235,8 @@ fn require_markdown_top_card_projection(
             .or_else(|| trimmed.strip_prefix("- Next reviewer action: "))
         {
             top_card_next_action = Some(next_action.to_string());
+        } else if let Some(confirmation_step) = trimmed.strip_prefix("- Confirmation step: ") {
+            top_card_confirmation_step = Some(confirmation_step.to_string());
         } else if let Some(rest) = trimmed.strip_prefix("- Explain: `") {
             let Some((command, _)) = rest.split_once('`') else {
                 continue;
@@ -1254,6 +5312,35 @@ fn require_markdown_top_card_projection(
         &format!("{} top card `{card_id}` operation family", path.display()),
     )?;
 
+    let Some(actual_proof_path) = top_card_proof_path else {
+        return Err(format!(
+            "{} must include a top ReviewCard proof path line",
+            path.display()
+        ));
+    };
+    require_expected_value(
+        &actual_proof_path,
+        &card.proof_path,
+        &format!("{} top card `{card_id}` proof path", path.display()),
+    )?;
+
+    let Some(actual_hypothesis) = top_card_hypothesis else {
+        return Err(format!(
+            "{} must include a top ReviewCard hypothesis-to-confirm line",
+            path.display()
+        ));
+    };
+    require_top_card_hypothesis_text(&actual_hypothesis, path, &card_id, card)?;
+
+    let Some(actual_build_this_first) = top_card_build_this_first else {
+        return Err(format!(
+            "{} must include a top ReviewCard build/run-this-first line",
+            path.display()
+        ));
+    };
+    require_top_card_build_this_first_text(&actual_build_this_first, path, &card_id, card)?;
+    require_top_card_minimal_repro_text(top_card_text, path, &card_id, card)?;
+
     let Some(actual_missing_evidence) = top_card_missing_evidence else {
         return Err(format!(
             "{} must include a top ReviewCard missing evidence line",
@@ -1288,7 +5375,7 @@ fn require_markdown_top_card_projection(
         )?;
         if let Some(command) = &expected_route.command {
             require_top_card_primary_route_command(
-                text,
+                top_card_text,
                 path,
                 &card_id,
                 &expected_route.kind,
@@ -1309,6 +5396,14 @@ fn require_markdown_top_card_projection(
         &card.next_action,
         &format!("{} top card `{card_id}` next action", path.display()),
     )?;
+
+    let Some(actual_confirmation_step) = top_card_confirmation_step else {
+        return Err(format!(
+            "{} must include a top ReviewCard confirmation step line",
+            path.display()
+        ));
+    };
+    require_top_card_confirmation_step_text(&actual_confirmation_step, path, &card_id, card)?;
 
     let Some(actual_explain_command) = top_card_explain_command else {
         return Err(format!(
@@ -1336,6 +5431,138 @@ fn require_markdown_top_card_projection(
             path.display()
         ),
     )
+}
+
+fn require_top_card_build_this_first_text(
+    actual: &str,
+    path: &Path,
+    card_id: &str,
+    card: &CardProjection,
+) -> Result<(), String> {
+    let expected = expected_comment_build_this_first(card);
+    require_expected_value(
+        actual,
+        &expected.summary,
+        &format!(
+            "{} top card `{card_id}` build/run-this-first",
+            path.display()
+        ),
+    )
+}
+
+fn require_top_card_minimal_repro_text(
+    text: &str,
+    path: &Path,
+    card_id: &str,
+    card: &CardProjection,
+) -> Result<(), String> {
+    let expected = expected_comment_minimal_repro(card);
+    if !text.contains("- Minimal repro cue:") {
+        return Err(format!(
+            "{} top card `{card_id}` must include a minimal repro cue",
+            path.display()
+        ));
+    }
+    for step in &expected.steps {
+        if !text.contains(step) {
+            return Err(format!(
+                "{} top card `{card_id}` minimal repro cue must include `{step}`",
+                path.display()
+            ));
+        }
+    }
+    if !text.contains(expected.limitation) {
+        return Err(format!(
+            "{} top card `{card_id}` minimal repro cue must include limitation `{}`",
+            path.display(),
+            expected.limitation
+        ));
+    }
+    Ok(())
+}
+
+fn require_top_card_hypothesis_text(
+    actual: &str,
+    path: &Path,
+    card_id: &str,
+    card: &CardProjection,
+) -> Result<(), String> {
+    for expected in [
+        "static",
+        "ReviewCard",
+        "confirm with external evidence",
+        "observed runtime behavior",
+    ] {
+        if !actual.contains(expected) {
+            return Err(format!(
+                "{} top card `{card_id}` hypothesis must include `{expected}`",
+                path.display()
+            ));
+        }
+    }
+    if !actual.contains(&format!("`{}`", card.class_name)) {
+        return Err(format!(
+            "{} top card `{card_id}` hypothesis must include class `{}`",
+            path.display(),
+            card.class_name
+        ));
+    }
+    if !actual.contains(&collapse_whitespace(&card.operation)) {
+        return Err(format!(
+            "{} top card `{card_id}` hypothesis must include operation `{}`",
+            path.display(),
+            card.operation
+        ));
+    }
+    Ok(())
+}
+
+fn require_top_card_confirmation_step_text(
+    actual: &str,
+    path: &Path,
+    card_id: &str,
+    card: &CardProjection,
+) -> Result<(), String> {
+    if !actual.contains("matching receipt") && !actual.contains("before upgrading confidence") {
+        return Err(format!(
+            "{} top card `{card_id}` confirmation step must name receipt or confidence-upgrade limits",
+            path.display()
+        ));
+    }
+    if let Some(command) = card.verify_commands.first() {
+        for expected in ["build/run", "first", "matching receipt"] {
+            if !actual.contains(expected) {
+                return Err(format!(
+                    "{} top card `{card_id}` confirmation step must include `{expected}`",
+                    path.display()
+                ));
+            }
+        }
+        if !actual.contains(command) {
+            return Err(format!(
+                "{} top card `{card_id}` confirmation step must include verify command `{command}`",
+                path.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn markdown_top_card_section(text: &str) -> &str {
+    let Some((start, heading)) = ["## Top card", "## Reviewer cockpit"]
+        .into_iter()
+        .find_map(|heading| text.find(heading).map(|start| (start, heading)))
+    else {
+        return text;
+    };
+    let section = &text[start..];
+    let Some(next_section) = section
+        .get(heading.len()..)
+        .and_then(|rest| rest.find("\n## ").map(|index| heading.len() + index))
+    else {
+        return section;
+    };
+    &section[..next_section]
 }
 
 fn expected_missing_summary(card: &CardProjection) -> String {
@@ -1370,23 +5597,60 @@ fn require_top_card_primary_route_command(
     }
 }
 
+fn reject_manual_candidate_markers(value: &serde_json::Value, context: &str) -> Result<(), String> {
+    match value {
+        serde_json::Value::Object(object) => {
+            for field in ["manual_candidate", "analyzer_discovered"] {
+                if object.contains_key(field) {
+                    return Err(format!(
+                        "{context} must not include `{field}`; manual candidates belong only in manual-candidates.json or the review-kit manual handoff"
+                    ));
+                }
+            }
+            if object.get("source").and_then(serde_json::Value::as_str) == Some("manual") {
+                return Err(format!(
+                    "{context} must not set source = manual; manual candidates belong only in manual-candidates.json or the review-kit manual handoff"
+                ));
+            }
+            for (key, value) in object {
+                reject_manual_candidate_markers(value, &format!("{context}/{key}"))?;
+            }
+            Ok(())
+        }
+        serde_json::Value::Array(items) => {
+            for (idx, item) in items.iter().enumerate() {
+                reject_manual_candidate_markers(item, &format!("{context}/{idx}"))?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
 fn check_advisory_artifact_set(dir: &Path) -> Result<AdvisoryArtifactSummary, String> {
     let manifest = check_cards_json_artifact(dir)?;
     check_pr_summary_artifact(dir, &manifest)?;
     check_sarif_artifact(dir, &manifest)?;
-    check_comment_plan_artifact(dir, &manifest)?;
     let repair_queue_projections = check_repair_queue_artifact(
         dir,
+        manifest.changed_files,
+        manifest.changed_rust_files,
+        manifest.changed_non_rust_files,
         manifest.card_count,
         &manifest.card_ids,
         &manifest.card_projections,
     )?;
+    check_comment_plan_artifact(dir, &manifest, &repair_queue_projections)?;
 
     Ok(AdvisoryArtifactSummary {
         card_ids: manifest.card_ids,
+        card_order: manifest.card_order,
         card_projections: manifest.card_projections,
         repair_queue_projections,
         scope: manifest.scope,
+        changed_files: manifest.changed_files,
+        changed_rust_files: manifest.changed_rust_files,
+        changed_non_rust_files: manifest.changed_non_rust_files,
         card_count: manifest.card_count,
         open_actionable_gaps: manifest.open_actionable_gaps,
         high_priority_cards: manifest.high_priority_cards,
@@ -1402,6 +5666,7 @@ fn check_cards_json_artifact(dir: &Path) -> Result<AdvisoryArtifactManifest, Str
     }
 
     let cards = super::parse_json_file(&dir.join("cards.json"))?;
+    reject_manual_candidate_markers(&cards, "cards.json")?;
     super::require_json_str(&cards, "schema_version", "0.1", "cards.json")?;
     super::require_json_str(&cards, "tool", "unsafe-review", "cards.json")?;
     super::require_json_str(&cards, "policy", "advisory", "cards.json")?;
@@ -1414,8 +5679,14 @@ fn check_cards_json_artifact(dir: &Path) -> Result<AdvisoryArtifactManifest, Str
     let scope = super::require_non_empty_json_str(&cards, "scope", "cards.json")?.to_string();
     require_known_advisory_scope(&scope)?;
     let card_ids = super::advisory_card_ids(&cards)?;
+    let card_order = advisory_card_order(&cards)?;
     let card_projections = advisory_card_projections(&cards)?;
     let card_count = card_ids.len();
+    let changed_files = super::json_usize_at(&cards, "/summary/changed_files", "cards.json")?;
+    let changed_rust_files =
+        super::json_usize_at(&cards, "/summary/changed_rust_files", "cards.json")?;
+    let changed_non_rust_files =
+        super::json_usize_at(&cards, "/summary/changed_non_rust_files", "cards.json")?;
     let summary_cards = super::json_usize_at(&cards, "/summary/cards", "cards.json")?;
     let open_actionable_gaps =
         super::json_usize_at(&cards, "/summary/open_actionable_gaps", "cards.json")?;
@@ -1431,8 +5702,12 @@ fn check_cards_json_artifact(dir: &Path) -> Result<AdvisoryArtifactManifest, Str
 
     Ok(AdvisoryArtifactManifest {
         card_ids,
+        card_order,
         card_projections,
         scope,
+        changed_files,
+        changed_rust_files,
+        changed_non_rust_files,
         card_count,
         open_actionable_gaps,
         high_priority_cards,
@@ -1469,13 +5744,17 @@ fn check_pr_summary_artifact(
         "static unsafe contract review",
         &pr_summary_path,
     )?;
-    super::require_text_contains(
+    super::require_text_contains_any(
         &pr_summary,
-        "not a proof of memory safety",
         &pr_summary_path,
+        &["not a proof of memory safety", "not memory-safety proof"],
     )?;
     super::require_text_contains(&pr_summary, "not UB-free status", &pr_summary_path)?;
-    super::require_text_contains(&pr_summary, "not a Miri result", &pr_summary_path)?;
+    super::require_text_contains_any(
+        &pr_summary,
+        &pr_summary_path,
+        &["not a Miri result", "not Miri-clean status"],
+    )?;
     super::require_text_contains(
         &pr_summary,
         "- Receipt audit: `receipt-audit.md` checks saved receipt metadata only; no witness was run.",
@@ -1498,6 +5777,7 @@ fn check_sarif_artifact(dir: &Path, manifest: &AdvisoryArtifactManifest) -> Resu
     let card_projections = &manifest.card_projections;
     let card_count = manifest.card_count;
     let sarif = super::parse_json_file(&dir.join("cards.sarif"))?;
+    reject_manual_candidate_markers(&sarif, "cards.sarif")?;
     super::require_json_str(&sarif, "version", "2.1.0", "cards.sarif")?;
     super::require_json_array(&sarif, "runs", "cards.sarif")?;
     let sarif_rule_ids = sarif_rule_ids(&sarif)?;
@@ -1611,6 +5891,12 @@ fn check_sarif_result_projection<'a>(
     )?;
     require_projected_str(
         properties,
+        "proofPath",
+        &card_projection.proof_path,
+        "cards.sarif result properties",
+    )?;
+    require_projected_str(
+        properties,
         "operationFamily",
         &card_projection.operation_family,
         "cards.sarif result properties",
@@ -1669,12 +5955,14 @@ fn check_sarif_result_projection<'a>(
 fn check_comment_plan_artifact(
     dir: &Path,
     manifest: &AdvisoryArtifactManifest,
+    repair_queue_projections: &BTreeMap<String, RepairQueueProjection>,
 ) -> Result<(), String> {
     let card_ids = &manifest.card_ids;
     let card_projections = &manifest.card_projections;
     let card_count = manifest.card_count;
     let comment_plan_path = dir.join("comment-plan.json");
     let comment_plan = super::parse_json_file(&comment_plan_path)?;
+    reject_manual_candidate_markers(&comment_plan, "comment-plan.json")?;
     super::require_json_str(&comment_plan, "schema_version", "0.1", "comment-plan.json")?;
     super::require_json_str(&comment_plan, "mode", "plan_only", "comment-plan.json")?;
     super::require_json_str(&comment_plan, "policy", "advisory", "comment-plan.json")?;
@@ -1826,6 +6114,12 @@ fn check_comment_plan_artifact(
             expected_relevance(card_projection),
             "comment-plan.json comment relevance",
         )?;
+        require_comment_plan_repair_projection(
+            comment,
+            card_id,
+            repair_queue_projections,
+            "comment-plan.json comment",
+        )?;
         let comment_boundary = comment
             .get("trust_boundary")
             .and_then(serde_json::Value::as_str)
@@ -1837,7 +6131,7 @@ fn check_comment_plan_artifact(
                     .to_string(),
             );
         }
-        comment_body_projections.push((body, card_projection));
+        comment_body_projections.push((comment, body, card_projection));
     }
     let mut not_selected_card_ids = BTreeSet::new();
     if let Some(not_selected) = comment_plan.get("not_selected") {
@@ -1949,6 +6243,12 @@ fn check_comment_plan_artifact(
                 ),
                 "comment-plan.json not_selected reason_code",
             )?;
+            require_comment_plan_repair_projection(
+                card,
+                card_id,
+                repair_queue_projections,
+                "comment-plan.json not_selected",
+            )?;
         }
     }
     for card_id in card_ids {
@@ -1958,8 +6258,13 @@ fn check_comment_plan_artifact(
             ));
         }
     }
-    for (body, card_projection) in comment_body_projections {
+    for (comment, body, card_projection) in comment_body_projections {
         require_comment_body_card_projection(body, card_projection, "comment-plan.json comment")?;
+        require_comment_minimal_repro_projection(
+            comment,
+            card_projection,
+            "comment-plan.json comment",
+        )?;
     }
     let comment_boundary = comment_plan
         .get("trust_boundary")
@@ -1990,6 +6295,71 @@ fn check_comment_plan_artifact(
     }
     require_comment_plan_summary(&comment_plan, comments.len(), not_selected_card_ids.len())?;
     Ok(())
+}
+
+fn require_comment_plan_repair_projection(
+    entry: &serde_json::Value,
+    card_id: &str,
+    repair_queue_projections: &BTreeMap<String, RepairQueueProjection>,
+    context: &str,
+) -> Result<(), String> {
+    let repair = repair_queue_projections.get(card_id).ok_or_else(|| {
+        format!("comment-plan.json references card `{card_id}` missing from repair-queue.json")
+    })?;
+    require_projected_string_array(entry, "repair_queue_buckets", &repair.buckets, context)?;
+    let expected_bucket_reasons = repair
+        .buckets
+        .iter()
+        .map(|bucket| expected_repair_queue_bucket_reason(bucket).to_string())
+        .collect::<Vec<_>>();
+    require_projected_string_array(
+        entry,
+        "repair_queue_bucket_reasons",
+        &expected_bucket_reasons,
+        context,
+    )?;
+    let context_command = super::require_non_empty_json_str(entry, "context_command", context)?;
+    require_expected_value(
+        context_command,
+        &format!("unsafe-review context {card_id} --json"),
+        &format!("{context} context_command"),
+    )?;
+    let readiness = entry
+        .get("agent_readiness")
+        .ok_or_else(|| format!("{context} is missing agent_readiness"))?;
+    check_comment_plan_agent_readiness(readiness, repair, context)
+}
+
+fn check_comment_plan_agent_readiness(
+    readiness: &serde_json::Value,
+    repair: &RepairQueueProjection,
+    context: &str,
+) -> Result<(), String> {
+    let Some(ready) = readiness.get("ready").and_then(serde_json::Value::as_bool) else {
+        return Err(format!("{context} agent_readiness.ready must be a boolean"));
+    };
+    if ready != repair.readiness_ready {
+        return Err(format!(
+            "{context} agent_readiness.ready must project repair-queue.json value `{}`; got `{ready}`",
+            repair.readiness_ready
+        ));
+    }
+    let state = super::require_non_empty_json_str(
+        readiness,
+        "state",
+        &format!("{context} agent_readiness"),
+    )?;
+    require_expected_value(
+        state,
+        &repair.readiness_state,
+        &format!("{context} agent_readiness.state"),
+    )?;
+    require_projected_string_array(
+        readiness,
+        "reasons",
+        &repair.readiness_reasons,
+        &format!("{context} agent_readiness"),
+    )
 }
 
 fn require_comment_plan_summary(
@@ -2044,12 +6414,16 @@ fn require_comment_plan_summary(
 
 fn check_repair_queue_artifact(
     dir: &Path,
+    changed_files: usize,
+    changed_rust_files: usize,
+    changed_non_rust_files: usize,
     card_count: usize,
     card_ids: &BTreeSet<String>,
     card_projections: &BTreeMap<String, CardProjection>,
 ) -> Result<BTreeMap<String, RepairQueueProjection>, String> {
     let path = dir.join("repair-queue.json");
     let repair_queue = super::parse_json_file(&path)?;
+    reject_manual_candidate_markers(&repair_queue, "repair-queue.json")?;
     super::require_json_str(&repair_queue, "schema_version", "0.1", "repair-queue.json")?;
     super::require_json_str(
         &repair_queue,
@@ -2066,6 +6440,24 @@ fn check_repair_queue_artifact(
         .ok_or_else(|| "repair-queue.json is missing trust_boundary".to_string())?;
     check_repair_queue_trust_boundary(boundary, "repair-queue.json")?;
 
+    require_repair_queue_summary_count(
+        &repair_queue,
+        "changed_files",
+        changed_files,
+        "cards.json summary.changed_files",
+    )?;
+    require_repair_queue_summary_count(
+        &repair_queue,
+        "changed_rust_files",
+        changed_rust_files,
+        "cards.json summary.changed_rust_files",
+    )?;
+    require_repair_queue_summary_count(
+        &repair_queue,
+        "changed_non_rust_files",
+        changed_non_rust_files,
+        "cards.json summary.changed_non_rust_files",
+    )?;
     let summary_cards = super::json_usize_at(&repair_queue, "/summary/cards", "repair-queue.json")?;
     if summary_cards != card_count {
         return Err(format!(
@@ -2134,6 +6526,22 @@ fn check_repair_queue_artifact(
     Ok(repair_queue_projections)
 }
 
+fn require_repair_queue_summary_count(
+    repair_queue: &serde_json::Value,
+    field: &str,
+    expected: usize,
+    source: &str,
+) -> Result<(), String> {
+    let pointer = format!("/summary/{field}");
+    let actual = super::json_usize_at(repair_queue, &pointer, "repair-queue.json")?;
+    if actual != expected {
+        return Err(format!(
+            "repair-queue.json summary.{field} is {actual}, but {source} is {expected}"
+        ));
+    }
+    Ok(())
+}
+
 fn check_repair_queue_entry(
     entry: &serde_json::Value,
     bucket: &str,
@@ -2150,6 +6558,12 @@ fn check_repair_queue_entry(
         entry,
         "confidence",
         &card.confidence,
+        "repair-queue.json entry",
+    )?;
+    require_projected_str(
+        entry,
+        "proof_path",
+        &card.proof_path,
         "repair-queue.json entry",
     )?;
     require_projected_str(
@@ -2205,6 +6619,7 @@ fn check_repair_queue_entry(
     let readiness = check_repair_queue_readiness(readiness, bucket)?;
     Ok(RepairQueueEntryProjection {
         card_id: card_id.to_string(),
+        readiness_ready: readiness.ready,
         readiness_state: readiness.state,
         readiness_reasons: readiness.reasons,
     })
@@ -2266,9 +6681,16 @@ fn push_repair_queue_projection(
             .entry(entry.card_id.clone())
             .or_insert_with(|| RepairQueueProjection {
                 buckets: Vec::new(),
+                readiness_ready: entry.readiness_ready,
                 readiness_state: entry.readiness_state.clone(),
                 readiness_reasons: entry.readiness_reasons.clone(),
             });
+    if projection.readiness_ready != entry.readiness_ready {
+        return Err(format!(
+            "repair-queue.json card `{}` has inconsistent agent_readiness.ready across buckets",
+            entry.card_id
+        ));
+    }
     if projection.readiness_state != entry.readiness_state {
         return Err(format!(
             "repair-queue.json card `{}` has inconsistent agent_readiness.state across buckets",
@@ -2351,6 +6773,7 @@ fn check_repair_queue_readiness(
         .map(str::to_string)
         .collect();
     Ok(RepairQueueReadinessProjection {
+        ready,
         state: state.to_string(),
         reasons: readiness_reasons,
     })
@@ -2362,6 +6785,16 @@ fn require_known_advisory_scope(scope: &str) -> Result<(), String> {
         _ => Err(format!(
             "cards.json scope must be `diff` or `repo`; got `{scope}`"
         )),
+    }
+}
+
+fn require_known_proof_path(proof_path: &str, context: &str) -> Result<(), String> {
+    if KNOWN_PROOF_PATHS.contains(&proof_path) {
+        Ok(())
+    } else {
+        Err(format!(
+            "{context} must use a known proof_path; got `{proof_path}`"
+        ))
     }
 }
 
@@ -2400,11 +6833,57 @@ fn require_comment_body_card_projection(
             "missing evidence",
             format!("Missing evidence: {}", expected_missing_summary(card)),
         ),
+        ("proof_path", format!("Proof path: `{}`.", card.proof_path)),
+        (
+            "hypothesis",
+            format!(
+                "Hypothesis to confirm: static `{}` ReviewCard",
+                card.class_name
+            ),
+        ),
         ("next_action", format!("Next action: {}", card.next_action)),
     ] {
         if !body.contains(&expected) {
             return Err(format!(
                 "{context} body must project ReviewCard {field} `{expected}`"
+            ));
+        }
+    }
+    if !body.contains("Confirmation step: ") {
+        return Err(format!(
+            "{context} body must project ReviewCard confirmation step"
+        ));
+    }
+    let expected_hypothesis = expected_comment_hypothesis(card);
+    if !body.contains(&expected_hypothesis) {
+        return Err(format!(
+            "{context} body must project structured hypothesis_to_confirm `{expected_hypothesis}`"
+        ));
+    }
+    let expected_confirmation_step = expected_comment_confirmation_step(card);
+    if !body.contains(&expected_confirmation_step) {
+        return Err(format!(
+            "{context} body must project structured confirmation_step `{expected_confirmation_step}`"
+        ));
+    }
+    let expected_build_first = expected_comment_build_this_first(card);
+    if !body.contains(&expected_build_first.summary) {
+        return Err(format!(
+            "{context} body must project structured build_this_first summary `{}`",
+            expected_build_first.summary
+        ));
+    }
+    let expected_minimal_repro = expected_comment_minimal_repro_body(card);
+    if !body.contains(&expected_minimal_repro) {
+        return Err(format!(
+            "{context} body must project structured minimal_repro cue `{expected_minimal_repro}`"
+        ));
+    }
+    if let Some(command) = card.verify_commands.first() {
+        let expected = format!("Confirmation step: build/run `{command}` first");
+        if !body.contains(&expected) {
+            return Err(format!(
+                "{context} body must project ReviewCard confirmation step `{expected}`"
             ));
         }
     }
@@ -2458,6 +6937,9 @@ fn advisory_card_projections(
             super::require_non_empty_json_str(card, "priority", "cards.json card")?.to_string();
         let confidence =
             super::require_non_empty_json_str(card, "confidence", "cards.json card")?.to_string();
+        let proof_path =
+            super::require_non_empty_json_str(card, "proof_path", "cards.json card")?.to_string();
+        require_known_proof_path(&proof_path, "cards.json card proof_path")?;
         let hazards = card
             .get("hazards")
             .map(|hazards| {
@@ -2602,33 +7084,88 @@ fn advisory_card_projections(
             })
             .transpose()?
             .unwrap_or_default();
-        projections.insert(
-            id.clone(),
-            CardProjection {
-                id,
-                class_name,
-                priority,
-                confidence,
-                hazards,
-                path,
-                line,
-                column,
-                operation,
-                operation_family,
-                next_action,
-                missing,
-                contract,
-                discharge,
-                reach,
-                witness,
-                required_safety_conditions,
-                obligation_evidence,
-                verify_commands,
-                witness_routes,
-            },
-        );
+        let projection = CardProjection {
+            id,
+            class_name,
+            priority,
+            confidence,
+            proof_path,
+            hazards,
+            path,
+            line,
+            column,
+            operation,
+            operation_family,
+            next_action,
+            missing,
+            contract,
+            discharge,
+            reach,
+            witness,
+            required_safety_conditions,
+            obligation_evidence,
+            verify_commands,
+            witness_routes,
+        };
+        require_card_confirmation_cue_projection(
+            card,
+            &projection,
+            "cards.json card confirmation_cue",
+        )?;
+        projections.insert(projection.id.clone(), projection);
     }
     Ok(projections)
+}
+
+fn require_card_confirmation_cue_projection(
+    card_json: &serde_json::Value,
+    card: &CardProjection,
+    context: &str,
+) -> Result<(), String> {
+    let Some(cue) = card_json.get("confirmation_cue") else {
+        return Err(format!("{context} is missing"));
+    };
+    if !cue.is_object() {
+        return Err(format!("{context} must be an object"));
+    }
+    require_projected_str(
+        cue,
+        "hypothesis_to_confirm",
+        &expected_comment_hypothesis(card),
+        context,
+    )?;
+    require_comment_build_this_first_projection(cue, card, context)?;
+    require_comment_minimal_repro_projection(cue, card, context)?;
+    require_projected_str(
+        cue,
+        "confirmation_step",
+        &expected_comment_confirmation_step(card),
+        context,
+    )?;
+    let boundary = super::require_non_empty_json_str(cue, "trust_boundary", context)?;
+    super::require_boundary_text(boundary, "cards.json card confirmation_cue")?;
+    for expected in [
+        "not memory-safety proof",
+        "not UB-free status",
+        "not Miri-clean status",
+        "not a site-execution claim",
+    ] {
+        if !super::text_contains_ignore_ascii_case(boundary, expected) {
+            return Err(format!(
+                "{context} trust_boundary must include `{expected}`"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn advisory_card_order(cards: &serde_json::Value) -> Result<Vec<String>, String> {
+    super::json_array_at(cards, "/cards", "cards.json")?
+        .iter()
+        .map(|card| {
+            super::require_non_empty_json_str(card, "id", "cards.json card").map(str::to_string)
+        })
+        .collect()
 }
 
 fn optional_card_string(card: &serde_json::Value, field: &str) -> Result<Option<String>, String> {
@@ -2689,6 +7226,7 @@ fn require_lsp_hover_card_projection(
             "operation family",
             format!("`{}` unsafe operation", card.operation_family),
         ),
+        ("proof_path", format!("Proof path: `{}`", card.proof_path)),
         ("location", format!("Location: {}:{}", card.path, card.line)),
         ("operation", format!("- Operation: `{}`", card.operation)),
         ("next action", format!("- {}", card.next_action)),
@@ -2818,13 +7356,241 @@ fn require_comment_card_projection(
     require_projected_str(comment, "class", &card.class_name, context)?;
     require_projected_str(comment, "priority", &card.priority, context)?;
     require_projected_str(comment, "confidence", &card.confidence, context)?;
+    require_projected_str(comment, "proof_path", &card.proof_path, context)?;
     require_projected_str(comment, "path", &card.path, context)?;
     require_projected_u64(comment, "line", card.line, context)?;
+    require_projected_str(
+        comment,
+        "hypothesis_to_confirm",
+        &expected_comment_hypothesis(card),
+        context,
+    )?;
     require_projected_str(comment, "operation", &card.operation, context)?;
     require_projected_str(comment, "next_action", &card.next_action, context)?;
     require_projected_string_array(comment, "verify_commands", &card.verify_commands, context)?;
+    require_comment_build_this_first_projection(comment, card, context)?;
+    require_projected_str(
+        comment,
+        "confirmation_step",
+        &expected_comment_confirmation_step(card),
+        context,
+    )?;
     require_projected_witness_routes(comment, &card.witness_routes, context)?;
     require_projected_str(comment, "operation_family", &card.operation_family, context)
+}
+
+fn require_comment_build_this_first_projection(
+    comment: &serde_json::Value,
+    card: &CardProjection,
+    context: &str,
+) -> Result<(), String> {
+    let Some(value) = comment.get("build_this_first") else {
+        return Err(format!("{context} is missing build_this_first"));
+    };
+    let Some(object) = value.as_object() else {
+        return Err(format!("{context} build_this_first must be an object"));
+    };
+    let expected = expected_comment_build_this_first(card);
+    let kind = super::require_non_empty_json_str(value, "kind", context)?;
+    require_expected_value(
+        kind,
+        expected.kind,
+        &format!("{context} build_this_first.kind"),
+    )?;
+    require_optional_string_value(
+        object.get("command"),
+        expected.command.as_deref(),
+        &format!("{context} build_this_first.command"),
+    )?;
+    require_optional_string_value(
+        object.get("route_kind"),
+        expected.route_kind.as_deref(),
+        &format!("{context} build_this_first.route_kind"),
+    )?;
+    require_projected_str(value, "summary", &expected.summary, context)
+}
+
+fn require_comment_minimal_repro_projection(
+    comment: &serde_json::Value,
+    card: &CardProjection,
+    context: &str,
+) -> Result<(), String> {
+    let Some(value) = comment.get("minimal_repro") else {
+        return Err(format!("{context} is missing minimal_repro"));
+    };
+    let Some(object) = value.as_object() else {
+        return Err(format!("{context} minimal_repro must be an object"));
+    };
+    let expected = expected_comment_minimal_repro(card);
+    let cue_context = format!("{context} minimal_repro");
+    let kind = super::require_non_empty_json_str(value, "kind", &cue_context)?;
+    require_expected_value(kind, expected.kind, &format!("{cue_context}.kind"))?;
+    require_optional_string_value(
+        object.get("command"),
+        expected.command.as_deref(),
+        &format!("{cue_context}.command"),
+    )?;
+    require_optional_string_value(
+        object.get("route_kind"),
+        expected.route_kind.as_deref(),
+        &format!("{cue_context}.route_kind"),
+    )?;
+    require_projected_string_array(value, "steps", &expected.steps, &cue_context)?;
+    require_projected_str(value, "limitation", expected.limitation, &cue_context)
+}
+
+fn require_optional_string_value(
+    actual: Option<&serde_json::Value>,
+    expected: Option<&str>,
+    context: &str,
+) -> Result<(), String> {
+    match (actual, expected) {
+        (Some(value), Some(expected)) => {
+            let Some(actual) = value.as_str() else {
+                return Err(format!("{context} must be a string"));
+            };
+            require_expected_value(actual, expected, context)
+        }
+        (Some(value), None) if value.is_null() => Ok(()),
+        (None, None) => Ok(()),
+        (Some(value), None) => Err(format!("{context} must be null; got `{value}`")),
+        (None, Some(expected)) => Err(format!("{context} must be `{expected}`; got missing")),
+    }
+}
+
+fn expected_comment_hypothesis(card: &CardProjection) -> String {
+    format!(
+        "static `{}` ReviewCard for `{}`; confirm with external evidence before treating it as observed runtime behavior",
+        card.class_name,
+        collapse_whitespace(&card.operation)
+    )
+}
+
+fn expected_comment_confirmation_step(card: &CardProjection) -> String {
+    if let Some(command) = card.verify_commands.first() {
+        return format!(
+            "build/run `{command}` first, then attach a matching receipt if it confirms the route"
+        );
+    }
+    if let Some(route) = card.witness_routes.first() {
+        return format!(
+            "use the `{}` route in `witness-plan.md` to derive a focused repro or human review before upgrading confidence",
+            route.kind
+        );
+    }
+    "derive a focused confirmation from `unsafe-review explain` and human review before upgrading confidence".to_string()
+}
+
+fn expected_comment_build_this_first(card: &CardProjection) -> CommentBuildFirstProjection {
+    if let Some(command) = card.verify_commands.first() {
+        return CommentBuildFirstProjection {
+            kind: "verify_command",
+            command: Some(command.clone()),
+            route_kind: card.witness_routes.first().map(|route| route.kind.clone()),
+            summary: format!(
+                "Build/run `{command}` first for this card; attach a matching receipt only if it confirms the route"
+            ),
+        };
+    }
+    if let Some(route) = card.witness_routes.first() {
+        return CommentBuildFirstProjection {
+            kind: "witness_route",
+            command: route.command.clone(),
+            route_kind: Some(route.kind.clone()),
+            summary: format!(
+                "No automatic build/run command is available; use the `{}` route in `witness-plan.md` to derive a focused repro or human review before upgrading confidence",
+                route.kind
+            ),
+        };
+    }
+    CommentBuildFirstProjection {
+        kind: "human_review",
+        command: None,
+        route_kind: None,
+        summary: "No automatic build/run command is available; derive the first confirmation from `unsafe-review explain` and human review before upgrading confidence".to_string(),
+    }
+}
+
+fn expected_comment_minimal_repro(card: &CardProjection) -> CommentMinimalReproProjection {
+    let identity_step = format!(
+        "Confirm ReviewCard `{}` still maps to `{}` at `{}:{}:{}` before upgrading confidence.",
+        card.id,
+        collapse_whitespace(&card.operation),
+        card.path,
+        card.line,
+        card.column
+    );
+    if let Some(command) = card.verify_commands.first() {
+        return CommentMinimalReproProjection {
+            kind: "verify_command",
+            command: Some(command.clone()),
+            route_kind: card.witness_routes.first().map(|route| route.kind.clone()),
+            steps: vec![
+                identity_step,
+                format!("Build/run `{command}` as the smallest available command for this card."),
+                "Attach a matching receipt only if that run confirms the same route and ReviewCard identity.".to_string(),
+            ],
+            limitation: MINIMAL_REPRO_LIMITATION,
+        };
+    }
+    if let Some(route) = card.witness_routes.first() {
+        let route_step = if let Some(command) = &route.command {
+            format!(
+                "Use the `{}` route from `witness-plan.md`; start with `{command}` if it still targets this card.",
+                route.kind
+            )
+        } else {
+            format!(
+                "Use the `{}` route from `witness-plan.md` to derive a focused repro or human review target for this card.",
+                route.kind
+            )
+        };
+        return CommentMinimalReproProjection {
+            kind: "witness_route",
+            command: route.command.clone(),
+            route_kind: Some(route.kind.clone()),
+            steps: vec![
+                identity_step,
+                route_step,
+                "Attach a matching receipt only if the route confirms this card; otherwise keep the finding as a hypothesis to review.".to_string(),
+            ],
+            limitation: MINIMAL_REPRO_LIMITATION,
+        };
+    }
+    CommentMinimalReproProjection {
+        kind: "human_review",
+        command: None,
+        route_kind: None,
+        steps: vec![
+            identity_step,
+            format!(
+                "Use `unsafe-review explain {}` and human review to derive a focused repro before upgrading confidence.",
+                card.id
+            ),
+            "Keep the finding advisory unless external evidence confirms the same route."
+                .to_string(),
+        ],
+        limitation: MINIMAL_REPRO_LIMITATION,
+    }
+}
+
+fn expected_comment_minimal_repro_body(card: &CardProjection) -> String {
+    if let Some(command) = card.verify_commands.first() {
+        return format!(
+            "Minimal repro cue: confirm ReviewCard `{}` still maps to this site, then build/run `{command}`; attach a receipt only for the same route and identity; cue was not executed.",
+            card.id
+        );
+    }
+    if let Some(route) = card.witness_routes.first() {
+        return format!(
+            "Minimal repro cue: confirm ReviewCard `{}` still maps to this site, then use the `{}` witness route; attach a receipt only for the same route and identity; cue was not executed.",
+            card.id, route.kind
+        );
+    }
+    format!(
+        "Minimal repro cue: confirm ReviewCard `{}` still maps to this site, then derive a focused repro with `unsafe-review explain`; keep it advisory without external evidence; cue was not executed.",
+        card.id
+    )
 }
 
 fn require_not_selected_card_projection(
@@ -2835,6 +7601,7 @@ fn require_not_selected_card_projection(
     require_projected_str(card, "class", &projection.class_name, context)?;
     require_projected_str(card, "priority", &projection.priority, context)?;
     require_projected_str(card, "confidence", &projection.confidence, context)?;
+    require_projected_str(card, "proof_path", &projection.proof_path, context)?;
     require_projected_str(card, "path", &projection.path, context)?;
     require_projected_u64(card, "line", projection.line, context)?;
     require_projected_str(card, "operation", &projection.operation, context)?;
@@ -3142,6 +7909,7 @@ fn check_witness_plan_artifact(
     card_count: usize,
     open_actionable_gaps: usize,
     card_projections: &BTreeMap<String, CardProjection>,
+    manual_candidates: &ManualCandidateIndexProjection,
 ) -> Result<(), String> {
     let path = dir.join("witness-plan.md");
     let text = super::read_to_string(&path)?;
@@ -3158,10 +7926,18 @@ fn check_witness_plan_artifact(
             policy_mode_line,
             "does not run Miri",
             "cargo-careful",
-            "not a proof of memory safety",
             "not UB-free status",
-            "not a Miri result",
         ],
+    )?;
+    super::require_text_contains_any(
+        &text,
+        &path,
+        &["not a proof of memory safety", "not memory-safety proof"],
+    )?;
+    super::require_text_contains_any(
+        &text,
+        &path,
+        &["not a Miri result", "not Miri-clean status"],
     )?;
     if card_count > 0 {
         super::require_text_contains_all(
@@ -3186,6 +7962,80 @@ fn check_witness_plan_artifact(
                 "unsafe site executed",
             ],
         )?;
+    }
+    check_manual_candidate_witness_plan_text(&text, &path, manual_candidates)?;
+    Ok(())
+}
+
+fn check_manual_candidate_witness_plan_text(
+    text: &str,
+    path: &Path,
+    manual_candidates: &ManualCandidateIndexProjection,
+) -> Result<(), String> {
+    if manual_candidates.count == 0 {
+        return Ok(());
+    }
+
+    super::require_text_contains(text, "## Manual candidate witness follow-up", path)?;
+    super::require_text_contains(
+        text,
+        &format!(
+            "- Imported manual candidates: {} (manual/advisory; not analyzer-discovered ReviewCards)",
+            manual_candidates.count
+        ),
+        path,
+    )?;
+    let Some(first) = manual_candidates.candidates.first() else {
+        return Err(format!(
+            "{} has manual candidate count but no first candidate projection",
+            path.display()
+        ));
+    };
+    super::require_text_contains(
+        text,
+        &format!(
+            "- First manual candidate: `{}` at `{}` (`{}`)",
+            first.id, first.location_text, first.operation_family
+        ),
+        path,
+    )?;
+    super::require_text_contains(
+        text,
+        &format!("- Safe caller route: {}", first.safe_caller),
+        path,
+    )?;
+    super::require_text_contains(
+        text,
+        &format!("- Invariant at risk: {}", first.invariant),
+        path,
+    )?;
+    super::require_text_contains(
+        text,
+        &format!("- External evidence refs: {}", first.evidence_refs),
+        path,
+    )?;
+    check_manual_candidate_front_door_guidance_text(text, path, first, false)?;
+    check_manual_candidate_queue_preview_text(
+        text,
+        path,
+        manual_candidates,
+        MANUAL_CANDIDATE_REVIEW_KIT_QUEUE_LIMIT,
+        false,
+    )?;
+    for expected in [
+        "unsafe-review candidate witness-plan",
+        "unsafe-review context",
+        &first.id,
+        "manual-candidates.json",
+        "ReviewCard-only witness route groups",
+        "not analyzer-discovered",
+        "did not discover",
+        "did not run witnesses",
+        "edit source",
+        "policy inputs",
+        "do not import ReviewCard witness evidence",
+    ] {
+        super::require_text_contains(text, expected, path)?;
     }
     Ok(())
 }
@@ -3213,6 +8063,13 @@ fn require_witness_plan_card_projections(
             section,
             path,
             card_id,
+            "proof path",
+            &format!("- Proof path: `{}`", card.proof_path),
+        )?;
+        require_witness_plan_card_line(
+            section,
+            path,
+            card_id,
             "location",
             &format!("- Location: {}:{}", card.path, card.line),
         )?;
@@ -3227,8 +8084,65 @@ fn require_witness_plan_card_projections(
             section,
             path,
             card_id,
+            "operation family",
+            &format!("- Operation family: `{}`", card.operation_family),
+        )?;
+        require_witness_plan_card_line(
+            section,
+            path,
+            card_id,
+            "hazards",
+            &format!("- Hazards: {}", witness_plan_hazard_summary(&card.hazards)),
+        )?;
+        for (idx, condition) in card.required_safety_conditions.iter().enumerate() {
+            let expected = witness_plan_required_condition_line(
+                condition,
+                &format!("cards.json card `{card_id}` required_safety_conditions[{idx}]"),
+            )?;
+            require_witness_plan_card_line(
+                section,
+                path,
+                card_id,
+                "required safety condition",
+                &expected,
+            )?;
+        }
+        for (idx, evidence) in card.obligation_evidence.iter().enumerate() {
+            let expected = witness_plan_obligation_evidence_line(
+                evidence,
+                &format!("cards.json card `{card_id}` obligation_evidence[{idx}]"),
+            )?;
+            require_witness_plan_card_line(
+                section,
+                path,
+                card_id,
+                "obligation evidence",
+                &expected,
+            )?;
+        }
+        require_witness_plan_card_line(
+            section,
+            path,
+            card_id,
             "next action",
             &format!("- Next action: {}", card.next_action),
+        )?;
+        require_witness_plan_card_line(
+            section,
+            path,
+            card_id,
+            "hypothesis",
+            &format!(
+                "- Hypothesis to confirm: static `{}` ReviewCard",
+                card.class_name
+            ),
+        )?;
+        require_witness_plan_card_line(
+            section,
+            path,
+            card_id,
+            "confirmation step",
+            &expected_confirmation_step_fragment(card),
         )?;
         for route in &card.witness_routes {
             require_witness_plan_card_line(
@@ -3251,6 +8165,80 @@ fn require_witness_plan_card_projections(
         }
     }
     Ok(())
+}
+
+fn expected_confirmation_step_fragment(card: &CardProjection) -> String {
+    if let Some(command) = card.verify_commands.first() {
+        return format!("- Confirmation step: build/run `{command}` first");
+    }
+    if let Some(route) = card.witness_routes.first() {
+        return format!("- Confirmation step: use the `{}` route", route.kind);
+    }
+    "- Confirmation step: derive a focused confirmation".to_string()
+}
+
+fn witness_plan_hazard_summary(hazards: &[String]) -> String {
+    if hazards.is_empty() {
+        return "none recorded".to_string();
+    }
+    hazards
+        .iter()
+        .map(|hazard| format!("`{hazard}`"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn witness_plan_required_condition_line(
+    condition: &serde_json::Value,
+    context: &str,
+) -> Result<String, String> {
+    let key = super::require_non_empty_json_str(condition, "key", context)?;
+    let description = super::require_non_empty_json_str(condition, "description", context)?;
+    Ok(format!("  - `{}`: {}", key, one_line_text(description)))
+}
+
+fn witness_plan_obligation_evidence_line(
+    evidence: &serde_json::Value,
+    context: &str,
+) -> Result<String, String> {
+    let key = super::require_non_empty_json_str(evidence, "key", context)?;
+    let (contract_state, contract_summary) =
+        witness_plan_evidence_state_parts(evidence, "contract", context)?;
+    let (discharge_state, discharge_summary) =
+        witness_plan_evidence_state_parts(evidence, "discharge", context)?;
+    let (reach_state, reach_summary) =
+        witness_plan_evidence_state_parts(evidence, "reach", context)?;
+    let (witness_state, witness_summary) =
+        witness_plan_evidence_state_parts(evidence, "witness", context)?;
+    Ok(format!(
+        "  - `{}`: contract `{}` ({}); discharge `{}` ({}); reach `{}` ({}); witness `{}` ({})",
+        key,
+        contract_state,
+        one_line_text(contract_summary),
+        discharge_state,
+        one_line_text(discharge_summary),
+        reach_state,
+        one_line_text(reach_summary),
+        witness_state,
+        one_line_text(witness_summary)
+    ))
+}
+
+fn witness_plan_evidence_state_parts<'a>(
+    evidence: &'a serde_json::Value,
+    key: &str,
+    context: &str,
+) -> Result<(&'a str, &'a str), String> {
+    let Some(value) = evidence.get(key) else {
+        return Err(format!("{context} is missing {key}"));
+    };
+    let state = super::require_non_empty_json_str(value, "state", &format!("{context}.{key}"))?;
+    let summary = super::require_non_empty_json_str(value, "summary", &format!("{context}.{key}"))?;
+    Ok((state, summary))
+}
+
+fn one_line_text(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn witness_route_command_projection(
@@ -3422,10 +8410,16 @@ fn markdown_top_card_id(
 }
 
 fn expected_agent_handoff_summary(projection: &RepairQueueProjection) -> String {
+    let bucket_reasons = projection
+        .buckets
+        .iter()
+        .map(|bucket| expected_repair_queue_bucket_reason(bucket).to_string())
+        .collect::<Vec<_>>();
     format!(
-        "- Agent handoff: `{}`; buckets: {}; reasons: {}",
+        "- Agent handoff: `{}`; buckets: {}; bucket reasons: {}; readiness reasons: {}",
         projection.readiness_state,
         render_backtick_list(&projection.buckets),
+        render_backtick_list(&bucket_reasons),
         projection.readiness_reasons.join("; ")
     )
 }
@@ -3452,9 +8446,10 @@ fn require_pr_summary_card_table_projection(
     super::require_text_contains(text, "## Card table", path)?;
     for (card_id, card) in card_projections {
         let expected = format!(
-            "| `{}` | `{}` | {} | `{}` | `{}` | {} | `{}` | {} |",
+            "| `{}` | `{}` | `{}` | {} | `{}` | `{}` | {} | `{}` | {} |",
             markdown_table_cell(card_id),
             card.class_name,
+            card.proof_path,
             markdown_table_cell(&format!("{}:{}", card.path, card.line)),
             card.operation_family,
             markdown_table_cell(&card.operation),
@@ -3497,8 +8492,32 @@ fn require_pr_summary_witness_plan_projection(
         )
     })?;
     for (card_id, card) in card_projections {
+        let expected = format!(
+            "- `{card_id}` hypothesis: static `{}` ReviewCard",
+            card.class_name
+        );
+        require_pr_summary_witness_line(section, path, card_id, "hypothesis", &expected)?;
+        require_pr_summary_witness_line(
+            section,
+            path,
+            card_id,
+            "confirmation step",
+            &expected_confirmation_step_fragment(card),
+        )?;
+        let expected_build_this_first = format!(
+            "  - Build/run this first: {}",
+            expected_comment_build_this_first(card).summary
+        );
+        require_pr_summary_witness_line(
+            section,
+            path,
+            card_id,
+            "build/run-this-first",
+            &expected_build_this_first,
+        )?;
+        require_pr_summary_witness_minimal_repro(section, path, card_id, card)?;
         if let Some(route) = card.witness_routes.first() {
-            let expected = format!("- `{card_id}`: `{}` because {}", route.kind, route.reason);
+            let expected = format!("  - Route: `{}` because {}", route.kind, route.reason);
             require_pr_summary_witness_line(section, path, card_id, "primary route", &expected)?;
             if let Some(command) = &route.command {
                 let expected = format!("```bash\n{command}\n```");
@@ -3519,13 +8538,37 @@ fn require_pr_summary_witness_plan_projection(
                 )?;
             }
         } else {
-            let expected = format!(
-                "- `{card_id}`: no witness route was selected; route this to human review."
-            );
+            let expected = "  - Route: no witness route was selected; route this to human review.";
             require_pr_summary_witness_line(section, path, card_id, "manual route", &expected)?;
         }
     }
     Ok(())
+}
+
+fn require_pr_summary_witness_minimal_repro(
+    section: &str,
+    path: &Path,
+    card_id: &str,
+    card: &CardProjection,
+) -> Result<(), String> {
+    let expected = expected_comment_minimal_repro(card);
+    require_pr_summary_witness_line(
+        section,
+        path,
+        card_id,
+        "minimal repro cue heading",
+        "  - Minimal repro cue:",
+    )?;
+    for step in &expected.steps {
+        require_pr_summary_witness_line(section, path, card_id, "minimal repro step", step)?;
+    }
+    require_pr_summary_witness_line(
+        section,
+        path,
+        card_id,
+        "minimal repro limitation",
+        expected.limitation,
+    )
 }
 
 fn pr_summary_witness_plan_section(text: &str) -> Option<&str> {
@@ -3555,6 +8598,7 @@ fn require_pr_summary_witness_line(
 fn check_lsp_artifact(dir: &Path, summary: &AdvisoryArtifactSummary) -> Result<(), String> {
     let path = dir.join("lsp.json");
     let lsp = super::parse_json_file(&path)?;
+    reject_manual_candidate_markers(&lsp, "lsp.json")?;
     let card_projections = &summary.card_projections;
     let card_ids = card_projections.keys().cloned().collect::<BTreeSet<_>>();
     super::require_json_str(&lsp, "schema_version", "0.1", "lsp.json")?;
@@ -3939,6 +8983,12 @@ fn require_lsp_diagnostic_card_projection(
     require_projected_str(diagnostic, "code", &card.class_name, "lsp.json diagnostic")?;
     require_projected_str(
         diagnostic,
+        "proof_path",
+        &card.proof_path,
+        "lsp.json diagnostic",
+    )?;
+    require_projected_str(
+        diagnostic,
         "operation",
         &card.operation,
         "lsp.json diagnostic",
@@ -4301,6 +9351,12 @@ fn check_lsp_code_action_payload(
         expected_kind,
         "lsp.json code_action payload",
     )?;
+    require_projected_str(
+        payload,
+        "proof_path",
+        &card_projection.proof_path,
+        "lsp.json code_action payload",
+    )?;
     let boundary = payload
         .get("trust_boundary")
         .and_then(serde_json::Value::as_str)
@@ -4362,7 +9418,11 @@ fn check_advisory_artifact_overclaims(dir: &Path) -> Result<(), String> {
         "comment-plan.json",
         "witness-plan.md",
         "receipt-audit.md",
+        "policy-report.json",
+        "policy-report.md",
         "manual-candidates.json",
+        "manual-repair-queue.json",
+        "tokmd-packets.json",
         "lsp.json",
         "repair-queue.json",
     ] {
@@ -4386,7 +9446,10 @@ fn is_machine_json_artifact(name: &str) -> bool {
             | "cards.json"
             | "cards.sarif"
             | "comment-plan.json"
+            | "policy-report.json"
             | "manual-candidates.json"
+            | "manual-repair-queue.json"
+            | "tokmd-packets.json"
             | "lsp.json"
             | "repair-queue.json"
     )
@@ -4409,5 +9472,172 @@ fn reject_json_positive_overclaims(path: &Path, value: &serde_json::Value) -> Re
             Ok(())
         }
         _ => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stable_byte_candidate_projection() -> ManualCandidateProjection {
+        ManualCandidateProjection {
+            id: "R4R2-S001".to_string(),
+            title: "TextDecoder SharedArrayBuffer decode creates &[u8] over shared bytes"
+                .to_string(),
+            location_text: "src/runtime/webcore/TextDecoder.rs:237".to_string(),
+            location_file: "src/runtime/webcore/TextDecoder.rs".to_string(),
+            location_line: 237,
+            operation_family: "raw_pointer_read".to_string(),
+            unsafe_operation: "core::slice::from_raw_parts".to_string(),
+            invariant: "&[u8] memory must not be concurrently mutated".to_string(),
+            safe_caller: "TextDecoder.decode SharedArrayBuffer route".to_string(),
+            proof_mode: Some(ManualCandidateProofModeProjection {
+                kind: "mutation-plus-miri".to_string(),
+                system_bun_expected: "nondiscriminating".to_string(),
+                mutation_required: true,
+                miri_required: true,
+            }),
+            fix_boundary: Some("copy shared bytes before constructing the Rust slice".to_string()),
+            pr_aperture: Some(
+                "TextDecoder shared-byte snapshot only; do not rewrite unrelated encodings"
+                    .to_string(),
+            ),
+            oracle_map: None,
+            stable_byte: Some(serde_json::json!({
+                "class": "stable-byte-source-sab-race",
+                "source": "SharedArrayBuffer-backed typed array decode",
+                "sink": "src/runtime/webcore/TextDecoder.rs slice materialization",
+                "hazard": "Rust slice materialization can treat shared JS bytes as stable while JS can mutate the backing storage concurrently",
+                "observable": "no",
+                "proof_required": "mutation-plus-miri",
+                "suggested_fix_boundary": "copy shared bytes before constructing the Rust slice",
+                "pr_aperture": "TextDecoder shared-byte snapshot only; do not rewrite unrelated encodings",
+                "ledger_state": "handoff-ready"
+            })),
+            stable_byte_source_class: Some("stable-byte-source-sab-race".to_string()),
+            stable_byte_ledger_state: Some("handoff-ready".to_string()),
+            evidence: Vec::new(),
+            fix_options: Vec::new(),
+            test_targets: Vec::new(),
+            do_not_touch: Vec::new(),
+            evidence_refs: 0,
+            implementer_handoff: serde_json::json!({}),
+        }
+    }
+
+    fn stable_byte_seed_projection() -> serde_json::Value {
+        serde_json::json!({
+            "source": "docs/dogfood/stable-byte-follow-up-seeds.md",
+            "seed_id": "bun-stable-byte-textdecoder-sab",
+            "ledger_state": "handoff-ready",
+            "candidate_family": "stable-byte-source-sab-race",
+            "surface": "TextDecoder.decode",
+            "manual_candidate": "docs/examples/manual-candidates/textdecoder-sab.json",
+            "safe_js_caller": "SharedArrayBuffer-backed typed array decode",
+            "rust_native_sink": "src/runtime/webcore/TextDecoder.rs slice materialization",
+            "proof_mode": "mutation-plus-miri",
+            "suggested_first_pr": "TextDecoder shared-byte snapshot only",
+            "manual_candidate_pr_aperture": "TextDecoder shared-byte snapshot only; do not rewrite unrelated encodings",
+            "owner_lane": "rust2",
+            "triage_labels": ["non-observable", "needs-miri-model"],
+            "candidate_consistency": {
+                "stable_byte_class_matches_manual_candidate": true,
+                "proof_mode_matches_manual_candidate": true,
+                "ledger_state_matches_manual_candidate": true,
+                "safe_js_caller_matches_manual_candidate": true,
+                "rust_native_sink_matches_manual_candidate": true,
+                "suggested_first_pr_has_manual_candidate_pr_aperture": true
+            },
+            "trust_boundary": "Stable-byte seed row is advisory workflow metadata only; not analyzer discovery, not witness execution, not proof, not policy readiness, not rendered tokmd output, and not a ReviewCard truth."
+        })
+    }
+
+    #[test]
+    fn tokmd_stable_byte_seed_rejects_safe_js_caller_projection_drift() {
+        let expected = stable_byte_candidate_projection();
+        let mut seed = stable_byte_seed_projection();
+        seed["safe_js_caller"] = serde_json::json!("Wrong safe JS caller route");
+
+        let err = check_tokmd_stable_byte_seed(&seed, &expected, "tokmd-packets.json packets[0]")
+            .expect_err("safe_js_caller drift should fail tokmd stable-byte seed verification");
+
+        assert!(err.contains("safe_js_caller"), "{err}");
+        assert!(err.contains("stable_byte.source"), "{err}");
+        assert!(err.contains("Wrong safe JS caller route"), "{err}");
+    }
+
+    #[test]
+    fn tokmd_stable_byte_seed_rejects_manual_candidate_pr_aperture_projection_drift() {
+        let expected = stable_byte_candidate_projection();
+        let mut seed = stable_byte_seed_projection();
+        seed["manual_candidate_pr_aperture"] =
+            serde_json::json!("Wrong broad TextDecoder and S3 bundle");
+
+        let err = check_tokmd_stable_byte_seed(&seed, &expected, "tokmd-packets.json packets[0]")
+            .expect_err("manual_candidate_pr_aperture drift should fail tokmd stable-byte seed verification");
+
+        assert!(err.contains("manual_candidate_pr_aperture"), "{err}");
+        assert!(err.contains("pr_aperture"), "{err}");
+        assert!(err.contains("Wrong broad"), "{err}");
+    }
+
+    #[test]
+    fn tokmd_packet_rejects_not_imported_limitation_when_seed_is_projected() {
+        let expected = stable_byte_candidate_projection();
+        let entry = serde_json::json!({
+            "ledger_state_limitation": "ledger state is packet-local manual candidate metadata; external seed ledger rows are not imported",
+            "stable_byte_seed": stable_byte_seed_projection(),
+        });
+
+        let err =
+            check_tokmd_ledger_state_limitation(&entry, &expected, "tokmd-packets.json packets[0]")
+                .expect_err("joined seed packets must not say seed rows are not imported");
+
+        assert!(
+            err.contains("external seed ledger rows are not imported"),
+            "{err}"
+        );
+        assert!(err.contains("stable_byte_seed is projected"), "{err}");
+    }
+
+    #[test]
+    fn review_kit_stable_byte_seed_rejects_rust_native_sink_projection_drift() {
+        let expected = stable_byte_candidate_projection();
+        let mut seed = stable_byte_seed_projection();
+        seed["rust_native_sink"] =
+            serde_json::json!("src/runtime/webcore/Wrong.rs slice materialization");
+
+        let err = check_review_kit_stable_byte_seed(
+            &seed,
+            &expected,
+            "review-kit.json handoff manual_candidates candidate_queue[0]",
+        )
+        .expect_err("rust_native_sink drift should fail review-kit stable-byte seed verification");
+
+        assert!(err.contains("rust_native_sink"), "{err}");
+        assert!(err.contains("stable_byte.sink"), "{err}");
+        assert!(err.contains("Wrong.rs"), "{err}");
+    }
+
+    #[test]
+    fn review_kit_stable_byte_seed_rejects_pr_aperture_consistency_drift() {
+        let expected = stable_byte_candidate_projection();
+        let mut seed = stable_byte_seed_projection();
+        seed["candidate_consistency"]["suggested_first_pr_has_manual_candidate_pr_aperture"] =
+            serde_json::json!(false);
+
+        let err = check_review_kit_stable_byte_seed(
+            &seed,
+            &expected,
+            "review-kit.json handoff manual_candidates candidate_queue[0]",
+        )
+        .expect_err(
+            "false PR aperture consistency should fail review-kit stable-byte seed verification",
+        );
+
+        assert!(
+            err.contains("suggested_first_pr_has_manual_candidate_pr_aperture"),
+            "{err}"
+        );
     }
 }

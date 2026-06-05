@@ -1,18 +1,18 @@
 {
   "schema_version": "0.1",
   "status": "experimental",
-  "updated": "2026-05-18",
+  "updated": "2026-06-05",
   "manifest": "docs/dogfood/corpus.toml",
-  "trust_boundary": "Dogfood corpus records are static unsafe contract review evidence, not a proof of memory safety, not UB-free status, and not a Miri result unless an exact witness receipt is attached.",
+  "trust_boundary": "Dogfood corpus records are static unsafe contract review evidence, not memory-safety proof, not UB-free status, not Miri-clean status, and not a site-execution claim unless an exact witness receipt is attached.",
   "summary": {
     "repositories": 7,
-    "targets": 31,
+    "targets": 32,
     "repo_snapshots": 7,
     "pr_diffs": 23,
-    "fixture_controls": 1,
+    "fixture_controls": 2,
     "checked_in_scan_outputs": 0,
     "artifact_statuses": {
-      "local_untracked": 31
+      "local_untracked": 32
     }
   },
   "repositories": [
@@ -72,6 +72,10 @@
         "regressed": 0,
         "unchanged": 40
       },
+      "judgment": "actionable",
+      "proof_action": "Keep the target_feature contract evidence as reviewability movement; attach an exact external witness receipt before treating the route as witnessed evidence.",
+      "witness_route_state": "external-receipt-missing",
+      "claim_boundary": "Static unsafe contract review saved-outcome movement only; not calibrated precision or recall, not witness execution, not site execution evidence, not policy readiness, not memory-safety proof, not UB-free status, not Miri-clean status, and not a site-execution claim unless a matching witness receipt says so.",
       "notes": "Documented target_feature declarations moved from guard_missing to guarded_unwitnessed without claiming target-feature availability, site execution, or soundness."
     }
   ],
@@ -81,6 +85,12 @@
       "fixture": "fixtures/safe_code_no_cards",
       "primary_exercise": "Quiet no-card output and no all-clear wording for a fixture-level false-positive control.",
       "report": "docs/dogfood/reports/2026-05-26-no-card-control.md"
+    },
+    {
+      "id": "bun-manual-candidates-first-pr-smoke",
+      "fixture": "fixtures/raw_pointer_alignment",
+      "primary_exercise": "Committed Bun manual candidates remain manual/advisory and project through first-pr manual-candidate handoff artifacts, including the manual repair queue sidecar.",
+      "report": "docs/dogfood/reports/2026-06-03-bun-manual-candidates-first-pr-smoke.md"
     }
   ],
   "limitations": [

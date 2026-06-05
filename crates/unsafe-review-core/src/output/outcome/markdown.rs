@@ -42,14 +42,17 @@ pub(super) fn render_markdown(report: &OutcomeReport) -> String {
         out.push_str("- Top remaining gaps: none in the after snapshot\n\n");
     } else {
         out.push_str("\nTop remaining gaps:\n\n");
-        out.push_str("| Card | Class | Priority | Operation family | Missing | Next action |\n");
-        out.push_str("|---|---|---|---|---:|---|\n");
+        out.push_str(
+            "| Card | Class | Priority | Proof path | Operation family | Missing | Next action |\n",
+        );
+        out.push_str("|---|---|---|---|---|---:|---|\n");
         for gap in &report.reviewer_delta.top_remaining_gaps {
             out.push_str(&format!(
-                "| `{}` | `{}` | `{}` | `{}` | {} | {} |\n",
+                "| `{}` | `{}` | `{}` | `{}` | `{}` | {} | {} |\n",
                 gap.card_id,
                 gap.class_name,
                 gap.priority,
+                markdown_cell(gap.proof_path.as_deref().unwrap_or("unknown")),
                 markdown_cell(gap.operation_family.as_deref().unwrap_or("unknown")),
                 gap.missing_count,
                 markdown_cell(gap.next_action.as_deref().unwrap_or(""))
@@ -154,11 +157,55 @@ fn markdown_state(state: Option<&OutcomeCardState>) -> String {
                     markdown_cell(operation_family)
                 ));
             }
+            if let Some(proof_path) = state.proof_path.as_deref() {
+                parts.push(format!("proof path `{}`", markdown_cell(proof_path)));
+            }
             if let Some(operation) = state.operation.as_deref() {
                 parts.push(format!("operation `{}`", markdown_cell(operation)));
             }
             if let Some(evidence_count) = state.evidence_count {
                 parts.push(format!("external evidence {evidence_count}"));
+            }
+            if let Some(safe_caller) = state.safe_caller.as_deref() {
+                parts.push(format!("route `{}`", markdown_cell(safe_caller)));
+            }
+            if let Some(invariant) = state.invariant.as_deref() {
+                parts.push(format!("invariant {}", markdown_cell(invariant)));
+            }
+            if let Some(oracle_map) = state.oracle_map.as_ref() {
+                parts.push(format!(
+                    "oracle `{}` `{}` / `{}` / confidence `{}` / limitation {}",
+                    markdown_cell(&oracle_map.oracle_language),
+                    markdown_cell(&oracle_map.oracle_path.display().to_string()),
+                    markdown_cell(&oracle_map.oracle_kind),
+                    markdown_cell(&oracle_map.coverage_confidence),
+                    markdown_cell(&oracle_map.limitation)
+                ));
+            }
+            if let Some(evidence) = state.evidence.first() {
+                let mut evidence_parts = vec![format!(
+                    "first evidence `{}`",
+                    markdown_cell(&evidence.kind)
+                )];
+                if let Some(path) = evidence.path.as_deref() {
+                    evidence_parts.push(format!("path `{}`", markdown_cell(path)));
+                }
+                if let Some(command) = evidence.command.as_deref() {
+                    evidence_parts.push(format!("command `{}`", markdown_cell(command)));
+                }
+                if let Some(limitation) = evidence.limitation.as_deref() {
+                    evidence_parts.push(format!("limitation {}", markdown_cell(limitation)));
+                }
+                parts.push(evidence_parts.join(", "));
+            }
+            if let Some(first_fix) = state.fix_options.first() {
+                parts.push(format!("first fix: {}", markdown_cell(first_fix)));
+            }
+            if let Some(first_test) = state.test_targets.first() {
+                parts.push(format!("first test: {}", markdown_cell(first_test)));
+            }
+            if let Some(first_non_goal) = state.do_not_touch.first() {
+                parts.push(format!("first non-goal: {}", markdown_cell(first_non_goal)));
             }
             if let Some(next_action) = state.next_action.as_deref() {
                 parts.push(format!("next: {}", markdown_cell(next_action)));

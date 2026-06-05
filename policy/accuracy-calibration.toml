@@ -1624,7 +1624,17 @@ owner = "calibration"
 support_tier = "JS-backed buffer reentry heuristic"
 fixtures = [
   "js_buffer_reentry_sync_compression",
+  "js_buffer_reentry_raw_parts_materialization",
+  "js_buffer_reentry_coerce_after_as_array_buffer",
+  "js_buffer_reentry_vector_materialization",
+  "js_buffer_reentry_as_ptr_materialization",
   "js_buffer_reentry_options_before_capture_no_card",
+  "js_buffer_reentry_recapture_after_reentry_no_card",
+  "js_buffer_reentry_refetch_after_coercion_no_card",
+  "js_buffer_reentry_vector_refetch_after_coercion_no_card",
+  "js_buffer_reentry_as_ptr_refetch_after_coercion_no_card",
+  "js_buffer_reentry_async_options_before_capture_no_card",
+  "js_buffer_reentry_async_recapture_after_reentry_no_card",
 ]
 dogfood_targets = []
 label_ledgers = [
@@ -1633,13 +1643,165 @@ label_ledgers = [
 labeled_reports = []
 allowed_public_claim = """
 Fixture-pinned JS-backed buffer reentry heuristic behavior emits one advisory
-ReviewCard for the listed sync compression capture, getter reentry, and helper
-materialization fixture, and emits zero ReviewCards for the listed options
-before capture control.
+ReviewCard for the listed sync compression getter or callback reentry, helper
+materialization, direct raw-parts materialization, and as_array_buffer before
+coerce_to_* materialization fixtures, including byte_slice, vector, and as_ptr
+materializers. The direct raw-parts fixture also retains the underlying
+raw-parts operation ReviewCard. The heuristic emits zero
+ReviewCards for the listed options-before-capture, post-reentry recapture, and
+post-coercion re-fetch controls, including vector and as_ptr refreshed-descriptor
+materialization controls.
 """
 forbidden_claims = [
   "Bun vulnerability",
   "stale backing storage proof",
+  "site-execution proof",
+  "witness execution proof",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "stable-byte-rab-async-heuristic"
+status = "fixture_pinned"
+kind = "operation_family"
+owner = "calibration"
+support_tier = "Stable-byte RAB async heuristic"
+operation_family = "stable_byte_source_rab_async"
+hazard = "stable_byte_source"
+fixtures = [
+  "js_buffer_reentry_async_helper_capture",
+  "js_buffer_reentry_node_fs_rab_scalar_write",
+  "js_buffer_reentry_node_fs_rab_encoded_write_file",
+  "js_buffer_reentry_node_fs_rab_scalar_write_scheduled_before_capture_no_card",
+  "js_buffer_reentry_node_fs_rab_encoded_write_scheduled_before_capture_no_card",
+  "js_buffer_reentry_node_fs_rab_encoded_write_recapture_after_dispatch_no_card",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/stable-byte-rab-async-heuristic.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned stable-byte RAB async heuristic behavior emits one advisory
+ReviewCard for the listed async StringOrBuffer helper capture before callback
+reentry or async worker dispatch and later helper or worker byte materialization,
+including the listed node:fs scalar write and encoding-aware writeFile/appendFile
+fixture shapes. The listed scheduling-before-capture and recapture-after-dispatch
+fixtures remain no-card controls. These fixtures are advisory static review
+pressure for Bun RAB async seeds only and do not execute witnesses.
+"""
+forbidden_claims = [
+  "Bun vulnerability",
+  "stale backing storage proof",
+  "site-execution proof",
+  "witness execution proof",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "stable-byte-sab-race-heuristic"
+status = "fixture_pinned"
+kind = "operation_family"
+owner = "calibration"
+support_tier = "Stable-byte SAB race heuristic"
+operation_family = "stable_byte_source_sab_race"
+hazard = "stable_byte_source"
+fixtures = [
+  "stable_byte_sab_borrowed_slice",
+  "stable_byte_sab_mysql_blob_rawslice",
+  "stable_byte_sab_snapshot_no_card",
+  "stable_byte_sab_mysql_blob_owned_copy_no_card",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/stable-byte-sab-race-heuristic.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned stable-byte SAB race heuristic behavior emits one advisory
+ReviewCard for the listed shared-backing borrowed-slice and MySQL BLOB raw-slice
+fixtures while retaining the underlying raw-parts ReviewCard. The listed
+snapshot and owned-copy fixtures remain no-card controls because shared bytes
+are copied into owned storage before the borrowed/native sink.
+"""
+forbidden_claims = [
+  "Bun vulnerability",
+  "stale backing storage proof",
+  "SAB proof",
+  "site-execution proof",
+  "witness execution proof",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "stable-byte-native-ffi-heuristic"
+status = "fixture_pinned"
+kind = "operation_family"
+owner = "calibration"
+support_tier = "Stable-byte native FFI heuristic"
+operation_family = "stable_byte_source_native_ffi_read"
+hazard = "stable_byte_source"
+fixtures = [
+  "stable_byte_native_ffi_zstd_handoff",
+  "stable_byte_native_ffi_zstd_owned_copy_control",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/stable-byte-native-ffi-heuristic.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned stable-byte native FFI heuristic behavior emits one advisory
+ReviewCard for the listed JS-backed byte capture before zstd-style native FFI
+pointer/length handoff while retaining the generic FFI ReviewCard. The listed
+owned-copy control remains FFI-only because bytes are copied into owned storage
+before the native handoff.
+"""
+forbidden_claims = [
+  "Bun vulnerability",
+  "overlap proof",
+  "stale backing storage proof",
+  "zstd site-execution proof",
+  "witness execution proof",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "panic-from-safe-js-heuristic"
+status = "fixture_pinned"
+kind = "operation_family"
+owner = "calibration"
+support_tier = "Panic-from-safe-JS heuristic"
+fixtures = [
+  "panic_from_safe_js_direct_try_from_expect",
+  "panic_from_safe_js_bound_try_from_unwrap",
+  "panic_from_safe_js_observed_only_not_guard",
+  "panic_from_safe_js_inline_max_no_card",
+  "panic_from_safe_js_return_guard_no_card",
+  "panic_from_safe_js_non_js_signed_no_card",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/panic-from-safe-js-heuristic.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned panic-from-safe-JS heuristic behavior emits advisory
+panic-safety ReviewCards for the listed JS-derived signed values converted
+through panicking unsigned try_from expect or unwrap forms without a visible
+sign/range guard. It emits zero ReviewCards for the listed inline clamp,
+negative-value error return, and non-JS signed local controls.
+"""
+forbidden_claims = [
+  "Bun crash proof",
   "site-execution proof",
   "witness execution proof",
   "global precision",

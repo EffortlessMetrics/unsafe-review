@@ -3,8 +3,18 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 pub const MANUAL_CANDIDATE_SCHEMA_VERSION: &str = "manual-candidate/v1";
-const MANUAL_CANDIDATE_TRUST_BOUNDARY: &str =
-    "manual candidate; not analyzer-discovered; not proof of repository safety";
+pub const MANUAL_CANDIDATE_INDEX_SCHEMA_VERSION: &str = "manual-candidates/v1";
+const MANUAL_CANDIDATE_TRUST_BOUNDARY: &str = "manual candidate; not analyzer-discovered; not witness execution; not proof of memory safety; not UB-free status; not Miri-clean status; not site-execution proof; not policy readiness";
+const MANUAL_CANDIDATE_TRUST_BOUNDARY_PHRASES: [&str; 8] = [
+    "manual candidate",
+    "not analyzer-discovered",
+    "not witness execution",
+    "not proof",
+    "not UB-free",
+    "not Miri-clean",
+    "not site-execution",
+    "not policy",
+];
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ManualCandidate {
@@ -16,8 +26,24 @@ pub struct ManualCandidate {
     pub unsafe_operation: String,
     pub invariant: String,
     pub safe_caller: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oracle_map: Option<ManualCandidateOracleMap>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stable_byte: Option<ManualCandidateStableByte>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proof_mode: Option<ManualCandidateProofMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fix_boundary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pr_aperture: Option<String>,
     #[serde(default)]
     pub evidence: Vec<ManualCandidateEvidence>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fix_options: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub test_targets: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub do_not_touch: Vec<String>,
     pub trust_boundary: String,
     #[serde(default = "manual_source")]
     pub source: String,
@@ -31,6 +57,37 @@ pub struct ManualCandidate {
 pub struct ManualCandidateLocation {
     pub file: PathBuf,
     pub line: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManualCandidateProofMode {
+    pub kind: String,
+    pub system_bun_expected: String,
+    pub mutation_required: bool,
+    pub miri_required: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManualCandidateOracleMap {
+    pub rust_seam: String,
+    pub oracle_language: String,
+    pub oracle_path: PathBuf,
+    pub oracle_kind: String,
+    pub coverage_confidence: String,
+    pub limitation: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManualCandidateStableByte {
+    pub class: String,
+    pub source: String,
+    pub sink: String,
+    pub hazard: String,
+    pub observable: String,
+    pub proof_required: String,
+    pub suggested_fix_boundary: String,
+    pub pr_aperture: String,
+    pub ledger_state: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -89,7 +146,25 @@ impl ManualCandidate {
         require_nonempty("unsafe_operation", &self.unsafe_operation)?;
         require_nonempty("invariant", &self.invariant)?;
         require_nonempty("safe_caller", &self.safe_caller)?;
-        require_nonempty("trust_boundary", &self.trust_boundary)?;
+        if let Some(oracle_map) = &self.oracle_map {
+            oracle_map.validate()?;
+        }
+        if let Some(stable_byte) = &self.stable_byte {
+            stable_byte.validate(
+                self.proof_mode.as_ref(),
+                self.fix_boundary.as_deref(),
+                self.pr_aperture.as_deref(),
+            )?;
+        }
+        if let Some(proof_mode) = &self.proof_mode {
+            proof_mode.validate()?;
+        }
+        require_optional_nonempty("fix_boundary", self.fix_boundary.as_deref())?;
+        require_optional_nonempty("pr_aperture", self.pr_aperture.as_deref())?;
+        validate_manual_candidate_trust_boundary(&self.trust_boundary)?;
+        require_nonempty_items("fix_options", &self.fix_options)?;
+        require_nonempty_items("test_targets", &self.test_targets)?;
+        require_nonempty_items("do_not_touch", &self.do_not_touch)?;
         for evidence in &self.evidence {
             if !is_known_evidence_kind(&evidence.kind) {
                 return Err(format!(
@@ -99,6 +174,114 @@ impl ManualCandidate {
             }
             require_optional_nonempty("evidence.command", evidence.command.as_deref())?;
             require_optional_nonempty("evidence.limitation", evidence.limitation.as_deref())?;
+        }
+        Ok(())
+    }
+}
+
+impl ManualCandidateOracleMap {
+    fn validate(&self) -> Result<(), String> {
+        require_nonempty("oracle_map.rust_seam", &self.rust_seam)?;
+        require_nonempty("oracle_map.oracle_language", &self.oracle_language)?;
+        if self.oracle_path.as_os_str().is_empty() {
+            return Err("manual candidate oracle_map.oracle_path must not be empty".to_string());
+        }
+        require_nonempty("oracle_map.oracle_kind", &self.oracle_kind)?;
+        require_nonempty("oracle_map.coverage_confidence", &self.coverage_confidence)?;
+        require_nonempty("oracle_map.limitation", &self.limitation)?;
+        for required in [
+            "not witness execution",
+            "site-execution proof",
+            "memory-safety proof",
+        ] {
+            if !self.limitation.to_ascii_lowercase().contains(required) {
+                return Err(format!(
+                    "manual candidate oracle_map.limitation must include `{required}`"
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+impl ManualCandidateStableByte {
+    fn validate(
+        &self,
+        proof_mode: Option<&ManualCandidateProofMode>,
+        fix_boundary: Option<&str>,
+        pr_aperture: Option<&str>,
+    ) -> Result<(), String> {
+        if !is_known_stable_byte_class(&self.class) {
+            return Err(format!(
+                "manual candidate stable_byte.class `{}` is not supported",
+                self.class
+            ));
+        }
+        require_nonempty("stable_byte.source", &self.source)?;
+        require_nonempty("stable_byte.sink", &self.sink)?;
+        require_nonempty("stable_byte.hazard", &self.hazard)?;
+        if !is_known_stable_byte_observable(&self.observable) {
+            return Err(format!(
+                "manual candidate stable_byte.observable `{}` is not supported",
+                self.observable
+            ));
+        }
+        if !is_known_proof_mode_kind(&self.proof_required) {
+            return Err(format!(
+                "manual candidate stable_byte.proof_required `{}` is not supported",
+                self.proof_required
+            ));
+        }
+        if let Some(proof_mode) = proof_mode {
+            if self.proof_required != proof_mode.kind {
+                return Err(format!(
+                    "manual candidate stable_byte.proof_required `{}` must match proof_mode.kind `{}`",
+                    self.proof_required, proof_mode.kind
+                ));
+            }
+        }
+        require_nonempty(
+            "stable_byte.suggested_fix_boundary",
+            &self.suggested_fix_boundary,
+        )?;
+        if let Some(fix_boundary) = fix_boundary {
+            if self.suggested_fix_boundary != fix_boundary {
+                return Err(format!(
+                    "manual candidate stable_byte.suggested_fix_boundary must match fix_boundary `{fix_boundary}`"
+                ));
+            }
+        }
+        require_nonempty("stable_byte.pr_aperture", &self.pr_aperture)?;
+        if let Some(pr_aperture) = pr_aperture {
+            if self.pr_aperture != pr_aperture {
+                return Err(format!(
+                    "manual candidate stable_byte.pr_aperture must match pr_aperture `{pr_aperture}`"
+                ));
+            }
+        }
+        if !is_known_stable_byte_ledger_state(&self.ledger_state) {
+            return Err(format!(
+                "manual candidate stable_byte.ledger_state `{}` is not supported",
+                self.ledger_state
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl ManualCandidateProofMode {
+    fn validate(&self) -> Result<(), String> {
+        if !is_known_proof_mode_kind(&self.kind) {
+            return Err(format!(
+                "manual candidate proof_mode.kind `{}` is not supported",
+                self.kind
+            ));
+        }
+        if !is_known_system_bun_expected(&self.system_bun_expected) {
+            return Err(format!(
+                "manual candidate proof_mode.system_bun_expected `{}` is not supported",
+                self.system_bun_expected
+            ));
         }
         Ok(())
     }
@@ -186,7 +369,7 @@ pub fn render_manual_candidate_explain(candidate: &ManualCandidate) -> String {
 }
 
 pub fn render_manual_candidate_context(candidate: &ManualCandidate) -> Result<String, String> {
-    let value = serde_json::json!({
+    let mut value = serde_json::json!({
         "schema_version": "manual-candidate-context/v1",
         "id": candidate.id,
         "source": "manual",
@@ -201,6 +384,8 @@ pub fn render_manual_candidate_context(candidate: &ManualCandidate) -> Result<St
         "unsafe_operation": candidate.unsafe_operation,
         "invariant": candidate.invariant,
         "safe_caller": candidate.safe_caller,
+        "oracle_map": candidate.oracle_map.as_ref(),
+        "stable_byte": candidate.stable_byte.as_ref(),
         "implementer_handoff": manual_candidate_implementer_handoff(candidate),
         "evidence": candidate.evidence.iter().map(|evidence| serde_json::json!({
             "kind": evidence.kind,
@@ -221,6 +406,26 @@ pub fn render_manual_candidate_context(candidate: &ManualCandidate) -> Result<St
         ],
         "trust_boundary": candidate.trust_boundary,
     });
+    if let Some(object) = value.as_object_mut() {
+        if candidate.stable_byte.is_none() {
+            object.remove("stable_byte");
+        }
+        if candidate.oracle_map.is_none() {
+            object.remove("oracle_map");
+        }
+        if let Some(proof_mode) = &candidate.proof_mode {
+            object.insert("proof_mode".to_string(), serde_json::json!(proof_mode));
+        }
+        if let Some(fix_boundary) = &candidate.fix_boundary {
+            object.insert("fix_boundary".to_string(), serde_json::json!(fix_boundary));
+        }
+        if let Some(pr_aperture) = &candidate.pr_aperture {
+            object.insert("pr_aperture".to_string(), serde_json::json!(pr_aperture));
+        }
+        insert_non_empty_json_array(object, "fix_options", &candidate.fix_options);
+        insert_non_empty_json_array(object, "test_targets", &candidate.test_targets);
+        insert_non_empty_json_array(object, "do_not_touch", &candidate.do_not_touch);
+    }
     let mut rendered = serde_json::to_string_pretty(&value)
         .map_err(|err| format!("render manual candidate context failed: {err}"))?;
     rendered.push('\n');
@@ -298,12 +503,55 @@ fn render_candidate_handoff_markdown(out: &mut String, candidate: &ManualCandida
         candidate.safe_caller, candidate.unsafe_operation
     ));
     out.push_str(&format!("- Invariant at risk: {}\n", candidate.invariant));
+    if let Some(oracle_map) = &candidate.oracle_map {
+        out.push_str(&format!(
+            "- Oracle map: Rust seam `{}` -> `{}` oracle `{}` (`{}`; confidence: `{}`; limitation: {})\n",
+            oracle_map.rust_seam,
+            oracle_map.oracle_language,
+            oracle_map.oracle_path.display(),
+            oracle_map.oracle_kind,
+            oracle_map.coverage_confidence,
+            oracle_map.limitation
+        ));
+    }
+    if let Some(proof_mode) = &candidate.proof_mode {
+        out.push_str(&format!(
+            "- Proof mode: `{}` (system Bun expected: `{}`; mutation required: `{}`; Miri/model required: `{}`)\n",
+            proof_mode.kind,
+            proof_mode.system_bun_expected,
+            proof_mode.mutation_required,
+            proof_mode.miri_required
+        ));
+    }
+    if let Some(stable_byte) = &candidate.stable_byte {
+        out.push_str(&format!(
+            "- Stable-byte class: `{}` (observable: `{}`; proof required: `{}`; ledger state: `{}`)\n",
+            stable_byte.class,
+            stable_byte.observable,
+            stable_byte.proof_required,
+            stable_byte.ledger_state
+        ));
+        out.push_str(&format!(
+            "- Stable-byte source: `{}` -> sink: `{}`\n",
+            stable_byte.source, stable_byte.sink
+        ));
+        out.push_str(&format!("- Stable-byte hazard: {}\n", stable_byte.hazard));
+    }
+    if let Some(fix_boundary) = &candidate.fix_boundary {
+        out.push_str(&format!("- Fix boundary: {fix_boundary}\n"));
+    }
+    if let Some(pr_aperture) = &candidate.pr_aperture {
+        out.push_str(&format!("- PR aperture: {pr_aperture}\n"));
+    }
+    render_string_list(out, "Fix options", &candidate.fix_options);
+    render_string_list(out, "Test targets", &candidate.test_targets);
+    render_string_list(out, "Do not touch", &candidate.do_not_touch);
     out.push_str("- Next: confirm the route, preserve or add concrete evidence for the invariant, and attach receipts only when they target this manual candidate ID.\n");
     out.push_str("- Stop line: stop before source edits if the route no longer matches this manual candidate, or if the repair would broaden into unrelated unsafe sites.\n\n");
 }
 
 pub fn manual_candidate_implementer_handoff(candidate: &ManualCandidate) -> serde_json::Value {
-    serde_json::json!({
+    let mut value = serde_json::json!({
         "target": {
             "file": candidate.location.file.display().to_string(),
             "line": candidate.location.line,
@@ -315,6 +563,8 @@ pub fn manual_candidate_implementer_handoff(candidate: &ManualCandidate) -> serd
             "operation_family": candidate.operation_family,
         },
         "invariant_at_risk": candidate.invariant,
+        "oracle_map": candidate.oracle_map.as_ref(),
+        "stable_byte": candidate.stable_byte.as_ref(),
         "external_evidence": candidate.evidence.iter().map(|evidence| serde_json::json!({
             "kind": evidence.kind,
             "path": evidence.path.as_ref().map(|path| path.display().to_string()),
@@ -322,18 +572,108 @@ pub fn manual_candidate_implementer_handoff(candidate: &ManualCandidate) -> serd
             "command": evidence.command,
             "limitation": evidence.limitation,
         })).collect::<Vec<_>>(),
-        "suggested_next_steps": [
-            "confirm the file:line and safe caller route before editing",
-            "preserve or add concrete contract, guard, test, or witness evidence for the invariant",
-            "attach receipts only when the external run targets this manual candidate ID"
-        ],
-        "non_goals": [
-            "do not treat this as analyzer-discovered",
-            "do not claim proof, UB-free status, Miri-clean status, or site execution",
-            "do not broaden the task to unrelated unsafe sites"
-        ],
+        "suggested_next_steps": manual_candidate_suggested_next_steps(candidate),
+        "non_goals": manual_candidate_non_goals(candidate),
         "stop_condition": "stop before source edits if the route no longer matches this manual candidate, or if the repair would broaden into unrelated unsafe sites",
-    })
+    });
+    if let Some(object) = value.as_object_mut() {
+        if candidate.stable_byte.is_none() {
+            object.remove("stable_byte");
+        }
+        if candidate.oracle_map.is_none() {
+            object.remove("oracle_map");
+        }
+        if let Some(proof_mode) = &candidate.proof_mode {
+            object.insert("proof_mode".to_string(), serde_json::json!(proof_mode));
+        }
+        if let Some(fix_boundary) = &candidate.fix_boundary {
+            object.insert("fix_boundary".to_string(), serde_json::json!(fix_boundary));
+        }
+        if let Some(pr_aperture) = &candidate.pr_aperture {
+            object.insert("pr_aperture".to_string(), serde_json::json!(pr_aperture));
+        }
+        insert_non_empty_json_array(object, "fix_options", &candidate.fix_options);
+        insert_non_empty_json_array(object, "test_targets", &candidate.test_targets);
+        insert_non_empty_json_array(object, "do_not_touch", &candidate.do_not_touch);
+    }
+    value
+}
+
+fn manual_candidate_suggested_next_steps(candidate: &ManualCandidate) -> Vec<String> {
+    let mut steps = vec![
+        "confirm the file:line and safe caller route before editing".to_string(),
+        "preserve or add concrete contract, guard, test, or witness evidence for the invariant"
+            .to_string(),
+        "attach receipts only when the external run targets this manual candidate ID".to_string(),
+    ];
+    if !candidate.fix_options.is_empty() {
+        steps.push("evaluate the candidate-specific fix options before editing".to_string());
+    }
+    if candidate.proof_mode.is_some() {
+        steps.push(
+            "preserve the candidate proof mode and evidence bar before claiming the lane outcome"
+                .to_string(),
+        );
+    }
+    if candidate.oracle_map.is_some() {
+        steps.push(
+            "preserve the cross-language oracle map and limitation when preparing handoffs"
+                .to_string(),
+        );
+    }
+    if candidate.stable_byte.is_some() {
+        steps.push(
+            "preserve the stable-byte class, proof requirement, and ledger metadata in handoffs"
+                .to_string(),
+        );
+    }
+    if candidate.fix_boundary.is_some() {
+        steps.push("keep the first patch at the candidate-specific fix boundary".to_string());
+    }
+    if candidate.pr_aperture.is_some() {
+        steps.push("keep the PR inside the candidate-specific aperture and stop line".to_string());
+    }
+    if !candidate.test_targets.is_empty() {
+        steps.push(
+            "run or preserve the candidate-specific test targets listed in this handoff"
+                .to_string(),
+        );
+    }
+    if !candidate.do_not_touch.is_empty() {
+        steps.push("respect the candidate-specific do-not-touch notes before editing".to_string());
+    }
+    steps
+}
+
+fn manual_candidate_non_goals(candidate: &ManualCandidate) -> Vec<String> {
+    let mut non_goals = vec![
+        "do not treat this as analyzer-discovered".to_string(),
+        "do not claim proof, UB-free status, Miri-clean status, or site execution".to_string(),
+        "do not broaden the task to unrelated unsafe sites".to_string(),
+    ];
+    non_goals.extend(candidate.do_not_touch.iter().cloned());
+    non_goals
+}
+
+fn render_string_list(out: &mut String, label: &str, items: &[String]) {
+    if items.is_empty() {
+        return;
+    }
+    out.push_str(&format!("- {label}:\n"));
+    for item in items {
+        out.push_str(&format!("  - {item}\n"));
+    }
+}
+
+fn insert_non_empty_json_array(
+    object: &mut serde_json::Map<String, serde_json::Value>,
+    field: &str,
+    values: &[String],
+) {
+    if values.is_empty() {
+        return;
+    }
+    object.insert(field.to_string(), serde_json::json!(values));
 }
 
 fn manual_candidate_location_text(candidate: &ManualCandidate) -> String {
@@ -362,12 +702,36 @@ fn require_nonempty(field: &str, value: &str) -> Result<(), String> {
     }
 }
 
+fn require_nonempty_items(field: &str, values: &[String]) -> Result<(), String> {
+    for value in values {
+        if value.trim().is_empty() {
+            return Err(format!(
+                "manual candidate {field} entries must not be empty"
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn require_optional_nonempty(field: &str, value: Option<&str>) -> Result<(), String> {
     if value.is_some_and(|value| value.trim().is_empty()) {
         Err(format!("manual candidate {field} must not be empty"))
     } else {
         Ok(())
     }
+}
+
+fn validate_manual_candidate_trust_boundary(value: &str) -> Result<(), String> {
+    require_nonempty("trust_boundary", value)?;
+    let value = value.to_ascii_lowercase();
+    for required in MANUAL_CANDIDATE_TRUST_BOUNDARY_PHRASES {
+        if !value.contains(&required.to_ascii_lowercase()) {
+            return Err(format!(
+                "manual candidate trust_boundary must include `{required}`"
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn validate_candidate_id(id: &str) -> Result<(), String> {
@@ -392,6 +756,45 @@ fn is_known_evidence_kind(kind: &str) -> bool {
     )
 }
 
+fn is_known_proof_mode_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "observable-red-green" | "mutation-plus-miri" | "source-route-only" | "helper-gated"
+    )
+}
+
+fn is_known_system_bun_expected(value: &str) -> bool {
+    matches!(value, "fail" | "nondiscriminating" | "unavailable")
+}
+
+fn is_known_stable_byte_class(value: &str) -> bool {
+    matches!(
+        value,
+        "stable-byte-source-rab-async"
+            | "stable-byte-source-sab-race"
+            | "stable-byte-source-getter-reentry"
+            | "stable-byte-source-helper-dependent"
+            | "stable-byte-source-pathlike-live-view"
+            | "stable-byte-source-native-ffi-read"
+    )
+}
+
+fn is_known_stable_byte_observable(value: &str) -> bool {
+    matches!(value, "yes" | "no" | "source-route-only" | "helper-gated")
+}
+
+fn is_known_stable_byte_ledger_state(value: &str) -> bool {
+    matches!(
+        value,
+        "handoff-ready"
+            | "fork-draft"
+            | "upstream-open"
+            | "parked-followup"
+            | "merged-upstream"
+            | "needs-refresh"
+    )
+}
+
 fn manual_source() -> String {
     "manual".to_string()
 }
@@ -411,9 +814,46 @@ mod tests {
         assert!(candidate.manual_candidate);
         assert!(!candidate.analyzer_discovered);
         assert_eq!(candidate.evidence.len(), 2);
+        assert_eq!(
+            candidate
+                .stable_byte
+                .as_ref()
+                .map(|stable_byte| stable_byte.class.as_str()),
+            Some("stable-byte-source-sab-race")
+        );
+        assert_eq!(
+            candidate.proof_mode.as_ref().map(|mode| mode.kind.as_str()),
+            Some("mutation-plus-miri")
+        );
+        assert_eq!(
+            candidate.fix_boundary.as_deref(),
+            Some("copy shared bytes before constructing the Rust slice")
+        );
+        assert_eq!(
+            candidate.pr_aperture.as_deref(),
+            Some("TextDecoder shared-byte snapshot only; do not rewrite unrelated encodings")
+        );
+        assert_eq!(
+            candidate
+                .oracle_map
+                .as_ref()
+                .map(|oracle_map| oracle_map.oracle_language.as_str()),
+            Some("typescript")
+        );
+        assert_eq!(candidate.fix_options.len(), 1);
+        assert_eq!(candidate.test_targets.len(), 1);
+        assert_eq!(candidate.do_not_touch.len(), 1);
         let canonical = candidate.to_pretty_json()?;
         assert!(canonical.contains("\"manual_candidate\": true"));
         assert!(canonical.contains("\"analyzer_discovered\": false"));
+        assert!(canonical.contains("\"stable_byte\""));
+        assert!(canonical.contains("\"proof_mode\""));
+        assert!(canonical.contains("\"oracle_map\""));
+        assert!(canonical.contains("\"fix_boundary\""));
+        assert!(canonical.contains("\"pr_aperture\""));
+        assert!(canonical.contains("\"fix_options\""));
+        assert!(canonical.contains("\"test_targets\""));
+        assert!(canonical.contains("\"do_not_touch\""));
         Ok(())
     }
 
@@ -502,6 +942,105 @@ mod tests {
     }
 
     #[test]
+    fn manual_candidate_rejects_empty_guidance_entries() {
+        let err = ManualCandidate::from_json_str(&example_json().replace(
+            "\"copy SharedArrayBuffer-backed bytes before constructing the slice\"",
+            "\"   \"",
+        ))
+        .err()
+        .unwrap_or_default();
+
+        assert!(err.contains("fix_options"));
+    }
+
+    #[test]
+    fn manual_candidate_rejects_unknown_proof_mode() {
+        let err = ManualCandidate::from_json_str(&example_json().replace(
+            "\"kind\": \"mutation-plus-miri\"",
+            "\"kind\": \"sure-from-source\"",
+        ))
+        .err()
+        .unwrap_or_default();
+
+        assert!(err.contains("proof_mode.kind"), "{err}");
+    }
+
+    #[test]
+    fn manual_candidate_rejects_stable_byte_proof_mode_drift() {
+        let err = ManualCandidate::from_json_str(&example_json().replace(
+            "\"proof_required\": \"mutation-plus-miri\"",
+            "\"proof_required\": \"observable-red-green\"",
+        ))
+        .err()
+        .unwrap_or_default();
+
+        assert!(err.contains("stable_byte.proof_required"), "{err}");
+    }
+
+    #[test]
+    fn manual_candidate_rejects_stable_byte_fix_boundary_drift() {
+        let err = ManualCandidate::from_json_str(&example_json().replacen(
+            "\"suggested_fix_boundary\": \"copy shared bytes before constructing the Rust slice\"",
+            "\"suggested_fix_boundary\": \"copy bytes somewhere else\"",
+            1,
+        ))
+        .err()
+        .unwrap_or_default();
+
+        assert!(err.contains("stable_byte.suggested_fix_boundary"), "{err}");
+    }
+
+    #[test]
+    fn manual_candidate_rejects_stable_byte_pr_aperture_drift() {
+        let err = ManualCandidate::from_json_str(&example_json().replacen(
+            "\"pr_aperture\": \"TextDecoder shared-byte snapshot only; do not rewrite unrelated encodings\"",
+            "\"pr_aperture\": \"unrelated broad rewrite\"",
+            1,
+        ))
+        .err()
+        .unwrap_or_default();
+
+        assert!(err.contains("stable_byte.pr_aperture"), "{err}");
+    }
+
+    #[test]
+    fn manual_candidate_rejects_empty_fix_boundary() {
+        let err = ManualCandidate::from_json_str(&example_json().replace(
+            "\"fix_boundary\": \"copy shared bytes before constructing the Rust slice\"",
+            "\"fix_boundary\": \"   \"",
+        ))
+        .err()
+        .unwrap_or_default();
+
+        assert!(err.contains("fix_boundary"), "{err}");
+    }
+
+    #[test]
+    fn manual_candidate_rejects_weak_trust_boundary() {
+        let err = ManualCandidate::from_json_str(&example_json().replace(
+            "\"trust_boundary\": \"manual candidate; not analyzer-discovered; not witness execution; not proof of memory safety; not UB-free status; not Miri-clean status; not site-execution proof; not policy readiness\"",
+            "\"trust_boundary\": \"manual candidate; not analyzer-discovered; not proof of repository safety\"",
+        ))
+        .err()
+        .unwrap_or_default();
+
+        assert!(err.contains("trust_boundary"), "{err}");
+        assert!(err.contains("not witness execution"), "{err}");
+    }
+
+    #[test]
+    fn manual_candidate_rejects_empty_oracle_map_limitation() {
+        let err = ManualCandidate::from_json_str(&example_json().replace(
+            "\"limitation\": \"oracle map only; not witness execution, site-execution proof, or memory-safety proof\"",
+            "\"limitation\": \"   \"",
+        ))
+        .err()
+        .unwrap_or_default();
+
+        assert!(err.contains("oracle_map.limitation"), "{err}");
+    }
+
+    #[test]
     fn manual_candidate_explain_context_and_witness_plan_preserve_manual_marker()
     -> Result<(), String> {
         let candidate = ManualCandidate::from_json_str(example_json())?;
@@ -514,18 +1053,49 @@ mod tests {
         assert!(explain.contains("Analyzer-discovered: `false`"));
         assert!(explain.contains("## Implementer handoff"));
         assert!(explain.contains("Stop line: stop before source edits"));
+        assert!(explain.contains("Proof mode: `mutation-plus-miri`"));
+        assert!(explain.contains("Stable-byte class: `stable-byte-source-sab-race`"));
+        assert!(
+            explain.contains("Stable-byte source: `SharedArrayBuffer-backed typed array decode`")
+        );
+        assert!(explain.contains("Oracle map: Rust seam"));
+        assert!(explain.contains("textdecoder-sharedarraybuffer.test.ts"));
+        assert!(explain.contains("Fix boundary: copy shared bytes"));
+        assert!(explain.contains("PR aperture: TextDecoder shared-byte snapshot"));
+        assert!(explain.contains("Fix options"));
+        assert!(explain.contains("copy SharedArrayBuffer-backed bytes"));
+        assert!(explain.contains("Test targets"));
+        assert!(explain.contains("textdecoder-sharedarraybuffer.test.ts"));
+        assert!(explain.contains("Do not touch"));
+        assert!(explain.contains("TextDecoder unrelated encodings"));
         assert!(explain.contains("command `bun test"));
         assert!(explain.contains("limitation: runtime route evidence only"));
         assert!(context.contains("\"source\": \"manual\""));
         assert!(context.contains("\"manual_candidate\": true"));
         assert!(context.contains("\"implementer_handoff\""));
         assert!(context.contains("\"invariant_at_risk\""));
+        assert!(context.contains("\"stable_byte\""));
+        assert!(context.contains("\"oracle_map\""));
+        assert!(context.contains("\"oracle_language\": \"typescript\""));
+        assert!(context.contains("\"ledger_state\": \"handoff-ready\""));
+        assert!(context.contains("\"proof_mode\""));
+        assert!(context.contains("\"fix_boundary\""));
+        assert!(context.contains("\"pr_aperture\""));
         assert!(context.contains("\"command\": \"bun test"));
         assert!(context.contains("\"limitation\": \"runtime route evidence only"));
+        assert!(context.contains("\"fix_options\""));
+        assert!(context.contains("\"test_targets\""));
+        assert!(context.contains("\"do_not_touch\""));
         assert!(context.contains("\"stop_condition\""));
         assert!(witness_plan.contains("manual candidate witness plan"));
         assert!(witness_plan.contains("does not run witnesses"));
         assert!(witness_plan.contains("## Implementer handoff"));
+        assert!(witness_plan.contains("Proof mode: `mutation-plus-miri`"));
+        assert!(witness_plan.contains("Stable-byte class: `stable-byte-source-sab-race`"));
+        assert!(witness_plan.contains("Oracle map: Rust seam"));
+        assert!(witness_plan.contains("Fix options"));
+        assert!(witness_plan.contains("Test targets"));
+        assert!(witness_plan.contains("Do not touch"));
         assert!(witness_plan.contains("command `bun test"));
         Ok(())
     }
@@ -546,6 +1116,42 @@ mod tests {
           "unsafe_operation": "core::slice::from_raw_parts",
           "invariant": "&[u8] memory must not be concurrently mutated",
           "safe_caller": "new TextDecoder().decode(new Uint8Array(new SharedArrayBuffer(...)))",
+          "oracle_map": {
+            "rust_seam": "src/runtime/webcore/TextDecoder.rs::decode",
+            "oracle_language": "typescript",
+            "oracle_path": "test/js/webcore/textdecoder-sharedarraybuffer.test.ts",
+            "oracle_kind": "shared-byte-mutation-model",
+            "coverage_confidence": "candidate-local",
+            "limitation": "oracle map only; not witness execution, site-execution proof, or memory-safety proof"
+          },
+          "stable_byte": {
+            "class": "stable-byte-source-sab-race",
+            "source": "SharedArrayBuffer-backed typed array decode",
+            "sink": "src/runtime/webcore/TextDecoder.rs slice materialization",
+            "hazard": "Rust slice materialization can treat shared JS bytes as stable while JS can mutate the backing storage concurrently",
+            "observable": "no",
+            "proof_required": "mutation-plus-miri",
+            "suggested_fix_boundary": "copy shared bytes before constructing the Rust slice",
+            "pr_aperture": "TextDecoder shared-byte snapshot only; do not rewrite unrelated encodings",
+            "ledger_state": "handoff-ready"
+          },
+          "proof_mode": {
+            "kind": "mutation-plus-miri",
+            "system_bun_expected": "nondiscriminating",
+            "mutation_required": true,
+            "miri_required": true
+          },
+          "fix_boundary": "copy shared bytes before constructing the Rust slice",
+          "pr_aperture": "TextDecoder shared-byte snapshot only; do not rewrite unrelated encodings",
+          "fix_options": [
+            "copy SharedArrayBuffer-backed bytes before constructing the slice"
+          ],
+          "test_targets": [
+            "test/js/webcore/textdecoder-sharedarraybuffer.test.ts"
+          ],
+          "do_not_touch": [
+            "Do not rewrite TextDecoder unrelated encodings"
+          ],
           "evidence": [
             {
               "kind": "runtime_witness",
@@ -562,7 +1168,7 @@ mod tests {
               "limitation": "model evidence only; does not prove the Bun site executed under Miri"
             }
           ],
-          "trust_boundary": "manual candidate; not analyzer-discovered; not proof of repository safety"
+          "trust_boundary": "manual candidate; not analyzer-discovered; not witness execution; not proof of memory safety; not UB-free status; not Miri-clean status; not site-execution proof; not policy readiness"
         }"#
     }
 

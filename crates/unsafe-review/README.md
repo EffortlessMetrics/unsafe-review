@@ -77,6 +77,9 @@ cards.sarif
 comment-plan.json
 witness-plan.md
 receipt-audit.md
+manual-candidates.json
+manual-repair-queue.json
+tokmd-packets.json
 lsp.json
 repair-queue.json
 ```
@@ -92,6 +95,9 @@ The bundle is artifact-first:
 | `comment-plan.json` | Planned comments, not posted |
 | `witness-plan.md` | Suggested witness routes and limits |
 | `receipt-audit.md` | Saved receipt metadata audit; no witness was run |
+| `manual-candidates.json` | Imported manual/advisory candidates, separate from ReviewCards |
+| `manual-repair-queue.json` | Copy-only manual candidate repair handoff; no agent was run |
+| `tokmd-packets.json` | Formatting input for Bun packet presets; tokmd was not run |
 | `lsp.json` | Saved read-only editor projection |
 | `repair-queue.json` | Copy-only agent repair queue; no agent was run |
 
@@ -119,8 +125,9 @@ what unsafe-review is not claiming
 ## Trust boundary
 
 `unsafe-review` reports static review evidence. It is not a proof of memory safety,
-not a UB-free claim, not a Miri result, not soundness evidence, and not evidence
-that any unsafe site executed.
+not a UB-free claim or status, not a Miri result or Miri-clean status, not
+soundness evidence, and not a site-execution claim unless a matching witness
+receipt is attached.
 
 By default it does not run witnesses, post comments, edit source, enforce
 blocking policy, or claim calibrated precision or recall.

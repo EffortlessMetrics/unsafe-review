@@ -1,10 +1,11 @@
 # Dogfood outcome index
 
-Date: 2026-05-18
+Date: 2026-06-05
 Status: experimental selected-corpus evidence
 Source manifest: [`corpus.toml`](corpus.toml)
 Machine-readable index: [`index.json`](index.json)
 Usefulness notes: [`usefulness-notes.md`](usefulness-notes.md)
+Bun stable-byte seeds: [`stable-byte-follow-up-seeds.md`](stable-byte-follow-up-seeds.md)
 
 This index is a front panel for the real-crate dogfood corpus. It summarizes
 which crates and PR diffs have been used to exercise `unsafe-review`, where the
@@ -14,8 +15,9 @@ currently recorded.
 ## Trust Boundary
 
 Dogfood corpus records are static unsafe contract review evidence. They are not
-a proof of memory safety, not UB-free status, not a Miri result unless an exact
-witness receipt is attached, and not calibrated precision or recall.
+memory-safety proof, not UB-free status, not Miri-clean status, not a
+site-execution claim unless an exact witness receipt is attached, and not
+calibrated precision or recall.
 
 Generated scan outputs are intentionally recorded as `local_untracked` artifacts
 under `target/dogfood-work/`. Re-run the command in `corpus.toml` when a fresh
@@ -26,10 +28,10 @@ local artifact is needed.
 | Measure | Count |
 |---|---:|
 | Repositories | 7 |
-| Total targets | 31 |
+| Total targets | 32 |
 | Capped repo snapshots | 7 |
 | PR diff targets | 23 |
-| Fixture control targets | 1 |
+| Fixture control targets | 2 |
 | Checked-in scan outputs | 0 |
 
 ## Repository Coverage
@@ -46,9 +48,9 @@ local artifact is needed.
 
 ## Recorded Outcome Movement
 
-| Target | Before | After | New | Resolved | Improved | Regressed | Unchanged | Notes |
-|---|---|---|---:|---:|---:|---:|---:|---|
-| `memchr-capped` target-feature contract evidence | `target/dogfood-work/memchr.unsafe-review.after-slice-end-pointer-evidence.json` | `target/dogfood-work/memchr.unsafe-review.after-target-feature-contract-evidence.json` | 0 | 0 | 10 | 0 | 40 | Documented `#[target_feature]` declarations moved from `guard_missing` to `guarded_unwitnessed`; no target-feature availability, site execution, or soundness claim. |
+| Target | Judgment | Before | After | New | Resolved | Improved | Regressed | Unchanged | Proof action | Witness route state | Claim boundary | Notes |
+|---|---|---|---|---:|---:|---:|---:|---:|---|---|---|---|
+| `memchr-capped` target-feature contract evidence | `actionable` | `target/dogfood-work/memchr.unsafe-review.after-slice-end-pointer-evidence.json` | `target/dogfood-work/memchr.unsafe-review.after-target-feature-contract-evidence.json` | 0 | 0 | 10 | 0 | 40 | Keep the `target_feature` contract evidence as reviewability movement; attach an exact external witness receipt before treating the route as witnessed evidence. | `external-receipt-missing` | Static unsafe contract review saved-outcome movement only; not calibrated precision or recall, not witness execution, not site execution evidence, not policy readiness, not memory-safety proof, not UB-free status, not Miri-clean status, and not a site-execution claim unless a matching witness receipt says so. | Documented `#[target_feature]` declarations moved from `guard_missing` to `guarded_unwitnessed`; no target-feature availability, site execution, or soundness claim. |
 
 ## Target Groups
 
@@ -93,6 +95,11 @@ local artifact is needed.
 - `safe-code-no-cards-control` - fixture-level quiet/no-card control linked to
   [2026-05-26 no-card fixture smoke](reports/2026-05-26-no-card-control.md).
   It is not real-crate precision evidence.
+- `bun-manual-candidates-first-pr-smoke` - fixture-level manual-candidate
+  projection control linked to
+  [2026-06-03 Bun manual candidates first-pr smoke](reports/2026-06-03-bun-manual-candidates-first-pr-smoke.md).
+  It is not Bun runtime evidence, analyzer discovery evidence, or real-crate
+  precision evidence.
 
 ## Local Workflow
 
@@ -120,6 +127,11 @@ readiness.
 For `fixture-control` targets, keep the target under `fixtures/` and describe
 the control as fixture-level evidence. Do not count fixture controls as
 real-crate coverage, calibrated precision, or safety evidence.
+
+Bun stable-byte seeds live in
+[`stable-byte-follow-up-seeds.md`](stable-byte-follow-up-seeds.md). They are
+manual-candidate workflow seeds, not real-crate dogfood measurements and not
+analyzer-discovered ReviewCards.
 
 For `pr-diff` targets, make sure the target checkout under `root` matches the
 saved diff's expected source tree. A zero-card result from checkout drift is not

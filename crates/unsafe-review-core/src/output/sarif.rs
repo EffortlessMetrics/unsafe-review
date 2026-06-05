@@ -1,13 +1,12 @@
 use crate::api::AnalyzeOutput;
 use crate::domain::{ReviewCard, ReviewClass, WitnessRoute};
+use crate::output::REVIEWCARD_TRUST_BOUNDARY as TRUST_BOUNDARY;
 use crate::util::path_display;
 use serde::Serialize;
 use std::collections::BTreeSet;
 
 const SARIF_SCHEMA: &str =
     "https://docs.oasis-open.org/sarif/sarif/v2.1.0/cs01/schemas/sarif-schema-2.1.0.json";
-const TRUST_BOUNDARY: &str = "Static unsafe contract review only; this is not a proof of memory safety, not UB-free status, and not a Miri result unless a witness receipt is attached.";
-
 pub(crate) fn render(output: &AnalyzeOutput) -> String {
     render_pretty(&SarifLog::from(output))
 }
@@ -182,6 +181,7 @@ struct SarifResultProperties {
     class: &'static str,
     priority: &'static str,
     confidence: &'static str,
+    proof_path: &'static str,
     operation_family: &'static str,
     operation: String,
     hazards: Vec<&'static str>,
@@ -200,6 +200,7 @@ impl From<&ReviewCard> for SarifResultProperties {
             class: card.class.as_str(),
             priority: card.priority.as_str(),
             confidence: card.confidence.as_str(),
+            proof_path: card.proof_path.as_str(),
             operation_family: card.operation.family.as_str(),
             operation: card.operation.expression.clone(),
             hazards: card.hazards.iter().map(|hazard| hazard.as_str()).collect(),
@@ -328,7 +329,7 @@ mod tests {
             value["runs"][0]["results"][0]["properties"]["trustBoundary"]
                 .as_str()
                 .unwrap_or("")
-                .contains("not a Miri result")
+                .contains("not a site-execution claim")
         );
         Ok(())
     }

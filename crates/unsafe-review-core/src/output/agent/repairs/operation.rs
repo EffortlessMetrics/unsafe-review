@@ -243,6 +243,30 @@ pub(super) fn add_operation_repairs(card: &ReviewCard, repairs: &mut Vec<String>
             repairs.push("preserve the same arguments and receiver between local guards and the unsafe function call".to_string());
             repairs.push("prefer a safe wrapper that enforces the callee preconditions before reaching this call".to_string());
         }
+        OperationFamily::StableByteSourceGetterReentry
+            if common::missing_discharge(card, "byte-stability") =>
+        {
+            repairs.push("parse JS options/getters before capturing JS-backed bytes, or re-fetch and copy the bytes after getter reentry before Rust/native materialization".to_string());
+            repairs.push("keep the repair limited to this getter-reentry stable-byte aperture and attach only external observable-red-green evidence after running it outside unsafe-review".to_string());
+        }
+        OperationFamily::StableByteSourceRabAsync
+            if common::missing_discharge(card, "byte-stability") =>
+        {
+            repairs.push("snapshot or copy RAB-backed JS bytes before async worker scheduling or helper/native materialization".to_string());
+            repairs.push("keep the repair limited to this RAB async stable-byte aperture and attach only external observable-red-green evidence after running it outside unsafe-review".to_string());
+        }
+        OperationFamily::StableByteSourceSabRace
+            if common::missing_discharge(card, "byte-stability") =>
+        {
+            repairs.push("snapshot or copy SharedArrayBuffer-backed bytes before constructing Rust/native borrowed slices".to_string());
+            repairs.push("keep the repair limited to this SAB race stable-byte aperture and attach only external mutation-plus-Miri/model evidence after running it outside unsafe-review".to_string());
+        }
+        OperationFamily::StableByteSourceNativeFfiRead
+            if common::missing_discharge(card, "byte-stability") =>
+        {
+            repairs.push("snapshot or copy JS-backed bytes before passing pointer/length pairs to native FFI".to_string());
+            repairs.push("keep the repair limited to this native FFI stable-byte aperture and attach only external observable-red-green evidence after running it outside unsafe-review".to_string());
+        }
         _ => {}
     }
 }

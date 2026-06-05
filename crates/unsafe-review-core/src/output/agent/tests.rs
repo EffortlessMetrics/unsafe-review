@@ -26,6 +26,56 @@ fn agent_packet_is_parseable_bounded_and_card_sourced() -> Result<(), String> {
         Some(card.next_action.summary.as_str())
     );
     assert_eq!(
+        value["confirmation_cue"]["hypothesis_to_confirm"],
+        "static `guard_missing` ReviewCard for `unsafe { ptr.cast::<Header>().read() }`; confirm with external evidence before treating it as observed runtime behavior"
+    );
+    assert_eq!(
+        value["confirmation_cue"]["build_this_first"]["kind"],
+        "verify_command"
+    );
+    assert_eq!(
+        value["confirmation_cue"]["build_this_first"]["command"],
+        "cargo +nightly miri test read_header"
+    );
+    assert_eq!(
+        value["confirmation_cue"]["build_this_first"]["route_kind"],
+        "miri"
+    );
+    assert!(
+        value["confirmation_cue"]["build_this_first"]["summary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("Build/run `cargo +nightly miri test read_header` first")
+    );
+    assert_eq!(
+        value["confirmation_cue"]["minimal_repro"]["kind"],
+        "verify_command"
+    );
+    assert_eq!(
+        value["confirmation_cue"]["minimal_repro"]["command"],
+        "cargo +nightly miri test read_header"
+    );
+    assert_eq!(
+        value["confirmation_cue"]["minimal_repro"]["route_kind"],
+        "miri"
+    );
+    let minimal_repro = serde_json::to_string(&value["confirmation_cue"]["minimal_repro"])
+        .map_err(|err| format!("render minimal repro cue failed: {err}"))?;
+    assert!(minimal_repro.contains("Confirm ReviewCard"));
+    assert!(minimal_repro.contains("src/lib.rs"));
+    assert!(minimal_repro.contains("cargo +nightly miri test read_header"));
+    assert!(minimal_repro.contains("unsafe-review did not run this command"));
+    assert_eq!(
+        value["confirmation_cue"]["confirmation_step"],
+        "build/run `cargo +nightly miri test read_header` first, then attach a matching receipt if it confirms the route"
+    );
+    assert!(
+        value["confirmation_cue"]["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("not UB-free status")
+    );
+    assert_eq!(
         value["context"]["operation"],
         "unsafe { ptr.cast::<Header>().read() }"
     );
@@ -172,7 +222,7 @@ fn agent_packet_is_parseable_bounded_and_card_sourced() -> Result<(), String> {
         value["trust_boundary"]
             .as_str()
             .unwrap_or("")
-            .contains("not a Miri result")
+            .contains("not a site-execution claim")
     );
     Ok(())
 }
@@ -677,6 +727,31 @@ fn agent_packet_scopes_target_feature_repairs_to_dispatch_invariant() -> Result<
     assert!(!allowed_repairs.contains("will not move"));
     assert_eq!(value["agent_readiness"]["ready"], false);
     assert_eq!(value["agent_readiness"]["state"], "requires_human_review");
+    assert_eq!(
+        value["confirmation_cue"]["build_this_first"]["kind"],
+        "witness_route"
+    );
+    assert_eq!(
+        value["confirmation_cue"]["build_this_first"]["route_kind"],
+        "human-deep-review"
+    );
+    assert_eq!(
+        value["confirmation_cue"]["confirmation_step"],
+        "use the `human-deep-review` route in `witness-plan.md` to derive a focused repro or human review before upgrading confidence"
+    );
+    assert_eq!(
+        value["confirmation_cue"]["minimal_repro"]["kind"],
+        "witness_route"
+    );
+    assert_eq!(
+        value["confirmation_cue"]["minimal_repro"]["route_kind"],
+        "human-deep-review"
+    );
+    let minimal_repro = serde_json::to_string(&value["confirmation_cue"]["minimal_repro"])
+        .map_err(|err| format!("render minimal repro cue failed: {err}"))?;
+    assert!(minimal_repro.contains("witness-plan.md"));
+    assert!(minimal_repro.contains("derive a focused repro"));
+    assert!(minimal_repro.contains("did not run this command"));
     assert!(reasons.contains("target_feature"));
     assert!(reasons.contains("human deep review"));
     assert!(reasons.contains("no verify command"));
