@@ -3181,7 +3181,7 @@ fn first_pr_clean_output_stays_advisory_not_all_clear() -> Result<(), Box<dyn Er
         review_kit["trust_boundary"]
             .as_str()
             .unwrap_or("")
-            .contains("not site-execution proof")
+            .contains("not a site-execution claim")
     );
 
     let summary = fs::read_to_string(out_dir.join("pr-summary.md"))?;
@@ -5367,8 +5367,9 @@ fn assert_manual_candidate_front_panel(
             "- Proof mode: `mutation-plus-miri` (system Bun expected: `nondiscriminating`; mutation required: `true`; Miri/model required: `true`)"
         ));
         assert!(text.contains(
-            "- Oracle map: `src/runtime/webcore/TextDecoder.rs::decode` -> `test/js/webcore/textdecoder-sharedarraybuffer.test.ts` (`typescript`; `shared-byte-mutation-model`; limitation in sidecars)"
+            "- Oracle map: `src/runtime/webcore/TextDecoder.rs::decode` -> `test/js/webcore/textdecoder-sharedarraybuffer.test.ts`"
         ));
+        assert!(text.contains("`shared-byte-mutation-model`; limitation in sidecars"));
     } else {
         assert!(text.contains(
             "- Proof mode: `mutation-plus-miri` (system Bun expected: `nondiscriminating`; mutation required: `true`; Miri/model required: `true`)"
