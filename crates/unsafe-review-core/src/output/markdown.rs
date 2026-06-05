@@ -1,8 +1,13 @@
 use crate::api::AnalyzeOutput;
 use crate::api::Scope;
 use crate::domain::ReviewCard;
-use crate::output::agent;
-use crate::output::{NO_CHANGED_GAPS_LIMITATION, NO_CHANGED_GAPS_MESSAGE};
+use crate::output::confirmation::{
+    build_this_first, confirmation_step, hypothesis_to_confirm, minimal_repro,
+};
+use crate::output::{
+    NO_CHANGED_GAPS_LIMITATION, NO_CHANGED_GAPS_MESSAGE, REVIEWCARD_TRUST_BOUNDARY,
+};
+use crate::output::{agent, repair_queue};
 use crate::util::path_display;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -38,16 +43,19 @@ pub(crate) fn render(output: &AnalyzeOutput) -> String {
         render_no_changed_gaps(&mut out);
     }
     out.push_str("## Cards\n\n");
-    out.push_str("| ID | Class | Operation | Hazard | Missing | Route | Next action |\n");
-    out.push_str("|---|---|---|---|---|---|---|\n");
+    out.push_str(
+        "| ID | Class | Proof path | Operation | Hazard | Missing | Route | Next action |\n",
+    );
+    out.push_str("|---|---|---|---|---|---|---|---|\n");
     for card in &output.cards {
         let hazard = card.hazards.first().map_or("unknown", |h| h.as_str());
         let missing = card.missing.first().map_or("", |m| m.kind.as_str());
         let route = diff_primary_route(card);
         out.push_str(&format!(
-            "| `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | {} |\n",
+            "| `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | {} |\n",
             md_cell(&card.id.to_string()),
             card.class.as_str(),
+            card.proof_path.as_str(),
             md_cell(&one_line(&card.operation.expression)),
             hazard,
             missing,
@@ -56,7 +64,7 @@ pub(crate) fn render(output: &AnalyzeOutput) -> String {
         ));
     }
     out.push_str("\n## Trust boundary\n\n");
-    out.push_str("This is static unsafe contract review. It is not a proof of memory safety and not a Miri result unless a witness receipt is attached.\n");
+    push_reviewcard_trust_boundary(&mut out);
     out
 }
 
@@ -98,15 +106,16 @@ fn render_repo_posture(output: &AnalyzeOutput) -> String {
         out.push_str("No repo-scope unsafe-review cards found.\n\n");
     } else {
         out.push_str(
-            "| ID | Class | Location | Operation family | Operation | Missing evidence | Route | Next action |\n",
+            "| ID | Class | Proof path | Location | Operation family | Operation | Missing evidence | Route | Next action |\n",
         );
-        out.push_str("|---|---|---|---|---|---|---|---|\n");
+        out.push_str("|---|---|---|---|---|---|---|---|---|\n");
         for card in &output.cards {
             let route = repo_primary_route(card);
             out.push_str(&format!(
-                "| `{}` | `{}` | {} | `{}` | `{}` | {} | `{}` | {} |\n",
+                "| `{}` | `{}` | `{}` | {} | `{}` | `{}` | {} | `{}` | {} |\n",
                 md_cell(&card.id.to_string()),
                 card.class.as_str(),
+                card.proof_path.as_str(),
                 md_cell(&card_location(card)),
                 card.operation.family.as_str(),
                 md_cell(&one_line(&card.operation.expression)),
@@ -119,7 +128,9 @@ fn render_repo_posture(output: &AnalyzeOutput) -> String {
     }
 
     out.push_str("## Trust boundary\n\n");
-    out.push_str("This is static repo posture evidence from unsafe-review cards. It counts open review gaps, not raw unsafe usage, not memory-safety proof, not UB-free status, and not a Miri result unless a witness receipt is attached.\n");
+    out.push_str("This is static repo posture evidence from unsafe-review cards. It counts open review gaps, not raw unsafe usage. It is ");
+    out.push_str(REVIEWCARD_TRUST_BOUNDARY);
+    out.push('\n');
     out
 }
 
@@ -300,10 +311,15 @@ fn repo_primary_route(card: &ReviewCard) -> &str {
 fn agent_handoff_summary(card: &ReviewCard) -> String {
     let projection = agent::repair_queue_projection(card);
     let buckets = repair_queue_buckets(&projection.repair_queue.buckets);
+    let bucket_reasons = buckets
+        .iter()
+        .map(|bucket| repair_queue::bucket_reason(bucket))
+        .collect::<Vec<_>>();
     format!(
-        "Agent handoff: `{}`; buckets: {}; reasons: {}",
+        "Agent handoff: `{}`; buckets: {}; bucket reasons: {}; readiness reasons: {}",
         projection.agent_readiness.state,
         render_backtick_list(&buckets),
+        render_backtick_list(&bucket_reasons),
         projection.agent_readiness.reasons.join("; ")
     )
 }
@@ -372,11 +388,11 @@ pub(crate) fn render_github_summary(output: &AnalyzeOutput) -> String {
     render_github_summary_open_next(&mut out);
     out.push_str("---\n\n");
     out.push_str(
-        "Full advisory bundle (review-kit.json, cards.json, pr-summary.md, github-summary.md, cards.sarif, comment-plan.json, witness-plan.md, receipt-audit.md, manual-candidates.json, lsp.json, repair-queue.json) is attached as the workflow artifact.\n\n",
+        "Full advisory bundle (review-kit.json, cards.json, pr-summary.md, github-summary.md, cards.sarif, comment-plan.json, witness-plan.md, receipt-audit.md, policy-report.json, policy-report.md, manual-candidates.json, manual-repair-queue.json, tokmd-packets.json, lsp.json, repair-queue.json) is attached as the workflow artifact.\n\n",
     );
-    out.push_str(
-        "> Trust boundary: static unsafe contract review only; not memory-safety proof, not UB-free status, not Miri-clean status, and not site-execution proof.\n",
-    );
+    out.push_str("> Trust boundary: ");
+    out.push_str(REVIEWCARD_TRUST_BOUNDARY);
+    out.push('\n');
     out.push_str(
         "> Execution boundary: unsafe-review did not run witnesses, post comments, edit source, run an agent, or enforce blocking policy.\n",
     );
@@ -390,7 +406,11 @@ fn render_github_summary_open_next(out: &mut String) {
     out.push_str("- Machine-readable ReviewCards: `cards.json`\n");
     out.push_str("- Witness routes: `witness-plan.md`\n");
     out.push_str("- Receipt audit: `receipt-audit.md` checks saved receipt metadata only; no witness was run.\n");
+    out.push_str(
+        "- Policy report: `policy-report.md`; ReviewCard-only; manual candidates are not policy inputs.\n",
+    );
     out.push_str("- Manual candidate index: `manual-candidates.json` lists imported advisory candidates separately from ReviewCards.\n");
+    out.push_str("- Tokmd packets: `tokmd-packets.json`; tokmd not run.\n");
     out.push_str("- Agent repair queue: `repair-queue.json` is copy-only; no agent was run.\n");
     out.push_str(
         "- Comment budget: `comment-plan.json` is plan-only; no comments were posted.\n\n",
@@ -405,6 +425,7 @@ fn render_pr_summary_header_bullets(out: &mut String, output: &AnalyzeOutput) {
             crate::api::Scope::Repo => "repo",
         }
     ));
+    render_diff_scope_bullet(out, output);
     out.push_str(&format!("- Review cards: {}\n", output.summary.cards));
     out.push_str(&format!(
         "- Open actionable gaps: {}\n",
@@ -413,21 +434,27 @@ fn render_pr_summary_header_bullets(out: &mut String, output: &AnalyzeOutput) {
     out.push_str(&format!("- Policy mode: `{}`\n\n", output.policy.as_str()));
 }
 
+fn render_diff_scope_bullet(out: &mut String, output: &AnalyzeOutput) {
+    if output.summary.changed_files == 0 {
+        return;
+    }
+
+    out.push_str(&format!(
+        "- Diff scope: {} {} changed ({} Rust, {} non-Rust)\n",
+        output.summary.changed_files,
+        file_word(output.summary.changed_files),
+        output.summary.changed_rust_files,
+        output.summary.changed_non_rust_files,
+    ));
+}
+
+fn file_word(count: usize) -> &'static str {
+    if count == 1 { "file" } else { "files" }
+}
+
 fn render_pr_summary_header(out: &mut String, output: &AnalyzeOutput) {
     out.push_str("# unsafe-review PR summary\n\n");
-    out.push_str(&format!(
-        "- Scope: `{}`\n",
-        match output.scope {
-            crate::api::Scope::Diff => "diff",
-            crate::api::Scope::Repo => "repo",
-        }
-    ));
-    out.push_str(&format!("- Review cards: {}\n", output.summary.cards));
-    out.push_str(&format!(
-        "- Open actionable gaps: {}\n",
-        output.summary.open_actionable_gaps
-    ));
-    out.push_str(&format!("- Policy mode: `{}`\n\n", output.policy.as_str()));
+    render_pr_summary_header_bullets(out, output);
 }
 
 fn render_pr_summary_reviewer_cockpit(out: &mut String, output: &AnalyzeOutput) {
@@ -452,6 +479,16 @@ fn render_pr_summary_reviewer_cockpit(out: &mut String, output: &AnalyzeOutput) 
             "- Obligation: {}\n",
             primary_obligation_summary(card)
         ));
+        out.push_str(&format!("- Proof path: `{}`\n", card.proof_path.as_str()));
+        out.push_str(&format!(
+            "- Hypothesis to confirm: {}\n",
+            top_card_hypothesis(card)
+        ));
+        out.push_str(&format!(
+            "- Build/run this first: {}\n",
+            top_card_build_this_first(card)
+        ));
+        render_minimal_repro_cue(out, card, "- Minimal repro cue:", "  ");
         out.push_str("- Evidence found:\n");
         out.push_str(&format!("  - Contract: {}\n", card.contract.summary));
         out.push_str(&format!(
@@ -467,6 +504,10 @@ fn render_pr_summary_reviewer_cockpit(out: &mut String, output: &AnalyzeOutput) 
         out.push_str(&format!(
             "- Next reviewer action: {}\n",
             card.next_action.summary
+        ));
+        out.push_str(&format!(
+            "- Confirmation step: {}\n",
+            top_card_confirmation_step(card)
         ));
         if let Some(route) = card.routes.first() {
             out.push_str(&format!(
@@ -490,7 +531,9 @@ fn render_pr_summary_reviewer_cockpit(out: &mut String, output: &AnalyzeOutput) 
             card.id
         ));
         out.push_str(&format!("- {}\n", agent_handoff_summary(card)));
-        out.push_str("- Trust boundary: static unsafe contract review only; not proof, not UB-free status, not Miri-clean status, and not site-execution proof.\n\n");
+        out.push_str("- Trust boundary: ");
+        out.push_str(REVIEWCARD_TRUST_BOUNDARY);
+        out.push_str("\n\n");
     } else {
         render_no_changed_gaps(out);
         out.push_str(
@@ -517,6 +560,16 @@ fn render_pr_summary_top_card(out: &mut String, output: &AnalyzeOutput) {
             "- Operation family: `{}`\n",
             card.operation.family.as_str()
         ));
+        out.push_str(&format!("- Proof path: `{}`\n", card.proof_path.as_str()));
+        out.push_str(&format!(
+            "- Hypothesis to confirm: {}\n",
+            top_card_hypothesis(card)
+        ));
+        out.push_str(&format!(
+            "- Build/run this first: {}\n",
+            top_card_build_this_first(card)
+        ));
+        render_minimal_repro_cue(out, card, "- Minimal repro cue:", "  ");
         out.push_str(&format!("- Missing evidence: {}\n", missing_summary(card)));
         if let Some(route) = card.routes.first() {
             out.push_str(&format!(
@@ -530,28 +583,68 @@ fn render_pr_summary_top_card(out: &mut String, output: &AnalyzeOutput) {
             }
         }
         out.push_str(&format!("- Next action: {}\n", card.next_action.summary));
+        out.push_str(&format!(
+            "- Confirmation step: {}\n",
+            top_card_confirmation_step(card)
+        ));
         out.push_str(&format!("- Explain: `unsafe-review explain {}`\n", card.id));
         out.push_str(&format!(
-            "- Agent context: `unsafe-review context {} --json`\n\n",
+            "- Agent context: `unsafe-review context {} --json`\n",
             card.id
         ));
+        out.push_str(&format!("- {}\n\n", agent_handoff_summary(card)));
     } else {
         render_no_changed_gaps(out);
     }
 }
 
+fn top_card_hypothesis(card: &ReviewCard) -> String {
+    hypothesis_to_confirm(card)
+}
+
+fn top_card_build_this_first(card: &ReviewCard) -> String {
+    build_this_first(card).summary
+}
+
+fn top_card_confirmation_step(card: &ReviewCard) -> String {
+    if let Some(command) = card.next_action.verify_commands.first() {
+        return format!(
+            "build/run `{}` first for this card, then attach a matching receipt if it confirms the route",
+            command
+        );
+    }
+    confirmation_step(card)
+}
+
+fn render_minimal_repro_cue(out: &mut String, card: &ReviewCard, label: &str, indent: &str) {
+    let cue = minimal_repro(card);
+    out.push_str(label);
+    out.push('\n');
+    for step in cue.steps() {
+        out.push_str(indent);
+        out.push_str("- ");
+        out.push_str(step);
+        out.push('\n');
+    }
+    out.push_str(indent);
+    out.push_str("- Limitation: ");
+    out.push_str(cue.limitation());
+    out.push('\n');
+}
+
 fn render_pr_summary_card_table(out: &mut String, output: &AnalyzeOutput) {
     out.push_str("## Card table\n\n");
     out.push_str(
-        "| ID | Class | Location | Operation family | Operation | Missing evidence | Route | Next action |\n",
+        "| ID | Class | Proof path | Location | Operation family | Operation | Missing evidence | Route | Next action |\n",
     );
-    out.push_str("|---|---|---|---|---|---|---|---|\n");
+    out.push_str("|---|---|---|---|---|---|---|---|---|\n");
     for card in &output.cards {
         let route = repo_primary_route(card);
         out.push_str(&format!(
-            "| `{}` | `{}` | {} | `{}` | `{}` | {} | `{}` | {} |\n",
+            "| `{}` | `{}` | `{}` | {} | `{}` | `{}` | {} | `{}` | {} |\n",
             md_cell(&card.id.to_string()),
             card.class.as_str(),
+            card.proof_path.as_str(),
             md_cell(&format!(
                 "{}:{}",
                 path_display(&card.site.location.file),
@@ -573,10 +666,23 @@ fn render_pr_summary_witness_plan(out: &mut String, output: &AnalyzeOutput) {
         return;
     }
     for card in &output.cards {
+        out.push_str(&format!(
+            "- `{}` hypothesis: {}\n",
+            card.id,
+            top_card_hypothesis(card)
+        ));
+        out.push_str(&format!(
+            "  - Confirmation step: {}\n",
+            top_card_confirmation_step(card)
+        ));
+        out.push_str(&format!(
+            "  - Build/run this first: {}\n",
+            top_card_build_this_first(card)
+        ));
+        render_minimal_repro_cue(out, card, "  - Minimal repro cue:", "    ");
         if let Some(route) = card.routes.first() {
             out.push_str(&format!(
-                "- `{}`: `{}` because {}\n",
-                card.id,
+                "  - Route: `{}` because {}\n",
                 route.kind.as_str(),
                 route.reason
             ));
@@ -591,8 +697,7 @@ fn render_pr_summary_witness_plan(out: &mut String, output: &AnalyzeOutput) {
             }
         } else {
             out.push_str(&format!(
-                "- `{}`: no witness route was selected; route this to human review.\n",
-                card.id
+                "  - Route: no witness route was selected; route this to human review.\n"
             ));
         }
     }
@@ -601,7 +706,9 @@ fn render_pr_summary_witness_plan(out: &mut String, output: &AnalyzeOutput) {
 
 fn render_pr_summary_trust_boundary(out: &mut String) {
     out.push_str("## Trust boundary\n\n");
-    out.push_str("This artifact projects existing unsafe-review cards for PR review. It is static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result unless a witness receipt is attached.\n");
+    out.push_str("This artifact projects existing unsafe-review cards for PR review. It is ");
+    out.push_str(REVIEWCARD_TRUST_BOUNDARY);
+    out.push('\n');
 }
 
 fn render_no_changed_gaps(out: &mut String) {
@@ -627,6 +734,10 @@ pub(crate) fn render_card_detail(card: &ReviewCard) -> String {
     out.push_str(&format!(
         "**Operation family:** `{}`\n\n",
         card.operation.family.as_str()
+    ));
+    out.push_str(&format!(
+        "**Proof path:** `{}`\n\n",
+        card.proof_path.as_str()
     ));
 
     out.push_str("## Why this card exists\n\n");
@@ -681,8 +792,14 @@ pub(crate) fn render_card_detail(card: &ReviewCard) -> String {
     render_non_resolution_guidance(&mut out);
     render_witness_routes(&mut out, card);
     out.push_str("\n## Trust boundary\n\n");
-    out.push_str("This is static unsafe contract review. It is not a proof of memory safety, not UB-free status, and not a Miri result unless a witness receipt is attached.\n");
+    push_reviewcard_trust_boundary(&mut out);
     out
+}
+
+fn push_reviewcard_trust_boundary(out: &mut String) {
+    out.push_str("This is ");
+    out.push_str(REVIEWCARD_TRUST_BOUNDARY);
+    out.push('\n');
 }
 
 fn render_resolution_guidance(out: &mut String, card: &ReviewCard) {
@@ -772,13 +889,13 @@ mod tests {
         let rendered = render(&output);
 
         assert!(rendered.contains("# unsafe-review"));
-        assert!(
-            rendered
-                .contains("| ID | Class | Operation | Hazard | Missing | Route | Next action |")
-        );
+        assert!(rendered.contains(
+            "| ID | Class | Proof path | Operation | Hazard | Missing | Route | Next action |"
+        ));
+        assert!(rendered.contains("`source_route_only`"));
         assert!(rendered.contains("unsafe { ptr.cast::<Header>().read() }"));
         assert!(rendered.contains("Add or expose the local guard"));
-        assert!(rendered.contains("not a proof of memory safety"));
+        assert!(rendered.contains("not memory-safety proof"));
         Ok(())
     }
 
@@ -804,6 +921,7 @@ mod tests {
         assert!(rendered.contains("## Why this card exists"));
         assert!(rendered.contains("## Required safety conditions"));
         assert!(rendered.contains("**Operation:** `unsafe { ptr.cast::<Header>().read() }`"));
+        assert!(rendered.contains("**Proof path:** `source_route_only`"));
         assert!(rendered.contains("pointer is aligned for the accessed type"));
         assert!(rendered.contains("## Evidence found"));
         assert!(rendered.contains("Guard/discharge:"));
@@ -845,20 +963,54 @@ mod tests {
 
         assert!(rendered.contains("# unsafe-review PR summary"));
         assert!(rendered.contains("## Reviewer cockpit"));
+        assert!(rendered.contains("- Diff scope: 1 file changed (1 Rust, 0 non-Rust)"));
         assert!(rendered.contains(&format!("- Top card: `{}`", card.id)));
         assert!(rendered.contains("## Card table"));
         assert!(rendered.contains("- Operation: `unsafe { ptr.cast::<Header>().read() }`"));
         assert!(rendered.contains("- Operation family: `raw_pointer_read`"));
+        assert!(rendered.contains("- Proof path: `source_route_only`"));
+        assert!(rendered.contains("- Hypothesis to confirm: static `guard_missing` ReviewCard"));
+        assert!(rendered.contains(
+            "confirm with external evidence before treating it as observed runtime behavior"
+        ));
+        assert!(rendered.contains(
+            "- Build/run this first: Build/run `cargo +nightly miri test read_header` first for this card"
+        ));
+        assert!(rendered.contains("- Minimal repro cue:"));
+        assert!(rendered.contains(&format!(
+            "Confirm ReviewCard `{}` still maps to `unsafe {{ ptr.cast::<Header>().read() }}` at `src/lib.rs:8:5` before upgrading confidence.",
+            card.id
+        )));
+        assert!(
+            rendered.contains("Minimal repro cue only; unsafe-review did not run this command")
+        );
         assert!(rendered.contains("- Obligation:"));
         assert!(rendered.contains("- Evidence found:"));
         assert!(rendered.contains("  - Guard/discharge:"));
         assert!(rendered.contains("- Missing/weak evidence: Missing visible local guard"));
         assert!(rendered.contains("- Next reviewer action: Add or expose the local guard"));
+        assert!(rendered.contains(
+            "- Confirmation step: build/run `cargo +nightly miri test read_header` first"
+        ));
         assert!(rendered.contains("- Witness route: `miri` because Pure-Rust UB-adjacent hazard"));
-        assert!(rendered.contains("| ID | Class | Location | Operation family | Operation |"));
+        assert!(
+            rendered
+                .contains("| ID | Class | Proof path | Location | Operation family | Operation |")
+        );
+        assert!(rendered.contains("| `source_route_only` |"));
         assert!(rendered.contains("unsafe { ptr.cast::<Header>().read() }"));
         assert!(rendered.contains("| `raw_pointer_read` |"));
         assert!(rendered.contains("## Witness plan"));
+        assert!(rendered.contains(&format!(
+            "- `{}` hypothesis: static `guard_missing` ReviewCard",
+            card.id
+        )));
+        assert!(rendered.contains(
+            "  - Confirmation step: build/run `cargo +nightly miri test read_header` first"
+        ));
+        assert!(rendered.contains(
+            "  - Build/run this first: Build/run `cargo +nightly miri test read_header` first for this card"
+        ));
         assert!(rendered.contains("Open actionable gaps: 1"));
         assert!(rendered.contains("Missing visible local guard"));
         assert!(rendered.contains("cargo +nightly miri test read_header"));
@@ -868,14 +1020,13 @@ mod tests {
             card.id
         )));
         assert!(rendered.contains(
-            "- Agent handoff: `ready_for_agent`; buckets: `repairable_by_guard`, `requires_witness_receipt`; reasons: specific operation family"
+            "- Agent handoff: `ready_for_agent`; buckets: `repairable_by_guard`, `requires_witness_receipt`; bucket reasons: `guard_evidence_missing`, `witness_receipt_missing`; readiness reasons: specific operation family"
         ));
         assert!(rendered.contains("- Receipt audit: `receipt-audit.md`"));
         assert!(rendered.contains("no witness was run"));
         assert!(rendered.contains("not Miri-clean status"));
-        assert!(rendered.contains("not site-execution proof"));
-        assert!(rendered.contains("not a proof of memory safety"));
-        assert!(rendered.contains("not a Miri result unless a witness receipt is attached"));
+        assert!(rendered.contains("not a site-execution claim"));
+        assert!(rendered.contains("not memory-safety proof"));
         Ok(())
     }
 
@@ -906,8 +1057,18 @@ mod tests {
             .ok_or_else(|| "raw pointer fixture should emit a card".to_string())?;
 
         assert!(rendered.contains("## unsafe-review advisory summary"));
+        assert!(rendered.contains("- Diff scope: 1 file changed (1 Rust, 0 non-Rust)"));
         assert!(rendered.contains("## Top card"));
         assert!(rendered.contains(&format!("- ID: `{}`", card.id)));
+        assert!(rendered.contains("- Proof path: `source_route_only`"));
+        assert!(rendered.contains("- Hypothesis to confirm: static `guard_missing` ReviewCard"));
+        assert!(rendered.contains(
+            "- Build/run this first: Build/run `cargo +nightly miri test read_header` first for this card"
+        ));
+        assert!(rendered.contains("- Minimal repro cue:"));
+        assert!(rendered.contains(
+            "- Confirmation step: build/run `cargo +nightly miri test read_header` first"
+        ));
         assert!(rendered.contains(&format!("- Explain: `unsafe-review explain {}`", card.id)));
         assert!(rendered.contains(&format!(
             "- Agent context: `unsafe-review context {} --json`",
@@ -949,8 +1110,9 @@ mod tests {
         assert!(rendered.contains("## Related sink clusters"));
         assert!(rendered.contains("No multi-card file/owner clusters found."));
         assert!(rendered.contains(
-            "| ID | Class | Location | Operation family | Operation | Missing evidence | Route | Next action |"
+            "| ID | Class | Proof path | Location | Operation family | Operation | Missing evidence | Route | Next action |"
         ));
+        assert!(rendered.contains("| `source_route_only` |"));
         assert!(rendered.contains("src/lib.rs:8"));
         assert!(rendered.contains("unsafe { ptr.cast::<Header>().read() }"));
         assert!(rendered.contains("Add or expose the local guard"));

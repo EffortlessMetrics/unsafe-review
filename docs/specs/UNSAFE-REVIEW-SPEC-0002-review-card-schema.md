@@ -36,11 +36,19 @@ route kinds stay commandless by default. The next-action summary is a reviewer
 instruction, not a verdict: it must be non-empty, concrete, operation-aware
 when it names a safety obligation, and free of "all clear", safety-proof,
 UB-free, Miri-clean, or site-execution claims.
+Rendered ReviewCard JSON also includes a `confirmation_cue` object with the
+same hypothesis, build-this-first, minimal-repro, confirmation-step, and trust
+boundary projection used by comment-plan and agent packets. The cue is
+plan-only: it must not imply that unsafe-review ran the command, observed
+runtime behavior, proved site execution, proved UB, or proved repository
+safety.
 
-Card `class`, `priority`, and `confidence` values must use the canonical
-ReviewCard vocabulary. Fixture goldens pin the expected signal for supported
-classification states so a card cannot silently drift from a high-confidence
-contract gap to a weaker or unknown PR-review signal.
+Card `class`, `priority`, `confidence`, and `proof_path` values must use the
+canonical ReviewCard vocabulary. `proof_path` is a reviewer routing hint for the
+kind of evidence that could make a card reviewable, not a proof claim and not a
+verdict that a witness has run. Fixture goldens pin the expected signal for
+supported classification states so a card cannot silently drift from a
+high-confidence contract gap to a weaker or unknown PR-review signal.
 
 ## Non-goals
 
@@ -65,11 +73,14 @@ contract gap to a weaker or unknown PR-review signal.
   hazards, obligation evidence keys, and witness route kinds belong to the
   operation family registry row, command-bearing witness routes name their
   matching tool, and hazards are not duplicated.
-- The card's class, priority, and confidence are known ReviewCard values and
-  match the fixture-pinned classification signal.
+- The card's class, priority, confidence, and proof path are known ReviewCard
+  values and match the fixture-pinned classification signal.
 - The card includes missing evidence and a next action.
 - The card's next action names a concrete review step without implying safety,
   UB-free status, Miri-clean status, or site execution.
+- The card's rendered JSON includes a confirmation cue that frames the finding
+  as a static hypothesis and names the first build/run or witness-route cue
+  without claiming it was executed.
 - If evidence is not knowable statically, the card names the limitation instead of overclaiming.
 - Fixture `expected.cards.json` files pin the rendered card JSON for supported smoke cases.
 

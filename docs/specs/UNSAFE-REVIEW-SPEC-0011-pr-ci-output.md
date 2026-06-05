@@ -106,6 +106,9 @@ target/unsafe-review/cards.sarif
 target/unsafe-review/comment-plan.json
 target/unsafe-review/witness-plan.md
 target/unsafe-review/receipt-audit.md
+target/unsafe-review/manual-candidates.json
+target/unsafe-review/manual-repair-queue.json
+target/unsafe-review/tokmd-packets.json
 target/unsafe-review/lsp.json
 target/unsafe-review/repair-queue.json
 ```
@@ -130,14 +133,26 @@ must include source = first_pr
 must include policy = advisory
 must include scope matching cards.json
 must include base/head metadata when known
-must include card count and open actionable gap count matching cards.json
+must include changed-file, changed-Rust-file, changed-non-Rust-file, card, and
+  open-actionable-gap counts matching cards.json
 must include top_card_id, or null only when no cards exist
 must include copy-only handoff commands for the reviewer summary, receipt audit,
   and top-card explain/context commands when a top card exists
+must include a bounded ReviewCard queue preview under handoff.review_cards,
+  with cards.json and repair-queue.json artifact references, queue limit,
+  omitted-card count, and entries projected from known ReviewCards only
+must keep handoff.review_cards entries aligned with cards.json identity,
+  location, operation, missing evidence, next action, verify commands, witness
+  routes, and with repair-queue.json bucket, bucket-reason, and agent-readiness
+  state
 must include manual candidate handoff metadata pointing to
-  manual-candidates.json, with analyzer_discovered = 0 and copy-only
-  explain/context/witness-plan commands plus implementer handoff cues when
+  manual-candidates.json and manual-repair-queue.json, with
+  analyzer_discovered = 0 and copy-only explain/context/witness-plan commands,
+  a bounded candidate_queue, omitted count, and implementer handoff cues when
   manual candidates exist
+must include handoff.repair_queues as a side-by-side front panel with
+  ReviewCard repair-queue.json counts and manual-repair-queue.json counts,
+  without merging their sources
 must list every required first-pr artifact with relative paths
 must include artifact kind, format, and schema_version/null metadata
 must include trust boundary wording
@@ -146,6 +161,36 @@ must include trust boundary wording
 The manifest is a discovery projection. It must not reclassify ReviewCards or
 create a second source of truth for operation family, obligation, evidence,
 witness route, repair bucket, outcome, or policy posture.
+
+The ReviewCard queue preview must not include manual candidates. Manual
+candidates remain under `manual-candidates.json` and
+`handoff.manual_candidates.candidate_queue`. The ReviewCard queue is copy-only
+and advisory; `repair-queue.json` remains the checked aggregate queue truth.
+ReviewCard queue entries project `verify_commands` and full `witness_routes`
+route objects from `cards.json`; they are reviewer handoff cues only and do not
+claim witness execution.
+
+`handoff.repair_queues` may place the checked ReviewCard repair queue and the
+manual-candidate repair queue side by side for reviewer and agent routing. It
+must cross-check ReviewCard counts, bucket counts, and agent-ready counts
+against `repair-queue.json`, and manual candidate queued counts against
+`manual-repair-queue.json`. It must not merge manual candidates into
+`repair-queue.json`, create a new repair vocabulary, run agents, run witnesses,
+edit source, post comments, claim repair success, or claim policy readiness.
+
+Manual candidate markers (`source = manual`, `manual_candidate`, or
+`analyzer_discovered`) must not appear in ReviewCard-only first-pr artifacts:
+`cards.json`, `cards.sarif`, `comment-plan.json`, `lsp.json`,
+`repair-queue.json`, `policy-report.json`, or `policy-report.md`. The artifact
+verifier rejects marker leakage instead of silently converting manual
+candidates into analyzer output.
+`manual-candidates.json`, `manual-repair-queue.json`, and
+`handoff.manual_candidates` are the manual-candidate sidecars allowed to carry
+manual markers. `manual-candidates.json` and `handoff.manual_candidates` must
+carry structured `reviewcard_artifact_applicability` metadata that records
+ReviewCard-only surfaces as `reviewcard_only`, including explicit
+`policy-report.json` and `policy-report.md` entries, and sets manual-candidate
+applicability and marker allowance to false.
 
 The handoff commands are reviewer and agent discovery aids only. They must not
 imply that unsafe-review ran witnesses, ran an agent, posted comments, edited
@@ -167,8 +212,15 @@ must include hazards
 must include obligation evidence
 must include missing evidence
 must include witness routes when available
+must include confirmation_cue with hypothesis_to_confirm, build_this_first,
+minimal_repro, confirmation_step, and trust_boundary
 witness routes must keep `required = false` in the default advisory PR packet
 ```
+
+`confirmation_cue` is a plan-only projection from each ReviewCard. It frames
+the card as a static hypothesis and names the first build/run or witness-route
+cue, but it must not imply that unsafe-review executed the cue, observed runtime
+behavior, proved site execution, proved UB, or proved repository safety.
 
 All other PR artifacts are projections from this card set.
 
@@ -181,10 +233,13 @@ Must include:
 ```text
 card count
 top actionable card, when present
+  static hypothesis to confirm, with no observed-runtime-behavior claim until
+  external evidence confirms the route
+  first confirmation step from the selected verify command or witness route
   explain handoff command
   bounded agent context handoff command
-  agent handoff readiness, repair buckets, and readiness reasons projected from
-  `repair-queue.json`
+  agent handoff readiness, repair buckets, bucket reasons, and readiness reasons
+  projected from `repair-queue.json`
 compact card table
   rows project ReviewCard id, class, location, operation family, operation,
   missing evidence, primary route, and next action
@@ -225,10 +280,12 @@ top actionable card, when present:
   location
   operation
   operation family
+  static hypothesis to confirm
   missing evidence
   primary witness route, when present
   primary witness route command, when available
   next action
+  first confirmation step
   explain handoff command
   bounded agent context handoff command
 full bundle artifact list
@@ -317,11 +374,15 @@ changed_line
 class
 priority
 confidence
+hypothesis_to_confirm
 operation
 operation_family
 next_action
 witness_routes
 verify_commands
+build_this_first
+minimal_repro
+confirmation_step
 selection_reason
 selection_reason_code
 actionability
@@ -331,6 +392,16 @@ trust_boundary
 ```
 
 `line` must be one-based and nonzero.
+
+`build_this_first` must be a plan-only cue object projected from the first
+verify command when available, otherwise from the first witness route or human
+review path. It must not imply that unsafe-review ran the command or observed
+runtime behavior.
+
+`minimal_repro` must be a plan-only cue object projected from the first verify
+command when available, otherwise from the first witness route or human review
+path. It must carry a limitation that unsafe-review did not run the cue, observe
+runtime behavior, prove site execution, prove UB, or prove repository safety.
 
 Planned comments must not repeat a `card_id` or a `path`/`line` inline anchor.
 Planned comments also must not repeat an `operation_family` plus
@@ -562,6 +633,33 @@ The queue must not run agents, edit source, post comments, execute witnesses,
 suppress cards, resolve cards, or claim proof, UB-free status, Miri-clean
 status, site execution, calibrated precision/recall, or policy readiness.
 
+#### 3.9a `manual-repair-queue.json`
+
+Copy-only manual candidate repair handoff queue. This is a manual-candidate
+sidecar, not the ReviewCard repair queue.
+
+Must include:
+
+```text
+schema_version = manual-repair-queue/v1
+mode = manual_candidate_repair_queue
+source = manual_candidate
+policy = advisory
+summary counts aligned with manual-candidates.json
+optional stable-byte seed source/count metadata and per-entry seed rows joined
+  by manual candidate ID only
+queue entries preserving source = manual, manual_candidate = true, and
+  analyzer_discovered = false
+copy-only explain/context/witness-plan commands
+trust boundary wording stating not analyzer-discovered, not automatic repair,
+  not proof, no agents, no witnesses, no source edits, no comments, and no
+  blocking policy
+```
+
+The verifier must cross-check queue length, order, guidance, implementer
+handoff, and summary maps against `manual-candidates.json`. It must not accept
+the manual queue as a ReviewCard source or as repair execution evidence.
+
 ### 4. Gate outcomes
 
 The PR gate should report one of these states.
@@ -733,6 +831,9 @@ Open:
 - `target/unsafe-review/github-summary.md`
 - `target/unsafe-review/witness-plan.md`
 - `target/unsafe-review/receipt-audit.md` (saved receipt metadata only; no witness was run)
+- `target/unsafe-review/manual-candidates.json` (manual/advisory candidates, separate from ReviewCards)
+- `target/unsafe-review/manual-repair-queue.json` (copy-only manual candidate handoff; no agent was run)
+- `target/unsafe-review/tokmd-packets.json` (formatting input only; tokmd was not run)
 - `target/unsafe-review/repair-queue.json` (copy-only; no agent was run)
 
 Trust boundary:
@@ -798,7 +899,9 @@ This is not Miri-clean status.
 The first-pr artifact verifier scans every required bundle artifact for positive
 overclaim wording, including `review-kit.json`, `cards.json`, `pr-summary.md`,
 `github-summary.md`, `cards.sarif`, `comment-plan.json`, `witness-plan.md`,
-`receipt-audit.md`, `lsp.json`, and `repair-queue.json`.
+`receipt-audit.md`, `manual-candidates.json`, `manual-repair-queue.json`,
+`tokmd-packets.json`,
+`lsp.json`, and `repair-queue.json`.
 
 ### 8. Policy report relationship
 
@@ -947,6 +1050,10 @@ cargo run --locked -p unsafe-review -- policy report \
   --diff fixtures/raw_pointer_alignment/change.diff \
   --format markdown
 ```
+
+The first-pr verifier also checks bundled `policy-report.json` and
+`policy-report.md` artifacts as ReviewCard-only policy-report projections and
+rejects manual-candidate marker leakage in both files.
 
 ### 12. Final design summary
 

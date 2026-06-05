@@ -63,6 +63,11 @@ pub enum OperationFamily {
     StaticMut,
     InlineAsm,
     TargetFeature,
+    PanicFromSafeJs,
+    StableByteSourceGetterReentry,
+    StableByteSourceRabAsync,
+    StableByteSourceSabRace,
+    StableByteSourceNativeFfiRead,
     Unknown,
 }
 
@@ -99,6 +104,11 @@ impl OperationFamily {
             Self::StaticMut => "static_mut",
             Self::InlineAsm => "inline_asm",
             Self::TargetFeature => "target_feature",
+            Self::PanicFromSafeJs => "panic_from_safe_js",
+            Self::StableByteSourceGetterReentry => "stable_byte_source_getter_reentry",
+            Self::StableByteSourceRabAsync => "stable_byte_source_rab_async",
+            Self::StableByteSourceSabRace => "stable_byte_source_sab_race",
+            Self::StableByteSourceNativeFfiRead => "stable_byte_source_native_ffi_read",
             Self::Unknown => "unknown",
         }
     }
@@ -193,6 +203,23 @@ mod tests {
             (OperationFamily::StaticMut, "static_mut"),
             (OperationFamily::InlineAsm, "inline_asm"),
             (OperationFamily::TargetFeature, "target_feature"),
+            (OperationFamily::PanicFromSafeJs, "panic_from_safe_js"),
+            (
+                OperationFamily::StableByteSourceGetterReentry,
+                "stable_byte_source_getter_reentry",
+            ),
+            (
+                OperationFamily::StableByteSourceRabAsync,
+                "stable_byte_source_rab_async",
+            ),
+            (
+                OperationFamily::StableByteSourceSabRace,
+                "stable_byte_source_sab_race",
+            ),
+            (
+                OperationFamily::StableByteSourceNativeFfiRead,
+                "stable_byte_source_native_ffi_read",
+            ),
             (OperationFamily::Unknown, "unknown"),
         ];
 

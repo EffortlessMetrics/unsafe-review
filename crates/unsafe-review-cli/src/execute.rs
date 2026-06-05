@@ -21,10 +21,10 @@ use unsafe_review_core::{
     ProofReceiptInput, RepoScanEvent, RepoScanPhase, RepoScanStatus, SanitizerReceiptInput, Scope,
     WITNESS_RECEIPT_SCHEMA_VERSION, WitnessReceipt, analyze, analyze_with_discovery,
     analyze_with_discovery_and_repo_events, audit_witness_receipts, compare_outcome_json,
-    discover_repo_files, evaluate_policy_report, load_manual_candidates,
-    manual_candidate_implementer_handoff, read_manual_candidate, render_badge_jsons,
-    render_comment_plan, render_github_summary, render_human, render_json, render_lsp,
-    render_manual_candidate_witness_plan, render_markdown, render_outcome_json,
+    discover_repo_files, evaluate_policy_report, evaluate_policy_report_from_output,
+    load_manual_candidates, manual_candidate_implementer_handoff, read_manual_candidate,
+    render_badge_jsons, render_comment_plan, render_github_summary, render_human, render_json,
+    render_lsp, render_manual_candidate_witness_plan, render_markdown, render_outcome_json,
     render_outcome_markdown, render_policy_report_json, render_policy_report_markdown,
     render_pr_summary, render_receipt_audit_json, render_receipt_audit_markdown,
     render_repair_queue, render_sarif, render_witness_plan, validate_witness_receipts,
@@ -36,11 +36,16 @@ mod first_pr;
 const NO_CHANGED_GAPS_MESSAGE: &str = "No changed unsafe-review gaps were found.";
 const NO_CHANGED_GAPS_LIMITATION: &str =
     "This does not prove the repo safe, UB-free, Miri-clean, or that any unsafe site executed.";
+const FIRST_RUN_TRUST_BOUNDARY: &str = "static unsafe contract review only; not memory-safety proof, not UB-free status, not Miri-clean status, and not a site-execution claim unless a matching witness receipt says so.";
 type FirstPrRenderer = fn(&AnalyzeOutput) -> String;
 
 const REVIEW_KIT_ARTIFACT: &str = "review-kit.json";
 const RECEIPT_AUDIT_ARTIFACT: &str = "receipt-audit.md";
+const POLICY_REPORT_JSON_ARTIFACT: &str = "policy-report.json";
+const POLICY_REPORT_MARKDOWN_ARTIFACT: &str = "policy-report.md";
 const MANUAL_CANDIDATES_ARTIFACT: &str = "manual-candidates.json";
+const MANUAL_REPAIR_QUEUE_ARTIFACT: &str = "manual-repair-queue.json";
+const TOKMD_PACKETS_ARTIFACT: &str = "tokmd-packets.json";
 const FIRST_PR_RENDERED_ARTIFACTS: [(&str, FirstPrRenderer); 8] = [
     ("cards.json", render_json),
     ("pr-summary.md", render_pr_summary),
@@ -51,7 +56,7 @@ const FIRST_PR_RENDERED_ARTIFACTS: [(&str, FirstPrRenderer); 8] = [
     ("lsp.json", render_lsp),
     ("repair-queue.json", render_repair_queue),
 ];
-const FIRST_PR_ARTIFACTS: [&str; 11] = [
+const FIRST_PR_ARTIFACTS: [&str; 15] = [
     REVIEW_KIT_ARTIFACT,
     "cards.json",
     "pr-summary.md",
@@ -60,7 +65,11 @@ const FIRST_PR_ARTIFACTS: [&str; 11] = [
     "comment-plan.json",
     "witness-plan.md",
     RECEIPT_AUDIT_ARTIFACT,
+    POLICY_REPORT_JSON_ARTIFACT,
+    POLICY_REPORT_MARKDOWN_ARTIFACT,
     MANUAL_CANDIDATES_ARTIFACT,
+    MANUAL_REPAIR_QUEUE_ARTIFACT,
+    TOKMD_PACKETS_ARTIFACT,
     "lsp.json",
     "repair-queue.json",
 ];
@@ -144,7 +153,7 @@ fn print_support() {
     println!("- not memory-safety proof.");
     println!("- not UB-free status.");
     println!("- not Miri-clean status.");
-    println!("- not a site-execution claim unless a matching receipt says so.");
+    println!("- not a site-execution claim unless a matching witness receipt says so.");
     println!();
     println!("Docs:");
     println!("- docs/status/SUPPORT_SUMMARY.md");
@@ -244,8 +253,9 @@ fn run_repo_check(options: RepoOptions) -> Result<(), String> {
 
 fn repo_list_files(options: RepoOptions) -> Result<(), String> {
     let root = options.check.root.clone();
+    let scan_scope = RepoScanScopeMetadata::new(&root, &options.discovery);
     let files = discover_repo_files(root.clone(), options.discovery)?;
-    let rendered = render_repo_file_list(&root, &files);
+    let rendered = render_repo_file_list(&root, &files, &options.check.format, &scan_scope)?;
     if let Some(path) = options.check.out {
         ensure_parent_dir(&path)?;
         fs::write(&path, rendered)
@@ -256,7 +266,21 @@ fn repo_list_files(options: RepoOptions) -> Result<(), String> {
     Ok(())
 }
 
-fn render_repo_file_list(root: &Path, files: &[PathBuf]) -> String {
+fn render_repo_file_list(
+    root: &Path,
+    files: &[PathBuf],
+    format: &Format,
+    scan_scope: &RepoScanScopeMetadata,
+) -> Result<String, String> {
+    match format {
+        Format::Human => Ok(render_repo_file_list_human(root, files)),
+        Format::Json => render_repo_file_list_json(root, files, scan_scope),
+        Format::Markdown => Ok(render_repo_file_list_markdown(root, files, scan_scope)),
+        _ => Err("repo --list-files only supports human, json, or markdown output".to_string()),
+    }
+}
+
+fn render_repo_file_list_human(root: &Path, files: &[PathBuf]) -> String {
     let mut rendered = format!(
         "unsafe-review repo file list\nroot: {}\nfiles: {}\n",
         root.display(),
@@ -267,6 +291,102 @@ fn render_repo_file_list(root: &Path, files: &[PathBuf]) -> String {
         rendered.push('\n');
     }
     rendered
+}
+
+fn render_repo_file_list_json(
+    root: &Path,
+    files: &[PathBuf],
+    scan_scope: &RepoScanScopeMetadata,
+) -> Result<String, String> {
+    let file_paths = files
+        .iter()
+        .map(|file| repo_path_display(file))
+        .collect::<Vec<_>>();
+    let value = serde_json::json!({
+        "schema_version": "repo-file-list/v1",
+        "tool": "unsafe-review",
+        "tool_version": env!("CARGO_PKG_VERSION"),
+        "mode": "repo_list_files",
+        "root": root.display().to_string(),
+        "scan_scope": repo_scan_scope_json(scan_scope),
+        "summary": {
+            "selected_rust_files": file_paths.len(),
+            "analysis_run": false,
+            "reviewcards_created": 0,
+            "witnesses_run": false,
+        },
+        "files": file_paths,
+        "trust_boundary": repo_file_list_trust_boundary(),
+    });
+    let mut rendered = serde_json::to_string_pretty(&value)
+        .map_err(|err| format!("render repo file list JSON failed: {err}"))?;
+    rendered.push('\n');
+    Ok(rendered)
+}
+
+fn render_repo_file_list_markdown(
+    root: &Path,
+    files: &[PathBuf],
+    scan_scope: &RepoScanScopeMetadata,
+) -> String {
+    let mut out = String::new();
+    out.push_str("# unsafe-review repo file list\n\n");
+    out.push_str("Selected Rust files from the repo discovery pipeline.\n\n");
+    out.push_str("## Summary\n\n");
+    out.push_str(&format!("- Root: `{}`\n", root.display()));
+    out.push_str(&format!("- Selected Rust files: `{}`\n", files.len()));
+    out.push_str("- Analysis run: `false`\n");
+    out.push_str("- ReviewCards created: `0`\n");
+    out.push_str("- Witnesses run: `false`\n\n");
+    out.push_str("## Scan Scope\n\n");
+    out.push_str(&format!(
+        "- Include: `{}`\n",
+        repo_scope_patterns_display(&scan_scope.include)
+    ));
+    out.push_str(&format!(
+        "- Exclude: `{}`\n",
+        repo_scope_patterns_display(&scan_scope.exclude)
+    ));
+    out.push_str(&format!(
+        "- Respect gitignore: `{}`\n",
+        scan_scope.respect_gitignore
+    ));
+    out.push_str(&format!(
+        "- Large-repo ignores: `{}`\n",
+        scan_scope.large_repo_ignores
+    ));
+    out.push_str(&format!(
+        "- Max files: `{}`\n\n",
+        scan_scope
+            .max_files
+            .map(|max_files| max_files.to_string())
+            .unwrap_or_else(|| "none".to_string())
+    ));
+    out.push_str("## Files\n\n");
+    if files.is_empty() {
+        out.push_str("No Rust files selected.\n\n");
+    } else {
+        for file in files {
+            out.push_str(&format!("- `{}`\n", repo_path_display(file)));
+        }
+        out.push('\n');
+    }
+    out.push_str("## Trust Boundary\n\n");
+    out.push_str(repo_file_list_trust_boundary());
+    out.push('\n');
+    out
+}
+
+fn repo_scope_patterns_display(patterns: &[String]) -> String {
+    if patterns.is_empty() {
+        "all".to_string()
+    } else {
+        patterns.join(", ")
+    }
+}
+
+fn repo_file_list_trust_boundary() -> &'static str {
+    "File selection dry run only; this does not analyze files, create ReviewCards, execute witnesses, prove site reach, prove repository safety, or make UB-free/Miri-clean claims."
 }
 
 fn repo_path_display(path: &Path) -> String {
@@ -672,6 +792,7 @@ fn render_repo_scan_status(
         "error": null,
         "signal": null,
         "partial_path": null,
+        "operator": repo_status_operator_json("complete", None),
     });
     let mut rendered = serde_json::to_string_pretty(&value)
         .map_err(|err| format!("render repo status JSON failed: {err}"))?;
@@ -703,6 +824,7 @@ fn render_repo_scan_incomplete_status(
         "error": error,
         "signal": null,
         "partial_path": partial_path.map(|path| path.display().to_string()),
+        "operator": repo_status_operator_json("failed", partial_path),
     });
     let mut rendered = serde_json::to_string_pretty(&value)
         .map_err(|err| format!("render repo status JSON failed: {err}"))?;
@@ -735,11 +857,53 @@ fn render_repo_scan_interrupted_status(
         "error": format!("repo scan interrupted by {signal_name}"),
         "signal": signal_name,
         "partial_path": partial_path.map(|path| path.display().to_string()),
+        "operator": repo_status_operator_json("terminated", partial_path),
     });
     let mut rendered = serde_json::to_string_pretty(&value)
         .map_err(|err| format!("render repo status JSON failed: {err}"))?;
     rendered.push('\n');
     Ok(rendered)
+}
+
+fn repo_status_operator_json(
+    state: &'static str,
+    partial_path: Option<&Path>,
+) -> serde_json::Value {
+    let partial_report_available = partial_path.is_some();
+    let partial_report_limitation = match (state, partial_report_available) {
+        ("complete", _) => {
+            "No partial report is retained after a successful scan; use the final report for the recorded scan scope."
+        }
+        (_, true) => "Completed-file snapshot only; not complete repo posture.",
+        _ => {
+            "No completed-file partial report was retained; the status sidecar is the durable incomplete-scan artifact."
+        }
+    };
+    let next_action = match (state, partial_report_available) {
+        ("complete", _) => {
+            "Use the promoted final report for the recorded scan_scope; rerun with adjusted include/exclude filters if the scope is not the intended review lane."
+        }
+        ("failed", true) => {
+            "Inspect partial_path for completed-file findings, then rerun repo with the recorded scan_scope after fixing the error, narrowing scope, or increasing timeout."
+        }
+        ("failed", false) => {
+            "Inspect error and scan_scope, then rerun repo after fixing the error, narrowing scope, or increasing timeout."
+        }
+        ("terminated", true) => {
+            "Inspect partial_path for completed-file findings, then rerun repo with the recorded scan_scope after restarting or narrowing the scan."
+        }
+        ("terminated", false) => {
+            "Inspect signal and scan_scope, then rerun repo with --out after restarting or narrowing the scan."
+        }
+        _ => "Inspect scan_scope and status fields, then rerun repo with the intended scope.",
+    };
+    serde_json::json!({
+        "state": state,
+        "partial_report_available": partial_report_available,
+        "partial_report_limitation": partial_report_limitation,
+        "next_action": next_action,
+        "claim_boundary": "Operational scan status only; partial reports are completed-file snapshots and are not complete repo posture, witness execution, proof, UB-free status, Miri-clean status, site-execution proof, or policy gating.",
+    })
 }
 
 fn repo_scan_scope_json(scan_scope: &RepoScanScopeMetadata) -> serde_json::Value {
@@ -918,20 +1082,51 @@ fn first_pr(options: FirstPrOptions) -> Result<(), String> {
         include_unchanged_tests: true,
         max_cards: check.max_cards,
     })?;
+    let policy_report = evaluate_policy_report_from_output(&output)?;
     let manual_candidates = load_manual_candidates(&root)?;
 
     fs::create_dir_all(&options.out_dir)
         .map_err(|err| format!("create {} failed: {err}", options.out_dir.display()))?;
+    let mut comment_plan_artifact = None;
     for (name, renderer) in FIRST_PR_RENDERED_ARTIFACTS {
-        write_artifact(&options.out_dir.join(name), renderer(&output))?;
+        let rendered = first_pr::render_first_pr_front_door_artifact(
+            name,
+            renderer(&output),
+            &root,
+            &manual_candidates,
+        );
+        if name == "comment-plan.json" {
+            comment_plan_artifact = Some(rendered.clone());
+        }
+        write_artifact(&options.out_dir.join(name), rendered)?;
     }
     write_artifact(
         &options.out_dir.join(RECEIPT_AUDIT_ARTIFACT),
         render_receipt_audit_markdown(&receipt_audit),
     )?;
     write_artifact(
+        &options.out_dir.join(POLICY_REPORT_JSON_ARTIFACT),
+        render_policy_report_json(&policy_report),
+    )?;
+    write_artifact(
+        &options.out_dir.join(POLICY_REPORT_MARKDOWN_ARTIFACT),
+        render_policy_report_markdown(&policy_report),
+    )?;
+    write_artifact(
         &options.out_dir.join(MANUAL_CANDIDATES_ARTIFACT),
         first_pr::render_manual_candidates_artifact(&root, &manual_candidates),
+    )?;
+    write_artifact(
+        &options.out_dir.join(MANUAL_REPAIR_QUEUE_ARTIFACT),
+        first_pr::render_manual_repair_queue_artifact(&root, &manual_candidates),
+    )?;
+    write_artifact(
+        &options.out_dir.join(TOKMD_PACKETS_ARTIFACT),
+        first_pr::render_tokmd_packets_artifact(
+            &root,
+            &manual_candidates,
+            comment_plan_artifact.as_deref(),
+        ),
     )?;
     write_artifact(
         &options.out_dir.join(REVIEW_KIT_ARTIFACT),
@@ -1092,9 +1287,7 @@ fn doctor(root: &Path) -> Result<(), String> {
     println!();
     println!("policy: advisory by default");
     println!("witness execution: not run by doctor or by default");
-    println!(
-        "trust boundary: static unsafe contract review only; not memory-safety proof, not UB-free status, and no witness execution"
-    );
+    println!("trust boundary: {FIRST_RUN_TRUST_BOUNDARY}");
     Ok(())
 }
 
@@ -1299,6 +1492,8 @@ fn render_candidate_list_json(
         .iter()
         .map(|candidate| candidate.evidence.len())
         .sum::<usize>();
+    let operation_families = first_pr::manual_candidate_operation_family_counts(candidates);
+    let evidence_kinds = first_pr::manual_candidate_evidence_kind_counts(candidates);
     let value = serde_json::json!({
         "schema_version": "manual-candidates/v1",
         "tool": "unsafe-review",
@@ -1309,6 +1504,8 @@ fn render_candidate_list_json(
         "summary": {
             "manual_candidates": candidates.len(),
             "external_evidence_refs": evidence_refs,
+            "operation_families": operation_families,
+            "evidence_kinds": evidence_kinds,
             "analyzer_discovered": 0,
         },
         "candidates": candidates
@@ -1316,6 +1513,7 @@ fn render_candidate_list_json(
             .map(|candidate| manual_candidate_list_entry(root, candidate))
             .collect::<Vec<_>>(),
         "reviewcard_artifact_relationship": manual_candidate_reviewcard_relationship(),
+        "reviewcard_artifact_applicability": manual_candidate_reviewcard_applicability(),
         "trust_boundary": manual_candidate_list_trust_boundary(),
     });
     let mut rendered = serde_json::to_string_pretty(&value)
@@ -1365,6 +1563,8 @@ fn render_candidate_list_markdown(
         .iter()
         .map(|candidate| candidate.evidence.len())
         .sum::<usize>();
+    let operation_families = first_pr::manual_candidate_operation_family_counts(candidates);
+    let evidence_kinds = first_pr::manual_candidate_evidence_kind_counts(candidates);
     let mut out = String::new();
     out.push_str("# unsafe-review manual candidate list\n\n");
     out.push_str("This is a manual/advisory candidate ledger. It lists imported `.unsafe-review/candidates/*.json` artifacts and does not make them analyzer-discovered ReviewCards.\n\n");
@@ -1372,6 +1572,14 @@ fn render_candidate_list_markdown(
     out.push_str(&format!("- Root: `{}`\n", root.display()));
     out.push_str(&format!("- Manual candidates: `{}`\n", candidates.len()));
     out.push_str(&format!("- External evidence refs: `{evidence_refs}`\n"));
+    out.push_str(&format!(
+        "- Operation families: `{}`\n",
+        first_pr::render_count_map(&operation_families)
+    ));
+    out.push_str(&format!(
+        "- Evidence kinds: `{}`\n",
+        first_pr::render_count_map(&evidence_kinds)
+    ));
     out.push_str("- Analyzer-discovered: `0`\n\n");
     if candidates.is_empty() {
         out.push_str("No imported manual candidates found.\n\n");
@@ -1455,6 +1663,9 @@ fn append_manual_candidate_list_handoff_markdown(
             }
         }
     }
+    append_json_string_list_markdown(&handoff, "fix_options", "Fix options", out);
+    append_json_string_list_markdown(&handoff, "test_targets", "Test targets", out);
+    append_json_string_list_markdown(&handoff, "do_not_touch", "Do not touch", out);
     append_json_string_list_markdown(&handoff, "suggested_next_steps", "Next steps", out);
     append_json_string_list_markdown(&handoff, "non_goals", "Non-goals", out);
     let stop_condition = json_string_field(&handoff, "stop_condition")
@@ -1509,12 +1720,58 @@ fn manual_candidate_reviewcard_relationship() -> serde_json::Value {
         "lsp.json": "ReviewCard-only saved editor projection; manual candidates are not emitted as analyzer diagnostics.",
         "repair-queue.json": "ReviewCard-only repair queue; manual candidates are not automatic repair tasks.",
         "receipt-audit.md": "Receipts may match manual candidate IDs as manual/advisory targets without importing them as ReviewCard witness evidence.",
-        "policy-report": "ReviewCard-only policy simulation; manual candidates are not policy gating inputs."
+        "policy-report.json": "ReviewCard-only policy simulation; manual candidates are not policy gating inputs.",
+        "policy-report.md": "ReviewCard-only policy simulation; manual candidates are not policy gating inputs."
+    })
+}
+
+fn manual_candidate_reviewcard_applicability() -> serde_json::Value {
+    serde_json::json!({
+        "cards.json": manual_candidate_reviewcard_applicability_entry(
+            "reviewcard_only",
+            "Manual candidates stay in manual-candidate ledger surfaces and are not emitted as analyzer ReviewCards."
+        ),
+        "cards.sarif": manual_candidate_reviewcard_applicability_entry(
+            "reviewcard_only",
+            "Manual candidates are not emitted as SARIF analyzer results."
+        ),
+        "comment-plan.json": manual_candidate_reviewcard_applicability_entry(
+            "reviewcard_only",
+            "Manual candidates are not selected for automatic comment plans."
+        ),
+        "lsp.json": manual_candidate_reviewcard_applicability_entry(
+            "reviewcard_only",
+            "Manual candidates are not emitted as saved editor diagnostics."
+        ),
+        "repair-queue.json": manual_candidate_reviewcard_applicability_entry(
+            "reviewcard_only",
+            "Manual candidates are not automatic repair tasks."
+        ),
+        "policy-report.json": manual_candidate_reviewcard_applicability_entry(
+            "reviewcard_only",
+            "Manual candidates are not policy gating inputs for the JSON policy report."
+        ),
+        "policy-report.md": manual_candidate_reviewcard_applicability_entry(
+            "reviewcard_only",
+            "Manual candidates are not policy gating inputs for the Markdown policy report."
+        )
+    })
+}
+
+fn manual_candidate_reviewcard_applicability_entry(
+    decision: &str,
+    reason: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "decision": decision,
+        "applies_to_manual_candidates": false,
+        "manual_candidate_markers_allowed": false,
+        "reason": reason,
     })
 }
 
 fn manual_candidate_list_trust_boundary() -> &'static str {
-    "Manual/advisory static unsafe contract review candidate ledger only; candidates are not analyzer-discovered ReviewCards, not a proof of UB, not a proof of memory safety, not UB-free status, not a Miri result, not Miri-clean status, not site-execution proof, not repository safety, and not policy gating. unsafe-review did not run witnesses, post comments, edit source, run an agent, or enforce blocking policy."
+    "Manual/advisory static unsafe contract review candidate ledger only; candidates are not analyzer-discovered ReviewCards, not a proof of UB, not a proof of memory safety, not UB-free status, not Miri-clean status, not a site-execution claim unless a matching witness receipt says so, not repository safety, and not policy gating. unsafe-review did not run witnesses, post comments, edit source, run an agent, or enforce blocking policy."
 }
 
 fn manual_candidate_location_text(candidate: &unsafe_review_core::ManualCandidate) -> String {
@@ -1886,9 +2143,7 @@ fn print_help() {
     println!();
     println!("Flags may be passed as `--flag value` or `--flag=value`.");
     println!();
-    println!(
-        "Trust boundary: static unsafe contract review only; not memory-safety proof, not UB-free status, and not Miri-clean status."
-    );
+    println!("Trust boundary: {FIRST_RUN_TRUST_BOUNDARY}");
 }
 
 fn print_repo_help() {
@@ -1917,6 +2172,7 @@ fn print_repo_help() {
         "- --respect-gitignore is the default; --no-respect-gitignore includes ignored Rust files."
     );
     println!("- --list-files prints selected Rust files and exits without analysis.");
+    println!("- With --list-files, --format supports human, json, or markdown output.");
     println!("- --progress prints scan-status heartbeats to stderr during analysis.");
     println!(
         "- --timeout-seconds <N> stops analysis after roughly N seconds at repo event boundaries."
@@ -1945,7 +2201,7 @@ fn print_repo_help() {
         "- --out renders to <out>.partial, then renames it to <out> only after a successful render."
     );
     println!(
-        "- <out>.status.json records scan scope, phase, elapsed time, discovered/scanned/remaining files, cards found, last path, completion, normal errors, and Unix interruption signals."
+        "- <out>.status.json records scan scope, phase, elapsed time, discovered/scanned/remaining files, cards found, last path, completion, normal errors, Unix interruption signals, and operator next-step diagnostics."
     );
     println!(
         "- On normal errors, incomplete status is kept; if a rendered partial report exists, it is left at <out>.partial."
@@ -1956,9 +2212,7 @@ fn print_repo_help() {
     println!("- Without --out, Unix SIGTERM/SIGINT prints an interruption diagnostic to stderr.");
     println!();
     println!("Trust boundary:");
-    println!(
-        "- ReviewCards are advisory static findings, not memory-safety proof, not UB-free status, and not Miri-clean status."
-    );
+    println!("- ReviewCards are advisory static findings: {FIRST_RUN_TRUST_BOUNDARY}");
     println!(
         "- unsafe-review does not execute witnesses, post comments, edit source, or enforce blocking policy by default."
     );
@@ -1982,7 +2236,7 @@ fn print_candidate_help() {
         "- They use schema_version `manual-candidate/v1` and preserve source `manual`, manual_candidate `true`, and analyzer_discovered `false`."
     );
     println!(
-        "- They can carry a title, file:line location, operation family, unsafe operation, invariant, safe caller route, evidence references, and a trust boundary."
+        "- They can carry a title, file:line location, operation family, unsafe operation, invariant, safe caller route, evidence references, optional fix/test/do-not-touch guidance, and a trust boundary."
     );
     println!();
     println!("Commands:");
@@ -2001,7 +2255,7 @@ fn print_candidate_help() {
         "- explain and context can load the manual candidate by ID when no analyzer ReviewCard has that ID."
     );
     println!(
-        "- first-pr writes a separate manual-candidates.json handoff; cards.json, SARIF, comment-plan, LSP, repair-queue, and policy-report stay ReviewCard-only."
+        "- first-pr writes a separate manual-candidates.json handoff with optional guidance fields; cards.json, SARIF, comment-plan, LSP, repair-queue, and policy-report artifacts stay ReviewCard-only."
     );
     println!(
         "- receipts may audit against manual candidate IDs as external evidence for that manual target, not as imported ReviewCard witness evidence."
@@ -2009,7 +2263,7 @@ fn print_candidate_help() {
     println!();
     println!("Trust boundary:");
     println!(
-        "- Manual candidates are not analyzer-discovered findings, not proof of memory safety, not UB-free status, not Miri-clean status, not site-execution proof, and not policy gating."
+        "- Manual candidates are not analyzer-discovered findings, not proof of memory safety, not UB-free status, not Miri-clean status, not a site-execution claim unless a matching witness receipt says so, and not policy gating."
     );
     println!(
         "- unsafe-review does not execute witnesses, post comments, edit source, run an agent, or enforce blocking policy by default."

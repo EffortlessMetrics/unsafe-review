@@ -139,6 +139,15 @@ fn diagnostic_for_card_carries_card_id_and_trust_boundary() -> Result<(), Box<dy
             .unwrap_or("")
             .contains("not UB-free status")
     );
+    let trust_boundary = diagnostic
+        .data
+        .as_ref()
+        .and_then(|data| data.get("trust_boundary"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    assert!(trust_boundary.contains("not Miri-clean status"));
+    assert!(trust_boundary.contains("not a site-execution claim"));
+    assert!(trust_boundary.contains("matching witness receipt"));
     let data = diagnostic
         .data
         .as_ref()
@@ -276,6 +285,11 @@ fn execute_collect_agent_packet_returns_packet_for_card() -> Result<(), Box<dyn 
         .as_str()
         .ok_or("packet should be returned as a string")?;
     assert!(packet.contains(&output.cards[0].id.0));
+    assert!(packet.contains("\"confirmation_cue\""));
+    assert!(packet.contains("\"build_this_first\""));
+    assert!(packet.contains("\"minimal_repro\""));
+    assert!(packet.contains("attach a matching receipt"));
+    assert!(packet.contains("unsafe-review did not run this command"));
     assert!(packet.contains("do_not_do"));
     Ok(())
 }

@@ -118,6 +118,38 @@ mod tests {
             vec!["callee-contract".to_string()]
         );
         assert_eq!(
+            hazards_for(&OperationFamily::StableByteSourceGetterReentry),
+            vec![HazardKind::StableByteSource]
+        );
+        assert_eq!(
+            obligation_keys(&OperationFamily::StableByteSourceGetterReentry),
+            vec!["byte-stability".to_string()]
+        );
+        assert_eq!(
+            hazards_for(&OperationFamily::StableByteSourceRabAsync),
+            vec![HazardKind::StableByteSource]
+        );
+        assert_eq!(
+            obligation_keys(&OperationFamily::StableByteSourceRabAsync),
+            vec!["byte-stability".to_string()]
+        );
+        assert_eq!(
+            hazards_for(&OperationFamily::StableByteSourceSabRace),
+            vec![HazardKind::StableByteSource]
+        );
+        assert_eq!(
+            obligation_keys(&OperationFamily::StableByteSourceSabRace),
+            vec!["byte-stability".to_string()]
+        );
+        assert_eq!(
+            hazards_for(&OperationFamily::StableByteSourceNativeFfiRead),
+            vec![HazardKind::StableByteSource]
+        );
+        assert_eq!(
+            obligation_keys(&OperationFamily::StableByteSourceNativeFfiRead),
+            vec!["byte-stability".to_string()]
+        );
+        assert_eq!(
             hazards_for(&OperationFamily::AtomicPointerState),
             vec![HazardKind::AtomicOrdering, HazardKind::DropOrDeallocation]
         );

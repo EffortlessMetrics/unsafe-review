@@ -1,6 +1,8 @@
 use crate::api::AnalyzeOutput;
 use crate::domain::{ReviewCard, WitnessKind, WitnessRoute};
-use crate::output::{NO_CHANGED_GAPS_LIMITATION, NO_CHANGED_GAPS_MESSAGE};
+use crate::output::{
+    NO_CHANGED_GAPS_LIMITATION, NO_CHANGED_GAPS_MESSAGE, REVIEWCARD_TRUST_BOUNDARY,
+};
 use crate::util::path_display;
 
 struct RouteGroup {
@@ -73,7 +75,9 @@ pub(crate) fn render(output: &AnalyzeOutput) -> String {
     }
 
     out.push_str("## Trust boundary\n\n");
-    out.push_str("This artifact is static unsafe contract review. It routes reviewers to credible witnesses but does not run Miri, cargo-careful, sanitizers, Loom, Shuttle, Kani, or Crux. It is not a proof of memory safety, not UB-free status, and not a Miri result unless a witness receipt is attached.\n");
+    out.push_str("This artifact routes reviewers to credible witnesses but does not run Miri, cargo-careful, sanitizers, Loom, Shuttle, Kani, or Crux. It is ");
+    out.push_str(REVIEWCARD_TRUST_BOUNDARY);
+    out.push('\n');
     out
 }
 
@@ -111,18 +115,30 @@ fn routes_for_group<'a>(card: &'a ReviewCard, group: &RouteGroup) -> Vec<&'a Wit
 
 fn render_group_card(out: &mut String, card: &ReviewCard, routes: &[&WitnessRoute]) {
     out.push_str(&format!(
-        "#### `{}`\n\n- Class: `{}`\n- Location: {}:{}\n- Operation: `{}`\n- Missing evidence: {}\n- Witness evidence: {}\n",
+        "#### `{}`\n\n- Class: `{}`\n- Proof path: `{}`\n- Location: {}:{}\n- Operation family: `{}`\n- Operation: `{}`\n- Hazards: {}\n- Missing evidence: {}\n- Witness evidence: {}\n",
         card.id,
         card.class.as_str(),
+        card.proof_path.as_str(),
         path_display(&card.site.location.file),
         card.site.location.line,
+        card.operation.family.as_str(),
         one_line(&card.operation.expression),
+        hazard_summary(card),
         missing_summary(card),
         card.witness.summary
     ));
+    render_obligation_evidence(out, card);
     out.push_str(&format!(
         "- Next action: {}\n",
         one_line(&card.next_action.summary)
+    ));
+    out.push_str(&format!(
+        "- Hypothesis to confirm: {}\n",
+        card_hypothesis(card)
+    ));
+    out.push_str(&format!(
+        "- Confirmation step: {}\n",
+        card_confirmation_step(card)
     ));
     if !card.next_action.verify_commands.is_empty() {
         out.push_str("- Verify command");
@@ -175,6 +191,65 @@ fn render_group_card(out: &mut String, card: &ReviewCard, routes: &[&WitnessRout
         ));
     }
     out.push('\n');
+}
+
+fn render_obligation_evidence(out: &mut String, card: &ReviewCard) {
+    out.push_str("- Required safety conditions:\n");
+    if card.obligation_evidence.is_empty() {
+        out.push_str("  - none recorded\n");
+    } else {
+        for evidence in &card.obligation_evidence {
+            out.push_str(&format!(
+                "  - `{}`: {}\n",
+                evidence.obligation.key,
+                one_line(&evidence.obligation.description)
+            ));
+        }
+    }
+
+    out.push_str("- Obligation evidence:\n");
+    if card.obligation_evidence.is_empty() {
+        out.push_str("  - none recorded\n");
+    } else {
+        for evidence in &card.obligation_evidence {
+            out.push_str(&format!(
+                "  - `{}`: contract `{}` ({}); discharge `{}` ({}); reach `{}` ({}); witness `{}` ({})\n",
+                evidence.obligation.key,
+                evidence.contract.state,
+                one_line(&evidence.contract.summary),
+                evidence.discharge.state,
+                one_line(&evidence.discharge.summary),
+                evidence.reach.state,
+                one_line(&evidence.reach.summary),
+                evidence.witness.state,
+                one_line(&evidence.witness.summary)
+            ));
+        }
+    }
+}
+
+fn card_hypothesis(card: &ReviewCard) -> String {
+    format!(
+        "static `{}` ReviewCard for `{}`; confirm with external evidence before treating it as observed runtime behavior",
+        card.class.as_str(),
+        one_line(&card.operation.expression)
+    )
+}
+
+fn card_confirmation_step(card: &ReviewCard) -> String {
+    if let Some(command) = card.next_action.verify_commands.first() {
+        return format!(
+            "build/run `{}` first for this card, then attach a matching receipt if it confirms the route",
+            command
+        );
+    }
+    if let Some(route) = card.routes.first() {
+        return format!(
+            "use the `{}` route in this witness plan to derive a focused repro or human review before upgrading confidence",
+            route.kind.as_str()
+        );
+    }
+    "derive a focused confirmation from `unsafe-review explain` and human review before upgrading confidence".to_string()
 }
 
 fn route_can_show(kind: WitnessKind) -> &'static str {
@@ -275,6 +350,17 @@ fn missing_summary(card: &ReviewCard) -> String {
         .join("; ")
 }
 
+fn hazard_summary(card: &ReviewCard) -> String {
+    if card.hazards.is_empty() {
+        return "none recorded".to_string();
+    }
+    card.hazards
+        .iter()
+        .map(|hazard| format!("`{}`", hazard.as_str()))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn one_line(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -302,6 +388,10 @@ mod tests {
         assert!(rendered.contains("unsafe-review receipt import-miri"));
         assert!(rendered.contains("unsafe-review receipt import-careful"));
         assert!(rendered.contains("Next action: Add or expose"));
+        assert!(rendered.contains("- Hypothesis to confirm: static `guard_missing` ReviewCard"));
+        assert!(rendered.contains(
+            "- Confirmation step: build/run `cargo +nightly miri test read_header` first"
+        ));
         assert!(rendered.contains("Verify command"));
         assert!(rendered.contains("Missing visible local guard"));
         assert!(rendered.contains("does not run Miri"));
@@ -330,7 +420,7 @@ mod tests {
         assert!(rendered.contains("expires_at: 2026-08-18"));
         assert!(rendered.contains("Missing visible local guard"));
         assert!(rendered.contains("Receipt hint"));
-        assert!(rendered.contains("not a Miri result unless a witness receipt is attached"));
+        assert!(rendered.contains("not a site-execution claim"));
         Ok(())
     }
 

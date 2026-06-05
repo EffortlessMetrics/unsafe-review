@@ -74,6 +74,26 @@ pub(crate) fn obligations_for(family: &OperationFamily) -> Vec<SafetyObligation>
             "target-feature",
             "callers only execute this path on supported hardware",
         )),
+        OperationFamily::PanicFromSafeJs => single(SafetyObligation::new(
+            "panic-guard",
+            "JS-derived signed values are range-checked before panicking conversions",
+        )),
+        OperationFamily::StableByteSourceGetterReentry => single(SafetyObligation::new(
+            "byte-stability",
+            "JS-owned bytes remain stable after getter reentry and before Rust/native materialization",
+        )),
+        OperationFamily::StableByteSourceRabAsync => single(SafetyObligation::new(
+            "byte-stability",
+            "RAB-backed JS bytes are snapshotted before async worker or helper materialization",
+        )),
+        OperationFamily::StableByteSourceSabRace => single(SafetyObligation::new(
+            "byte-stability",
+            "shared JS bytes are snapshotted before Rust/native borrowed-slice materialization",
+        )),
+        OperationFamily::StableByteSourceNativeFfiRead => single(SafetyObligation::new(
+            "byte-stability",
+            "JS-backed bytes are snapshotted or otherwise stabilized before native FFI pointer/length reads",
+        )),
         OperationFamily::StrFromUtf8Unchecked => {
             single(SafetyObligation::new("utf8", "bytes are valid UTF-8"))
         }

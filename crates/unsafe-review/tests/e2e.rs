@@ -24,6 +24,8 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     let value = parse_json(&stdout_text(&json)?)?;
     assert_eq!(value["schema_version"], "0.1");
     assert_eq!(value["scope"], "diff");
+    assert_eq!(value["summary"]["changed_files"], 1);
+    assert_eq!(value["summary"]["changed_non_rust_files"], 0);
     assert_eq!(value["summary"]["cards"], 1);
     assert_eq!(value["cards"][0]["class"], "guard_missing");
     assert_eq!(
@@ -55,9 +57,9 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
         os("markdown"),
     ])?;
     let markdown = stdout_text(&markdown)?;
-    assert!(
-        markdown.contains("| ID | Class | Operation | Hazard | Missing | Route | Next action |")
-    );
+    assert!(markdown.contains(
+        "| ID | Class | Proof path | Operation | Hazard | Missing | Route | Next action |"
+    ));
     assert!(markdown.contains("unsafe { ptr.cast::<Header>().read() }"));
     assert!(markdown.contains("Add or expose the local guard"));
 
@@ -125,10 +127,14 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     assert_eq!(stdout_text(&summary)?.trim(), "");
     let summary_text = fs::read_to_string(&summary_path)?;
     assert!(summary_text.contains("# unsafe-review PR summary"));
+    assert!(summary_text.contains("- Diff scope: 1 file changed (1 Rust, 0 non-Rust)"));
     assert!(summary_text.contains("## Card table"));
     assert!(summary_text.contains("- Operation: `unsafe { ptr.cast::<Header>().read() }`"));
     assert!(summary_text.contains("- Operation family: `raw_pointer_read`"));
-    assert!(summary_text.contains("| ID | Class | Location | Operation family | Operation |"));
+    assert!(
+        summary_text
+            .contains("| ID | Class | Proof path | Location | Operation family | Operation |")
+    );
     assert!(summary_text.contains("unsafe { ptr.cast::<Header>().read() }"));
     assert!(summary_text.contains("| `raw_pointer_read` |"));
     assert!(summary_text.contains("## Trust boundary"));
@@ -148,15 +154,19 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     assert_eq!(stdout_text(&github_summary)?.trim(), "");
     let github_summary_text = fs::read_to_string(&github_summary_path)?;
     assert!(github_summary_text.contains("## unsafe-review advisory summary"));
+    assert!(github_summary_text.contains("- Diff scope: 1 file changed (1 Rust, 0 non-Rust)"));
     assert!(github_summary_text.contains("## Top card"));
     assert!(github_summary_text.contains(&format!("- ID: `{card_id}`")));
     assert!(github_summary_text.contains(&format!("- Explain: `unsafe-review explain {card_id}`")));
     assert!(github_summary_text.contains(&format!(
         "- Agent context: `unsafe-review context {card_id} --json`"
     )));
+    assert!(github_summary_text.contains("- Agent handoff: `ready_for_agent`"));
+    assert!(github_summary_text.contains("bucket reasons: `guard_evidence_missing`"));
+    assert!(github_summary_text.contains("readiness reasons: specific operation family"));
     assert!(github_summary_text.contains("## Open next"));
     assert!(github_summary_text.contains("Full reviewer cockpit: `pr-summary.md`"));
-    assert!(github_summary_text.contains("not site-execution proof"));
+    assert!(github_summary_text.contains("not a site-execution claim"));
     assert!(github_summary_text.contains("unsafe-review did not run witnesses"));
     assert!(github_summary_text.contains("post comments"));
     assert!(github_summary_text.contains("edit source"));
@@ -452,6 +462,28 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     assert_eq!(packet["card_id"], card_id);
     assert_eq!(packet["card"]["id"], card_id);
     assert_eq!(
+        packet["confirmation_cue"]["build_this_first"]["kind"],
+        "verify_command"
+    );
+    assert_eq!(
+        packet["confirmation_cue"]["build_this_first"]["command"],
+        "cargo +nightly miri test read_header"
+    );
+    assert!(
+        packet["confirmation_cue"]["confirmation_step"]
+            .as_str()
+            .unwrap_or("")
+            .contains("attach a matching receipt")
+    );
+    assert_eq!(
+        packet["confirmation_cue"]["minimal_repro"]["kind"],
+        "verify_command"
+    );
+    assert!(
+        serde_json::to_string(&packet["confirmation_cue"]["minimal_repro"])?
+            .contains("unsafe-review did not run this command")
+    );
+    assert_eq!(
         packet["context"]["operation"],
         "unsafe { ptr.cast::<Header>().read() }"
     );
@@ -549,6 +581,61 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
 }
 
 #[test]
+fn check_json_summary_reports_mixed_language_diff_scope() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_alignment");
+    let temp = TempDir::new("unsafe-review-mixed-diff-e2e")?;
+    let mixed_diff_path = temp.path().join("mixed.diff");
+    let mut mixed_diff = fs::read_to_string(fixture.join("change.diff"))?;
+    mixed_diff.push_str(
+        r#"diff --git a/src/js/buffer.ts b/src/js/buffer.ts
+--- a/src/js/buffer.ts
++++ b/src/js/buffer.ts
+@@ -1,0 +1,1 @@
++export const changed = true;
+diff --git a/src/binding.cpp b/src/binding.cpp
+--- a/src/binding.cpp
++++ b/src/binding.cpp
+@@ -1,0 +1,1 @@
++void changed() {}
+"#,
+    );
+    fs::write(&mixed_diff_path, mixed_diff)?;
+
+    let output = run_success([
+        os("check"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        mixed_diff_path.as_os_str().to_os_string(),
+        os("--format"),
+        os("json"),
+    ])?;
+    let value = parse_json(&stdout_text(&output)?)?;
+    let summary = &value["summary"];
+
+    assert_eq!(summary["changed_files"], 3);
+    assert_eq!(summary["changed_rust_files"], 1);
+    assert_eq!(summary["changed_non_rust_files"], 2);
+    assert_eq!(summary["cards"], 1);
+    assert_eq!(value["cards"][0]["site"]["file"], "src/lib.rs");
+
+    let github_summary = run_success([
+        os("check"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        mixed_diff_path.as_os_str().to_os_string(),
+        os("--format"),
+        os("github-summary"),
+    ])?;
+    let github_summary = stdout_text(&github_summary)?;
+    assert!(github_summary.contains("- Diff scope: 3 files changed (1 Rust, 2 non-Rust)"));
+    assert!(github_summary.contains("## unsafe-review advisory summary"));
+
+    Ok(())
+}
+
+#[test]
 fn context_packet_queues_contract_gaps_for_public_safety_docs() -> Result<(), Box<dyn Error>> {
     let fixture = fixture_root("public_unsafe_fn_missing_safety");
 
@@ -628,15 +715,27 @@ fn manual_candidate_import_explain_context_and_witness_plan_preserve_manual_mark
     assert_eq!(canonical["analyzer_discovered"], false);
     assert_eq!(canonical["id"], "R4R2-S001");
     assert_eq!(
-        canonical["evidence"][0]["command"],
+        canonical["evidence"][1]["command"],
         "bun test test/js/webcore/textdecoder-sharedarraybuffer.test.ts"
     );
+    assert_eq!(canonical["oracle_map"]["oracle_language"], "typescript");
+    assert_eq!(
+        canonical["oracle_map"]["oracle_path"],
+        "test/js/webcore/textdecoder-sharedarraybuffer.test.ts"
+    );
     assert!(
-        canonical["evidence"][0]["limitation"]
+        canonical["oracle_map"]["limitation"]
+            .as_str()
+            .unwrap_or("")
+            .contains("not witness execution")
+    );
+    assert!(
+        canonical["evidence"][1]["limitation"]
             .as_str()
             .unwrap_or("")
             .contains("not analyzer-discovered")
     );
+    write_textdecoder_stable_byte_seed_ledger(temp.path())?;
 
     let empty_snapshot = temp.path().join("empty-snapshot.json");
     fs::write(&empty_snapshot, empty_review_card_snapshot_json())?;
@@ -671,7 +770,51 @@ fn manual_candidate_import_explain_context_and_witness_plan_preserve_manual_mark
         outcome["cards"]["new"][0]["after"]["operation"],
         "core::slice::from_raw_parts"
     );
-    assert_eq!(outcome["cards"]["new"][0]["after"]["evidence_count"], 2);
+    assert_eq!(outcome["cards"]["new"][0]["after"]["evidence_count"], 3);
+    assert_eq!(
+        outcome["cards"]["new"][0]["after"]["safe_caller"],
+        "new TextDecoder().decode(new Uint8Array(new SharedArrayBuffer(...)))"
+    );
+    assert_eq!(
+        outcome["cards"]["new"][0]["after"]["invariant"],
+        "&[u8] memory must not be concurrently mutated"
+    );
+    assert_eq!(
+        outcome["cards"]["new"][0]["after"]["oracle_map"]["oracle_path"],
+        "test/js/webcore/textdecoder-sharedarraybuffer.test.ts"
+    );
+    assert!(
+        outcome["cards"]["new"][0]["after"]["oracle_map"]["limitation"]
+            .as_str()
+            .unwrap_or("")
+            .contains("memory-safety proof")
+    );
+    assert_eq!(
+        outcome["cards"]["new"][0]["after"]["evidence"][1]["command"],
+        "bun test test/js/webcore/textdecoder-sharedarraybuffer.test.ts"
+    );
+    assert!(
+        outcome["cards"]["new"][0]["after"]["evidence"][1]["limitation"]
+            .as_str()
+            .unwrap_or("")
+            .contains("not memory-safety proof")
+    );
+    assert!(
+        outcome["cards"]["new"][0]["after"]["fix_options"][0]
+            .as_str()
+            .unwrap_or("")
+            .contains("Copy SharedArrayBuffer-backed bytes")
+    );
+    assert_eq!(
+        outcome["cards"]["new"][0]["after"]["test_targets"][0],
+        "test/js/webcore/textdecoder-sharedarraybuffer.test.ts"
+    );
+    assert!(
+        outcome["cards"]["new"][0]["after"]["do_not_touch"][0]
+            .as_str()
+            .unwrap_or("")
+            .contains("Do not rewrite unrelated TextDecoder")
+    );
     assert!(
         outcome["cards"]["new"][0]["reason"]
             .as_str()
@@ -702,6 +845,17 @@ fn manual_candidate_import_explain_context_and_witness_plan_preserve_manual_mark
     assert!(outcome_markdown.contains("source `manual`"));
     assert!(outcome_markdown.contains("manual_candidate `true`"));
     assert!(outcome_markdown.contains("analyzer-discovered `false`"));
+    assert!(outcome_markdown.contains("route `new TextDecoder().decode"));
+    assert!(outcome_markdown.contains("invariant &[u8] memory must not be concurrently mutated"));
+    assert!(outcome_markdown.contains("first evidence `source_trace`"));
+    assert!(outcome_markdown.contains("command `rg -n"));
+    assert!(outcome_markdown.contains("limitation source trace only"));
+    assert!(outcome_markdown.contains("first fix: Copy SharedArrayBuffer-backed bytes"));
+    assert!(
+        outcome_markdown
+            .contains("first test: test/js/webcore/textdecoder-sharedarraybuffer.test.ts")
+    );
+    assert!(outcome_markdown.contains("first non-goal: Do not rewrite unrelated TextDecoder"));
     assert!(outcome_markdown.contains("not analyzer-discovered"));
 
     let explain = run_success([
@@ -743,15 +897,15 @@ fn manual_candidate_import_explain_context_and_witness_plan_preserve_manual_mark
         "&[u8] memory must not be concurrently mutated"
     );
     assert_eq!(
-        explain_packet["implementer_handoff"]["external_evidence"][0]["kind"],
+        explain_packet["implementer_handoff"]["external_evidence"][1]["kind"],
         "runtime_witness"
     );
     assert_eq!(
-        explain_packet["implementer_handoff"]["external_evidence"][0]["command"],
+        explain_packet["implementer_handoff"]["external_evidence"][1]["command"],
         "bun test test/js/webcore/textdecoder-sharedarraybuffer.test.ts"
     );
     assert!(
-        explain_packet["implementer_handoff"]["external_evidence"][0]["limitation"]
+        explain_packet["implementer_handoff"]["external_evidence"][1]["limitation"]
             .as_str()
             .unwrap_or("")
             .contains("runtime route evidence only")
@@ -781,8 +935,42 @@ fn manual_candidate_import_explain_context_and_witness_plan_preserve_manual_mark
             .contains("do not treat this as analyzer-discovered")
     );
     assert_eq!(
-        context_packet["evidence"][0]["command"],
+        context_packet["evidence"][1]["command"],
         "bun test test/js/webcore/textdecoder-sharedarraybuffer.test.ts"
+    );
+    assert_eq!(context_packet["stable_byte_seed_source"]["included"], true);
+    assert_eq!(
+        context_packet["stable_byte_seed_source"]["matched_manual_candidates"],
+        1
+    );
+    assert!(
+        context_packet["stable_byte_seed_source"]["relationship"]
+            .as_str()
+            .unwrap_or("")
+            .contains("manual candidate context packets")
+    );
+    assert_eq!(
+        context_packet["stable_byte_seed"]["seed_id"],
+        "bun-stable-byte-textdecoder-sab"
+    );
+    assert_eq!(context_packet["stable_byte_seed"]["owner_lane"], "rust2");
+    assert_eq!(
+        context_packet["stable_byte_seed"]["suggested_first_pr"],
+        "TextDecoder shared-byte snapshot only"
+    );
+    assert_eq!(
+        context_packet["stable_byte_seed"]["triage_labels"][1],
+        "needs-miri-model"
+    );
+    assert_eq!(
+        context_packet["stable_byte_seed"]["candidate_consistency"]["proof_mode_matches_manual_candidate"],
+        true
+    );
+    assert!(
+        context_packet["stable_byte_seed"]["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("not Miri-clean status")
     );
 
     let witness_plan = run_success([
@@ -812,7 +1000,7 @@ fn manual_candidate_list_reports_imported_advisory_ledger() -> Result<(), Box<dy
     fs::create_dir_all(&candidate_dir)?;
     fs::write(
         candidate_dir.join("R4R2-S002.json"),
-        manual_candidate_json().replace("\"id\": \"R4R2-S001\"", "\"id\": \"R4R2-S002\""),
+        mysql_manual_candidate_json(),
     )?;
     fs::write(
         candidate_dir.join("R4R2-S001.json"),
@@ -834,13 +1022,27 @@ fn manual_candidate_list_reports_imported_advisory_ledger() -> Result<(), Box<dy
     assert_eq!(ledger["source"], "candidate_list");
     assert_eq!(ledger["root"], temp.path().display().to_string());
     assert_eq!(ledger["summary"]["manual_candidates"], 2);
-    assert_eq!(ledger["summary"]["external_evidence_refs"], 4);
+    assert_eq!(ledger["summary"]["external_evidence_refs"], 6);
+    assert_eq!(
+        ledger["summary"]["operation_families"]["raw_pointer_read"],
+        1
+    );
+    assert_eq!(
+        ledger["summary"]["operation_families"]["slice_from_raw_parts"],
+        1
+    );
+    assert_eq!(ledger["summary"]["evidence_kinds"]["model"], 2);
+    assert_eq!(ledger["summary"]["evidence_kinds"]["runtime_witness"], 2);
+    assert_eq!(ledger["summary"]["evidence_kinds"]["source_trace"], 2);
     assert_eq!(ledger["summary"]["analyzer_discovered"], 0);
     assert_eq!(ledger["candidates"][0]["id"], "R4R2-S001");
     assert_eq!(ledger["candidates"][1]["id"], "R4R2-S002");
     assert_eq!(ledger["candidates"][0]["source"], "manual");
     assert_eq!(ledger["candidates"][0]["manual_candidate"], true);
     assert_eq!(ledger["candidates"][0]["analyzer_discovered"], false);
+    assert_eq!(ledger["candidates"][1]["source"], "manual");
+    assert_eq!(ledger["candidates"][1]["manual_candidate"], true);
+    assert_eq!(ledger["candidates"][1]["analyzer_discovered"], false);
     assert_eq!(
         ledger["candidates"][0]["location_text"],
         "src/runtime/webcore/TextDecoder.rs:237"
@@ -861,11 +1063,107 @@ fn manual_candidate_list_reports_imported_advisory_ledger() -> Result<(), Box<dy
         ledger["candidates"][0]["implementer_handoff"]["invariant_at_risk"],
         "&[u8] memory must not be concurrently mutated"
     );
+    assert_eq!(
+        ledger["candidates"][0]["proof_mode"]["kind"],
+        "mutation-plus-miri"
+    );
+    assert_eq!(
+        ledger["candidates"][0]["proof_mode"]["system_bun_expected"],
+        "nondiscriminating"
+    );
+    assert_eq!(
+        ledger["candidates"][0]["fix_boundary"],
+        "Snapshot shared/growable/resizable bytes before Rust receives &[u8]"
+    );
+    assert!(
+        ledger["candidates"][0]["pr_aperture"]
+            .as_str()
+            .unwrap_or("")
+            .contains("do not patch S3")
+    );
+    assert_eq!(
+        ledger["candidates"][0]["implementer_handoff"]["proof_mode"]["kind"],
+        "mutation-plus-miri"
+    );
+    assert_eq!(
+        ledger["candidates"][0]["implementer_handoff"]["fix_boundary"],
+        ledger["candidates"][0]["fix_boundary"]
+    );
+    assert_eq!(
+        ledger["candidates"][0]["implementer_handoff"]["pr_aperture"],
+        ledger["candidates"][0]["pr_aperture"]
+    );
     assert!(
         ledger["candidates"][0]["implementer_handoff"]["stop_condition"]
             .as_str()
             .unwrap_or("")
             .contains("stop before source edits")
+    );
+    assert_eq!(
+        ledger["candidates"][1]["location_text"],
+        "src/sql_jsc/mysql/MySQLValue.rs:411"
+    );
+    assert_eq!(
+        ledger["candidates"][1]["implementer_handoff"]["target"]["location_text"],
+        "src/sql_jsc/mysql/MySQLValue.rs:411"
+    );
+    assert_eq!(
+        ledger["candidates"][1]["implementer_handoff"]["route"]["safe_caller"],
+        "Bun.SQL MySQL prepared statement binding a SharedArrayBuffer-backed Uint8Array as a BLOB parameter"
+    );
+    assert_eq!(
+        ledger["candidates"][1]["implementer_handoff"]["route"]["unsafe_operation"],
+        "JSC__JSValue__borrowBytesForOffThread -> core::slice::from_raw_parts -> Data::Temporary(RawSlice)"
+    );
+    assert_eq!(
+        ledger["candidates"][1]["implementer_handoff"]["invariant_at_risk"],
+        "MySQL packet construction must not borrow mutable or shared JS backing storage through a temporary raw slice"
+    );
+    assert!(
+        ledger["candidates"][1]["fix_options"][0]
+            .as_str()
+            .unwrap_or("")
+            .contains("stable BufferSource copy helper")
+    );
+    assert_eq!(
+        ledger["candidates"][1]["test_targets"][0],
+        "test/js/sql/sql-mysql-bind-blob-borrow.test.ts"
+    );
+    assert!(
+        ledger["candidates"][1]["do_not_touch"][1]
+            .as_str()
+            .unwrap_or("")
+            .contains("Postgres bytea parity")
+    );
+    assert!(
+        ledger["candidates"][1]["implementer_handoff"]["fix_options"][1]
+            .as_str()
+            .unwrap_or("")
+            .contains("owned or stable bytes")
+    );
+    assert_eq!(
+        ledger["candidates"][1]["implementer_handoff"]["test_targets"][1],
+        "bun target/unsafe-scout-mysql/mysql-blob-sab-matrix.js"
+    );
+    assert!(
+        ledger["candidates"][1]["implementer_handoff"]["do_not_touch"][0]
+            .as_str()
+            .unwrap_or("")
+            .contains("unrelated MySQL protocol packet")
+    );
+    assert_eq!(
+        ledger["candidates"][1]["evidence"][0]["kind"],
+        "source_trace"
+    );
+    assert_eq!(
+        ledger["candidates"][1]["evidence"][1]["command"],
+        "bun target/unsafe-scout-mysql/mysql-blob-sab-matrix.js"
+    );
+    assert!(
+        ledger["candidates"][1]["evidence"][2]["limitation"]
+            .as_str()
+            .unwrap_or("")
+            .contains("does not prove the Bun site executed under Miri")
     );
     assert!(
         ledger["candidates"][0]["explain_command"]
@@ -897,6 +1195,30 @@ fn manual_candidate_list_reports_imported_advisory_ledger() -> Result<(), Box<dy
             .unwrap_or("")
             .contains("not automatic repair tasks")
     );
+    assert_eq!(
+        ledger["reviewcard_artifact_applicability"]["cards.sarif"]["decision"],
+        "reviewcard_only"
+    );
+    assert_eq!(
+        ledger["reviewcard_artifact_applicability"]["comment-plan.json"]["applies_to_manual_candidates"],
+        false
+    );
+    assert_eq!(
+        ledger["reviewcard_artifact_applicability"]["policy-report.json"]["manual_candidate_markers_allowed"],
+        false
+    );
+    assert_eq!(
+        ledger["reviewcard_artifact_applicability"]["policy-report.json"]["decision"],
+        "reviewcard_only"
+    );
+    assert_eq!(
+        ledger["reviewcard_artifact_applicability"]["policy-report.md"]["manual_candidate_markers_allowed"],
+        false
+    );
+    assert_eq!(
+        ledger["reviewcard_artifact_applicability"]["policy-report.md"]["decision"],
+        "reviewcard_only"
+    );
     assert!(
         ledger["trust_boundary"]
             .as_str()
@@ -919,13 +1241,17 @@ fn manual_candidate_list_reports_imported_advisory_ledger() -> Result<(), Box<dy
     let markdown = stdout_text(&markdown)?;
     assert!(markdown.contains("# unsafe-review manual candidate list"));
     assert!(markdown.contains("Manual candidates: `2`"));
+    assert!(
+        markdown.contains("Operation families: `raw_pointer_read: 1, slice_from_raw_parts: 1`")
+    );
+    assert!(markdown.contains("Evidence kinds: `model: 2, runtime_witness: 2, source_trace: 2`"));
     assert!(markdown.contains("Analyzer-discovered: `0`"));
     assert!(markdown.contains("### `R4R2-S001`"));
     assert!(markdown.contains("Location: `src/runtime/webcore/TextDecoder.rs:237`"));
     assert!(markdown.contains("#### Implementer Handoff"));
     assert!(markdown.contains("Route: `new TextDecoder().decode"));
     assert!(markdown.contains("Invariant at risk: &[u8] memory must not be concurrently mutated"));
-    assert!(markdown.contains("Evidence packet: `2` external reference(s)"));
+    assert!(markdown.contains("Evidence packet: `3` external reference(s)"));
     assert!(
         markdown.contains(
             "`runtime_witness` at `target/unsafe-scout/textdecoder-shared-race-route.out`"
@@ -958,6 +1284,27 @@ fn manual_candidate_list_reports_imported_advisory_ledger() -> Result<(), Box<dy
     assert!(markdown.contains("ReviewCard-only repair queue"));
     assert!(markdown.contains("not analyzer-discovered ReviewCards"));
     assert!(markdown.contains("did not run witnesses"));
+    assert!(markdown.contains("### `R4R2-S002`"));
+    assert!(markdown.contains("Location: `src/sql_jsc/mysql/MySQLValue.rs:411`"));
+    assert!(markdown.contains("Route: `Bun.SQL MySQL prepared statement"));
+    assert!(
+        markdown.contains(
+            "JSC__JSValue__borrowBytesForOffThread -> core::slice::from_raw_parts -> Data::Temporary(RawSlice)"
+        )
+    );
+    assert!(markdown.contains("Evidence packet: `3` external reference(s)"));
+    assert!(markdown.contains("Fix options:"));
+    assert!(markdown.contains("owned or stable bytes before storing Data::Temporary"));
+    assert!(markdown.contains("Test targets:"));
+    assert!(markdown.contains("test/js/sql/sql-mysql-bind-blob-borrow.test.ts"));
+    assert!(markdown.contains("Do not touch:"));
+    assert!(markdown.contains("Postgres bytea parity"));
+    assert!(markdown.contains("`source_trace` at `src/sql_jsc/mysql/MySQLValue.rs`"));
+    assert!(markdown.contains(
+        "Bun.SQL MySQL BLOB matrix covers SharedArrayBuffer-backed typed-array parameters"
+    ));
+    assert!(markdown.contains("Command: `bun target/unsafe-scout-mysql/mysql-blob-sab-matrix.js`"));
+    assert!(markdown.contains("does not prove the Bun site executed under Miri"));
 
     let out = temp.path().join("manual-candidates-list.json");
     let wrote = run_success([
@@ -972,8 +1319,106 @@ fn manual_candidate_list_reports_imported_advisory_ledger() -> Result<(), Box<dy
     ])?;
     assert_eq!(stdout_text(&wrote)?.trim(), "");
     assert_eq!(
-        parse_json(&fs::read_to_string(out)?)?["summary"]["manual_candidates"],
+        parse_json(&fs::read_to_string(&out)?)?["summary"]["manual_candidates"],
         2
+    );
+
+    let empty_snapshot = temp.path().join("empty-snapshot.json");
+    fs::write(&empty_snapshot, empty_review_card_snapshot_json())?;
+    let outcome = run_success([
+        os("outcome"),
+        os("--before"),
+        empty_snapshot.as_os_str().to_os_string(),
+        os("--after"),
+        out.as_os_str().to_os_string(),
+        os("--format"),
+        os("json"),
+    ])?;
+    let outcome = parse_json(&stdout_text(&outcome)?)?;
+    assert_eq!(outcome["after"]["schema_version"], "manual-candidates/v1");
+    assert_eq!(outcome["after"]["source"], "candidate_list");
+    assert_eq!(outcome["after"]["cards"], 2);
+    assert_eq!(outcome["summary"]["new"], 2);
+    assert_eq!(outcome["cards"]["new"][0]["card_id"], "R4R2-S001");
+    assert_eq!(outcome["cards"]["new"][1]["card_id"], "R4R2-S002");
+    assert_eq!(outcome["cards"]["new"][0]["after"]["source"], "manual");
+    assert_eq!(
+        outcome["cards"]["new"][0]["after"]["manual_candidate"],
+        true
+    );
+    assert_eq!(
+        outcome["cards"]["new"][0]["after"]["analyzer_discovered"],
+        false
+    );
+    assert_eq!(
+        outcome["cards"]["new"][0]["after"]["safe_caller"],
+        "new TextDecoder().decode(new Uint8Array(new SharedArrayBuffer(...)))"
+    );
+    assert_eq!(
+        outcome["cards"]["new"][0]["after"]["invariant"],
+        "&[u8] memory must not be concurrently mutated"
+    );
+    assert_eq!(
+        outcome["cards"]["new"][0]["after"]["evidence"][1]["command"],
+        "bun test test/js/webcore/textdecoder-sharedarraybuffer.test.ts"
+    );
+    assert!(
+        outcome["cards"]["new"][0]["after"]["fix_options"][0]
+            .as_str()
+            .unwrap_or("")
+            .contains("Copy SharedArrayBuffer-backed bytes")
+    );
+    assert_eq!(
+        outcome["cards"]["new"][0]["after"]["test_targets"][0],
+        "test/js/webcore/textdecoder-sharedarraybuffer.test.ts"
+    );
+    assert!(
+        outcome["cards"]["new"][0]["after"]["do_not_touch"][0]
+            .as_str()
+            .unwrap_or("")
+            .contains("Do not rewrite unrelated TextDecoder")
+    );
+    assert_eq!(
+        outcome["cards"]["new"][1]["after"]["safe_caller"],
+        "Bun.SQL MySQL prepared statement binding a SharedArrayBuffer-backed Uint8Array as a BLOB parameter"
+    );
+    assert!(
+        outcome["cards"]["new"][1]["after"]["invariant"]
+            .as_str()
+            .unwrap_or("")
+            .contains("MySQL packet construction")
+    );
+    assert_eq!(
+        outcome["cards"]["new"][1]["after"]["evidence"][1]["command"],
+        "bun target/unsafe-scout-mysql/mysql-blob-sab-matrix.js"
+    );
+    assert!(
+        outcome["cards"]["new"][1]["after"]["evidence"][2]["limitation"]
+            .as_str()
+            .unwrap_or("")
+            .contains("does not prove the Bun site executed under Miri")
+    );
+    assert!(
+        outcome["cards"]["new"][1]["after"]["fix_options"][0]
+            .as_str()
+            .unwrap_or("")
+            .contains("stable BufferSource copy helper")
+    );
+    assert_eq!(
+        outcome["cards"]["new"][1]["after"]["test_targets"][1],
+        "bun target/unsafe-scout-mysql/mysql-blob-sab-matrix.js"
+    );
+    assert!(
+        outcome["cards"]["new"][1]["after"]["do_not_touch"][1]
+            .as_str()
+            .unwrap_or("")
+            .contains("Postgres bytea parity")
+    );
+    assert!(
+        outcome["cards"]["new"][0]["reason"]
+            .as_str()
+            .unwrap_or("")
+            .contains("new manual candidate")
     );
 
     Ok(())
@@ -1073,6 +1518,85 @@ fn manual_candidate_receipts_audit_as_manual_advisory_targets() -> Result<(), Bo
             .unwrap_or("")
             .contains("not analyzer-discovered")
     );
+    assert_eq!(
+        receipt["matched_manual_candidate"]["safe_caller"],
+        "new TextDecoder().decode(new Uint8Array(new SharedArrayBuffer(...)))"
+    );
+    assert_eq!(
+        receipt["matched_manual_candidate"]["invariant"],
+        "&[u8] memory must not be concurrently mutated"
+    );
+    assert_eq!(
+        receipt["matched_manual_candidate"]["oracle_map"]["oracle_language"],
+        "typescript"
+    );
+    assert_eq!(
+        receipt["matched_manual_candidate"]["oracle_map"]["oracle_path"],
+        "test/js/webcore/textdecoder-sharedarraybuffer.test.ts"
+    );
+    assert!(
+        receipt["matched_manual_candidate"]["oracle_map"]["limitation"]
+            .as_str()
+            .unwrap_or("")
+            .contains("site-execution proof")
+    );
+    assert_eq!(
+        receipt["matched_manual_candidate"]["evidence"][1]["command"],
+        "bun test test/js/webcore/textdecoder-sharedarraybuffer.test.ts"
+    );
+    assert!(
+        receipt["matched_manual_candidate"]["evidence"][1]["limitation"]
+            .as_str()
+            .unwrap_or("")
+            .contains("not memory-safety proof")
+    );
+    assert!(
+        receipt["matched_manual_candidate"]["fix_options"][0]
+            .as_str()
+            .unwrap_or("")
+            .contains("Copy SharedArrayBuffer-backed bytes")
+    );
+    assert_eq!(
+        receipt["matched_manual_candidate"]["test_targets"][0],
+        "test/js/webcore/textdecoder-sharedarraybuffer.test.ts"
+    );
+    assert!(
+        receipt["matched_manual_candidate"]["do_not_touch"][0]
+            .as_str()
+            .unwrap_or("")
+            .contains("unrelated TextDecoder")
+    );
+
+    let audit_markdown = run_success([
+        os("receipt"),
+        os("audit"),
+        os("--root"),
+        temp.path().as_os_str().to_os_string(),
+        os("--diff"),
+        temp.path().join("change.diff").into_os_string(),
+        os("--format"),
+        os("markdown"),
+    ])?;
+    let audit_markdown = stdout_text(&audit_markdown)?;
+    assert!(audit_markdown.contains("manual_candidate, matched"));
+    assert!(audit_markdown.contains("route: new TextDecoder().decode"));
+    assert!(audit_markdown.contains("invariant: &[u8] memory must not be concurrently mutated"));
+    assert!(audit_markdown.contains("oracle: `typescript`"));
+    assert!(audit_markdown.contains("site-execution proof"));
+    assert!(audit_markdown.contains("first fix: Copy SharedArrayBuffer-backed bytes"));
+    assert!(
+        audit_markdown
+            .contains("first test: `test/js/webcore/textdecoder-sharedarraybuffer.test.ts`")
+    );
+    assert!(
+        audit_markdown
+            .contains("first do-not-touch: Do not rewrite unrelated TextDecoder encoding paths")
+    );
+    assert!(
+        audit_markdown
+            .contains("source trace only; does not prove the safe JS route reaches this site")
+    );
+    assert!(!audit_markdown.contains("imports_witness_evidence"));
 
     Ok(())
 }
@@ -1088,6 +1612,10 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
     fs::write(
         candidate_dir.join("R4R2-S001.json"),
         manual_candidate_json(),
+    )?;
+    fs::write(
+        candidate_dir.join("R4R2-S002.json"),
+        mysql_manual_candidate_json(),
     )?;
     let out_dir = temp.path().join("unsafe-review");
 
@@ -1114,11 +1642,28 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
     assert!(stdout.contains("copy-only; unsafe-review did not run an agent"));
     assert!(stdout.contains("Manual candidates:"));
     assert!(stdout.contains("manual-candidates.json"));
-    assert!(stdout.contains("Count: 1"));
+    assert!(stdout.contains("Count: 2"));
+    assert!(stdout.contains("Operation families: raw_pointer_read: 1, slice_from_raw_parts: 1"));
+    assert!(stdout.contains("Evidence kinds: model: 2, runtime_witness: 2, source_trace: 2"));
     assert!(stdout.contains("First manual candidate: R4R2-S001"));
+    assert!(stdout.contains("Guidance: 1 fix option(s), 1 test target(s), 1 do-not-touch note(s)"));
+    assert!(
+        stdout.contains("First test target: test/js/webcore/textdecoder-sharedarraybuffer.test.ts")
+    );
+    assert!(stdout.contains("Manual candidate queue preview: first 2 of 2 manual candidate(s)"));
+    assert!(stdout.contains(
+        "R4R2-S002 at src/sql_jsc/mysql/MySQLValue.rs:411 (slice_from_raw_parts) evidence refs: 3"
+    ));
+    assert!(stdout.contains("proof mode: mutation-plus-miri"));
     assert!(stdout.contains("unsafe-review explain --root"));
     assert!(stdout.contains("unsafe-review context --root"));
     assert!(stdout.contains("unsafe-review candidate witness-plan --root"));
+    assert!(stdout.contains("Review-kit candidate queue: first 2 of 2 manual candidate(s)"));
+    assert!(stdout.contains("Manual repair queue:"));
+    assert!(stdout.contains("manual-repair-queue.json"));
+    assert!(stdout.contains("Tokmd packet export:"));
+    assert!(stdout.contains("tokmd-packets.json"));
+    assert!(stdout.contains("formatting input only; tokmd was not run"));
     assert!(stdout.contains("manual candidates are advisory manual targets"));
     assert!(stdout.contains("not analyzer-discovered"));
     assert!(stdout.contains("not policy inputs"));
@@ -1131,6 +1676,22 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
     assert!(stdout.contains("`raw_pointer_read`"));
     assert!(stdout.contains("Class: `guard_missing`"));
     assert!(stdout.contains("Route: `miri`"));
+    assert!(stdout.contains("Hypothesis: static `guard_missing` ReviewCard"));
+    assert!(
+        stdout.contains(
+            "Build/run this first: Build/run `cargo +nightly miri test read_header` first"
+        )
+    );
+    assert!(stdout.contains("Minimal repro cue:"));
+    assert!(stdout.contains("Confirm ReviewCard `"));
+    assert!(
+        stdout
+            .contains("Limitation: Minimal repro cue only; unsafe-review did not run this command")
+    );
+    assert!(
+        stdout
+            .contains("Confirmation step: build/run `cargo +nightly miri test read_header` first")
+    );
     assert!(stdout.contains("Explain top card:"));
     assert!(stdout.contains("Agent packet:"));
     assert!(stdout.contains("Artifacts:"));
@@ -1143,6 +1704,8 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
     assert!(stdout.contains("witness-plan.md"));
     assert!(stdout.contains("receipt-audit.md"));
     assert!(stdout.contains("manual-candidates.json"));
+    assert!(stdout.contains("manual-repair-queue.json"));
+    assert!(stdout.contains("tokmd-packets.json"));
     assert!(stdout.contains("lsp.json"));
     assert!(stdout.contains("repair-queue.json"));
     assert!(stdout.contains("Trust boundary:"));
@@ -1150,6 +1713,8 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
     assert!(stdout.contains("not memory-safety proof"));
     assert!(stdout.contains("not UB-free status"));
     assert!(stdout.contains("not Miri-clean status"));
+    assert!(stdout.contains("not a site-execution claim"));
+    assert!(stdout.contains("matching witness receipt"));
     assert!(stdout.contains("did not run witnesses"));
     assert!(stdout.contains("post comments"));
     assert!(stdout.contains("enforce blocking policy"));
@@ -1166,7 +1731,7 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
         cards["trust_boundary"]
             .as_str()
             .unwrap_or("")
-            .contains("not a proof of memory safety")
+            .contains("not memory-safety proof")
     );
     let card_id = json_str(&cards["cards"][0]["id"], "cards[0].id")?;
     assert!(stdout.contains("unsafe-review explain --root"));
@@ -1181,6 +1746,9 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
     assert_eq!(review_kit["source"], "first_pr");
     assert_eq!(review_kit["policy"], "advisory");
     assert_eq!(review_kit["scope"], "diff");
+    assert_eq!(review_kit["summary"]["changed_files"], 1);
+    assert_eq!(review_kit["summary"]["changed_rust_files"], 1);
+    assert_eq!(review_kit["summary"]["changed_non_rust_files"], 0);
     assert_eq!(review_kit["summary"]["cards"], 1);
     assert_eq!(review_kit["summary"]["open_actionable_gaps"], 1);
     assert_eq!(review_kit["top_card_id"], card_id);
@@ -1216,6 +1784,174 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
             .unwrap_or("")
             .contains("--json")
     );
+    assert_eq!(
+        review_kit["handoff"]["review_cards"]["artifact"],
+        "cards.json"
+    );
+    assert_eq!(
+        review_kit["handoff"]["review_cards"]["repair_queue_artifact"],
+        "repair-queue.json"
+    );
+    assert_eq!(review_kit["handoff"]["review_cards"]["review_cards"], 1);
+    assert_eq!(review_kit["handoff"]["review_cards"]["card_queue_limit"], 5);
+    assert_eq!(review_kit["handoff"]["review_cards"]["omitted_cards"], 0);
+    let card_queue = json_array(
+        &review_kit["handoff"]["review_cards"]["card_queue"],
+        "review_kit.handoff.review_cards.card_queue",
+    )?;
+    assert_eq!(card_queue.len(), 1);
+    assert_eq!(card_queue[0]["card_id"], card_id);
+    assert_eq!(card_queue[0]["source"], "review_card");
+    assert_eq!(card_queue[0]["class"], cards["cards"][0]["class"]);
+    assert_eq!(card_queue[0]["priority"], cards["cards"][0]["priority"]);
+    assert_eq!(card_queue[0]["confidence"], cards["cards"][0]["confidence"]);
+    assert_eq!(card_queue[0]["path"], cards["cards"][0]["site"]["file"]);
+    assert_eq!(card_queue[0]["line"], cards["cards"][0]["site"]["line"]);
+    assert_eq!(
+        card_queue[0]["operation_family"],
+        cards["cards"][0]["operation_family"]
+    );
+    assert_eq!(card_queue[0]["operation"], cards["cards"][0]["operation"]);
+    assert_eq!(
+        card_queue[0]["missing_evidence"],
+        cards["cards"][0]["missing"]
+    );
+    assert_eq!(
+        card_queue[0]["next_action"],
+        cards["cards"][0]["next_action"]
+    );
+    assert_eq!(
+        card_queue[0]["verify_commands"],
+        cards["cards"][0]["verify_commands"]
+    );
+    assert_eq!(
+        card_queue[0]["witness_routes"],
+        cards["cards"][0]["witness_routes"]
+    );
+    assert_eq!(card_queue[0]["witness_routes"][0]["kind"], "miri");
+    assert_eq!(
+        card_queue[0]["repair_queue_buckets"][0],
+        "repairable_by_guard"
+    );
+    assert_eq!(
+        card_queue[0]["repair_queue_buckets"][1],
+        "requires_witness_receipt"
+    );
+    assert_eq!(
+        card_queue[0]["repair_queue_bucket_reasons"][0],
+        "guard_evidence_missing"
+    );
+    assert_eq!(
+        card_queue[0]["repair_queue_bucket_reasons"][1],
+        "witness_receipt_missing"
+    );
+    assert_eq!(card_queue[0]["agent_readiness"]["state"], "ready_for_agent");
+    assert!(
+        card_queue[0]["explain"]
+            .as_str()
+            .unwrap_or("")
+            .contains(card_id)
+    );
+    assert!(
+        card_queue[0]["context_json"]
+            .as_str()
+            .unwrap_or("")
+            .contains("--json")
+    );
+    assert!(
+        review_kit["handoff"]["review_cards"]["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("repair-queue.json")
+    );
+    assert_eq!(
+        review_kit["handoff"]["repair_queues"]["review_card"]["artifact"],
+        "repair-queue.json"
+    );
+    assert_eq!(
+        review_kit["handoff"]["repair_queues"]["review_card"]["source"],
+        "review_card"
+    );
+    assert_eq!(
+        review_kit["handoff"]["repair_queues"]["review_card"]["cards"],
+        1
+    );
+    assert_eq!(
+        review_kit["handoff"]["repair_queues"]["review_card"]["unique_repair_queue_cards"],
+        1
+    );
+    assert_eq!(
+        review_kit["handoff"]["repair_queues"]["review_card"]["agent_ready_cards"],
+        1
+    );
+    assert_eq!(
+        review_kit["handoff"]["repair_queues"]["review_card"]["bucket_counts"]["repairable_by_guard"],
+        1
+    );
+    assert_eq!(
+        review_kit["handoff"]["repair_queues"]["review_card"]["bucket_counts"]["requires_witness_receipt"],
+        1
+    );
+    assert_eq!(
+        review_kit["handoff"]["repair_queues"]["review_card"]["bucket_counts"]["do_not_auto_repair"],
+        0
+    );
+    assert_eq!(
+        review_kit["handoff"]["repair_queues"]["manual_candidate"]["artifact"],
+        "manual-repair-queue.json"
+    );
+    assert_eq!(
+        review_kit["handoff"]["repair_queues"]["manual_candidate"]["source"],
+        "manual_candidate"
+    );
+    assert_eq!(
+        review_kit["handoff"]["repair_queues"]["manual_candidate"]["manual_candidates"],
+        2
+    );
+    assert_eq!(
+        review_kit["handoff"]["repair_queues"]["manual_candidate"]["queued_candidates"],
+        2
+    );
+    assert_eq!(
+        review_kit["handoff"]["repair_queues"]["manual_candidate"]["bucket"],
+        "manual_candidate_handoff"
+    );
+    assert_eq!(
+        review_kit["handoff"]["repair_queues"]["manual_candidate"]["bucket_reason"],
+        "manual_candidate_copy_only"
+    );
+    assert_eq!(
+        review_kit["handoff"]["repair_queues"]["manual_candidate"]["agent_handoff_state"],
+        "copy_ready"
+    );
+    assert_eq!(
+        review_kit["handoff"]["repair_queues"]["manual_candidate"]["automatic"],
+        false
+    );
+    assert!(
+        review_kit["handoff"]["repair_queues"]["separation"]
+            .as_str()
+            .unwrap_or("")
+            .contains("stay separate source ledgers")
+    );
+    assert!(
+        review_kit["handoff"]["repair_queues"]["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("does not merge manual candidates into ReviewCard repair-queue.json")
+    );
+    assert!(
+        review_kit["handoff"]["repair_queues"]["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("does not run agents")
+    );
+    assert!(
+        review_kit["handoff"]["repair_queues"]["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("is not proof, repair success, or policy readiness")
+    );
     assert!(
         review_kit["handoff"]["receipt_audit_markdown"]
             .as_str()
@@ -1233,12 +1969,106 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
         "manual-candidates.json"
     );
     assert_eq!(
+        review_kit["handoff"]["manual_candidates"]["manual_repair_queue_artifact"],
+        "manual-repair-queue.json"
+    );
+    assert_eq!(
         review_kit["handoff"]["manual_candidates"]["manual_candidates"],
-        1
+        2
     );
     assert_eq!(
         review_kit["handoff"]["manual_candidates"]["analyzer_discovered"],
         0
+    );
+    assert_eq!(
+        review_kit["handoff"]["manual_candidates"]["operation_families"]["raw_pointer_read"],
+        1
+    );
+    assert_eq!(
+        review_kit["handoff"]["manual_candidates"]["operation_families"]["slice_from_raw_parts"],
+        1
+    );
+    assert_eq!(
+        review_kit["handoff"]["manual_candidates"]["evidence_kinds"]["model"],
+        2
+    );
+    assert_eq!(
+        review_kit["handoff"]["manual_candidates"]["evidence_kinds"]["runtime_witness"],
+        2
+    );
+    assert_eq!(
+        review_kit["handoff"]["manual_candidates"]["evidence_kinds"]["source_trace"],
+        2
+    );
+    assert_eq!(
+        review_kit["handoff"]["manual_candidates"]["proof_modes"]["mutation-plus-miri"],
+        2
+    );
+    assert_eq!(
+        review_kit["handoff"]["manual_candidates"]["stable_byte_source_classes"]["stable-byte-source-sab-race"],
+        2
+    );
+    assert_eq!(
+        review_kit["handoff"]["manual_candidates"]["ledger_states"]["handoff-ready"],
+        2
+    );
+    assert_eq!(
+        review_kit["handoff"]["manual_candidates"]["with_fix_options"],
+        2
+    );
+    assert_eq!(
+        review_kit["handoff"]["manual_candidates"]["with_test_targets"],
+        2
+    );
+    assert_eq!(
+        review_kit["handoff"]["manual_candidates"]["with_do_not_touch"],
+        2
+    );
+    assert_eq!(
+        review_kit["handoff"]["manual_candidates"]["with_oracle_map"],
+        2
+    );
+    assert_eq!(
+        review_kit["handoff"]["manual_candidates"]["with_proof_mode"],
+        2
+    );
+    assert_eq!(
+        review_kit["handoff"]["manual_candidates"]["with_fix_boundary"],
+        2
+    );
+    assert_eq!(
+        review_kit["handoff"]["manual_candidates"]["with_pr_aperture"],
+        2
+    );
+    assert_eq!(
+        review_kit["handoff"]["manual_candidates"]["reviewcard_artifact_applicability"]["cards.sarif"]
+            ["decision"],
+        "reviewcard_only"
+    );
+    assert_eq!(
+        review_kit["handoff"]["manual_candidates"]["reviewcard_artifact_applicability"]["comment-plan.json"]
+            ["applies_to_manual_candidates"],
+        false
+    );
+    assert_eq!(
+        review_kit["handoff"]["manual_candidates"]["reviewcard_artifact_applicability"]["policy-report.json"]
+            ["manual_candidate_markers_allowed"],
+        false
+    );
+    assert_eq!(
+        review_kit["handoff"]["manual_candidates"]["reviewcard_artifact_applicability"]["policy-report.json"]
+            ["decision"],
+        "reviewcard_only"
+    );
+    assert_eq!(
+        review_kit["handoff"]["manual_candidates"]["reviewcard_artifact_applicability"]["policy-report.md"]
+            ["manual_candidate_markers_allowed"],
+        false
+    );
+    assert_eq!(
+        review_kit["handoff"]["manual_candidates"]["reviewcard_artifact_applicability"]["policy-report.md"]
+            ["decision"],
+        "reviewcard_only"
     );
     assert_eq!(
         review_kit["handoff"]["manual_candidates"]["first_candidate"]["id"],
@@ -1295,6 +2125,81 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
             .unwrap_or("")
             .contains("unsafe-review candidate witness-plan --root")
     );
+    assert_eq!(
+        review_kit["handoff"]["manual_candidates"]["candidate_queue_limit"],
+        5
+    );
+    assert_eq!(
+        review_kit["handoff"]["manual_candidates"]["omitted_candidates"],
+        0
+    );
+    let candidate_queue = json_array(
+        &review_kit["handoff"]["manual_candidates"]["candidate_queue"],
+        "review_kit.handoff.manual_candidates.candidate_queue",
+    )?;
+    assert_eq!(candidate_queue.len(), 2);
+    assert_eq!(candidate_queue[0]["id"], "R4R2-S001");
+    assert_eq!(candidate_queue[1]["id"], "R4R2-S002");
+    assert_eq!(candidate_queue[0]["source"], "manual");
+    assert_eq!(candidate_queue[0]["manual_candidate"], true);
+    assert_eq!(candidate_queue[0]["analyzer_discovered"], false);
+    assert_eq!(
+        candidate_queue[0]["location_text"],
+        "src/runtime/webcore/TextDecoder.rs:237"
+    );
+    assert_eq!(candidate_queue[0]["operation_family"], "raw_pointer_read");
+    assert_eq!(candidate_queue[0]["evidence_refs"], 3);
+    assert_eq!(
+        candidate_queue[0]["implementer_handoff"]["route"]["safe_caller"],
+        "new TextDecoder().decode(new Uint8Array(new SharedArrayBuffer(...)))"
+    );
+    assert_eq!(
+        candidate_queue[0]["implementer_handoff"]["route"]["unsafe_operation"],
+        "core::slice::from_raw_parts"
+    );
+    assert_eq!(
+        candidate_queue[1]["location_text"],
+        "src/sql_jsc/mysql/MySQLValue.rs:411"
+    );
+    assert_eq!(
+        candidate_queue[1]["operation_family"],
+        "slice_from_raw_parts"
+    );
+    assert_eq!(candidate_queue[1]["evidence_refs"], 3);
+    assert!(
+        candidate_queue[1]["implementer_handoff"]["fix_options"][0]
+            .as_str()
+            .unwrap_or("")
+            .contains("stable BufferSource copy helper")
+    );
+    assert_eq!(
+        candidate_queue[1]["implementer_handoff"]["test_targets"][2],
+        "cargo +nightly miri test mysql_rawslice_shared_bytes_model"
+    );
+    assert!(
+        candidate_queue[1]["implementer_handoff"]["do_not_touch"][2]
+            .as_str()
+            .unwrap_or("")
+            .contains("manual/advisory marker")
+    );
+    assert!(
+        candidate_queue[0]["explain"]
+            .as_str()
+            .unwrap_or("")
+            .contains("R4R2-S001")
+    );
+    assert!(
+        candidate_queue[1]["context_json"]
+            .as_str()
+            .unwrap_or("")
+            .contains("R4R2-S002")
+    );
+    assert!(
+        candidate_queue[1]["witness_plan"]
+            .as_str()
+            .unwrap_or("")
+            .contains("R4R2-S002")
+    );
     assert!(
         review_kit["handoff"]["manual_candidates"]["trust_boundary"]
             .as_str()
@@ -1323,7 +2228,11 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
         "comment-plan.json",
         "witness-plan.md",
         "receipt-audit.md",
+        "policy-report.json",
+        "policy-report.md",
         "manual-candidates.json",
+        "manual-repair-queue.json",
+        "tokmd-packets.json",
         "lsp.json",
         "repair-queue.json",
     ] {
@@ -1346,9 +2255,17 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
         }
         match expected {
             "review-kit.json" | "cards.json" | "comment-plan.json" | "lsp.json"
-            | "repair-queue.json" => assert_eq!(entry["schema_version"], "0.1"),
+            | "repair-queue.json" | "policy-report.json" => {
+                assert_eq!(entry["schema_version"], "0.1")
+            }
             "manual-candidates.json" => {
                 assert_eq!(entry["schema_version"], "manual-candidates/v1")
+            }
+            "manual-repair-queue.json" => {
+                assert_eq!(entry["schema_version"], "manual-repair-queue/v1")
+            }
+            "tokmd-packets.json" => {
+                assert_eq!(entry["schema_version"], "tokmd-packets/v1")
             }
             "cards.sarif" => assert_eq!(entry["schema_version"], "2.1.0"),
             _ => assert!(entry["schema_version"].is_null()),
@@ -1370,6 +2287,7 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
     let summary = fs::read_to_string(out_dir.join("pr-summary.md"))?;
     assert!(summary.contains("# unsafe-review PR summary"));
     assert!(summary.contains("## Reviewer cockpit"));
+    assert!(summary.contains("- Diff scope: 1 file changed (1 Rust, 0 non-Rust)"));
     assert!(summary.contains(&format!("- Top card: `{card_id}`")));
     assert!(summary.contains("- Missing/weak evidence:"));
     assert!(summary.contains("- Next reviewer action:"));
@@ -1379,44 +2297,74 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
     assert!(summary.contains(&format!("unsafe-review explain {card_id}")));
     assert!(summary.contains(&format!("unsafe-review context {card_id} --json")));
     assert!(summary.contains("## Trust boundary"));
-    assert!(summary.contains("not a Miri result unless a witness receipt is attached"));
+    assert!(summary.contains("not a site-execution claim"));
+    assert_manual_candidate_front_panel(&summary, "## Card table", 2, false);
 
     let github_summary = fs::read_to_string(out_dir.join("github-summary.md"))?;
     assert!(github_summary.contains("## unsafe-review advisory summary"));
+    assert!(github_summary.contains("- Diff scope: 1 file changed (1 Rust, 0 non-Rust)"));
     assert!(github_summary.contains(&format!("- ID: `{card_id}`")));
     assert!(github_summary.contains(&format!("- Explain: `unsafe-review explain {card_id}`")));
     assert!(github_summary.contains(&format!(
         "- Agent context: `unsafe-review context {card_id} --json`"
     )));
+    assert!(github_summary.contains("- Agent handoff: `ready_for_agent`"));
+    assert!(github_summary.contains("bucket reasons: `guard_evidence_missing`"));
+    assert!(github_summary.contains("readiness reasons: specific operation family"));
     assert!(github_summary.contains("## Open next"));
     assert!(github_summary.contains("Review kit manifest: `review-kit.json`"));
     assert!(github_summary.contains("Full reviewer cockpit: `pr-summary.md`"));
     assert!(github_summary.contains("Agent repair queue: `repair-queue.json`"));
     assert!(github_summary.contains("Receipt audit: `receipt-audit.md`"));
+    assert!(github_summary.contains("Policy report: `policy-report.md`"));
     assert!(github_summary.contains("Manual candidate index: `manual-candidates.json`"));
+    assert!(github_summary.contains("Tokmd packets: `tokmd-packets.json`; tokmd not run"));
     assert!(github_summary.contains("`comment-plan.json` is plan-only"));
     assert!(github_summary.contains("Full advisory bundle"));
     assert!(github_summary.contains("review-kit.json"));
     assert!(github_summary.contains("github-summary.md"));
     assert!(github_summary.contains("receipt-audit.md"));
+    assert!(github_summary.contains("policy-report.json"));
+    assert!(github_summary.contains("policy-report.md"));
     assert!(github_summary.contains("manual-candidates.json"));
+    assert!(github_summary.contains("manual-repair-queue.json"));
+    assert!(github_summary.contains("tokmd-packets.json"));
     assert!(github_summary.contains("not memory-safety proof"));
-    assert!(github_summary.contains("not site-execution proof"));
+    assert!(github_summary.contains("not a site-execution claim"));
     assert!(github_summary.contains("unsafe-review did not run witnesses"));
     assert!(github_summary.contains("post comments"));
     assert!(github_summary.contains("edit source"));
     assert!(github_summary.contains("enforce blocking policy"));
     assert!(!github_summary.contains("# unsafe-review PR summary"));
     assert!(!github_summary.contains("## Card table"));
+    assert_manual_candidate_front_panel(&github_summary, "## Open next", 1, true);
 
     let manual_candidates =
         parse_json(&fs::read_to_string(out_dir.join("manual-candidates.json"))?)?;
     assert_eq!(manual_candidates["schema_version"], "manual-candidates/v1");
     assert_eq!(manual_candidates["mode"], "manual_candidate_index");
     assert_eq!(manual_candidates["source"], "first_pr");
-    assert_eq!(manual_candidates["summary"]["manual_candidates"], 1);
+    assert_eq!(manual_candidates["summary"]["manual_candidates"], 2);
+    assert_eq!(
+        manual_candidates["summary"]["operation_families"]["raw_pointer_read"],
+        1
+    );
+    assert_eq!(
+        manual_candidates["summary"]["operation_families"]["slice_from_raw_parts"],
+        1
+    );
+    assert_eq!(manual_candidates["summary"]["evidence_kinds"]["model"], 2);
+    assert_eq!(
+        manual_candidates["summary"]["evidence_kinds"]["runtime_witness"],
+        2
+    );
+    assert_eq!(
+        manual_candidates["summary"]["evidence_kinds"]["source_trace"],
+        2
+    );
     assert_eq!(manual_candidates["summary"]["analyzer_discovered"], 0);
     assert_eq!(manual_candidates["candidates"][0]["id"], "R4R2-S001");
+    assert_eq!(manual_candidates["candidates"][1]["id"], "R4R2-S002");
     assert_eq!(manual_candidates["candidates"][0]["source"], "manual");
     assert_eq!(manual_candidates["candidates"][0]["manual_candidate"], true);
     assert_eq!(
@@ -1432,11 +2380,11 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
         "src/runtime/webcore/TextDecoder.rs:237"
     );
     assert_eq!(
-        manual_candidates["candidates"][0]["evidence"][0]["command"],
+        manual_candidates["candidates"][0]["evidence"][1]["command"],
         "bun test test/js/webcore/textdecoder-sharedarraybuffer.test.ts"
     );
     assert!(
-        manual_candidates["candidates"][0]["evidence"][0]["limitation"]
+        manual_candidates["candidates"][0]["evidence"][1]["limitation"]
             .as_str()
             .unwrap_or("")
             .contains("runtime route evidence only")
@@ -1471,11 +2419,97 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
         manual_candidates["candidates"][0]["implementer_handoff"]["invariant_at_risk"],
         "&[u8] memory must not be concurrently mutated"
     );
+    assert_eq!(
+        manual_candidates["candidates"][0]["proof_mode"]["kind"],
+        "mutation-plus-miri"
+    );
+    assert_eq!(
+        manual_candidates["candidates"][0]["proof_mode"]["system_bun_expected"],
+        "nondiscriminating"
+    );
+    assert_eq!(
+        manual_candidates["candidates"][0]["stable_byte"]["class"],
+        "stable-byte-source-sab-race"
+    );
+    assert_eq!(
+        manual_candidates["candidates"][0]["stable_byte"]["proof_required"],
+        manual_candidates["candidates"][0]["proof_mode"]["kind"]
+    );
+    assert_eq!(
+        manual_candidates["candidates"][0]["stable_byte"]["ledger_state"],
+        "handoff-ready"
+    );
+    assert_eq!(
+        manual_candidates["candidates"][0]["oracle_map"]["oracle_language"],
+        "typescript"
+    );
+    assert_eq!(
+        manual_candidates["candidates"][0]["oracle_map"]["oracle_path"],
+        "test/js/webcore/textdecoder-sharedarraybuffer.test.ts"
+    );
+    assert!(
+        manual_candidates["candidates"][0]["oracle_map"]["limitation"]
+            .as_str()
+            .unwrap_or("")
+            .contains("not witness execution")
+    );
+    assert_eq!(
+        manual_candidates["candidates"][0]["fix_boundary"],
+        "Snapshot shared/growable/resizable bytes before Rust receives &[u8]"
+    );
+    assert!(
+        manual_candidates["candidates"][0]["pr_aperture"]
+            .as_str()
+            .unwrap_or("")
+            .contains("do not patch S3")
+    );
+    assert_eq!(
+        manual_candidates["candidates"][0]["implementer_handoff"]["proof_mode"]["kind"],
+        "mutation-plus-miri"
+    );
+    assert_eq!(
+        manual_candidates["candidates"][0]["implementer_handoff"]["stable_byte"],
+        manual_candidates["candidates"][0]["stable_byte"]
+    );
+    assert_eq!(
+        manual_candidates["candidates"][0]["implementer_handoff"]["oracle_map"],
+        manual_candidates["candidates"][0]["oracle_map"]
+    );
+    assert_eq!(
+        manual_candidates["candidates"][0]["implementer_handoff"]["fix_boundary"],
+        manual_candidates["candidates"][0]["fix_boundary"]
+    );
+    assert_eq!(
+        manual_candidates["candidates"][0]["implementer_handoff"]["pr_aperture"],
+        manual_candidates["candidates"][0]["pr_aperture"]
+    );
     assert!(
         manual_candidates["candidates"][0]["implementer_handoff"]["stop_condition"]
             .as_str()
             .unwrap_or("")
             .contains("stop before source edits")
+    );
+    assert!(
+        manual_candidates["candidates"][1]["fix_options"][2]
+            .as_str()
+            .unwrap_or("")
+            .contains("local to MySQL bind-value conversion")
+    );
+    assert_eq!(
+        manual_candidates["candidates"][1]["test_targets"][0],
+        "test/js/sql/sql-mysql-bind-blob-borrow.test.ts"
+    );
+    assert!(
+        manual_candidates["candidates"][1]["do_not_touch"][0]
+            .as_str()
+            .unwrap_or("")
+            .contains("unrelated MySQL protocol packet")
+    );
+    assert!(
+        manual_candidates["candidates"][1]["implementer_handoff"]["fix_options"][1]
+            .as_str()
+            .unwrap_or("")
+            .contains("owned or stable bytes")
     );
     assert!(
         manual_candidates["reviewcard_artifact_relationship"]["cards.json"]
@@ -1489,6 +2523,30 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
             .unwrap_or("")
             .contains("not selected")
     );
+    assert_eq!(
+        manual_candidates["reviewcard_artifact_applicability"]["cards.sarif"]["decision"],
+        "reviewcard_only"
+    );
+    assert_eq!(
+        manual_candidates["reviewcard_artifact_applicability"]["comment-plan.json"]["applies_to_manual_candidates"],
+        false
+    );
+    assert_eq!(
+        manual_candidates["reviewcard_artifact_applicability"]["policy-report.json"]["manual_candidate_markers_allowed"],
+        false
+    );
+    assert_eq!(
+        manual_candidates["reviewcard_artifact_applicability"]["policy-report.json"]["decision"],
+        "reviewcard_only"
+    );
+    assert_eq!(
+        manual_candidates["reviewcard_artifact_applicability"]["policy-report.md"]["manual_candidate_markers_allowed"],
+        false
+    );
+    assert_eq!(
+        manual_candidates["reviewcard_artifact_applicability"]["policy-report.md"]["decision"],
+        "reviewcard_only"
+    );
     assert!(
         manual_candidates["trust_boundary"]
             .as_str()
@@ -1500,6 +2558,404 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
             .as_str()
             .unwrap_or("")
             .contains("not policy gating")
+    );
+
+    let manual_repair_queue = parse_json(&fs::read_to_string(
+        out_dir.join("manual-repair-queue.json"),
+    )?)?;
+    assert_eq!(
+        manual_repair_queue["schema_version"],
+        "manual-repair-queue/v1"
+    );
+    assert_eq!(manual_repair_queue["mode"], "manual_candidate_repair_queue");
+    assert_eq!(manual_repair_queue["source"], "manual_candidate");
+    assert_eq!(manual_repair_queue["policy"], "advisory");
+    assert_eq!(manual_repair_queue["summary"]["manual_candidates"], 2);
+    assert_eq!(manual_repair_queue["summary"]["queued_candidates"], 2);
+    assert_eq!(manual_repair_queue["summary"]["analyzer_discovered"], 0);
+    assert_eq!(manual_repair_queue["summary"]["external_evidence_refs"], 6);
+    assert_eq!(
+        manual_repair_queue["summary"]["operation_families"]["raw_pointer_read"],
+        1
+    );
+    assert_eq!(
+        manual_repair_queue["summary"]["operation_families"]["slice_from_raw_parts"],
+        1
+    );
+    assert_eq!(
+        manual_repair_queue["summary"]["proof_modes"]["mutation-plus-miri"],
+        2
+    );
+    assert_eq!(
+        manual_repair_queue["summary"]["stable_byte_source_classes"]["stable-byte-source-sab-race"],
+        2
+    );
+    assert_eq!(
+        manual_repair_queue["summary"]["ledger_states"]["handoff-ready"],
+        2
+    );
+    assert_eq!(manual_repair_queue["summary"]["with_fix_options"], 2);
+    assert_eq!(manual_repair_queue["summary"]["with_test_targets"], 2);
+    assert_eq!(manual_repair_queue["summary"]["with_do_not_touch"], 2);
+    assert_eq!(manual_repair_queue["summary"]["with_oracle_map"], 2);
+    assert_eq!(manual_repair_queue["summary"]["with_proof_mode"], 2);
+    assert_eq!(manual_repair_queue["summary"]["with_fix_boundary"], 2);
+    assert_eq!(manual_repair_queue["summary"]["with_pr_aperture"], 2);
+    assert_eq!(manual_repair_queue["summary"]["with_stable_byte_seed"], 0);
+    assert_eq!(
+        manual_repair_queue["summary"]["stable_byte_seed_source"]["included"],
+        false
+    );
+    assert!(
+        manual_repair_queue["summary"]["stable_byte_seed_source"]["limitation"]
+            .as_str()
+            .unwrap_or("")
+            .contains("Root-local stable-byte seed ledger was absent")
+    );
+    assert_eq!(manual_repair_queue["queue"][0]["id"], "R4R2-S001");
+    assert_eq!(manual_repair_queue["queue"][0]["source"], "manual");
+    assert_eq!(manual_repair_queue["queue"][0]["manual_candidate"], true);
+    assert_eq!(
+        manual_repair_queue["queue"][0]["analyzer_discovered"],
+        false
+    );
+    assert_eq!(
+        manual_repair_queue["queue"][0]["location_text"],
+        "src/runtime/webcore/TextDecoder.rs:237"
+    );
+    assert_eq!(
+        manual_repair_queue["queue"][0]["safe_caller"],
+        "new TextDecoder().decode(new Uint8Array(new SharedArrayBuffer(...)))"
+    );
+    assert_eq!(
+        manual_repair_queue["queue"][0]["invariant_at_risk"],
+        "&[u8] memory must not be concurrently mutated"
+    );
+    assert_eq!(
+        manual_repair_queue["queue"][0]["proof_mode"],
+        manual_candidates["candidates"][0]["proof_mode"]
+    );
+    assert_eq!(
+        manual_repair_queue["queue"][0]["stable_byte"],
+        manual_candidates["candidates"][0]["stable_byte"]
+    );
+    assert_eq!(
+        manual_repair_queue["queue"][0]["oracle_map"],
+        manual_candidates["candidates"][0]["oracle_map"]
+    );
+    assert_eq!(
+        manual_repair_queue["queue"][0]["fix_boundary"],
+        manual_candidates["candidates"][0]["fix_boundary"]
+    );
+    assert_eq!(
+        manual_repair_queue["queue"][0]["pr_aperture"],
+        manual_candidates["candidates"][0]["pr_aperture"]
+    );
+    assert_eq!(
+        manual_repair_queue["queue"][0]["implementer_handoff"],
+        manual_candidates["candidates"][0]["implementer_handoff"]
+    );
+    assert!(
+        manual_repair_queue["queue"][0]
+            .get("stable_byte_seed")
+            .is_none()
+    );
+    assert_eq!(
+        manual_repair_queue["queue"][1]["id"],
+        manual_candidates["candidates"][1]["id"]
+    );
+    assert_eq!(
+        manual_repair_queue["queue"][1]["fix_options"],
+        manual_candidates["candidates"][1]["fix_options"]
+    );
+    assert_eq!(
+        manual_repair_queue["queue"][1]["test_targets"],
+        manual_candidates["candidates"][1]["test_targets"]
+    );
+    assert_eq!(
+        manual_repair_queue["queue"][1]["do_not_touch"],
+        manual_candidates["candidates"][1]["do_not_touch"]
+    );
+    assert_eq!(
+        manual_repair_queue["queue"][0]["bucket"],
+        "manual_candidate_handoff"
+    );
+    assert_eq!(
+        manual_repair_queue["queue"][0]["agent_handoff"]["state"],
+        "copy_ready"
+    );
+    assert_eq!(
+        manual_repair_queue["queue"][0]["agent_handoff"]["automatic"],
+        false
+    );
+    assert!(
+        manual_repair_queue["queue"][0]["agent_handoff"]["reasons"][1]
+            .as_str()
+            .unwrap_or("")
+            .contains("separate from ReviewCard repair-queue.json")
+    );
+    assert!(
+        manual_repair_queue["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("not an automatic repair queue")
+    );
+    assert!(
+        manual_repair_queue["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("did not run agents")
+    );
+
+    let tokmd_packets = parse_json(&fs::read_to_string(out_dir.join("tokmd-packets.json"))?)?;
+    assert_eq!(tokmd_packets["schema_version"], "tokmd-packets/v1");
+    assert_eq!(tokmd_packets["mode"], "tokmd_packet_bundle");
+    assert_eq!(tokmd_packets["source"], "first_pr");
+    assert_eq!(tokmd_packets["policy"], "advisory");
+    assert_eq!(tokmd_packets["renderer"]["tokmd_run"], false);
+    assert_eq!(
+        tokmd_packets["renderer"]["available_presets"][0],
+        "bun-ub-handoff"
+    );
+    assert_eq!(
+        tokmd_packets["renderer"]["available_presets"][4],
+        "bun-ub-next-pick"
+    );
+    assert!(
+        tokmd_packets["renderer"]["presets_status"]
+            .as_str()
+            .unwrap_or("")
+            .contains("did not render tokmd output")
+    );
+    assert_eq!(tokmd_packets["summary"]["manual_candidates"], 2);
+    assert_eq!(tokmd_packets["summary"]["packets"], 2);
+    assert_eq!(tokmd_packets["summary"]["analyzer_discovered"], 0);
+    assert_eq!(tokmd_packets["summary"]["external_evidence_refs"], 6);
+    assert_eq!(tokmd_packets["summary"]["with_proof_mode"], 2);
+    assert_eq!(tokmd_packets["summary"]["with_fix_boundary"], 2);
+    assert_eq!(tokmd_packets["summary"]["with_pr_aperture"], 2);
+    assert_eq!(tokmd_packets["summary"]["with_oracle_map"], 2);
+    assert_eq!(tokmd_packets["summary"]["with_stable_byte_source_class"], 2);
+    assert_eq!(
+        tokmd_packets["summary"]["operation_families"]["raw_pointer_read"],
+        1
+    );
+    assert_eq!(
+        tokmd_packets["inputs"]["manual-candidates.json"]["included"],
+        true
+    );
+    assert_eq!(tokmd_packets["inputs"]["cards.json"]["included"], false);
+    assert_eq!(
+        tokmd_packets["inputs"]["comment-plan.json"]["included"],
+        true
+    );
+    assert_eq!(
+        tokmd_packets["inputs"]["comment-plan.json"]["summary"]["selected_count"],
+        1
+    );
+    assert_eq!(
+        tokmd_packets["inputs"]["comment-plan.json"]["summary"]["not_selected_count"],
+        0
+    );
+    assert_eq!(
+        tokmd_packets["inputs"]["comment-plan.json"]["summary"]["budget"],
+        3
+    );
+    assert_eq!(
+        tokmd_packets["inputs"]["comment-plan.json"]["summary"]["reason_code"],
+        "bounded_reviewer_noise"
+    );
+    assert_eq!(
+        tokmd_packets["inputs"]["comment-plan.json"]["selected_reason_codes"]["top_actionable_card"],
+        1
+    );
+    assert!(
+        tokmd_packets["inputs"]["comment-plan.json"]["relationship"]
+            .as_str()
+            .unwrap_or("")
+            .contains("ReviewCard-only")
+    );
+    assert!(
+        tokmd_packets["inputs"]["comment-plan.json"]["relationship"]
+            .as_str()
+            .unwrap_or("")
+            .contains("manual candidates are not selected")
+    );
+    assert!(
+        tokmd_packets["inputs"]["comment-plan.json"]["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("did not post comments")
+    );
+    assert!(
+        tokmd_packets["inputs"]["stable-byte seed ledger"]["limitation"]
+            .as_str()
+            .unwrap_or("")
+            .contains("packet-local stable_byte.ledger_state")
+    );
+    assert_eq!(tokmd_packets["packets"][0]["id"], "R4R2-S001");
+    assert_eq!(tokmd_packets["packets"][0]["source"], "manual");
+    assert_eq!(tokmd_packets["packets"][0]["manual_candidate"], true);
+    assert_eq!(tokmd_packets["packets"][0]["analyzer_discovered"], false);
+    assert_eq!(
+        tokmd_packets["packets"][0]["packet_kind"],
+        "manual_candidate"
+    );
+    assert_eq!(
+        tokmd_packets["packets"][0]["tokmd_presets"][2],
+        "bun-ub-ledger-note"
+    );
+    assert_eq!(
+        tokmd_packets["packets"][0]["stable_byte_source_class"],
+        manual_candidates["candidates"][0]["stable_byte"]["class"]
+    );
+    assert_eq!(
+        tokmd_packets["packets"][0]["stable_byte"],
+        manual_candidates["candidates"][0]["stable_byte"]
+    );
+    assert_eq!(
+        tokmd_packets["packets"][0]["ledger_state"],
+        manual_candidates["candidates"][0]["stable_byte"]["ledger_state"]
+    );
+    assert!(
+        tokmd_packets["packets"][0]["ledger_state_limitation"]
+            .as_str()
+            .unwrap_or("")
+            .contains("packet-local manual candidate metadata")
+    );
+    assert_eq!(
+        tokmd_packets["packets"][0]["target"]["location_text"],
+        manual_candidates["candidates"][0]["location_text"]
+    );
+    assert_eq!(
+        tokmd_packets["packets"][0]["route"]["safe_caller"],
+        manual_candidates["candidates"][0]["safe_caller"]
+    );
+    assert_eq!(
+        tokmd_packets["packets"][0]["invariant_at_risk"],
+        manual_candidates["candidates"][0]["invariant"]
+    );
+    assert_eq!(
+        tokmd_packets["packets"][0]["proof_mode"],
+        manual_candidates["candidates"][0]["proof_mode"]
+    );
+    assert_eq!(
+        tokmd_packets["packets"][0]["oracle_map"],
+        manual_candidates["candidates"][0]["oracle_map"]
+    );
+    assert_eq!(
+        tokmd_packets["packets"][0]["fix_boundary"],
+        manual_candidates["candidates"][0]["fix_boundary"]
+    );
+    assert_eq!(
+        tokmd_packets["packets"][0]["pr_aperture"],
+        manual_candidates["candidates"][0]["pr_aperture"]
+    );
+    assert_eq!(
+        tokmd_packets["packets"][0]["implementer_handoff"],
+        manual_candidates["candidates"][0]["implementer_handoff"]
+    );
+    assert_eq!(
+        tokmd_packets["packets"][0]["manual_repair_queue_item"]["artifact"],
+        "manual-repair-queue.json"
+    );
+    assert_eq!(
+        tokmd_packets["packets"][0]["manual_repair_queue_item"]["id"],
+        manual_repair_queue["queue"][0]["id"]
+    );
+    assert_eq!(
+        tokmd_packets["packets"][0]["manual_repair_queue_item"]["bucket"],
+        manual_repair_queue["queue"][0]["bucket"]
+    );
+    assert_eq!(
+        tokmd_packets["packets"][0]["manual_repair_queue_item"]["bucket_reason"],
+        manual_repair_queue["queue"][0]["bucket_reason"]
+    );
+    assert_eq!(
+        tokmd_packets["packets"][0]["manual_repair_queue_item"]["agent_handoff"],
+        manual_repair_queue["queue"][0]["agent_handoff"]
+    );
+    assert!(
+        tokmd_packets["packets"][0]["manual_repair_queue_item"]["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("not automatic repair")
+    );
+    assert_eq!(
+        tokmd_packets["packets"][0]["preset_inputs"]["bun-ub-handoff"]["stable_byte_family"],
+        manual_candidates["candidates"][0]["stable_byte"]["class"]
+    );
+    assert_eq!(
+        tokmd_packets["packets"][0]["preset_inputs"]["bun-ub-handoff"]["safe_js_caller_route"],
+        manual_candidates["candidates"][0]["safe_caller"]
+    );
+    assert!(
+        tokmd_packets["packets"][0]["preset_inputs"]["bun-ub-handoff"]["required_proof_action"]
+            .as_str()
+            .unwrap_or("")
+            .contains("Miri/model")
+    );
+    assert_eq!(
+        tokmd_packets["packets"][0]["preset_inputs"]["bun-ub-pr-body"]["compatibility_oracle"],
+        manual_candidates["candidates"][0]["oracle_map"]
+    );
+    assert!(
+        tokmd_packets["packets"][0]["preset_inputs"]["bun-ub-pr-body"]["claims_not_made"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|claim| claim.as_str() == Some("not Miri-clean status"))
+    );
+    assert!(
+        tokmd_packets["packets"][0]["preset_inputs"]["bun-ub-review-map"]["comment_plan"]["relationship"]
+            .as_str()
+            .unwrap_or("")
+            .contains("manual candidates are not selected")
+    );
+    assert_eq!(
+        tokmd_packets["packets"][0]["preset_inputs"]["bun-ub-review-map"]["repair_queue"]["bucket"],
+        manual_repair_queue["queue"][0]["bucket"]
+    );
+    assert_eq!(
+        tokmd_packets["packets"][0]["preset_inputs"]["bun-ub-next-pick"]["non_goals"],
+        manual_candidates["candidates"][0]["do_not_touch"]
+    );
+    assert!(
+        tokmd_packets["packets"][0]["preset_inputs"]["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("did not run tokmd")
+    );
+    assert_eq!(
+        tokmd_packets["packets"][1]["external_evidence"][2]["kind"],
+        manual_candidates["candidates"][1]["evidence"][2]["kind"]
+    );
+    assert!(
+        tokmd_packets["packets"][1]["commands"]["context_json"]
+            .as_str()
+            .unwrap_or("")
+            .contains("R4R2-S002")
+    );
+    let missing_inputs = json_array(
+        &tokmd_packets["packets"][0]["missing_inputs"],
+        "tokmd_packets.packets[0].missing_inputs",
+    )?;
+    assert!(
+        missing_inputs
+            .iter()
+            .any(|input| input == "ReviewCard projection")
+    );
+    assert!(
+        !missing_inputs
+            .iter()
+            .any(|input| input == "stable-byte ledger state"),
+        "packet-local stable_byte.ledger_state should not be reported as missing"
+    );
+    assert!(
+        tokmd_packets["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("did not run tokmd")
     );
 
     let receipt_audit = fs::read_to_string(out_dir.join("receipt-audit.md"))?;
@@ -1546,6 +3002,7 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
         witness_plan
             .contains("does not run Miri, cargo-careful, sanitizers, Loom, Shuttle, Kani, or Crux")
     );
+    assert_manual_candidate_witness_follow_up(&witness_plan);
     assert!(!witness_plan.contains("Miri passed"));
     assert!(!witness_plan.contains("site reached"));
 
@@ -1559,13 +3016,16 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
         lsp["trust_boundary"]
             .as_str()
             .unwrap_or("")
-            .contains("not a Miri result")
+            .contains("not a site-execution claim")
     );
 
     let repair_queue = parse_json(&fs::read_to_string(out_dir.join("repair-queue.json"))?)?;
     assert_eq!(repair_queue["mode"], "aggregate_repair_queue");
     assert_eq!(repair_queue["source"], "review_card");
     assert_eq!(repair_queue["policy"], "advisory");
+    assert_eq!(repair_queue["summary"]["changed_files"], 1);
+    assert_eq!(repair_queue["summary"]["changed_rust_files"], 1);
+    assert_eq!(repair_queue["summary"]["changed_non_rust_files"], 0);
     assert_eq!(repair_queue["summary"]["cards"], 1);
     assert_eq!(
         repair_queue["buckets"]["repairable_by_guard"][0]["card_id"],
@@ -1585,6 +3045,57 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
             .unwrap_or("")
             .contains("not an automatic repair queue")
     );
+    let repair_queue_raw = fs::read_to_string(out_dir.join("repair-queue.json"))?;
+    assert!(!repair_queue_raw.contains("R4R2-S001"));
+    assert!(!repair_queue_raw.contains("manual_candidate"));
+
+    let policy_report = parse_json(&fs::read_to_string(out_dir.join("policy-report.json"))?)?;
+    assert_eq!(policy_report["schema_version"], "0.1");
+    assert_eq!(policy_report["mode"], "policy-report");
+    assert_eq!(policy_report["policy"], "advisory");
+    assert_eq!(policy_report["summary"]["cards"], cards["summary"]["cards"]);
+    assert_eq!(
+        policy_report["summary"]["new_gaps"],
+        cards["summary"]["open_actionable_gaps"]
+    );
+    assert_eq!(policy_report["cards"][0]["card_id"], card_id);
+    assert!(
+        policy_report["limitations"]
+            .as_array()
+            .unwrap_or(&Vec::new())
+            .iter()
+            .any(|limitation| limitation
+                .as_str()
+                .unwrap_or("")
+                .contains("Manual candidates are not policy-report inputs"))
+    );
+    assert!(
+        policy_report["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("does not enforce blocking policy")
+    );
+    assert!(
+        policy_report["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("not a site-execution claim")
+    );
+    assert!(
+        policy_report["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("matching witness receipt")
+    );
+    let policy_report_raw = fs::read_to_string(out_dir.join("policy-report.json"))?;
+    assert!(!policy_report_raw.contains("R4R2-S001"));
+    assert!(!policy_report_raw.contains("manual_candidate"));
+
+    let policy_report_markdown = fs::read_to_string(out_dir.join("policy-report.md"))?;
+    assert!(policy_report_markdown.contains("# unsafe-review policy report"));
+    assert!(policy_report_markdown.contains("Manual candidates are not policy-report inputs"));
+    assert!(policy_report_markdown.contains("not Miri-clean status"));
+    assert!(!policy_report_markdown.contains("R4R2-S001"));
 
     Ok(())
 }
@@ -1636,17 +3147,30 @@ fn first_pr_clean_output_stays_advisory_not_all_clear() -> Result<(), Box<dyn Er
         cards["trust_boundary"]
             .as_str()
             .unwrap_or("")
-            .contains("not a proof of memory safety")
+            .contains("not memory-safety proof")
     );
 
     let review_kit = parse_json(&fs::read_to_string(out_dir.join("review-kit.json"))?)?;
     assert_eq!(review_kit["schema_version"], "0.1");
     assert_eq!(review_kit["mode"], "review_kit_manifest");
+    assert_eq!(review_kit["summary"]["changed_files"], 1);
+    assert_eq!(review_kit["summary"]["changed_rust_files"], 1);
+    assert_eq!(review_kit["summary"]["changed_non_rust_files"], 0);
     assert_eq!(review_kit["summary"]["cards"], 0);
     assert_eq!(review_kit["summary"]["open_actionable_gaps"], 0);
     assert!(review_kit["top_card_id"].is_null());
     assert_eq!(review_kit["handoff"]["reviewer_summary"], "pr-summary.md");
     assert!(review_kit["handoff"]["top_card"].is_null());
+    assert_eq!(review_kit["handoff"]["review_cards"]["review_cards"], 0);
+    assert_eq!(review_kit["handoff"]["review_cards"]["card_queue_limit"], 5);
+    assert_eq!(review_kit["handoff"]["review_cards"]["omitted_cards"], 0);
+    assert!(
+        json_array(
+            &review_kit["handoff"]["review_cards"]["card_queue"],
+            "review_kit.handoff.review_cards.card_queue",
+        )?
+        .is_empty()
+    );
     assert!(
         review_kit["handoff"]["receipt_audit_markdown"]
             .as_str()
@@ -1657,7 +3181,7 @@ fn first_pr_clean_output_stays_advisory_not_all_clear() -> Result<(), Box<dyn Er
         review_kit["trust_boundary"]
             .as_str()
             .unwrap_or("")
-            .contains("not site-execution proof")
+            .contains("not a site-execution claim")
     );
 
     let summary = fs::read_to_string(out_dir.join("pr-summary.md"))?;
@@ -1715,7 +3239,7 @@ fn first_pr_clean_output_stays_advisory_not_all_clear() -> Result<(), Box<dyn Er
         lsp["trust_boundary"]
             .as_str()
             .unwrap_or("")
-            .contains("not a Miri result")
+            .contains("not a site-execution claim")
     );
 
     let repair_queue = parse_json(&fs::read_to_string(out_dir.join("repair-queue.json"))?)?;
@@ -1796,6 +3320,8 @@ fn help_reports_first_run_trust_boundary_without_overclaims() -> Result<(), Box<
     assert!(text.contains("not memory-safety proof"));
     assert!(text.contains("not UB-free status"));
     assert!(text.contains("not Miri-clean status"));
+    assert!(text.contains("not a site-execution claim"));
+    assert!(text.contains("matching witness receipt"));
     assert!(!text.contains("soundness proof"));
     assert!(!text.contains("All clear"));
 
@@ -1814,6 +3340,7 @@ fn repo_help_reports_repo_specific_scale_guidance() -> Result<(), Box<dyn Error>
     assert!(text.contains("--include <glob>"));
     assert!(text.contains("--exclude <glob>"));
     assert!(text.contains("--list-files prints selected Rust files"));
+    assert!(text.contains("With --list-files, --format supports human, json, or markdown output"));
     assert!(text.contains("--progress prints scan-status heartbeats"));
     assert!(text.contains("--timeout-seconds <N>"));
     assert!(text.contains("--max-files <N>"));
@@ -1912,6 +3439,97 @@ fn repo_list_files_honors_selection_controls() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
+fn repo_list_files_renders_json_and_markdown_scope_artifacts() -> Result<(), Box<dyn Error>> {
+    let temp = TempDir::new("unsafe-review-repo-list-files-formats")?;
+    write_e2e_file(temp.path(), "src/lib.rs")?;
+    write_e2e_file(temp.path(), "packages/pkg/src/lib.rs")?;
+    write_e2e_file(temp.path(), "packages/pkg/src/skip.rs")?;
+    write_e2e_file(temp.path(), "ignored/lib.rs")?;
+    fs::write(temp.path().join(".gitignore"), "ignored/\n")?;
+    let json_out = temp.path().join("repo-files.json");
+
+    let json_output = run_success([
+        os("repo"),
+        os("--root"),
+        temp.path().as_os_str().to_os_string(),
+        os("--include"),
+        os("src/**/*.rs"),
+        os("--include"),
+        os("packages/**/*.rs"),
+        os("--exclude"),
+        os("packages/**/skip.rs"),
+        os("--max-files"),
+        os("2"),
+        os("--format"),
+        os("json"),
+        os("--out"),
+        json_out.as_os_str().to_os_string(),
+        os("--list-files"),
+    ])?;
+
+    assert_eq!(stdout_text(&json_output)?.trim(), "");
+    let list = parse_json(&fs::read_to_string(&json_out)?)?;
+    assert_eq!(list["schema_version"], "repo-file-list/v1");
+    assert_eq!(list["mode"], "repo_list_files");
+    assert_eq!(list["root"], temp.path().display().to_string());
+    assert_eq!(list["scan_scope"]["include"][0], "src/**/*.rs");
+    assert_eq!(list["scan_scope"]["include"][1], "packages/**/*.rs");
+    assert_eq!(list["scan_scope"]["exclude"][0], "packages/**/skip.rs");
+    assert_eq!(list["scan_scope"]["respect_gitignore"], true);
+    assert_eq!(list["scan_scope"]["large_repo_ignores"], true);
+    assert_eq!(list["scan_scope"]["max_files"], 2);
+    assert_eq!(list["summary"]["selected_rust_files"], 2);
+    assert_eq!(list["summary"]["analysis_run"], false);
+    assert_eq!(list["summary"]["reviewcards_created"], 0);
+    assert_eq!(list["summary"]["witnesses_run"], false);
+    assert_eq!(list["files"][0], "src/lib.rs");
+    assert_eq!(list["files"][1], "packages/pkg/src/lib.rs");
+    assert!(
+        list["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("does not analyze files")
+    );
+
+    let markdown_output = run_success([
+        os("repo"),
+        os("--root"),
+        temp.path().as_os_str().to_os_string(),
+        os("--include"),
+        os("ignored/**/*.rs"),
+        os("--no-respect-gitignore"),
+        os("--format"),
+        os("markdown"),
+        os("--list-files"),
+    ])?;
+    let markdown = stdout_text(&markdown_output)?;
+    assert!(markdown.contains("# unsafe-review repo file list"));
+    assert!(markdown.contains("- Analysis run: `false`"));
+    assert!(markdown.contains("- ReviewCards created: `0`"));
+    assert!(markdown.contains("- Respect gitignore: `false`"));
+    assert!(markdown.contains("- `ignored/lib.rs`"));
+    assert!(markdown.contains("not analyze files"));
+    assert!(markdown.contains("UB-free/Miri-clean claims"));
+
+    let unsupported = run_failure([
+        os("repo"),
+        os("--root"),
+        temp.path().as_os_str().to_os_string(),
+        os("--format"),
+        os("sarif"),
+        os("--list-files"),
+    ])?;
+    assert_eq!(unsupported.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&unsupported.stderr);
+    assert!(
+        stderr.contains("repo --list-files only supports human, json, or markdown output"),
+        "stderr should explain list-files format limits: {stderr}"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn doctor_reports_first_install_signals_without_running_witnesses() -> Result<(), Box<dyn Error>> {
     let fixture = fixture_root("raw_pointer_alignment");
 
@@ -1944,6 +3562,9 @@ fn doctor_reports_first_install_signals_without_running_witnesses() -> Result<()
     assert!(text.contains("trust boundary: static unsafe contract review only"));
     assert!(text.contains("not memory-safety proof"));
     assert!(text.contains("not UB-free status"));
+    assert!(text.contains("not Miri-clean status"));
+    assert!(text.contains("not a site-execution claim"));
+    assert!(text.contains("matching witness receipt"));
 
     Ok(())
 }
@@ -2004,7 +3625,9 @@ fn repo_inventory_and_badges_count_open_gaps_without_safety_claim() -> Result<()
     let summary = &repo["summary"];
     for key in [
         "rust_files",
+        "changed_files",
         "changed_rust_files",
+        "changed_non_rust_files",
         "unsafe_sites",
         "cards",
         "open_actionable_gaps",
@@ -2104,7 +3727,7 @@ fn repo_inventory_and_badges_count_open_gaps_without_safety_claim() -> Result<()
     assert!(repo_markdown.contains("## Top operation families"));
     assert!(repo_markdown.contains("| `raw_pointer_read` | 1 |"));
     assert!(repo_markdown.contains(
-        "| ID | Class | Location | Operation family | Operation | Missing evidence | Route | Next action |"
+        "| ID | Class | Proof path | Location | Operation family | Operation | Missing evidence | Route | Next action |"
     ));
     assert!(repo_markdown.contains("src/lib.rs:8"));
     assert!(repo_markdown.contains("unsafe { ptr.cast::<Header>().read() }"));
@@ -2176,6 +3799,7 @@ fn repo_progress_writes_status_sidecar_for_out_reports() -> Result<(), Box<dyn E
     assert!(status["elapsed_ms"].as_u64().is_some());
     assert!(status["error"].is_null());
     assert!(status["partial_path"].is_null());
+    assert_repo_status_operator(&status, "complete", false, "promoted final report")?;
 
     Ok(())
 }
@@ -2235,6 +3859,7 @@ fn repo_output_failure_keeps_partial_and_marks_status_incomplete() -> Result<(),
             .unwrap_or("")
             .ends_with("repo.json.partial")
     );
+    assert_repo_status_operator(&status, "failed", true, "fixing the error")?;
 
     Ok(())
 }
@@ -2302,6 +3927,7 @@ fn repo_analysis_failure_keeps_completed_file_partial_snapshot() -> Result<(), B
             .unwrap_or("")
             .ends_with("repo.json.partial")
     );
+    assert_repo_status_operator(&status, "failed", true, "fixing the error")?;
 
     Ok(())
 }
@@ -2396,6 +4022,7 @@ fn repo_timeout_keeps_completed_file_partial_snapshot() -> Result<(), Box<dyn Er
             .unwrap_or("")
             .ends_with("repo.json.partial")
     );
+    assert_repo_status_operator(&status, "failed", true, "increasing timeout")?;
 
     Ok(())
 }
@@ -2465,6 +4092,7 @@ fn repo_sigterm_writes_interrupted_status_sidecar() -> Result<(), Box<dyn Error>
             .contains("interrupted by SIGTERM")
     );
     assert!(status["partial_path"].is_null());
+    assert_repo_status_operator(&status, "terminated", false, "rerun repo with --out")?;
 
     Ok(())
 }
@@ -2551,6 +4179,7 @@ fn repo_sigterm_keeps_completed_file_partial_report() -> Result<(), Box<dyn Erro
             .unwrap_or("")
             .ends_with("repo.json.partial")
     );
+    assert_repo_status_operator(&status, "terminated", true, "restarting or narrowing")?;
 
     Ok(())
 }
@@ -2684,11 +4313,28 @@ fn outcome_compares_existing_json_snapshots_without_safety_claim() -> Result<(),
             .starts_with("snapshot-")
     );
     assert!(outcome["limitations"].is_array());
+    let trust_boundary = outcome["trust_boundary"].as_str().unwrap_or("");
+    for phrase in [
+        "not memory-safety proof",
+        "not UB-free status",
+        "not Miri-clean status",
+        "not site-execution evidence",
+        "not calibrated precision/recall",
+        "not policy-ready status",
+        "not witness execution",
+    ] {
+        assert!(
+            trust_boundary.contains(phrase),
+            "missing outcome trust boundary phrase: {phrase}"
+        );
+    }
+    let limitations = outcome["limitations"]
+        .as_array()
+        .expect("limitations should be an array");
     assert!(
-        outcome["trust_boundary"]
-            .as_str()
-            .unwrap_or("")
-            .contains("not memory-safety proof")
+        limitations
+            .iter()
+            .any(|item| item.as_str().unwrap_or("").contains("Miri-clean status"))
     );
 
     let markdown = run_success([
@@ -2709,15 +4355,19 @@ fn outcome_compares_existing_json_snapshots_without_safety_claim() -> Result<(),
     assert!(markdown.contains("- `new`"));
     assert!(markdown.contains("new card: appears in the after snapshot"));
     assert!(markdown.contains("Top remaining gaps"));
-    assert!(
-        markdown.contains("| Card | Class | Priority | Operation family | Missing | Next action |")
-    );
+    assert!(markdown.contains(
+        "| Card | Class | Priority | Proof path | Operation family | Missing | Next action |"
+    ));
     assert!(markdown.contains("guard_missing"));
     assert!(markdown.contains("high"));
     assert!(markdown.contains("| 2 |"));
     assert!(markdown.contains("| Status | Card | Reason | Before | After |"));
     assert!(markdown.contains("## Limitations"));
     assert!(markdown.contains("## Trust boundary"));
+    assert!(markdown.contains("not Miri-clean status"));
+    assert!(markdown.contains("not site-execution evidence"));
+    assert!(markdown.contains("not calibrated precision/recall"));
+    assert!(markdown.contains("not policy-ready status"));
     assert!(markdown.contains("| 1 | 0 | 0 | 0 | 0 |"));
     assert!(markdown.contains("raw_pointer_read"));
     assert!(markdown.contains("unsafe { ptr.cast::<Header>().read() }"));
@@ -3426,7 +5076,7 @@ fn policy_report_is_advisory_and_counts_baseline_state() -> Result<(), Box<dyn E
     assert_eq!(report["mode"], "policy-report");
     assert_eq!(report["policy"], "advisory");
     assert_eq!(report["schema_version"], "0.1");
-    assert_eq!(report["limitations"].as_array().map(Vec::len), Some(4));
+    assert_eq!(report["limitations"].as_array().map(Vec::len), Some(5));
     assert!(
         json_str(
             &report["classification_explanations"]["new_gap"],
@@ -3459,6 +5109,10 @@ fn policy_report_is_advisory_and_counts_baseline_state() -> Result<(), Box<dyn E
     assert!(
         json_str(&report["trust_boundary"], "trust_boundary")?
             .contains("does not enforce blocking policy")
+    );
+    assert!(
+        json_str(&report["trust_boundary"], "trust_boundary")?
+            .contains("not a site-execution claim")
     );
 
     let temp = TempDir::new("unsafe-review-policy-report-e2e")?;
@@ -3667,6 +5321,225 @@ fn json_array<'a>(value: &'a Value, path: &str) -> Result<&'a Vec<Value>, Box<dy
         .ok_or_else(|| format!("{path} should be an array").into())
 }
 
+fn assert_manual_candidate_front_panel(
+    text: &str,
+    later_heading: &str,
+    expected_queue_len: usize,
+    compact: bool,
+) {
+    assert!(text.contains("## Manual candidates"));
+    assert!(text.contains(
+        "- Imported manual candidates: 2 (manual/advisory; not analyzer-discovered ReviewCards)"
+    ));
+    assert!(text.contains("- Operation families: `raw_pointer_read: 1, slice_from_raw_parts: 1`"));
+    assert!(text.contains("- Evidence kinds: `model: 2, runtime_witness: 2, source_trace: 2`"));
+    assert!(text.contains(
+        "- First manual candidate: `R4R2-S001` at `src/runtime/webcore/TextDecoder.rs:237` (`raw_pointer_read`)"
+    ));
+    if compact {
+        assert!(text.contains(
+            "- Stable-byte class: `stable-byte-source-sab-race`; proof `mutation-plus-miri`; ledger `handoff-ready`; route `SharedArrayBuffer-backed typed array decode` -> `src/runtime/webcore/TextDecoder.rs slice materialization`; hazard in sidecars"
+        ));
+        assert!(text.contains("- Evidence refs: 3; full route and evidence packet in sidecars."));
+        assert!(!text.contains("- Safe caller route:"));
+        assert!(!text.contains("- Invariant at risk:"));
+        assert!(!text.contains("- External evidence refs:"));
+    } else {
+        assert!(text.contains(
+            "- Safe caller route: new TextDecoder().decode(new Uint8Array(new SharedArrayBuffer(...)))"
+        ));
+        assert!(
+            text.contains("- Invariant at risk: &[u8] memory must not be concurrently mutated")
+        );
+        assert!(text.contains("- External evidence refs: 3"));
+        assert!(text.contains(
+            "- Stable-byte class: `stable-byte-source-sab-race` (observable: `no`; proof required: `mutation-plus-miri`; ledger state: `handoff-ready`)"
+        ));
+        assert!(text.contains(
+            "- Stable-byte route: source `SharedArrayBuffer-backed typed array decode` -> sink `src/runtime/webcore/TextDecoder.rs slice materialization`"
+        ));
+        assert!(text.contains(
+            "- Stable-byte hazard: Rust slice materialization can treat shared JS bytes as stable while JS can mutate the backing storage concurrently"
+        ));
+    }
+    if compact {
+        assert!(text.contains(
+            "- Proof mode: `mutation-plus-miri` (system Bun expected: `nondiscriminating`; mutation required: `true`; Miri/model required: `true`)"
+        ));
+        assert!(text.contains(
+            "- Oracle map: `src/runtime/webcore/TextDecoder.rs::decode` -> `test/js/webcore/textdecoder-sharedarraybuffer.test.ts`"
+        ));
+        assert!(text.contains("`shared-byte-mutation-model`; limitation in sidecars"));
+    } else {
+        assert!(text.contains(
+            "- Proof mode: `mutation-plus-miri` (system Bun expected: `nondiscriminating`; mutation required: `true`; Miri/model required: `true`)"
+        ));
+        assert!(text.contains(
+            "- Oracle map: Rust seam `src/runtime/webcore/TextDecoder.rs::decode` -> `typescript` oracle `test/js/webcore/textdecoder-sharedarraybuffer.test.ts`"
+        ));
+        assert!(
+            text.contains("not witness execution, site-execution proof, or memory-safety proof")
+        );
+    }
+    if compact {
+        assert!(text.contains(
+            "- Fix boundary: Snapshot shared/growable/resizable bytes before Rust receives &[u8]"
+        ));
+        assert!(text.contains(
+            "- PR aperture: TextDecoder shared-byte snapshot only; do not patch S3, fs, writev, or unrelated encodings"
+        ));
+        assert!(text.contains("- Stop line: keep the PR inside this aperture."));
+        assert!(
+            text.contains("- Guidance: 1 fix option(s), 1 test target(s), 1 do-not-touch note(s)")
+        );
+        assert!(text.contains(
+            "- First fix option: Copy SharedArrayBuffer-backed bytes into stable owned storage before creating a Rust slice"
+        ));
+        assert!(text.contains(
+            "- First test target: `test/js/webcore/textdecoder-sharedarraybuffer.test.ts`"
+        ));
+        assert!(text.contains(
+            "- First do-not-touch note: Do not rewrite unrelated TextDecoder encoding paths"
+        ));
+    } else {
+        assert!(text.contains(
+            "- Fix boundary: Snapshot shared/growable/resizable bytes before Rust receives &[u8]"
+        ));
+        assert!(text.contains(
+            "- PR aperture: TextDecoder shared-byte snapshot only; do not patch S3, fs, writev, or unrelated encodings"
+        ));
+        assert!(text.contains("- Stop line: keep the PR inside this aperture"));
+        assert!(
+            text.contains("- Guidance: 1 fix option(s), 1 test target(s), 1 do-not-touch note(s)")
+        );
+        assert!(text.contains(
+            "- First fix option: Copy SharedArrayBuffer-backed bytes into stable owned storage before creating a Rust slice"
+        ));
+        assert!(text.contains(
+            "- First test target: `test/js/webcore/textdecoder-sharedarraybuffer.test.ts`"
+        ));
+        assert!(text.contains(
+            "- First do-not-touch note: Do not rewrite unrelated TextDecoder encoding paths"
+        ));
+    }
+    if compact {
+        assert!(!text.contains("- Manual candidate queue preview:"));
+    } else {
+        assert!(text.contains(&format!(
+            "- Manual candidate queue preview: first {expected_queue_len} of 2 manual candidate(s)"
+        )));
+        assert!(text.contains(
+            "`R4R2-S001` at `src/runtime/webcore/TextDecoder.rs:237` (`raw_pointer_read`); evidence refs: 3; proof mode: `mutation-plus-miri`"
+        ));
+        if expected_queue_len >= 2 {
+            assert!(text.contains(
+                "`R4R2-S002` at `src/sql_jsc/mysql/MySQLValue.rs:411` (`slice_from_raw_parts`); evidence refs: 3; proof mode: `mutation-plus-miri`"
+            ));
+        } else {
+            assert!(!text.contains(
+                "`R4R2-S002` at `src/sql_jsc/mysql/MySQLValue.rs:411` (`slice_from_raw_parts`); evidence refs: 3; proof mode: `mutation-plus-miri`"
+            ));
+        }
+    }
+    if !compact {
+        assert!(text.contains("unsafe-review explain --root"));
+    }
+    assert!(text.contains("unsafe-review context --root"));
+    assert!(text.contains("unsafe-review candidate witness-plan --root"));
+    assert!(text.contains("manual-candidates.json"));
+    assert!(text.contains("manual-repair-queue.json"));
+    assert!(text.contains("separate from ReviewCard `repair-queue.json`"));
+    assert!(text.contains("no agent was run"));
+    assert!(text.contains("ReviewCard-only outputs"));
+    assert!(text.contains("did not discover"));
+    assert!(text.contains("did not run witnesses"));
+    assert!(text.contains("edit source"));
+    assert!(text.contains("policy inputs"));
+    assert!(
+        text.find("## Manual candidates")
+            .expect("manual candidate section should exist")
+            < text
+                .find(later_heading)
+                .expect("later front-door heading should exist")
+    );
+}
+
+fn assert_manual_candidate_witness_follow_up(text: &str) {
+    assert!(text.contains("## Manual candidate witness follow-up"));
+    assert!(text.contains(
+        "- Imported manual candidates: 2 (manual/advisory; not analyzer-discovered ReviewCards)"
+    ));
+    assert!(text.contains("- Operation families: `raw_pointer_read: 1, slice_from_raw_parts: 1`"));
+    assert!(text.contains("- Evidence kinds: `model: 2, runtime_witness: 2, source_trace: 2`"));
+    assert!(text.contains(
+        "- First manual candidate: `R4R2-S001` at `src/runtime/webcore/TextDecoder.rs:237` (`raw_pointer_read`)"
+    ));
+    assert!(text.contains(
+        "- Safe caller route: new TextDecoder().decode(new Uint8Array(new SharedArrayBuffer(...)))"
+    ));
+    assert!(text.contains("- Invariant at risk: &[u8] memory must not be concurrently mutated"));
+    assert!(text.contains("- External evidence refs: 3"));
+    assert!(text.contains(
+        "- Stable-byte class: `stable-byte-source-sab-race` (observable: `no`; proof required: `mutation-plus-miri`; ledger state: `handoff-ready`)"
+    ));
+    assert!(text.contains(
+        "- Stable-byte route: source `SharedArrayBuffer-backed typed array decode` -> sink `src/runtime/webcore/TextDecoder.rs slice materialization`"
+    ));
+    assert!(text.contains(
+        "- Stable-byte hazard: Rust slice materialization can treat shared JS bytes as stable while JS can mutate the backing storage concurrently"
+    ));
+    assert!(text.contains(
+        "- Proof mode: `mutation-plus-miri` (system Bun expected: `nondiscriminating`; mutation required: `true`; Miri/model required: `true`)"
+    ));
+    assert!(text.contains(
+        "- Oracle map: Rust seam `src/runtime/webcore/TextDecoder.rs::decode` -> `typescript` oracle `test/js/webcore/textdecoder-sharedarraybuffer.test.ts`"
+    ));
+    assert!(text.contains("not witness execution, site-execution proof, or memory-safety proof"));
+    assert!(text.contains(
+        "- Fix boundary: Snapshot shared/growable/resizable bytes before Rust receives &[u8]"
+    ));
+    assert!(text.contains(
+        "- PR aperture: TextDecoder shared-byte snapshot only; do not patch S3, fs, writev, or unrelated encodings"
+    ));
+    assert!(text.contains("- Stop line: keep the PR inside this aperture"));
+    assert!(text.contains("- Guidance: 1 fix option(s), 1 test target(s), 1 do-not-touch note(s)"));
+    assert!(text.contains(
+        "- First fix option: Copy SharedArrayBuffer-backed bytes into stable owned storage before creating a Rust slice"
+    ));
+    assert!(
+        text.contains(
+            "- First test target: `test/js/webcore/textdecoder-sharedarraybuffer.test.ts`"
+        )
+    );
+    assert!(text.contains(
+        "- First do-not-touch note: Do not rewrite unrelated TextDecoder encoding paths"
+    ));
+    assert!(text.contains("- Manual candidate queue preview: first 2 of 2 manual candidate(s)"));
+    assert!(text.contains(
+        "`R4R2-S001` at `src/runtime/webcore/TextDecoder.rs:237` (`raw_pointer_read`); evidence refs: 3; proof mode: `mutation-plus-miri`"
+    ));
+    assert!(text.contains(
+        "`R4R2-S002` at `src/sql_jsc/mysql/MySQLValue.rs:411` (`slice_from_raw_parts`); evidence refs: 3; proof mode: `mutation-plus-miri`"
+    ));
+    assert!(text.contains("unsafe-review candidate witness-plan --root"));
+    assert!(text.contains("unsafe-review context --root"));
+    assert!(text.contains("manual-candidates.json"));
+    assert!(text.contains("ReviewCard-only witness route groups"));
+    assert!(text.contains("do not import ReviewCard witness evidence"));
+    assert!(text.contains("copy-only manual follow-up"));
+    assert!(text.contains("did not discover these candidates"));
+    assert!(text.contains("did not run witnesses"));
+    assert!(text.contains("did not edit source"));
+    assert!(text.contains("policy inputs"));
+    assert!(
+        text.find("## Manual candidate witness follow-up")
+            .expect("manual candidate witness section should exist")
+            < text
+                .find("## Trust boundary")
+                .expect("trust boundary section should exist")
+    );
+}
+
 fn assert_default_repo_status_scope(
     status: &Value,
     root: &Path,
@@ -3685,6 +5558,65 @@ fn assert_default_repo_status_scope(
     assert_eq!(status["scan_scope"]["large_repo_ignores"], true);
     assert!(status["scan_scope"]["max_files"].is_null());
     assert_eq!(status["files_remaining"], files_remaining);
+    Ok(())
+}
+
+fn assert_repo_status_operator(
+    status: &Value,
+    state: &str,
+    partial_report_available: bool,
+    next_action_contains: &str,
+) -> Result<(), Box<dyn Error>> {
+    let operator = status
+        .get("operator")
+        .ok_or("repo status is missing operator diagnostics")?;
+    assert_eq!(operator["state"], state);
+    assert_eq!(
+        operator["partial_report_available"],
+        partial_report_available
+    );
+    let limitation = operator["partial_report_limitation"].as_str().unwrap_or("");
+    assert!(
+        !limitation.is_empty(),
+        "operator should explain partial report limitations"
+    );
+    if partial_report_available {
+        assert!(
+            limitation.contains("Completed-file snapshot only"),
+            "operator limitation should describe partial snapshot scope: {limitation}"
+        );
+    } else {
+        assert!(
+            limitation.contains("No partial report")
+                || limitation.contains("No completed-file partial report"),
+            "operator limitation should explain absence of partial report: {limitation}"
+        );
+    }
+    let next_action = operator["next_action"].as_str().unwrap_or("");
+    assert!(
+        next_action.contains(next_action_contains),
+        "operator next_action `{next_action}` should include `{next_action_contains}`"
+    );
+    assert!(
+        next_action.contains("scan_scope"),
+        "operator next_action should point back to replayable scan_scope: {next_action}"
+    );
+    let boundary = operator["claim_boundary"].as_str().unwrap_or("");
+    for expected in [
+        "Operational scan status only",
+        "not complete repo posture",
+        "witness execution",
+        "proof",
+        "UB-free status",
+        "Miri-clean status",
+        "site-execution proof",
+        "policy gating",
+    ] {
+        assert!(
+            boundary.contains(expected),
+            "operator claim_boundary `{boundary}` should include `{expected}`"
+        );
+    }
     Ok(())
 }
 
@@ -3757,6 +5689,27 @@ fn write_e2e_file(root: &Path, rel: &str) -> Result<(), Box<dyn Error>> {
 
 fn manual_candidate_json() -> &'static str {
     include_str!("../../../docs/examples/manual-candidates/textdecoder-sab.json")
+}
+
+fn write_textdecoder_stable_byte_seed_ledger(root: &Path) -> Result<(), Box<dyn Error>> {
+    let docs_dir = root.join("docs/dogfood");
+    fs::create_dir_all(&docs_dir)?;
+    fs::write(
+        docs_dir.join("stable-byte-follow-up-seeds.md"),
+        r#"# Bun stable-byte follow-up seed index
+
+## Seeds
+
+| Seed ID | Ledger state | Candidate family | Surface | Manual candidate | Safe JS caller | Rust/native sink | Proof mode | Suggested first PR | Owner lane | Triage labels |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `bun-stable-byte-textdecoder-sab` | `handoff-ready` | `stable-byte-source-sab-race` | `TextDecoder.decode` | `.unsafe-review/candidates/R4R2-S001.json` | SharedArrayBuffer-backed typed array decode | `src/runtime/webcore/TextDecoder.rs` slice materialization | `mutation-plus-miri` | `TextDecoder shared-byte snapshot only` | `rust2` | `non-observable`, `needs-miri-model` |
+"#,
+    )?;
+    Ok(())
+}
+
+fn mysql_manual_candidate_json() -> &'static str {
+    include_str!("../../../docs/examples/manual-candidates/mysql-blob-sab.json")
 }
 
 fn empty_review_card_snapshot_json() -> &'static str {

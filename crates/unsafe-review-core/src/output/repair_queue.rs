@@ -1,10 +1,8 @@
 use crate::api::AnalyzeOutput;
 use crate::domain::ReviewCard;
-use crate::output::agent;
+use crate::output::{REPAIR_QUEUE_TRUST_BOUNDARY as TRUST_BOUNDARY, agent};
 use crate::util::path_display;
 use serde::Serialize;
-
-const TRUST_BOUNDARY: &str = "Static unsafe contract review only; this is not a proof of memory safety, not UB-free status, not a Miri result, and not an automatic repair queue. It does not run agents, does not run witnesses, does not edit source, does not post comments, does not suppress cards, and does not resolve cards.";
 
 pub(crate) fn render(output: &AnalyzeOutput) -> String {
     render_pretty(&RepairQueueArtifact::from(output))
@@ -38,7 +36,7 @@ impl From<&AnalyzeOutput> for RepairQueueArtifact {
                 buckets.push(bucket, RepairQueueEntry::new(card, bucket, &projection));
             }
         }
-        let summary = RepairQueueSummary::from(&buckets);
+        let summary = RepairQueueSummary::new(output, &buckets);
         Self {
             schema_version: "0.1",
             tool: "unsafe-review",
@@ -78,6 +76,9 @@ impl RepairQueueBuckets {
 
 #[derive(Serialize)]
 struct RepairQueueSummary {
+    changed_files: usize,
+    changed_rust_files: usize,
+    changed_non_rust_files: usize,
     cards: usize,
     repairable_by_guard: usize,
     repairable_by_safety_docs: usize,
@@ -87,9 +88,12 @@ struct RepairQueueSummary {
     do_not_auto_repair: usize,
 }
 
-impl From<&RepairQueueBuckets> for RepairQueueSummary {
-    fn from(buckets: &RepairQueueBuckets) -> Self {
+impl RepairQueueSummary {
+    fn new(output: &AnalyzeOutput, buckets: &RepairQueueBuckets) -> Self {
         Self {
+            changed_files: output.summary.changed_files,
+            changed_rust_files: output.summary.changed_rust_files,
+            changed_non_rust_files: output.summary.changed_non_rust_files,
             cards: unique_card_count(buckets),
             repairable_by_guard: buckets.repairable_by_guard.len(),
             repairable_by_safety_docs: buckets.repairable_by_safety_docs.len(),
@@ -107,6 +111,7 @@ struct RepairQueueEntry {
     class: &'static str,
     priority: &'static str,
     confidence: &'static str,
+    proof_path: &'static str,
     operation_family: &'static str,
     operation: String,
     path: String,
@@ -130,6 +135,7 @@ impl RepairQueueEntry {
             class: card.class.as_str(),
             priority: card.priority.as_str(),
             confidence: card.confidence.as_str(),
+            proof_path: card.proof_path.as_str(),
             operation_family: card.operation.family.as_str(),
             operation: card.operation.expression.clone(),
             path: path_display(&card.site.location.file),
@@ -161,7 +167,7 @@ impl From<&agent::AgentReadiness> for RepairQueueReadiness {
     }
 }
 
-fn aggregate_buckets(projection: &agent::AgentQueueProjection) -> Vec<&'static str> {
+pub(crate) fn aggregate_buckets(projection: &agent::AgentQueueProjection) -> Vec<&'static str> {
     let mut buckets = Vec::new();
     for bucket in &projection.repair_queue.buckets {
         let mapped = match *bucket {
@@ -188,7 +194,7 @@ fn push_unique(values: &mut Vec<&'static str>, value: &'static str) {
     }
 }
 
-fn bucket_reason(bucket: &str) -> &'static str {
+pub(crate) fn bucket_reason(bucket: &str) -> &'static str {
     match bucket {
         "repairable_by_guard" => "guard_evidence_missing",
         "repairable_by_safety_docs" => "safety_docs_evidence_missing",
@@ -245,6 +251,9 @@ mod tests {
         assert_eq!(value["mode"], "aggregate_repair_queue");
         assert_eq!(value["source"], "review_card");
         assert_eq!(value["policy"], "advisory");
+        assert_eq!(value["summary"]["changed_files"], 1);
+        assert_eq!(value["summary"]["changed_rust_files"], 1);
+        assert_eq!(value["summary"]["changed_non_rust_files"], 0);
         assert_eq!(value["summary"]["cards"], 1);
         assert_eq!(value["summary"]["repairable_by_guard"], 1);
         assert_eq!(value["summary"]["requires_witness_receipt"], 1);

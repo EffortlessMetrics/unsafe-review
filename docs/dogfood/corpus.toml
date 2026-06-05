@@ -1,7 +1,7 @@
 schema_version = "0.1"
 status = "experimental"
 artifact_root = "target/dogfood-work"
-trust_boundary = "Dogfood corpus records are static unsafe contract review evidence, not a proof of memory safety, not UB-free status, and not a Miri result unless an exact witness receipt is attached."
+trust_boundary = "Dogfood corpus records are static unsafe contract review evidence, not memory-safety proof, not UB-free status, not Miri-clean status, and not a site-execution claim unless an exact witness receipt is attached."
 
 [[targets]]
 id = "safe-code-no-cards-control"
@@ -15,6 +15,28 @@ purpose = "fixture-level no-card control for quiet first-pr and JSON output; not
 command = "rtk cargo run --locked -p unsafe-review -- check --root fixtures/safe_code_no_cards --diff fixtures/safe_code_no_cards/change.diff --format json --out target/dogfood-work/safe-code-no-cards.unsafe-review.json"
 artifact_status = "local_untracked"
 artifacts = ["target/dogfood-work/safe-code-no-cards.unsafe-review.json"]
+
+[[targets]]
+id = "bun-manual-candidates-first-pr-smoke"
+crate = "bun-manual-candidates"
+kind = "fixture-control"
+status = "active"
+fixture = "fixtures/raw_pointer_alignment"
+root = "fixtures/raw_pointer_alignment"
+diff = "fixtures/raw_pointer_alignment/change.diff"
+purpose = "fixture-level first-pr smoke for committed Bun manual-candidate projection through manual-candidates.json, manual-repair-queue.json, tokmd-packets.json, and review-kit handoff surfaces"
+command = "rtk cargo run --locked -p xtask -- check-manual-candidate-examples"
+artifact_status = "local_untracked"
+artifacts = [
+  "target/unsafe-review-manual-candidate-smoke/manual-candidates.json",
+  "target/unsafe-review-manual-candidate-smoke/manual-repair-queue.json",
+  "target/unsafe-review-manual-candidate-smoke/tokmd-packets.json",
+  "target/unsafe-review-manual-candidate-smoke/review-kit.json",
+  "target/unsafe-review-manual-candidate-smoke/pr-summary.md",
+  "target/unsafe-review-manual-candidate-smoke/github-summary.md",
+  "target/unsafe-review-manual-candidate-smoke/witness-plan.md",
+  "target/unsafe-review-manual-candidate-smoke/repair-queue.json",
+]
 
 [[targets]]
 id = "smallvec-capped"

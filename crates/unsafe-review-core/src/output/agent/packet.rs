@@ -5,6 +5,7 @@ use super::evidence::{
 use super::queue::{AgentReadiness, AgentRepairQueue, packet_repair_projection};
 use super::{DO_NOT_DO, TRUST_BOUNDARY};
 use crate::domain::ReviewCard;
+use crate::output::confirmation::ConfirmationCue;
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -17,7 +18,9 @@ pub(super) struct AgentPacket<'a> {
     trust_boundary: &'static str,
     card_id: &'a str,
     card: AgentCard<'a>,
+    proof_path: &'static str,
     task: &'a str,
+    confirmation_cue: ConfirmationCue,
     context: AgentContext<'a>,
     source_context: AgentSourceContext<'a>,
     safety_contract: AgentSafetyContract<'a>,
@@ -47,7 +50,9 @@ impl<'a> From<&'a ReviewCard> for AgentPacket<'a> {
             trust_boundary: TRUST_BOUNDARY,
             card_id: &card.id.0,
             card: AgentCard::from(card),
+            proof_path: card.proof_path.as_str(),
             task: &card.next_action.summary,
+            confirmation_cue: ConfirmationCue::from(card),
             context: AgentContext::from(card),
             source_context: AgentSourceContext::from(card),
             safety_contract: AgentSafetyContract::from(card),
@@ -98,6 +103,7 @@ struct AgentCard<'a> {
     class_name: &'static str,
     priority: &'static str,
     confidence: &'static str,
+    proof_path: &'static str,
 }
 
 impl<'a> From<&'a ReviewCard> for AgentCard<'a> {
@@ -107,6 +113,7 @@ impl<'a> From<&'a ReviewCard> for AgentCard<'a> {
             class_name: card.class.as_str(),
             priority: card.priority.as_str(),
             confidence: card.confidence.as_str(),
+            proof_path: card.proof_path.as_str(),
         }
     }
 }

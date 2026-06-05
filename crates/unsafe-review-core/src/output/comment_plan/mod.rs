@@ -31,8 +31,55 @@ mod tests {
         );
         assert_eq!(value["comments"][0]["operation_family"], "raw_pointer_read");
         assert_eq!(
+            value["comments"][0]["hypothesis_to_confirm"],
+            "static `guard_missing` ReviewCard for `unsafe { ptr.cast::<Header>().read() }`; confirm with external evidence before treating it as observed runtime behavior"
+        );
+        assert_eq!(
             value["comments"][0]["next_action"],
             "Add or expose the local guard that discharges the `raw_pointer_read` safety obligation."
+        );
+        assert_eq!(
+            value["comments"][0]["build_this_first"]["kind"],
+            "verify_command"
+        );
+        assert_eq!(
+            value["comments"][0]["build_this_first"]["command"],
+            "cargo +nightly miri test read_header"
+        );
+        assert_eq!(
+            value["comments"][0]["build_this_first"]["route_kind"],
+            "miri"
+        );
+        assert!(
+            value["comments"][0]["build_this_first"]["summary"]
+                .as_str()
+                .unwrap_or("")
+                .contains("Build/run `cargo +nightly miri test read_header` first")
+        );
+        assert_eq!(
+            value["comments"][0]["minimal_repro"]["kind"],
+            "verify_command"
+        );
+        assert_eq!(
+            value["comments"][0]["minimal_repro"]["command"],
+            "cargo +nightly miri test read_header"
+        );
+        assert_eq!(value["comments"][0]["minimal_repro"]["route_kind"], "miri");
+        assert!(
+            value["comments"][0]["minimal_repro"]["steps"][0]
+                .as_str()
+                .unwrap_or("")
+                .contains("Confirm ReviewCard")
+        );
+        assert!(
+            value["comments"][0]["minimal_repro"]["limitation"]
+                .as_str()
+                .unwrap_or("")
+                .contains("unsafe-review did not run this command")
+        );
+        assert_eq!(
+            value["comments"][0]["confirmation_step"],
+            "build/run `cargo +nightly miri test read_header` first, then attach a matching receipt if it confirms the route"
         );
         assert_eq!(
             value["comments"][0]["selection_reason"],
@@ -45,6 +92,28 @@ mod tests {
         assert_eq!(
             value["comments"][0]["actionability"],
             "specific_guard_missing"
+        );
+        assert_eq!(value["comments"][0]["agent_readiness"]["ready"], true);
+        assert_eq!(
+            value["comments"][0]["agent_readiness"]["state"],
+            "ready_for_agent"
+        );
+        assert!(
+            serde_json::to_string(&value["comments"][0]["agent_readiness"]["reasons"])
+                .map_err(|err| format!("render readiness reasons failed: {err}"))?
+                .contains("card-scoped allowed repairs")
+        );
+        assert_eq!(
+            value["comments"][0]["repair_queue_buckets"],
+            serde_json::json!(["repairable_by_guard", "requires_witness_receipt"])
+        );
+        assert_eq!(
+            value["comments"][0]["repair_queue_bucket_reasons"],
+            serde_json::json!(["guard_evidence_missing", "witness_receipt_missing"])
+        );
+        assert_eq!(
+            value["comments"][0]["context_command"],
+            format!("unsafe-review context {} --json", output.cards[0].id)
         );
         assert!(
             value["comments"][0]["trust_boundary"]
@@ -75,13 +144,41 @@ mod tests {
             value["comments"][0]["body"]
                 .as_str()
                 .unwrap_or("")
+                .contains("Hypothesis to confirm: static `guard_missing` ReviewCard")
+        );
+        assert!(
+            value["comments"][0]["body"]
+                .as_str()
+                .unwrap_or("")
+                .contains(
+                    "Build/run this first: Build/run `cargo +nightly miri test read_header` first"
+                )
+        );
+        assert!(
+            value["comments"][0]["body"]
+                .as_str()
+                .unwrap_or("")
+                .contains("Minimal repro cue: confirm ReviewCard")
+        );
+        assert!(
+            value["comments"][0]["body"]
+                .as_str()
+                .unwrap_or("")
+                .contains(
+                    "Confirmation step: build/run `cargo +nightly miri test read_header` first"
+                )
+        );
+        assert!(
+            value["comments"][0]["body"]
+                .as_str()
+                .unwrap_or("")
                 .contains("unsafe-review did not post this comment")
         );
         assert!(
             value["comments"][0]["body"]
                 .as_str()
                 .unwrap_or("")
-                .contains("not a Miri result")
+                .contains("not a site-execution claim")
         );
         Ok(())
     }
@@ -425,6 +522,40 @@ mod tests {
         assert_eq!(
             value["not_selected"][0]["reason_code"],
             "human_deep_review_only"
+        );
+        assert_eq!(value["not_selected"][0]["agent_readiness"]["ready"], false);
+        assert_eq!(
+            value["not_selected"][0]["agent_readiness"]["state"],
+            "requires_human_review"
+        );
+        assert!(
+            serde_json::to_string(&value["not_selected"][0]["agent_readiness"]["reasons"])
+                .map_err(|err| format!("render readiness reasons failed: {err}"))?
+                .contains("operation family `unknown`")
+        );
+        assert_eq!(
+            value["not_selected"][0]["repair_queue_buckets"],
+            serde_json::json!([
+                "repairable_by_safety_docs",
+                "repairable_by_test",
+                "requires_witness_receipt",
+                "requires_human_review",
+                "do_not_auto_repair"
+            ])
+        );
+        assert_eq!(
+            value["not_selected"][0]["repair_queue_bucket_reasons"],
+            serde_json::json!([
+                "safety_docs_evidence_missing",
+                "reach_evidence_missing",
+                "witness_receipt_missing",
+                "human_review_required",
+                "not_ready_for_automatic_repair"
+            ])
+        );
+        assert_eq!(
+            value["not_selected"][0]["context_command"],
+            format!("unsafe-review context {} --json", output.cards[0].id)
         );
         Ok(())
     }

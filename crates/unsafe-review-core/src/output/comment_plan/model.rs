@@ -1,6 +1,13 @@
 use crate::api::AnalyzeOutput;
 use crate::domain::{ReviewCard, WitnessRoute};
-use crate::output::{NO_CHANGED_GAPS_LIMITATION, NO_CHANGED_GAPS_MESSAGE};
+use crate::output::confirmation::{
+    BuildThisFirstCue, MinimalReproCue, build_this_first, confirmation_step, hypothesis_to_confirm,
+    minimal_repro,
+};
+use crate::output::{
+    NO_CHANGED_GAPS_LIMITATION, NO_CHANGED_GAPS_MESSAGE,
+    REVIEWCARD_TRUST_BOUNDARY as TRUST_BOUNDARY, agent, repair_queue,
+};
 use crate::util::path_display;
 use serde::Serialize;
 use std::collections::BTreeSet;
@@ -15,8 +22,6 @@ const REVIEW_BUDGET_REASON: ReviewBudgetReason = ReviewBudgetReason {
     code: "bounded_reviewer_noise",
     message: "bounded reviewer noise",
 };
-pub(super) const TRUST_BOUNDARY: &str = "Static unsafe contract review only; this is not a proof of memory safety, not UB-free status, and not a Miri result unless a witness receipt is attached.";
-
 #[derive(Serialize)]
 pub(super) struct CommentPlan {
     pub(super) schema_version: String,
@@ -136,15 +141,24 @@ pub(super) struct PlannedComment {
     class: &'static str,
     priority: &'static str,
     confidence: &'static str,
+    proof_path: &'static str,
+    hypothesis_to_confirm: String,
     operation: String,
     operation_family: &'static str,
     witness_routes: Vec<PlannedWitnessRoute>,
     next_action: String,
     verify_commands: Vec<String>,
+    build_this_first: BuildThisFirstCue,
+    minimal_repro: MinimalReproCue,
+    confirmation_step: String,
     selection_reason: &'static str,
     selection_reason_code: &'static str,
     actionability: &'static str,
     relevance: &'static str,
+    agent_readiness: CommentPlanAgentReadiness,
+    repair_queue_buckets: Vec<&'static str>,
+    repair_queue_bucket_reasons: Vec<&'static str>,
+    context_command: String,
     trust_boundary: &'static str,
     body: String,
 }
@@ -152,6 +166,7 @@ pub(super) struct PlannedComment {
 impl From<&ReviewCard> for PlannedComment {
     fn from(card: &ReviewCard) -> Self {
         let selection_reason = selection_reason(card);
+        let repair = CommentPlanRepairMetadata::from(card);
         Self {
             card_id: card.id.0.clone(),
             path: path_display(&card.site.location.file),
@@ -160,15 +175,24 @@ impl From<&ReviewCard> for PlannedComment {
             class: card.class.as_str(),
             priority: card.priority.as_str(),
             confidence: card.confidence.as_str(),
+            proof_path: card.proof_path.as_str(),
+            hypothesis_to_confirm: hypothesis_to_confirm(card),
             operation: card.operation.expression.clone(),
             operation_family: card.operation.family.as_str(),
             witness_routes: card.routes.iter().map(PlannedWitnessRoute::from).collect(),
             next_action: card.next_action.summary.clone(),
             verify_commands: card.next_action.verify_commands.clone(),
+            build_this_first: build_this_first(card),
+            minimal_repro: minimal_repro(card),
+            confirmation_step: confirmation_step(card),
             selection_reason: selection_reason.message,
             selection_reason_code: selection_reason.code,
             actionability: actionability(card),
             relevance: relevance(card),
+            agent_readiness: repair.agent_readiness,
+            repair_queue_buckets: repair.repair_queue_buckets,
+            repair_queue_bucket_reasons: repair.repair_queue_bucket_reasons,
+            context_command: repair.context_command,
             trust_boundary: TRUST_BOUNDARY,
             body: comment_body(card),
         }
@@ -184,17 +208,23 @@ pub(super) struct NotSelectedCard {
     class: &'static str,
     priority: &'static str,
     confidence: &'static str,
+    proof_path: &'static str,
     operation: String,
     operation_family: &'static str,
     next_action: String,
     actionability: &'static str,
     relevance: &'static str,
+    agent_readiness: CommentPlanAgentReadiness,
+    repair_queue_buckets: Vec<&'static str>,
+    repair_queue_bucket_reasons: Vec<&'static str>,
+    context_command: String,
     reason: &'static str,
     reason_code: &'static str,
 }
 
 impl NotSelectedCard {
     fn from_reason(card: &ReviewCard, reason: ReviewBudgetReason) -> Self {
+        let repair = CommentPlanRepairMetadata::from(card);
         Self {
             card_id: card.id.0.clone(),
             path: path_display(&card.site.location.file),
@@ -203,13 +233,59 @@ impl NotSelectedCard {
             class: card.class.as_str(),
             priority: card.priority.as_str(),
             confidence: card.confidence.as_str(),
+            proof_path: card.proof_path.as_str(),
             operation: card.operation.expression.clone(),
             operation_family: card.operation.family.as_str(),
             next_action: card.next_action.summary.clone(),
             actionability: actionability(card),
             relevance: relevance(card),
+            agent_readiness: repair.agent_readiness,
+            repair_queue_buckets: repair.repair_queue_buckets,
+            repair_queue_bucket_reasons: repair.repair_queue_bucket_reasons,
+            context_command: repair.context_command,
             reason: reason.message,
             reason_code: reason.code,
+        }
+    }
+}
+
+struct CommentPlanRepairMetadata {
+    agent_readiness: CommentPlanAgentReadiness,
+    repair_queue_buckets: Vec<&'static str>,
+    repair_queue_bucket_reasons: Vec<&'static str>,
+    context_command: String,
+}
+
+impl From<&ReviewCard> for CommentPlanRepairMetadata {
+    fn from(card: &ReviewCard) -> Self {
+        let projection = agent::repair_queue_projection(card);
+        let repair_queue_buckets = repair_queue::aggregate_buckets(&projection);
+        let repair_queue_bucket_reasons = repair_queue_buckets
+            .iter()
+            .map(|bucket| repair_queue::bucket_reason(bucket))
+            .collect();
+        Self {
+            agent_readiness: CommentPlanAgentReadiness::from(&projection.agent_readiness),
+            repair_queue_buckets,
+            repair_queue_bucket_reasons,
+            context_command: format!("unsafe-review context {} --json", card.id),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct CommentPlanAgentReadiness {
+    ready: bool,
+    state: &'static str,
+    reasons: Vec<String>,
+}
+
+impl From<&agent::AgentReadiness> for CommentPlanAgentReadiness {
+    fn from(readiness: &agent::AgentReadiness) -> Self {
+        Self {
+            ready: readiness.ready,
+            state: readiness.state,
+            reasons: readiness.reasons.clone(),
         }
     }
 }

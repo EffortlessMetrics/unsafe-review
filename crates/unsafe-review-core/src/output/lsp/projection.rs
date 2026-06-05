@@ -1,12 +1,11 @@
 use crate::api::{AnalyzeOutput, Scope};
 use crate::domain::{EvidenceState, ObligationEvidence, Priority, ReviewCard, WitnessRoute};
+use crate::output::REVIEWCARD_TRUST_BOUNDARY as TRUST_BOUNDARY;
 use crate::util::path_display;
 use serde::{Deserialize, Serialize};
 
 mod code_actions;
 mod hover;
-
-const TRUST_BOUNDARY: &str = "Static unsafe contract review only; this is not a proof of memory safety, not UB-free status, and not a Miri result unless a witness receipt is attached.";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EditorProjection {
@@ -117,6 +116,7 @@ struct LspDiagnostic<'a> {
     message: String,
     operation: &'a str,
     operation_family: &'static str,
+    proof_path: &'static str,
     hazards: Vec<&'static str>,
     required_safety_conditions: Vec<LspSafetyCondition<'a>>,
     evidence_summary: LspEvidenceSummary<'a>,
@@ -144,6 +144,7 @@ impl<'a> From<&'a ReviewCard> for LspDiagnostic<'a> {
             ),
             operation: &card.operation.expression,
             operation_family: card.operation.family.as_str(),
+            proof_path: card.proof_path.as_str(),
             hazards: card.hazards.iter().map(|hazard| hazard.as_str()).collect(),
             required_safety_conditions: card
                 .obligations
@@ -323,6 +324,7 @@ struct LspCodeAction<'a> {
 struct LspCodeActionPayload<'a> {
     kind: &'static str,
     card_id: &'a str,
+    proof_path: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     file: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]

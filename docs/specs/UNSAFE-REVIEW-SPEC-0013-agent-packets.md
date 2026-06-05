@@ -25,7 +25,12 @@ source of analyzer truth. It carries:
 - `mode = bounded_repair_packet`
 - `source = review_card`
 - `policy = advisory`
-- the card identity, class, priority, and confidence
+- the card identity, class, priority, confidence, and ReviewCard `proof_path`
+- top-level `proof_path`, `card.proof_path`, and `context.proof_path`, copied
+  as a reviewer routing hint from the canonical ReviewCard proof-path vocabulary
+- `confirmation_cue`, an advisory first-confirmation projection with the
+  static hypothesis to confirm, `build_this_first` cue, minimal repro cue,
+  confirmation step, and trust boundary
 - the unsafe site context, concrete operation expression, operation family,
   snippet, and hazards
 - bounded source context containing the unsafe site, nearby safety-contract
@@ -55,6 +60,11 @@ and a few related test mentions. It must not dump whole files by default, and a
 related test mention remains reach evidence only; it is not a claim that the
 unsafe site executed.
 
+`proof_path` is advisory routing metadata copied from the ReviewCard. It helps
+the reviewer choose the next proof action.
+This reviewer routing hint does not prove witness execution, UB-free status, safety, or repair success.
+It must not reclassify the finding outside the ReviewCard.
+
 `agent_readiness` is additive metadata, not analyzer truth. Its state vocabulary
 is closed:
 
@@ -75,9 +85,10 @@ routing are marked not ready with reasons. This classification does not execute
 an agent, apply edits, run witnesses, or resolve the card.
 
 Packets constrain LLMs with task, contract, missing evidence, allowed repairs,
-do-not-do list, verify commands, and stop conditions. They are copy-only in
-v0.x; `unsafe-review` does not run an agent, edit source, post comments, or
-claim that the packet resolves the card.
+do-not-do list, verify commands, first-confirmation/minimal-repro cue, and stop
+conditions. They are copy-only in v0.x; `unsafe-review` does not run an agent,
+edit source, post comments, execute the `build_this_first` or minimal repro
+command, or claim that the packet resolves the card.
 The do-not-do list must make that automation boundary visible to packet
 consumers: a packet must not let downstream tooling claim `unsafe-review` ran
 an agent, ran witnesses, applied source edits, or posted comments, and it must
@@ -89,8 +100,12 @@ the packet as an automatic safety repair.
 ## Projection contract
 
 Agent packets are card-scoped handoffs, not autonomous repair authority. Each
-packet must name one ReviewCard, the exact missing obligation evidence, allowed
-repair shapes, do-not-do rules, verify commands, and stop conditions.
+packet must name one ReviewCard, its `proof_path`, the exact missing obligation
+evidence, allowed repair shapes, do-not-do rules, verify commands, and stop
+conditions. `proof_path` is projected from the ReviewCard into the top-level,
+`card.proof_path`, and `context.proof_path` fields so packet consumers can
+route work without scraping prose. It must not reclassify the card.
+It does not promote a packet into proof.
 
 The packet may classify whether the card is ready for bounded repair delegation,
 but that classification is advisory metadata. It must not hide the ReviewCard,
@@ -132,11 +147,15 @@ agent-readiness state, bucket reason, do-not-do rules, and a copyable
 one bucket only when the reasons are distinct and card-scoped, such as a card
 that is repairable by guard evidence but still requires a witness receipt for a
 stronger review signal. A card must not repeat within the same bucket.
+The aggregate summary must also project the canonical input diff file counts
+from `cards.json`, so mixed-language scope remains visible without creating
+non-Rust repair tasks.
 
-`pr-summary.md` may repeat the top card's agent-readiness state, queue buckets,
-and readiness reasons as a reviewer cockpit cue. That summary is not a separate
-classification path; it must project the checked aggregate `repair-queue.json`
-state for the same ReviewCard.
+`pr-summary.md` and `github-summary.md` may repeat the top card's
+agent-readiness state, queue buckets, bucket reasons, and readiness reasons as
+a reviewer cockpit cue. That summary is not a separate classification path; it
+must project the checked aggregate `repair-queue.json` state for the same
+ReviewCard.
 
 The aggregate artifact is still copy-only. It must not run an agent, edit
 source, post comments, execute witnesses, suppress cards, resolve cards, or
@@ -146,7 +165,8 @@ precision/recall, or policy readiness.
 The artifact verifier must check that every bucket name is from the closed
 repair-queue vocabulary, every queue entry references a known ReviewCard, every
 bucket reason is from a closed vocabulary, do-not-do boundaries are present, and
-no queue entry weakens the source card's missing evidence or trust boundary.
+no queue entry weakens the source card's missing evidence or trust boundary. It
+must also verify that repair-queue summary diff counts match `cards.json`.
 Each queue entry's `agent_readiness.reasons` must explain why the packet is or
 is not ready for bounded agent work. `agent_readiness.state` must be
 `ready_for_agent`, `requires_human_review`, `requires_witness_receipt`, or
@@ -183,6 +203,10 @@ agent-ready.
   whole-file dumps and site-execution claims.
 - The packet includes obligation-level evidence, missing evidence, witness
   routes, do-not-do rules, stop conditions, and the trust boundary.
+- The packet includes `confirmation_cue` projected from the ReviewCard: a
+  hypothesis to confirm, a first build/run or witness-route cue, a minimal
+  repro cue, and a receipt/confidence-upgrade reminder. The cue is advisory and
+  does not mean unsafe-review ran the command or observed runtime behavior.
 - The do-not-do rules explicitly preserve the copy-only boundary: do not claim
   `unsafe-review` ran an agent, ran witnesses, applied source edits, or posted
   comments.
