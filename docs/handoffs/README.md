@@ -5,6 +5,7 @@ what not to do next. Do not put active specs here.
 
 | Handoff | Date | Scope |
 |---|---|---|
+| [Release 0.3.3 preparation](2026-06-05-release-0.3.3-preparation.md) | 2026-06-05 | Bun manual-candidate cockpit usability patch release preparation, synchronized 0.3.3 version bump, confirmation-cue/oracle-map/manual-handoff notes, validation checklist, and manual publish order |
 | [Source workbench docs and readiness sync](2026-06-05-source-workbench-docs-readiness-sync.md) | 2026-06-05 | acknowledges source PR #525 history-preserving catch-up of current swarm workbench docs, readiness contracts, public review workflow, and CI cookbook history without claiming publication, proof, or policy readiness |
 | [Source manual candidate handoff cross-check sync](2026-06-03-source-manual-candidate-handoff-crosscheck-sync.md) | 2026-06-03 | acknowledges source PR #522 history-preserving manual-candidate first-pr handoff cross-check promotion and source CI budget acknowledgement without claiming publication, proof, or policy readiness |
 | [Source changelog history sync](2026-06-03-source-changelog-history-sync.md) | 2026-06-03 | acknowledges source PR #521 history-preserving changelog/usability catch-up and source CI budget acknowledgement without claiming publication, proof, or policy readiness |
