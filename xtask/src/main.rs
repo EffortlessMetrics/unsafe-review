@@ -488,6 +488,7 @@ const MANUAL_CANDIDATE_SMOKE_OUT_DIR: &str = "target/unsafe-review-manual-candid
 
 const DOGFOOD_MANIFEST: &str = "docs/dogfood/corpus.toml";
 const DOGFOOD_INDEX: &str = "docs/dogfood/index.json";
+const DOGFOOD_INDEX_MD: &str = "docs/dogfood/index.md";
 const DOGFOOD_README: &str = "docs/dogfood/README.md";
 const DOGFOOD_FOLLOW_UP_SEEDS: &str = "docs/dogfood/follow-up-seeds.md";
 const DOGFOOD_STABLE_BYTE_SEEDS: &str = "docs/dogfood/stable-byte-follow-up-seeds.md";
@@ -499,6 +500,8 @@ const DOGFOOD_JUDGMENT_DIR: &str = "docs/dogfood/judgments";
 const DOGFOOD_JUDGMENTS_README: &str = "docs/dogfood/judgments/README.md";
 const DOGFOOD_REPORT_DIR: &str = "docs/dogfood/reports";
 const BUN_MANUAL_CANDIDATE_SMOKE_ID: &str = "bun-manual-candidates-first-pr-smoke";
+const BUN_MANUAL_CANDIDATE_SMOKE_REPORT: &str =
+    "docs/dogfood/reports/2026-06-03-bun-manual-candidates-first-pr-smoke.md";
 const BUN_MANUAL_CANDIDATE_SMOKE_ARTIFACTS: &[&str] = &[
     "target/unsafe-review-manual-candidate-smoke/manual-candidates.json",
     "target/unsafe-review-manual-candidate-smoke/manual-repair-queue.json",
@@ -1175,6 +1178,7 @@ fn check_manual_candidate_example_handoff_fields(
         pr_aperture,
     )?;
     check_manual_candidate_example_source_trace(value, path)?;
+    check_manual_candidate_example_node_parity_oracle_map(value, path)?;
 
     let trust_boundary = require_non_empty_json_str(value, "trust_boundary", path)?;
     for needle in [
@@ -1195,6 +1199,58 @@ fn check_manual_candidate_example_handoff_fields(
                 "{path} trust_boundary must include `{needle}` for committed manual examples"
             ));
         }
+    }
+    Ok(())
+}
+
+fn check_manual_candidate_example_node_parity_oracle_map(
+    value: &serde_json::Value,
+    path: &str,
+) -> Result<(), String> {
+    let evidence = json_array_at(value, "/evidence", path)?;
+    let has_node_parity = evidence
+        .iter()
+        .any(|item| item.get("kind").and_then(serde_json::Value::as_str) == Some("node_parity"));
+    if !has_node_parity {
+        return Ok(());
+    }
+    let Some(oracle_map) = value
+        .get("oracle_map")
+        .and_then(serde_json::Value::as_object)
+    else {
+        return Err(format!(
+            "{path} committed manual candidate example with node_parity evidence must include oracle_map"
+        ));
+    };
+    require_object_str(oracle_map, "rust_seam", path, "oracle_map")?;
+    require_object_str(oracle_map, "oracle_language", path, "oracle_map")?;
+    let oracle_path = require_object_str(oracle_map, "oracle_path", path, "oracle_map")?;
+    require_object_str(oracle_map, "oracle_kind", path, "oracle_map")?;
+    require_object_str(oracle_map, "coverage_confidence", path, "oracle_map")?;
+    let limitation = require_object_str(oracle_map, "limitation", path, "oracle_map")?;
+    let limitation = limitation.to_ascii_lowercase();
+    for needle in [
+        "oracle map only",
+        "not witness execution",
+        "site-execution proof",
+        "memory-safety proof",
+    ] {
+        if !limitation.contains(needle) {
+            return Err(format!(
+                "{path} oracle_map.limitation must include `{needle}`"
+            ));
+        }
+    }
+    let test_targets = json_array_at(value, "/test_targets", path)?;
+    let oracle_in_tests = test_targets.iter().any(|target| {
+        target
+            .as_str()
+            .is_some_and(|target| target.contains(oracle_path))
+    });
+    if !oracle_in_tests {
+        return Err(format!(
+            "{path} oracle_map.oracle_path `{oracle_path}` must also appear in test_targets"
+        ));
     }
     Ok(())
 }
@@ -3243,8 +3299,10 @@ fn check_dogfood() -> Result<(), String> {
     let mut repo_snapshots = 0usize;
     let mut pr_diffs = 0usize;
     let mut fixture_controls = 0usize;
+    let mut target_kinds = BTreeMap::new();
     for (idx, target) in targets.iter().enumerate() {
         let stats = dogfood_checks::validate_target(target, idx, &mut ids)?;
+        target_kinds.insert(stats.id.clone(), stats.kind.clone());
         if let Some(repository) = stats.repository {
             repositories.insert(repository);
         }
@@ -3286,9 +3344,11 @@ fn check_dogfood() -> Result<(), String> {
     check_dogfood_report_overclaims()?;
     check_dogfood_follow_up_seeds(&ids)?;
     check_dogfood_stable_byte_seeds()?;
+    check_dogfood_bun_manual_candidate_smoke_report()?;
     check_dogfood_agent_repair_experiment_protocol_doc()?;
     check_dogfood_judgment_schema_docs()?;
-    check_dogfood_judgments(&ids)?;
+    let judgment_stats = check_dogfood_judgments(&ids, &target_kinds)?;
+    check_dogfood_real_crate_judgment_sample_index(&judgment_stats)?;
 
     println!(
         "check-dogfood: ok ({} targets, {} repositories)",
@@ -3298,7 +3358,20 @@ fn check_dogfood() -> Result<(), String> {
     Ok(())
 }
 
-fn check_dogfood_judgments(known_targets: &BTreeSet<String>) -> Result<(), String> {
+#[derive(Debug, Default)]
+struct DogfoodJudgmentSampleStats {
+    judgment_files: usize,
+    real_crate_targets: BTreeSet<String>,
+    fixture_control_targets: BTreeSet<String>,
+    card_or_surface_judgments: usize,
+    missed_obligations: usize,
+    labels: BTreeMap<String, usize>,
+}
+
+fn check_dogfood_judgments(
+    known_targets: &BTreeSet<String>,
+    target_kinds: &BTreeMap<String, String>,
+) -> Result<DogfoodJudgmentSampleStats, String> {
     let judgment_dir = workspace_path(DOGFOOD_JUDGMENT_DIR);
     if !judgment_dir.is_dir() {
         return Err(format!("{DOGFOOD_JUDGMENT_DIR} is missing"));
@@ -3327,6 +3400,7 @@ fn check_dogfood_judgments(known_targets: &BTreeSet<String>) -> Result<(), Strin
     }
     judgment_files.sort();
 
+    let mut stats = DogfoodJudgmentSampleStats::default();
     for path in judgment_files {
         let judgment_path = path.to_string_lossy().replace('\\', "/");
         let text = read_to_string(&path)?;
@@ -3337,9 +3411,14 @@ fn check_dogfood_judgments(known_targets: &BTreeSet<String>) -> Result<(), Strin
             &known_families_or_surfaces,
             &reports,
         )?;
+        let value = text
+            .parse::<toml::Table>()
+            .map(toml::Value::Table)
+            .map_err(|err| format!("parse {judgment_path} failed: {err}"))?;
+        record_dogfood_judgment_sample(&mut stats, &judgment_path, &value, target_kinds)?;
     }
 
-    Ok(())
+    Ok(stats)
 }
 
 fn dogfood_known_families_or_surfaces() -> Result<BTreeSet<String>, String> {
@@ -3355,6 +3434,37 @@ fn dogfood_known_families_or_surfaces() -> Result<BTreeSet<String>, String> {
             .map(|surface| (*surface).to_string()),
     );
     Ok(known)
+}
+
+fn record_dogfood_judgment_sample(
+    stats: &mut DogfoodJudgmentSampleStats,
+    path: &str,
+    value: &toml::Value,
+    target_kinds: &BTreeMap<String, String>,
+) -> Result<(), String> {
+    let target = required_toml_string(value, "target", path)?;
+    let kind = target_kinds
+        .get(target)
+        .ok_or_else(|| format!("{path} target `{target}` has no dogfood target kind"))?;
+    if kind == "fixture-control" {
+        stats.fixture_control_targets.insert(target.to_string());
+        return Ok(());
+    }
+
+    stats.judgment_files += 1;
+    stats.real_crate_targets.insert(target.to_string());
+    if let Some(cards) = optional_toml_array(value, "cards", path)? {
+        stats.card_or_surface_judgments += cards.len();
+        for (idx, card) in cards.iter().enumerate() {
+            let table = toml_table(card, path, "cards", idx)?;
+            let judgment = required_table_string(table, "judgment", path, "cards", idx)?;
+            *stats.labels.entry(judgment.to_string()).or_insert(0) += 1;
+        }
+    }
+    if let Some(missed) = optional_toml_array(value, "missed", path)? {
+        stats.missed_obligations += missed.len();
+    }
+    Ok(())
 }
 
 fn check_dogfood_judgment_text(
@@ -3929,6 +4039,63 @@ fn check_dogfood_stable_byte_seeds() -> Result<(), String> {
     Ok(())
 }
 
+fn check_dogfood_bun_manual_candidate_smoke_report() -> Result<(), String> {
+    let text = read_to_string(&workspace_path(BUN_MANUAL_CANDIDATE_SMOKE_REPORT))?;
+    let examples = manual_candidate_examples()?;
+    check_dogfood_bun_manual_candidate_smoke_report_text(
+        BUN_MANUAL_CANDIDATE_SMOKE_REPORT,
+        &text,
+        &examples,
+    )
+}
+
+fn check_dogfood_bun_manual_candidate_smoke_report_text(
+    path: &str,
+    text: &str,
+    examples: &[ManualCandidateExample],
+) -> Result<(), String> {
+    let section = markdown_heading_section(text, "Bun candidates")
+        .ok_or_else(|| format!("{path} must include a `## Bun candidates` section"))?;
+    for example in examples {
+        let id_marker = format!("`{}`", example.id);
+        if !section.contains(&id_marker) {
+            return Err(format!(
+                "{path} Bun candidates section must list committed manual candidate `{}`",
+                example.id
+            ));
+        }
+
+        let file = example
+            .expected
+            .pointer("/location/file")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| {
+                format!(
+                    "{} location.file must be present for dogfood smoke report check",
+                    example.path.display()
+                )
+            })?;
+        let line = example
+            .expected
+            .pointer("/location/line")
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| {
+                format!(
+                    "{} location.line must be present for dogfood smoke report check",
+                    example.path.display()
+                )
+            })?;
+        let location = format!("{file}:{line}");
+        if !section.contains(&location) {
+            return Err(format!(
+                "{path} Bun candidates section must list committed manual candidate `{}` primary location `{location}`",
+                example.id
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn check_dogfood_agent_repair_experiment_protocol_doc() -> Result<(), String> {
     let readme = read_to_string(&workspace_path(DOGFOOD_README))?;
     if !readme.contains("agent-repair-experiments.md") {
@@ -4477,12 +4644,12 @@ fn check_stable_byte_coverage_fixture_path(
             "{path}:{line} stable-byte coverage row for `{seed_id}` positive fixture `{fixture_path}` is not registered in fixtures/calibration.toml"
         ));
     }
-    if let Some(expected_fixture) = dogfood_stable_byte_primary_fixture(seed_id) {
-        if fixture_name != expected_fixture {
-            return Err(format!(
-                "{path}:{line} stable-byte coverage row for `{seed_id}` positive fixture `{fixture_path}` must match primary fixture `fixtures/{expected_fixture}`"
-            ));
-        }
+    if let Some(expected_fixture) = dogfood_stable_byte_primary_fixture(seed_id)
+        && fixture_name != expected_fixture
+    {
+        return Err(format!(
+            "{path}:{line} stable-byte coverage row for `{seed_id}` positive fixture `{fixture_path}` must match primary fixture `fixtures/{expected_fixture}`"
+        ));
     }
     Ok(())
 }
@@ -4994,6 +5161,8 @@ mod dogfood_checks {
     use super::*;
 
     pub(super) struct TargetStats {
+        pub(super) id: String,
+        pub(super) kind: String,
         pub(super) repository: Option<String>,
         pub(super) artifact_status: String,
         pub(super) repo_snapshots: usize,
@@ -5064,6 +5233,8 @@ mod dogfood_checks {
         let (repo_snapshots, pr_diffs, fixture_controls) = validate_kind_fields(target, idx, kind)?;
         let fixture_control_id = (fixture_controls > 0).then(|| id.to_string());
         Ok(TargetStats {
+            id: id.to_string(),
+            kind: kind.to_string(),
             repository,
             artifact_status: artifact_status.to_string(),
             repo_snapshots,
@@ -5411,6 +5582,113 @@ fn check_dogfood_recorded_outcomes(
             "{id}\n{target}\n{proof_action}\n{witness_route_state}\n{claim_boundary}\n{notes}"
         );
         reject_positive_overclaims(Path::new(DOGFOOD_INDEX), &claim_text)?;
+    }
+    Ok(())
+}
+
+fn check_dogfood_real_crate_judgment_sample_index(
+    stats: &DogfoodJudgmentSampleStats,
+) -> Result<(), String> {
+    let index = parse_json_file(&workspace_path(DOGFOOD_INDEX))?;
+    let markdown = read_to_string(&workspace_path(DOGFOOD_INDEX_MD))?;
+    check_dogfood_real_crate_judgment_sample_index_value(&index, &markdown, stats)
+}
+
+fn check_dogfood_real_crate_judgment_sample_index_value(
+    index: &serde_json::Value,
+    markdown: &str,
+    stats: &DogfoodJudgmentSampleStats,
+) -> Result<(), String> {
+    let sample = index
+        .get("real_crate_judgment_sample")
+        .ok_or_else(|| format!("{DOGFOOD_INDEX} is missing real_crate_judgment_sample"))?;
+    let context = format!("{DOGFOOD_INDEX} real_crate_judgment_sample");
+    require_json_str(sample, "status", "manual_selected_sample", &context)?;
+    require_json_usize_at(sample, "/judgment_files", stats.judgment_files, &context)?;
+    require_json_usize_at(sample, "/targets", stats.real_crate_targets.len(), &context)?;
+    require_json_usize_at(
+        sample,
+        "/card_or_surface_judgments",
+        stats.card_or_surface_judgments,
+        &context,
+    )?;
+    require_json_usize_at(
+        sample,
+        "/missed_obligations",
+        stats.missed_obligations,
+        &context,
+    )?;
+    let target_ids = json_array_at(sample, "/target_ids", &context)?;
+    let actual_targets = target_ids
+        .iter()
+        .map(|target| {
+            target
+                .as_str()
+                .ok_or_else(|| format!("{context} target_ids entries must be strings"))
+                .map(str::to_string)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let expected_targets = stats.real_crate_targets.iter().cloned().collect::<Vec<_>>();
+    if actual_targets != expected_targets {
+        return Err(format!(
+            "{context} target_ids {:?} do not match committed real-crate judgment targets {:?}",
+            actual_targets, expected_targets
+        ));
+    }
+
+    for label in DOGFOOD_JUDGMENT_LABELS {
+        let expected = stats.labels.get(*label).copied().unwrap_or(0);
+        require_json_usize_at(sample, &format!("/labels/{label}"), expected, &context)?;
+    }
+
+    let claim_boundary = require_non_empty_json_str(sample, "claim_boundary", &context)?;
+    check_dogfood_judgment_sample_claim_boundary(&context, claim_boundary)?;
+    check_dogfood_real_crate_judgment_sample_markdown_text(markdown, stats)?;
+    Ok(())
+}
+
+fn check_dogfood_real_crate_judgment_sample_markdown_text(
+    text: &str,
+    stats: &DogfoodJudgmentSampleStats,
+) -> Result<(), String> {
+    for expected in [
+        "## Selected Judgment Sample".to_string(),
+        format!(
+            "| Real-crate targets | {} |",
+            stats.real_crate_targets.len()
+        ),
+        format!("| Judgment files | {} |", stats.judgment_files),
+        format!(
+            "| Card or surface judgments | {} |",
+            stats.card_or_surface_judgments
+        ),
+        format!("| Missed-obligation rows | {} |", stats.missed_obligations),
+    ] {
+        if !text.contains(&expected) {
+            return Err(format!("{DOGFOOD_INDEX_MD} is missing `{expected}`"));
+        }
+    }
+    for label in DOGFOOD_JUDGMENT_LABELS {
+        let expected = format!("| `{label}` | {} |", stats.labels.get(*label).unwrap_or(&0));
+        if !text.contains(&expected) {
+            return Err(format!("{DOGFOOD_INDEX_MD} is missing `{expected}`"));
+        }
+    }
+    Ok(())
+}
+
+fn check_dogfood_judgment_sample_claim_boundary(context: &str, text: &str) -> Result<(), String> {
+    require_boundary_text(text, context)?;
+    for needle in [
+        "selected real-crate manual usefulness samples only",
+        "not calibrated precision or recall",
+        "not witness execution",
+        "not site execution evidence",
+        "not policy readiness",
+    ] {
+        if !text_contains_ignore_ascii_case(text, needle) {
+            return Err(format!("{context} claim_boundary is missing `{needle}`"));
+        }
     }
     Ok(())
 }
@@ -12030,7 +12308,7 @@ OperationFamily::RawPointerRead => vec![
         text.push_str("A suggested witness route is not evidence until it is run externally.\n");
         text.push_str("Only `agent_readiness.state` `ready_for_agent` packets are edit tasks.\n");
         for heading in FIX_RECIPE_REQUIRED_SECTIONS {
-            text.push_str("\n");
+            text.push('\n');
             text.push_str(heading);
             text.push_str("\n\n");
             text.push_str("What `unsafe-review` is looking for:\n\n");
@@ -12442,6 +12720,75 @@ artifacts = [
     }
 
     #[test]
+    fn manual_candidate_examples_require_node_parity_oracle_map() -> Result<(), String> {
+        let path =
+            "docs/examples/manual-candidates/candidate7-sync-compression-getter-reentry.json";
+        let mut value = parse_json_file(&workspace_path(path))?;
+        value
+            .as_object_mut()
+            .ok_or_else(|| "candidate7 example should be an object".to_string())?
+            .remove("oracle_map");
+
+        let err = err_text(check_manual_candidate_example_handoff_fields(&value, path))?;
+
+        assert!(err.contains("node_parity"), "{err}");
+        assert!(err.contains("oracle_map"), "{err}");
+        Ok(())
+    }
+
+    #[test]
+    fn manual_candidate_examples_require_oracle_path_as_test_target() -> Result<(), String> {
+        let path =
+            "docs/examples/manual-candidates/candidate7-sync-compression-getter-reentry.json";
+        let mut value = parse_json_file(&workspace_path(path))?;
+        value["oracle_map"]["oracle_path"] = serde_json::json!("test/js/bun/util/missing.ts");
+
+        let err = err_text(check_manual_candidate_example_handoff_fields(&value, path))?;
+
+        assert!(err.contains("oracle_map.oracle_path"), "{err}");
+        assert!(err.contains("test_targets"), "{err}");
+        Ok(())
+    }
+
+    #[test]
+    fn dogfood_bun_manual_smoke_report_requires_all_candidate_ids() -> Result<(), String> {
+        let examples = manual_candidate_examples()?;
+        let text = read_to_string(&workspace_path(BUN_MANUAL_CANDIDATE_SMOKE_REPORT))?;
+        let text = text.replace("`R4R2-S007`", "`R4R2-S999`");
+
+        let err = err_text(check_dogfood_bun_manual_candidate_smoke_report_text(
+            BUN_MANUAL_CANDIDATE_SMOKE_REPORT,
+            &text,
+            &examples,
+        ))?;
+
+        assert!(err.contains("Bun candidates section"), "{err}");
+        assert!(err.contains("R4R2-S007"), "{err}");
+        Ok(())
+    }
+
+    #[test]
+    fn dogfood_bun_manual_smoke_report_requires_primary_locations() -> Result<(), String> {
+        let examples = manual_candidate_examples()?;
+        let text = read_to_string(&workspace_path(BUN_MANUAL_CANDIDATE_SMOKE_REPORT))?;
+        let text = text.replace(
+            "src/runtime/api/BunObject.rs:2345",
+            "src/runtime/api/BunObject.rs:9999",
+        );
+
+        let err = err_text(check_dogfood_bun_manual_candidate_smoke_report_text(
+            BUN_MANUAL_CANDIDATE_SMOKE_REPORT,
+            &text,
+            &examples,
+        ))?;
+
+        assert!(err.contains("primary location"), "{err}");
+        assert!(err.contains("R4R2-S007"), "{err}");
+        assert!(err.contains("src/runtime/api/BunObject.rs:2345"), "{err}");
+        Ok(())
+    }
+
+    #[test]
     fn manual_fuzz_harness_validates_current_shape() -> Result<(), String> {
         check_manual_fuzz_harness()
     }
@@ -12659,6 +13006,64 @@ artifacts = [
         })
     }
 
+    fn dogfood_judgment_sample_stats_for_tests() -> DogfoodJudgmentSampleStats {
+        let mut labels = BTreeMap::new();
+        labels.insert("actionable".to_string(), 2);
+        labels.insert("noise".to_string(), 1);
+        DogfoodJudgmentSampleStats {
+            judgment_files: 2,
+            real_crate_targets: BTreeSet::from([
+                "arrayvec-pr138".to_string(),
+                "memchr-capped".to_string(),
+            ]),
+            fixture_control_targets: BTreeSet::new(),
+            card_or_surface_judgments: 3,
+            missed_obligations: 0,
+            labels,
+        }
+    }
+
+    fn dogfood_judgment_sample_index_for_tests() -> serde_json::Value {
+        serde_json::json!({
+            "real_crate_judgment_sample": {
+                "status": "manual_selected_sample",
+                "targets": 2,
+                "target_ids": ["arrayvec-pr138", "memchr-capped"],
+                "judgment_files": 2,
+                "card_or_surface_judgments": 3,
+                "missed_obligations": 0,
+                "labels": {
+                    "actionable": 2,
+                    "noise": 1,
+                    "missed": 0,
+                    "uncertain": 0,
+                    "human-only": 0,
+                    "good-agent-task": 0,
+                    "bad-agent-task": 0
+                },
+                "claim_boundary": "Selected real-crate manual usefulness samples only from static unsafe contract review; not calibrated precision or recall, not witness execution, not site execution evidence, not policy readiness, not a proof of memory safety, not UB-free status, and not a Miri result."
+            }
+        })
+    }
+
+    fn dogfood_judgment_sample_markdown_for_tests() -> String {
+        [
+            "## Selected Judgment Sample",
+            "| Real-crate targets | 2 |",
+            "| Judgment files | 2 |",
+            "| Card or surface judgments | 3 |",
+            "| Missed-obligation rows | 0 |",
+            "| `actionable` | 2 |",
+            "| `noise` | 1 |",
+            "| `missed` | 0 |",
+            "| `uncertain` | 0 |",
+            "| `human-only` | 0 |",
+            "| `good-agent-task` | 0 |",
+            "| `bad-agent-task` | 0 |",
+        ]
+        .join("\n")
+    }
+
     fn dogfood_agent_repair_protocol_doc_fixture() -> String {
         let mut text = "# Agent Repair Experiment Protocol\n\n".to_string();
         text.push_str("Status: experimental dogfood protocol\n\n");
@@ -12781,6 +13186,30 @@ artifacts = [
         ))?;
 
         assert!(err.contains("safe to merge"));
+        Ok(())
+    }
+
+    #[test]
+    fn dogfood_real_crate_judgment_sample_index_accepts_derived_counts() -> Result<(), String> {
+        check_dogfood_real_crate_judgment_sample_index_value(
+            &dogfood_judgment_sample_index_for_tests(),
+            &dogfood_judgment_sample_markdown_for_tests(),
+            &dogfood_judgment_sample_stats_for_tests(),
+        )
+    }
+
+    #[test]
+    fn dogfood_real_crate_judgment_sample_index_rejects_stale_label_count() -> Result<(), String> {
+        let mut index = dogfood_judgment_sample_index_for_tests();
+        index["real_crate_judgment_sample"]["labels"]["actionable"] = serde_json::json!(1);
+
+        let err = err_text(check_dogfood_real_crate_judgment_sample_index_value(
+            &index,
+            &dogfood_judgment_sample_markdown_for_tests(),
+            &dogfood_judgment_sample_stats_for_tests(),
+        ))?;
+
+        assert!(err.contains("/labels/actionable"));
         Ok(())
     }
 
