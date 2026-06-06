@@ -36,6 +36,14 @@ Specs define behavior. They do not carry the PR queue.
 25. [Docs automation](UNSAFE-REVIEW-SPEC-0025-docs-automation.md)
 26. [Accuracy validation and calibration](UNSAFE-REVIEW-SPEC-0026-accuracy-validation-and-calibration.md)
 27. [Manual candidate cards](UNSAFE-REVIEW-SPEC-0027-manual-candidate-cards.md)
+28. [Coverage instrument and product boundary](UNSAFE-REVIEW-SPEC-0028-delivery-surfaces-and-ease-of-use.md)
+29. [Unsafe evidence coverage model](UNSAFE-REVIEW-SPEC-0029-unsafe-evidence-coverage-model.md)
+30. [Baseline and coverage movement](UNSAFE-REVIEW-SPEC-0030-baseline-and-coverage-movement.md)
+31. [Baseline-aware repo badge](UNSAFE-REVIEW-SPEC-0031-baseline-aware-badge.md)
+32. [Comment-plan coverage-gap hardening](UNSAFE-REVIEW-SPEC-0032-comment-plan-coverage-hardening.md)
+33. [LLM context packet](UNSAFE-REVIEW-SPEC-0033-llm-context-packet.md)
+34. [ub-review gate manifest](UNSAFE-REVIEW-SPEC-0034-ub-review-gate-manifest.md)
+35. [Repo-scan diagnosability](UNSAFE-REVIEW-SPEC-0035-repo-scan-diagnosability.md)
 
 
 ## Appendices
