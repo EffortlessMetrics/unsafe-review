@@ -1,5 +1,9 @@
 use crate::api::{AnalyzeOutput, Scope, Summary};
-use crate::domain::{EvidenceState, ObligationEvidence, ReviewCard, WitnessRoute};
+use crate::domain::{
+    AgentLspReadiness, BaselineState, CommentPlanStatus, Coverage, CoverageBlock, EvidenceState,
+    ManualContext, ObligationEvidence, OutcomeMovement, ReviewCard, WitnessReceiptCoverage,
+    WitnessRoute,
+};
 use crate::output::REVIEWCARD_TRUST_BOUNDARY as TRUST_BOUNDARY;
 use crate::output::confirmation::ConfirmationCue;
 use crate::util::path_display;
@@ -61,6 +65,11 @@ struct JsonSummary {
     requires_loom: usize,
     miri_unsupported: usize,
     static_unknown: usize,
+    /// Coverage movement counts (SPEC-0030).
+    new_gaps: usize,
+    worsened_gaps: usize,
+    resolved_gaps: usize,
+    inherited_gaps: usize,
 }
 
 impl From<&Summary> for JsonSummary {
@@ -80,6 +89,10 @@ impl From<&Summary> for JsonSummary {
             requires_loom: summary.requires_loom,
             miri_unsupported: summary.miri_unsupported,
             static_unknown: summary.static_unknown,
+            new_gaps: summary.new_gaps,
+            worsened_gaps: summary.worsened_gaps,
+            resolved_gaps: summary.resolved_gaps,
+            inherited_gaps: summary.inherited_gaps,
         }
     }
 }
@@ -107,6 +120,7 @@ struct JsonCard<'a> {
     next_action: &'a str,
     verify_commands: &'a [String],
     confirmation_cue: ConfirmationCue,
+    coverage: JsonCoverageBlock,
 }
 
 impl<'a> From<&'a ReviewCard> for JsonCard<'a> {
@@ -144,6 +158,7 @@ impl<'a> From<&'a ReviewCard> for JsonCard<'a> {
             next_action: &card.next_action.summary,
             verify_commands: &card.next_action.verify_commands,
             confirmation_cue: ConfirmationCue::from(card),
+            coverage: JsonCoverageBlock::from(card.coverage_block()),
         }
     }
 }
@@ -241,6 +256,64 @@ fn scope_str(output: &AnalyzeOutput) -> &'static str {
     }
 }
 
+/// JSON projection of a card's machine-readable coverage block (SPEC-0029).
+#[derive(Serialize)]
+struct JsonCoverageBlock {
+    contract_coverage: &'static str,
+    guard_coverage: &'static str,
+    test_reach_coverage: &'static str,
+    witness_receipt_coverage: &'static str,
+    manual_context: &'static str,
+    baseline_state: &'static str,
+    outcome_movement: &'static str,
+    comment_plan_status: &'static str,
+    agent_lsp_readiness: &'static str,
+}
+
+impl From<CoverageBlock> for JsonCoverageBlock {
+    fn from(block: CoverageBlock) -> Self {
+        Self {
+            contract_coverage: coverage_str(block.contract_coverage),
+            guard_coverage: coverage_str(block.guard_coverage),
+            test_reach_coverage: coverage_str(block.test_reach_coverage),
+            witness_receipt_coverage: witness_receipt_str(block.witness_receipt_coverage),
+            manual_context: manual_context_str(block.manual_context),
+            baseline_state: baseline_state_str(block.baseline_state),
+            outcome_movement: outcome_movement_str(block.outcome_movement),
+            comment_plan_status: comment_plan_status_str(block.comment_plan_status),
+            agent_lsp_readiness: agent_lsp_readiness_str(block.agent_lsp_readiness),
+        }
+    }
+}
+
+fn coverage_str(coverage: Coverage) -> &'static str {
+    coverage.as_str()
+}
+
+fn witness_receipt_str(coverage: WitnessReceiptCoverage) -> &'static str {
+    coverage.as_str()
+}
+
+fn manual_context_str(context: ManualContext) -> &'static str {
+    context.as_str()
+}
+
+fn baseline_state_str(state: BaselineState) -> &'static str {
+    state.as_str()
+}
+
+fn outcome_movement_str(movement: OutcomeMovement) -> &'static str {
+    movement.as_str()
+}
+
+fn comment_plan_status_str(status: CommentPlanStatus) -> &'static str {
+    status.as_str()
+}
+
+fn agent_lsp_readiness_str(readiness: AgentLspReadiness) -> &'static str {
+    readiness.as_str()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -328,6 +401,8 @@ mod tests {
         "js_buffer_reentry_coerce_after_as_array_buffer",
         "js_buffer_reentry_vector_materialization",
         "js_buffer_reentry_as_ptr_materialization",
+        "js_buffer_stale_span_slice_index_after_reentry",
+        "js_buffer_stale_span_stale_detached_check",
         "stable_byte_native_ffi_zstd_handoff",
         "stable_byte_native_ffi_zstd_owned_copy_control",
         "stable_byte_sab_borrowed_slice",
@@ -344,6 +419,11 @@ mod tests {
         "js_buffer_reentry_node_fs_rab_scalar_write_scheduled_before_capture_no_card",
         "js_buffer_reentry_node_fs_rab_encoded_write_scheduled_before_capture_no_card",
         "js_buffer_reentry_node_fs_rab_encoded_write_recapture_after_dispatch_no_card",
+        "js_buffer_stale_span_refetch_before_use_no_card",
+        "js_buffer_stale_span_pinned_before_use_no_card",
+        "js_buffer_stale_span_use_before_reentry_no_card",
+        "js_buffer_stale_span_passed_as_arg_after_reentry",
+        "js_buffer_stale_span_snapshot_before_use_no_card",
         "panic_from_safe_js_direct_try_from_expect",
         "panic_from_safe_js_bound_try_from_unwrap",
         "panic_from_safe_js_observed_only_not_guard",
@@ -843,6 +923,14 @@ mod tests {
             value["cards"][0]["confirmation_cue"]["build_this_first"]["kind"],
             "verify_command"
         );
+        assert_eq!(
+            value["cards"][0]["confirmation_cue"]["confirmation_state"],
+            "pending"
+        );
+        assert_eq!(
+            value["cards"][0]["confirmation_cue"]["runtime_executed"],
+            false
+        );
         assert!(
             value["cards"][0]["confirmation_cue"]["hypothesis_to_confirm"]
                 .as_str()
@@ -854,6 +942,32 @@ mod tests {
                 .as_str()
                 .unwrap_or("")
                 .contains("unsafe-review did not run this command")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn confirmation_cue_projects_runtime_receipt_verdict_state() -> Result<(), String> {
+        use crate::domain::WitnessEvidence;
+
+        let mut output = fixture_output("raw_pointer_alignment")?;
+        let card = output
+            .cards
+            .first_mut()
+            .ok_or_else(|| "alignment fixture should emit a card".to_string())?;
+        card.witness = WitnessEvidence::present("miri receipt imported")
+            .with_runtime_executed(true)
+            .with_verdict(Some("not_reproduced".to_string()));
+
+        let value = parse_json(&render(&output))?;
+
+        assert_eq!(
+            value["cards"][0]["confirmation_cue"]["confirmation_state"],
+            "not_reproduced"
+        );
+        assert_eq!(
+            value["cards"][0]["confirmation_cue"]["runtime_executed"],
+            true
         );
         Ok(())
     }
@@ -918,6 +1032,37 @@ mod tests {
             ));
         }
 
+        Ok(())
+    }
+
+    /// Regenerate all `expected.cards.json` golden files from the current output.
+    ///
+    /// Run with `UPDATE_GOLDENS=1 cargo test -p unsafe-review-core bless_fixture_card_goldens`
+    /// after intentional changes to the JSON card shape (e.g. adding a new field).
+    #[test]
+    fn bless_fixture_card_goldens() -> Result<(), String> {
+        if std::env::var("UPDATE_GOLDENS").as_deref() != Ok("1") {
+            return Ok(());
+        }
+        for fixture in FIXTURE_GOLDENS {
+            let output = fixture_output(fixture)?;
+            // Serialize the typed Vec<JsonCard> directly so that serde emits
+            // keys in struct-field order (not alphabetically as serde_json::Value
+            // would after a round-trip through BTreeMap).
+            let cards: Vec<JsonCard<'_>> = output.cards.iter().map(JsonCard::from).collect();
+            let path = fixture_root(fixture).join("expected.cards.json");
+            let mut text = serde_json::to_string_pretty(&cards)
+                .map_err(|err| format!("serialize {fixture} cards failed: {err}"))?;
+            text.push('\n');
+            // Ensure LF line endings (the repo is LF-only).
+            let text = text.replace("\r\n", "\n");
+            fs::write(&path, text.as_bytes())
+                .map_err(|err| format!("write {} failed: {err}", path.display()))?;
+        }
+        println!(
+            "bless_fixture_card_goldens: updated {} fixtures",
+            FIXTURE_GOLDENS.len()
+        );
         Ok(())
     }
 

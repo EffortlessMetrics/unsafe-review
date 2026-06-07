@@ -994,6 +994,252 @@ fn manual_candidate_import_explain_context_and_witness_plan_preserve_manual_mark
 }
 
 #[test]
+fn candidate_import_rejects_malformed_packet_and_preserves_source_manual_on_valid()
+-> Result<(), Box<dyn Error>> {
+    let temp = TempDir::new("unsafe-review-candidate-import-reject-e2e")?;
+
+    // Invalid JSON is rejected with a parse error.
+    let not_json = temp.path().join("not-json.json");
+    fs::write(&not_json, b"not json")?;
+    let bad_parse = run_failure([
+        os("candidate"),
+        os("import"),
+        not_json.as_os_str().to_os_string(),
+    ])?;
+    let bad_parse_stderr = String::from_utf8_lossy(&bad_parse.stderr).to_string();
+    assert!(
+        bad_parse_stderr.contains("parse manual candidate"),
+        "import should report parse error: {bad_parse_stderr}"
+    );
+    assert_eq!(
+        bad_parse.status.code(),
+        Some(2),
+        "import should exit 2 on malformed input"
+    );
+
+    // Wrong schema_version is rejected naming the field.
+    let wrong_schema = temp.path().join("wrong-schema.json");
+    fs::write(
+        &wrong_schema,
+        br#"{
+          "schema_version": "manual-candidate/v0",
+          "id": "R4R2-S001",
+          "title": "t",
+          "location": {"file": "f.rs", "line": 1},
+          "operation_family": "raw_pointer_read",
+          "unsafe_operation": "op",
+          "invariant": "inv",
+          "safe_caller": "caller",
+          "evidence": [],
+          "trust_boundary": "manual candidate; not analyzer-discovered; not witness execution; not proof of memory safety; not UB-free status; not Miri-clean status; not site-execution proof; not policy readiness"
+        }"#,
+    )?;
+    let bad_schema = run_failure([
+        os("candidate"),
+        os("import"),
+        wrong_schema.as_os_str().to_os_string(),
+    ])?;
+    let bad_schema_stderr = String::from_utf8_lossy(&bad_schema.stderr).to_string();
+    assert!(
+        bad_schema_stderr.contains("schema_version"),
+        "import should name schema_version on version mismatch: {bad_schema_stderr}"
+    );
+
+    // A valid committed example is accepted with source = manual and
+    // analyzer_discovered = false enforced by the importer.
+    let out = temp.path().join("R4R2-S001.json");
+    let import = run_success([
+        os("candidate"),
+        os("import"),
+        manual_candidate_example_path().into_os_string(),
+        os("--out"),
+        out.as_os_str().to_os_string(),
+    ])?;
+    let import_stdout = stdout_text(&import)?;
+    assert!(
+        import_stdout.contains("source: manual"),
+        "import stdout should confirm source=manual: {import_stdout}"
+    );
+    assert!(
+        import_stdout.contains("manual_candidate: true"),
+        "import stdout should confirm manual_candidate: {import_stdout}"
+    );
+    let canonical: serde_json::Value = serde_json::from_str(&fs::read_to_string(&out)?)?;
+    assert_eq!(
+        canonical["source"], "manual",
+        "canonical artifact must have source=manual"
+    );
+    assert_eq!(
+        canonical["manual_candidate"], true,
+        "canonical artifact must have manual_candidate=true"
+    );
+    assert_eq!(
+        canonical["analyzer_discovered"], false,
+        "canonical artifact must have analyzer_discovered=false"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn candidate_new_skeleton_is_schema_correct_but_fails_lint_on_todos() -> Result<(), Box<dyn Error>>
+{
+    let temp = TempDir::new("unsafe-review-candidate-new-e2e")?;
+    let draft = temp.path().join("draft-candidate.json");
+
+    let new = run_success([
+        os("candidate"),
+        os("new"),
+        os("--class"),
+        os("stable-byte-source-getter-reentry"),
+        os("--out"),
+        draft.as_os_str().to_os_string(),
+    ])?;
+    let new_stdout = stdout_text(&new)?;
+    assert!(new_stdout.contains("wrote manual candidate skeleton"));
+    assert!(new_stdout.contains("id: R4R2-S000-TODO"));
+    assert!(new_stdout.contains("stable-byte class: stable-byte-source-getter-reentry"));
+    assert!(new_stdout.contains("source: manual"));
+    assert!(new_stdout.contains("not analyzer discovery"));
+
+    let skeleton = parse_json(&fs::read_to_string(&draft)?)?;
+    assert_eq!(skeleton["schema_version"], "manual-candidate/v1");
+    assert_eq!(skeleton["source"], "manual");
+    assert_eq!(skeleton["manual_candidate"], true);
+    assert_eq!(skeleton["analyzer_discovered"], false);
+    assert_eq!(
+        skeleton["stable_byte"]["class"],
+        "stable-byte-source-getter-reentry"
+    );
+    assert_eq!(
+        skeleton["stable_byte"]["proof_required"],
+        skeleton["proof_mode"]["kind"]
+    );
+    assert_eq!(
+        skeleton["stable_byte"]["suggested_fix_boundary"],
+        skeleton["fix_boundary"]
+    );
+    assert_eq!(
+        skeleton["stable_byte"]["pr_aperture"],
+        skeleton["pr_aperture"]
+    );
+    assert!(
+        skeleton["invariant"]
+            .as_str()
+            .unwrap_or("")
+            .contains("TODO")
+    );
+
+    // The skeleton passes the structural import validation; only the TODO
+    // markers keep it from being a finished authoring packet.
+    let imported = temp.path().join("imported-skeleton.json");
+    run_success([
+        os("candidate"),
+        os("import"),
+        draft.as_os_str().to_os_string(),
+        os("--out"),
+        imported.as_os_str().to_os_string(),
+    ])?;
+
+    let lint = run_failure([
+        os("candidate"),
+        os("lint"),
+        draft.as_os_str().to_os_string(),
+    ])?;
+    assert_eq!(lint.status.code(), Some(2));
+    let lint_stderr = String::from_utf8_lossy(&lint.stderr).to_string();
+    assert!(
+        lint_stderr.contains("candidate lint:"),
+        "stderr should name candidate lint: {lint_stderr}"
+    );
+    assert!(
+        lint_stderr.contains("todo: `title` still contains TODO placeholder text"),
+        "stderr should flag the title TODO: {lint_stderr}"
+    );
+    assert!(
+        lint_stderr.contains("todo: `invariant`"),
+        "stderr should flag the invariant TODO: {lint_stderr}"
+    );
+    assert!(
+        !lint_stderr.contains("schema: "),
+        "skeleton should have no schema problems: {lint_stderr}"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn candidate_lint_accepts_all_committed_manual_candidate_examples() -> Result<(), Box<dyn Error>> {
+    let dir = manual_candidate_examples_dir();
+    let mut linted = 0usize;
+    for entry in fs::read_dir(&dir)? {
+        let path = entry?.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let lint = run_success([os("candidate"), os("lint"), path.as_os_str().to_os_string()])?;
+        let stdout = stdout_text(&lint)?;
+        assert!(
+            stdout.contains("candidate lint: ok"),
+            "{} should lint clean: {stdout}",
+            path.display()
+        );
+        assert!(
+            stdout.contains("not analyzer discovery"),
+            "{} lint output should keep the advisory boundary: {stdout}",
+            path.display()
+        );
+        linted += 1;
+    }
+    assert!(linted > 0, "no committed manual candidate examples found");
+
+    Ok(())
+}
+
+#[test]
+fn candidate_lint_reports_cross_field_and_todo_problems() -> Result<(), Box<dyn Error>> {
+    let temp = TempDir::new("unsafe-review-candidate-lint-e2e")?;
+    let example =
+        manual_candidate_examples_dir().join("candidate7-sync-compression-getter-reentry.json");
+    let dirty = fs::read_to_string(&example)?
+        .replacen(
+            "\"proof_required\": \"observable-red-green\"",
+            "\"proof_required\": \"mutation-plus-miri\"",
+            1,
+        )
+        .replacen(
+            "\"invariant\": \"Sync compression must not read bytes",
+            "\"invariant\": \"TODO: describe the invariant at risk",
+            1,
+        );
+    let dirty_path = temp.path().join("dirty-candidate.json");
+    fs::write(&dirty_path, dirty)?;
+
+    let lint = run_failure([
+        os("candidate"),
+        os("lint"),
+        dirty_path.as_os_str().to_os_string(),
+    ])?;
+
+    assert_eq!(lint.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&lint.stderr).to_string();
+    assert!(
+        stderr.contains("schema: ") && stderr.contains("stable_byte.proof_required"),
+        "stderr should report the cross-field drift: {stderr}"
+    );
+    assert!(
+        stderr.contains("todo: `invariant` still contains TODO placeholder text"),
+        "stderr should report the TODO marker: {stderr}"
+    );
+    assert!(
+        stderr.contains("nothing was imported or written"),
+        "stderr should state lint imports nothing: {stderr}"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn manual_candidate_list_reports_imported_advisory_ledger() -> Result<(), Box<dyn Error>> {
     let temp = TempDir::new("unsafe-review-manual-candidate-list-e2e")?;
     let candidate_dir = temp.path().join(".unsafe-review/candidates");
@@ -1696,6 +1942,7 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
     assert!(stdout.contains("Agent packet:"));
     assert!(stdout.contains("Artifacts:"));
     assert!(stdout.contains("review-kit.json"));
+    assert!(stdout.contains("unsafe-review-gate.json"));
     assert!(stdout.contains("cards.json"));
     assert!(stdout.contains("pr-summary.md"));
     assert!(stdout.contains("github-summary.md"));
@@ -2221,6 +2468,7 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
     let artifacts = json_array(&review_kit["artifacts"], "review_kit.artifacts")?;
     for expected in [
         "review-kit.json",
+        "unsafe-review-gate.json",
         "cards.json",
         "pr-summary.md",
         "github-summary.md",
@@ -2258,6 +2506,9 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
             | "repair-queue.json" | "policy-report.json" => {
                 assert_eq!(entry["schema_version"], "0.1")
             }
+            "unsafe-review-gate.json" => {
+                assert_eq!(entry["schema_version"], "unsafe-review-gate/v1")
+            }
             "manual-candidates.json" => {
                 assert_eq!(entry["schema_version"], "manual-candidates/v1")
             }
@@ -2271,6 +2522,50 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
             _ => assert!(entry["schema_version"].is_null()),
         }
     }
+    // Verify the gate manifest file content.
+    let gate_manifest = parse_json(&fs::read_to_string(
+        out_dir.join("unsafe-review-gate.json"),
+    )?)?;
+    assert_eq!(gate_manifest["schema_version"], "unsafe-review-gate/v1");
+    assert_eq!(gate_manifest["dialect"], "unsafe-review");
+    assert_eq!(gate_manifest["status"], "advisory");
+    assert_eq!(
+        gate_manifest["trust_boundary"],
+        "static unsafe-review coverage evidence; not proof, not a merge verdict"
+    );
+    assert_eq!(gate_manifest["artifacts"]["cards"], "cards.json");
+    assert_eq!(
+        gate_manifest["artifacts"]["comment_plan"],
+        "comment-plan.json"
+    );
+    assert_eq!(
+        gate_manifest["artifacts"]["repair_queue"],
+        "repair-queue.json"
+    );
+    assert_eq!(
+        gate_manifest["summary"]["new_gaps"],
+        cards["summary"]["new_gaps"]
+    );
+    assert_eq!(
+        gate_manifest["summary"]["worsened_gaps"],
+        cards["summary"]["worsened_gaps"]
+    );
+    assert_eq!(
+        gate_manifest["summary"]["resolved_gaps"],
+        cards["summary"]["resolved_gaps"]
+    );
+    assert_eq!(
+        gate_manifest["summary"]["inherited_gaps"],
+        cards["summary"]["inherited_gaps"]
+    );
+    assert!(
+        gate_manifest.get("generated_at").is_none(),
+        "gate manifest must not contain volatile timestamp field"
+    );
+    assert!(
+        gate_manifest.get("wall_seconds").is_none(),
+        "gate manifest must not contain volatile wall_seconds field"
+    );
     assert!(
         review_kit["trust_boundary"]
             .as_str()
@@ -3333,6 +3628,147 @@ fn help_reports_first_run_trust_boundary_without_overclaims() -> Result<(), Box<
     assert!(text.contains("matching witness receipt"));
     assert!(!text.contains("soundness proof"));
     assert!(!text.contains("All clear"));
+
+    Ok(())
+}
+
+#[test]
+fn help_lists_confirm_with_allow_heavy_boundary() -> Result<(), Box<dyn Error>> {
+    let output = run_success([os("--help")])?;
+    let text = stdout_text(&output)?;
+
+    assert!(text.contains("confirm <card-id> --dry-run|--allow-heavy"));
+    assert!(
+        text.contains("executes the routed witness command only with --allow-heavy; never default")
+    );
+    assert!(text.contains("--dry-run previews without executing"));
+
+    Ok(())
+}
+
+#[test]
+fn confirm_refuses_without_allow_heavy_and_points_at_dry_run() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_alignment");
+
+    let output = run_failure([
+        os("confirm"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1"),
+    ])?;
+
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(stdout_text(&output)?.trim(), "");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("only with the explicit --allow-heavy opt-in"),
+        "stderr should state the opt-in boundary: {stderr}"
+    );
+    assert!(
+        stderr.contains("unsafe-review never executes witnesses by default"),
+        "stderr should restate the default boundary: {stderr}"
+    );
+    assert!(
+        stderr.contains("--dry-run to preview"),
+        "stderr should point at --dry-run: {stderr}"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn confirm_dry_run_previews_routed_command_without_executing() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_alignment");
+
+    let json = run_success([
+        os("check"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        fixture.join("change.diff").into_os_string(),
+        os("--format"),
+        os("json"),
+    ])?;
+    let value = parse_json(&stdout_text(&json)?)?;
+    let card_id = json_str(&value["cards"][0]["id"], "cards[0].id")?;
+
+    let output = run_success([
+        os("confirm"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--dry-run"),
+        OsString::from(card_id),
+    ])?;
+    let text = stdout_text(&output)?;
+
+    assert!(text.contains("unsafe-review confirm (dry run)"));
+    assert!(text.contains(&format!("card: {card_id}")));
+    assert!(text.contains("operation family: raw_pointer_read"));
+    assert!(text.contains("route: miri"));
+    assert!(text.contains("command: cargo +nightly miri test read_header"));
+    assert!(text.contains("timeout: 600s"));
+    assert!(text.contains("expected evidence: a `miri` witness receipt"));
+    assert!(text.contains("dry run only; nothing was executed"));
+    assert!(text.contains("unsafe-review never executes witnesses by default"));
+    assert!(text.contains("trust boundary: static unsafe contract review only"));
+    assert!(
+        !fixture.join(".unsafe-review").join("receipts").exists(),
+        "dry run must not write a receipt"
+    );
+    assert!(
+        !fixture
+            .join("target")
+            .join("unsafe-review-confirm")
+            .exists(),
+        "dry run must not write an output log"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn confirm_allow_heavy_reports_spawn_failure_without_writing_a_receipt()
+-> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_alignment");
+
+    let json = run_success([
+        os("check"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        fixture.join("change.diff").into_os_string(),
+        os("--format"),
+        os("json"),
+    ])?;
+    let value = parse_json(&stdout_text(&json)?)?;
+    let card_id = json_str(&value["cards"][0]["id"], "cards[0].id")?;
+
+    let output = run_failure([
+        os("confirm"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--allow-heavy"),
+        os("--author"),
+        os("core/e2e"),
+        os("--command"),
+        os("unsafe-review-e2e-missing-witness-binary miri-test read_header"),
+        OsString::from(card_id),
+    ])?;
+
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("failed to spawn `unsafe-review-e2e-missing-witness-binary`"),
+        "stderr should report the spawn failure honestly: {stderr}"
+    );
+    assert!(
+        stderr.contains("no receipt was written"),
+        "stderr should confirm no receipt was fabricated: {stderr}"
+    );
+    assert!(
+        !fixture.join(".unsafe-review").join("receipts").exists(),
+        "spawn failure must not write a receipt"
+    );
 
     Ok(())
 }
@@ -5030,10 +5466,8 @@ fn no_new_debt_policy_fails_only_for_unbaselined_actionable_gaps() -> Result<(),
     let failing_json = parse_json(&stdout_text(&failing)?)?;
     assert_eq!(failing_json["policy"], "no-new-debt");
     assert_eq!(failing_json["summary"]["open_actionable_gaps"], 1);
-    assert!(
-        String::from_utf8(failing.stderr)?
-            .contains("no-new-debt policy found 1 open actionable gap(s)")
-    );
+    // SPEC-0030: no-new-debt fails on new/worsened gaps, not total open actionable count.
+    assert!(String::from_utf8(failing.stderr)?.contains("no-new-debt policy: 1 new gap(s)"));
 
     let temp = TempDir::new("unsafe-review-no-new-debt-e2e")?;
     let copied = temp.path().join("fixture");
@@ -5184,7 +5618,8 @@ fn policy_report_is_advisory_and_counts_baseline_state() -> Result<(), Box<dyn E
     let markdown = fs::read_to_string(markdown_path)?;
     assert!(markdown.contains("# unsafe-review policy report"));
     assert!(markdown.contains("## Reviewer front panel"));
-    assert!(markdown.contains("- New unbaselined gaps: 0"));
+    // SPEC-0030: reviewer front panel shows movement counts.
+    assert!(markdown.contains("- Movement: 0 new gap(s), 0 worsened, 1 resolved, 1 inherited"));
     assert!(markdown.contains("- Current ledger-covered cards: 1 baseline-known, 0 suppressed"));
     assert!(markdown.contains("- Ledger cleanup: 1 resolved baseline entries"));
     assert!(markdown.contains("consider pruning or updating resolved baseline entries"));
@@ -5192,7 +5627,7 @@ fn policy_report_is_advisory_and_counts_baseline_state() -> Result<(), Box<dyn E
     assert!(markdown.contains("## Classification explanations"));
     assert!(markdown.contains("Exact ReviewCard identity matched a baseline ledger entry"));
     assert!(markdown.contains("Next action"));
-    assert!(markdown.contains("| Status | Reason | Card | Class |"));
+    assert!(markdown.contains("| Status | Baseline | Changed |"));
     assert!(markdown.contains("raw_pointer_read"));
     assert!(markdown.contains("unsafe { ptr.cast::<Header>().read() }"));
     assert!(markdown.contains("Known baseline card"));
@@ -5643,8 +6078,11 @@ fn fixture_root(name: &str) -> PathBuf {
 }
 
 fn manual_candidate_example_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../docs/examples/manual-candidates/textdecoder-sab.json")
+    manual_candidate_examples_dir().join("textdecoder-sab.json")
+}
+
+fn manual_candidate_examples_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/examples/manual-candidates")
 }
 
 fn os(value: &str) -> OsString {

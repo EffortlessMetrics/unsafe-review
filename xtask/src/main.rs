@@ -20,6 +20,7 @@ mod calibration_manifest;
 mod command_args;
 mod commands;
 mod docs_automation_paths;
+mod dogfood_usefulness;
 mod first_hour;
 mod markdown;
 mod public_badges;
@@ -833,7 +834,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
     match commands::XtaskCommand::parse(&args)? {
         commands::XtaskCommand::Help => {
             println!(
-                "xtask commands: check-pr, check-docs, check-policy, check-support-tiers, check-fixtures, check-calibration, check-dogfood, check-fuzz, check-doc-artifacts, check-docs-automation, check-spec-status, check-public-surfaces, check-goals, check-package-boundary, check-ci-lanes, check-advisory-artifacts <dir>, check-first-pr-artifacts <dir>, check-manual-candidate-examples, check-first-hour, source-divergence, check-source-sync"
+                "xtask commands: check-pr, check-docs, check-policy, check-support-tiers, check-fixtures, check-calibration, check-dogfood, check-fuzz, check-doc-artifacts, check-docs-automation, check-spec-status, check-public-surfaces, check-goals, check-package-boundary, check-ci-lanes, check-advisory-artifacts <dir>, check-first-pr-artifacts <dir>, check-manual-candidate-examples, check-first-hour, dogfood-usefulness, source-divergence, check-source-sync"
             );
             Ok(())
         }
@@ -868,6 +869,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
         commands::XtaskCommand::CheckFirstPrArtifacts(dir) => check_first_pr_artifacts(&dir),
         commands::XtaskCommand::CheckManualCandidateExamples => check_manual_candidate_examples(),
         commands::XtaskCommand::CheckFirstHour => check_first_hour(),
+        commands::XtaskCommand::DogfoodUsefulness => dogfood_usefulness::write(),
         commands::XtaskCommand::SourceDivergence => source_sync::report_source_divergence(),
     }
 }
@@ -958,43 +960,89 @@ fn check_ci_routing_contract() -> Result<(), String> {
     let path = ".github/workflows/ci.yml";
     let text =
         std::fs::read_to_string(path).map_err(|err| format!("failed to read {path}: {err}"))?;
-    if text.contains("repos/${") && text.contains("/actions/runners") {
-        return Err(format!(
-            "{path} must use organization runner discovery, not repository runner discovery"
-        ));
-    }
+    // Single tight CI gate, self-hosted-primary with gh-hosted overflow: a minimal
+    // `route` job (not a required check) picks the gate runner — an idle trusted
+    // self-hosted em-ci runner when the owned fleet has capacity, else
+    // `ubuntu-latest` overflow (bursts, capacity gaps, fork PRs). The gate stays a
+    // SINGLE job whose mandatory deterministic core floor (`xtask check-pr` plus the
+    // full suite) is the only hard blocker and the only required status check, with
+    // ub-review riding along as an advisory LLM layer that consumes the core results
+    // as grounding context. The router never blocks the merge and never size-routes.
     for needle in [
-        "gh api \"orgs/${ORG}/actions/runners?per_page=100\"",
+        // One required check, stable name for branch protection.
+        "name: Unsafe Review Rust Result",
+        // Capacity router: self-hosted primary, gh-hosted overflow.
+        "Route CI runner",
         "EM_RUNNER_READ_TOKEN",
-        "router_target=",
-        "router_reason=",
-        "Rust Small on CPX42",
-        "labels: [self-hosted, linux, x64, em-ci, cpx42, rust-16gb, rust-medium, trusted-pr]",
-        "Prepare CPX42 scratch",
-        "dtolnay/rust-toolchain@v1",
-        "toolchain: 1.95.0",
-        "Rust Small on CX43",
-        "Rust Small on CX53",
+        "gh api \"orgs/EffortlessMetrics/actions/runners",
+        "runner_kind",
+        // Trusted self-hosted label set (shared em-ci group, any idle size).
+        "self-hosted",
+        "em-ci",
+        "trusted-pr",
+        // The gate consumes the router's runs-on value; gh-hosted is the overflow.
+        "fromJSON(needs.route.outputs.runner)",
+        "runs-on: ubuntu-latest",
+        // Shared warmed setup, runner-kind agnostic.
         "dtolnay/rust-toolchain@1.95.0",
-        "Rust Tiny Fallback on GitHub Hosted",
-        "Rust Small Blocked (capacity/config)",
-        "fallback_allowed=",
-        "fallback_mode=",
-        "allow-github-hosted",
-        "ci-budget-ack",
-        "full-ci",
-        "Unsafe Review Rust Small Result",
+        "Swatinem/rust-cache@v2",
+        // Fast precontext launches the LLM lanes off cheap signal, the deterministic
+        // core gate runs concurrently in the background (guarded by a disk-headroom
+        // check), and the final assert decides the merge on the core verdict.
+        "Fast precontext and launch core gate",
+        "cargo run --locked -p xtask -- check-pr",
+        "df -h",
+        "core_exit",
+        "Assert core gate verdict",
+        // Advisory ub-review layer in the same job, fed the fast precontext, with a
+        // concise advisory-failure status note.
+        "UB Review (advisory)",
+        "UB Review advisory status",
+        "EffortlessMetrics/ub-review@",
+        "mode: intelligent-ci",
+        "posting: review",
+        "fail-on-gate: false",
+        "setup-rust: false",
+        "provider-policy: primary-with-fallback",
+        "minimax-model: MiniMax-M3",
+        "opencode-model: deepseek-v4-flash",
+        "pr-thread-context: target/ci-core/precontext.md",
+        // Advisory layer must stay non-blocking and fork-safe.
+        "continue-on-error: true",
+        "github.event.pull_request.head.repo.fork == false",
     ] {
         if !text.contains(needle) {
             return Err(format!(
-                "{path} missing required routed CI contract marker: {needle}"
+                "{path} missing required single-gate CI contract marker: {needle}"
             ));
         }
     }
-    for forbidden in ["em-ci-rust:1.95", "docker run --rm"] {
+    // The capacity router is back, but ONLY in its minimal self-hosted-primary /
+    // gh-overflow shape. The OLD size-routed multi-lane pile-of-checks must not
+    // reappear: no per-size lanes (cpx42/cx43/cx53), no separate normalized "Rust
+    // Small Result" required check, no budget opt-out fallback modes, and no
+    // repository-level runner discovery or the broken Docker Rust Small image.
+    if text.contains("repos/${") && text.contains("/actions/runners") {
+        return Err(format!(
+            "{path} must not reintroduce repository runner discovery (org-level only)"
+        ));
+    }
+    for forbidden in [
+        "route-rust-small",
+        "router_target=",
+        "cpx42",
+        "cx43",
+        "cx53",
+        "Rust Small Fallback on GitHub Hosted",
+        "fallback_mode=full",
+        "no-github-fallback",
+        "Unsafe Review Rust Small Result",
+        "em-ci-rust:1.95",
+        "docker run --rm",
+    ] {
         if text.contains(forbidden) {
             return Err(format!(
-                "{path} must not depend on broken Docker Rust Small marker: {forbidden}"
+                "{path} must not reintroduce retired size-routed multi-lane marker: {forbidden}"
             ));
         }
     }
@@ -3349,6 +3397,7 @@ fn check_dogfood() -> Result<(), String> {
     check_dogfood_judgment_schema_docs()?;
     let judgment_stats = check_dogfood_judgments(&ids, &target_kinds)?;
     check_dogfood_real_crate_judgment_sample_index(&judgment_stats)?;
+    dogfood_usefulness::check()?;
 
     println!(
         "check-dogfood: ok ({} targets, {} repositories)",
@@ -6268,6 +6317,12 @@ fn is_fixture_operation_snippet_exception(path: &str, operation: &str) -> bool {
         || (normalized.contains("fixtures/js_buffer_reentry_")
             && operation
                 .starts_with("stable-byte-source-rab-async candidate; proof required: observable-red-green; RAB-backed JS buffer descriptor captured through async helper before possible JS reentry"))
+        || (normalized.contains("fixtures/js_buffer_stale_span_")
+            && operation
+                .starts_with("stable-byte-source-getter-reentry candidate; proof required: observable-red-green; JS-backed buffer span materialized before possible JS reentry"))
+        || (normalized.contains("fixtures/js_buffer_stale_span_")
+            && operation
+                .starts_with("stable-byte-source-getter-reentry candidate; missing stable-byte evidence: no refetch, snapshot, or pin found after JS reentry; proof required: observable-red-green; JS-backed buffer span materialized before possible JS reentry"))
         || (normalized.contains("fixtures/stable_byte_sab_")
             && operation
                 .starts_with("stable-byte-source-sab-race candidate; proof required: mutation-plus-miri; shared JS backing reaches Rust/native borrowed-slice materialization before snapshot"))
@@ -10069,6 +10124,20 @@ jobs:
         assert!(!is_fixture_operation_snippet_exception(
             "fixtures/js_buffer_reentry_sync_compression/expected.cards.json",
             "ptr.read()",
+        ));
+        // stale-span fixtures with the "missing stable-byte evidence" prefix are allowed.
+        let stale_span_operation = "stable-byte-source-getter-reentry candidate; missing stable-byte evidence: no refetch, snapshot, or pin found after JS reentry; proof required: observable-red-green; JS-backed buffer span materialized before possible JS reentry and used afterward without re-fetch, re-validation, or pinning; capture: x; span: y; reentry: z; use: w";
+        assert!(is_fixture_operation_snippet_exception(
+            "fixtures/js_buffer_stale_span_passed_as_arg_after_reentry/expected.cards.json",
+            stale_span_operation,
+        ));
+        assert!(is_fixture_operation_snippet_exception(
+            "fixtures\\js_buffer_stale_span_passed_as_arg_after_reentry\\expected.cards.json",
+            stale_span_operation,
+        ));
+        assert!(!is_fixture_operation_snippet_exception(
+            "fixtures/raw_pointer_alignment/expected.cards.json",
+            stale_span_operation,
         ));
     }
 
@@ -19967,7 +20036,7 @@ Snapshot reports:
         write_valid_artifacts(&dir)?;
         fs::write(
             dir.join("comment-plan.json"),
-            r#"{"schema_version":"0.1","mode":"plan_only","policy":"advisory","comments":[{"card_id":"card-1","path":"src/lib.rs","line":7,"changed_line":true,"class":"guard_missing","priority":"high","confidence":"medium","proof_path":"source_route_only","hypothesis_to_confirm":"static `guard_missing` ReviewCard for `unsafe { ptr.cast::<Header>().read() }`; confirm with external evidence before treating it as observed runtime behavior","operation":"unsafe { ptr.cast::<Header>().read() }","operation_family":"raw_pointer_read","witness_routes":[{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}],"next_action":"Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.","verify_commands":["cargo +nightly miri test card"],"build_this_first":{"kind":"verify_command","command":"cargo +nightly miri test card","route_kind":"miri","summary":"Build/run `cargo +nightly miri test card` first for this card; attach a matching receipt only if it confirms the route"},"confirmation_step":"build/run `cargo +nightly miri test card` first, then attach a matching receipt if it confirms the route","selection_reason":"actionable high-priority review card","selection_reason_code":"top_actionable_card","actionability":"specific_guard_missing","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result","body":"Next action: Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.\n\nPlan boundary: artifact-only inline comment candidate; unsafe-review did not post this comment, run witnesses, or make a policy decision."}],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}"#,
+            r#"{"schema_version":"0.1","mode":"plan_only","policy":"advisory","comments":[{"card_id":"card-1","path":"src/lib.rs","line":7,"changed_line":true,"class":"guard_missing","priority":"high","confidence":"medium","proof_path":"source_route_only","hypothesis_to_confirm":"static `guard_missing` ReviewCard for `unsafe { ptr.cast::<Header>().read() }`; confirm with external evidence before treating it as observed runtime behavior","operation":"unsafe { ptr.cast::<Header>().read() }","operation_family":"raw_pointer_read","witness_routes":[{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}],"next_action":"Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.","verify_commands":["cargo +nightly miri test card"],"build_this_first":{"kind":"verify_command","command":"cargo +nightly miri test card","route_kind":"miri","summary":"Build/run `cargo +nightly miri test card` first for this card; attach a matching receipt only if it confirms the route"},"confirmation_step":"build/run `cargo +nightly miri test card` first, then attach a matching receipt if it confirms the route","selection_reason":"guard_coverage: missing — actionable high-priority card","selection_reason_code":"top_actionable_card","coverage_gap":"guard_coverage: missing","confirmation_state":"pending","actionability":"specific_guard_missing","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result","body":"Next action: Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.\n\nPlan boundary: artifact-only inline comment candidate; unsafe-review did not post this comment, run witnesses, or make a policy decision."}],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}"#,
         )
         .map_err(|err| format!("write comment plan failed: {err}"))?;
 
@@ -21613,6 +21682,7 @@ review_after = "2026-08-01"
             },
             "artifacts": [
                 {"path":"review-kit.json","kind":"review_kit_manifest","format":"json","schema_version":"0.1"},
+                {"path":"unsafe-review-gate.json","kind":"gate_manifest","format":"json","schema_version":"unsafe-review-gate/v1"},
                 {"path":"cards.json","kind":"review_cards","format":"json","schema_version":"0.1"},
                 {"path":"pr-summary.md","kind":"reviewer_summary","format":"markdown","schema_version":serde_json::Value::Null},
                 {"path":"github-summary.md","kind":"github_summary","format":"markdown","schema_version":serde_json::Value::Null},
@@ -21632,6 +21702,36 @@ review_after = "2026-08-01"
         });
         fs::write(dir.join("review-kit.json"), value.to_string())
             .map_err(|err| format!("write review kit failed: {err}"))
+    }
+
+    fn write_gate_manifest_artifact(dir: &Path) -> Result<(), String> {
+        let value = serde_json::json!({
+            "schema_version": "unsafe-review-gate/v1",
+            "dialect": "unsafe-review",
+            "status": "advisory",
+            "summary": {
+                "new_gaps": 0,
+                "worsened_gaps": 0,
+                "resolved_gaps": 0,
+                "inherited_gaps": 0
+            },
+            "artifacts": {
+                "cards": "cards.json",
+                "comment_plan": "comment-plan.json",
+                "repair_queue": "repair-queue.json",
+                "receipt_audit": "receipt-audit.md",
+                "review_kit": "review-kit.json",
+                "pr_summary": "pr-summary.md",
+                "sarif": "cards.sarif",
+                "lsp": "lsp.json",
+                "policy_report": "policy-report.json"
+            },
+            "trust_boundary": "static unsafe-review coverage evidence; not proof, not a merge verdict",
+            "tool": "unsafe-review",
+            "tool_version": "0.2.1-test"
+        });
+        fs::write(dir.join("unsafe-review-gate.json"), value.to_string())
+            .map_err(|err| format!("write gate manifest failed: {err}"))
     }
 
     fn write_empty_manual_candidates_artifact(dir: &Path) -> Result<(), String> {
@@ -22758,6 +22858,90 @@ review_after = "2026-08-01"
             .map_err(|err| format!("write comment plan failed: {err}"))
     }
 
+    /// Add SPEC-0032 fields (`coverage_gap`, `confirmation_state`, updated
+    /// `selection_reason`) to a comment-plan.json fixture. Called after the
+    /// existing helper chain so the baseline artifacts pass the new validators.
+    fn add_spec_0032_fields_to_comment_plan(path: &Path) -> Result<(), String> {
+        let mut value = parse_json_file(path)?;
+        if let Some(comments) = value
+            .get_mut("comments")
+            .and_then(serde_json::Value::as_array_mut)
+        {
+            for comment in comments {
+                // Derive coverage_gap from the card class (fallback heuristic;
+                // production code reads coverage_block which the fixture cards
+                // do not include).
+                let class = comment
+                    .get("class")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("guard_missing");
+                let gap = coverage_gap_for_fixture_class(class);
+                comment["coverage_gap"] = serde_json::json!(gap);
+                // confirmation_state defaults to "pending" for fixture cards
+                // that have no witness receipt imported.
+                if comment.get("confirmation_state").is_none() {
+                    comment["confirmation_state"] = serde_json::json!("pending");
+                }
+                // Update selection_reason to the gap-specific string.
+                let confidence = comment
+                    .get("confidence")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("medium");
+                let signal = if confidence == "high" {
+                    "high-confidence"
+                } else {
+                    "high-priority"
+                };
+                comment["selection_reason"] =
+                    serde_json::json!(format!("{gap} — actionable {signal} card"));
+            }
+        }
+        if let Some(not_selected) = value
+            .get_mut("not_selected")
+            .and_then(serde_json::Value::as_array_mut)
+        {
+            for entry in not_selected {
+                // Surface coverage_gap for actionable not_selected cards.
+                let class = entry
+                    .get("class")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("");
+                if is_fixture_class_actionable(class) {
+                    let gap = coverage_gap_for_fixture_class(class);
+                    entry["coverage_gap"] = serde_json::json!(gap);
+                }
+            }
+        }
+        fs::write(path, value.to_string())
+            .map_err(|err| format!("write comment plan failed: {err}"))
+    }
+
+    fn coverage_gap_for_fixture_class(class: &str) -> &'static str {
+        match class {
+            "contract_missing" => "contract_coverage: missing",
+            "guard_missing" => "guard_coverage: missing",
+            "unsafe_unreached" => "test_reach_coverage: missing",
+            _ => "witness_receipt_coverage: missing",
+        }
+    }
+
+    fn is_fixture_class_actionable(class: &str) -> bool {
+        matches!(
+            class,
+            "guard_missing"
+                | "contract_missing"
+                | "guarded_unwitnessed"
+                | "reachable_unwitnessed"
+                | "requires_loom"
+                | "requires_sanitizer"
+                | "requires_kani_or_crux"
+                | "miri_unsupported"
+                | "witness_mismatch"
+                | "unsafe_unreached"
+                | "static_unknown"
+        )
+    }
+
     fn add_confirmation_cues_to_cards(path: &Path) -> Result<(), String> {
         let mut value = parse_json_file(path)?;
         let cards = value
@@ -22971,6 +23155,7 @@ review_after = "2026-08-01"
         .map_err(|err| format!("write comment plan failed: {err}"))?;
         add_comment_plan_repair_metadata(&dir.join("comment-plan.json"))?;
         add_minimal_repro_to_valid_comment_plan(&dir.join("comment-plan.json"))?;
+        add_spec_0032_fields_to_comment_plan(&dir.join("comment-plan.json"))?;
         fs::write(
             dir.join("repair-queue.json"),
             add_repair_queue_boundaries(r#"{"schema_version":"0.1","tool":"unsafe-review","mode":"aggregate_repair_queue","source":"review_card","policy":"advisory","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, not a Miri result, and not an automatic repair queue","summary":{"changed_files":1,"changed_rust_files":1,"changed_non_rust_files":0,"cards":1,"repairable_by_guard":1,"repairable_by_safety_docs":0,"repairable_by_test":0,"requires_witness_receipt":1,"requires_human_review":0,"do_not_auto_repair":0},"buckets":{"repairable_by_guard":[{"card_id":"card-1","class":"guard_missing","priority":"high","confidence":"medium","proof_path":"source_route_only","operation_family":"raw_pointer_read","operation":"unsafe { ptr.cast::<Header>().read() }","path":"src/lib.rs","line":7,"missing_evidence":[],"agent_readiness":{"ready":true,"state":"ready_for_agent","reasons":["specific operation family"]},"bucket_reason":"guard_evidence_missing","context_command":"unsafe-review context card-1 --json","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, not a Miri result, and not an automatic repair queue"}],"repairable_by_safety_docs":[],"repairable_by_test":[],"requires_witness_receipt":[{"card_id":"card-1","class":"guard_missing","priority":"high","confidence":"medium","proof_path":"source_route_only","operation_family":"raw_pointer_read","operation":"unsafe { ptr.cast::<Header>().read() }","path":"src/lib.rs","line":7,"missing_evidence":[],"agent_readiness":{"ready":true,"state":"ready_for_agent","reasons":["specific operation family"]},"bucket_reason":"witness_receipt_missing","context_command":"unsafe-review context card-1 --json","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, not a Miri result, and not an automatic repair queue"}],"requires_human_review":[],"do_not_auto_repair":[]}}"#),
@@ -23089,6 +23274,7 @@ review_after = "2026-08-01"
         .map_err(|err| format!("write comment plan failed: {err}"))?;
         add_comment_plan_repair_metadata(&dir.join("comment-plan.json"))?;
         add_minimal_repro_to_valid_comment_plan(&dir.join("comment-plan.json"))?;
+        add_spec_0032_fields_to_comment_plan(&dir.join("comment-plan.json"))?;
         fs::write(
             dir.join("repair-queue.json"),
             add_repair_queue_boundaries(r#"{"schema_version":"0.1","tool":"unsafe-review","mode":"aggregate_repair_queue","source":"review_card","policy":"advisory","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, not a Miri result, and not an automatic repair queue","summary":{"changed_files":1,"changed_rust_files":1,"changed_non_rust_files":0,"cards":2,"repairable_by_guard":1,"repairable_by_safety_docs":1,"repairable_by_test":0,"requires_witness_receipt":1,"requires_human_review":1,"do_not_auto_repair":1},"buckets":{"repairable_by_guard":[{"card_id":"card-1","class":"guard_missing","priority":"high","confidence":"medium","proof_path":"source_route_only","operation_family":"raw_pointer_read","operation":"unsafe { ptr.cast::<Header>().read() }","path":"src/lib.rs","line":7,"missing_evidence":[],"agent_readiness":{"ready":true,"state":"ready_for_agent","reasons":["specific operation family"]},"bucket_reason":"guard_evidence_missing","context_command":"unsafe-review context card-1 --json","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, not a Miri result, and not an automatic repair queue"}],"repairable_by_safety_docs":[{"card_id":"card-2","class":"contract_missing","priority":"high","confidence":"high","proof_path":"human_review_only","operation_family":"unknown","operation":"unsafe fn read_header(ptr: *const u8)","path":"src/lib.rs","line":7,"missing_evidence":[],"agent_readiness":{"ready":false,"state":"requires_human_review","reasons":["operation family `unknown` is not safe for automatic repair delegation"]},"bucket_reason":"safety_docs_evidence_missing","context_command":"unsafe-review context card-2 --json","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, not a Miri result, and not an automatic repair queue"}],"repairable_by_test":[],"requires_witness_receipt":[{"card_id":"card-1","class":"guard_missing","priority":"high","confidence":"medium","proof_path":"source_route_only","operation_family":"raw_pointer_read","operation":"unsafe { ptr.cast::<Header>().read() }","path":"src/lib.rs","line":7,"missing_evidence":[],"agent_readiness":{"ready":true,"state":"ready_for_agent","reasons":["specific operation family"]},"bucket_reason":"witness_receipt_missing","context_command":"unsafe-review context card-1 --json","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, not a Miri result, and not an automatic repair queue"}],"requires_human_review":[{"card_id":"card-2","class":"contract_missing","priority":"high","confidence":"high","proof_path":"human_review_only","operation_family":"unknown","operation":"unsafe fn read_header(ptr: *const u8)","path":"src/lib.rs","line":7,"missing_evidence":[],"agent_readiness":{"ready":false,"state":"requires_human_review","reasons":["operation family `unknown` is not safe for automatic repair delegation"]},"bucket_reason":"human_review_required","context_command":"unsafe-review context card-2 --json","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, not a Miri result, and not an automatic repair queue"}],"do_not_auto_repair":[{"card_id":"card-2","class":"contract_missing","priority":"high","confidence":"high","proof_path":"human_review_only","operation_family":"unknown","operation":"unsafe fn read_header(ptr: *const u8)","path":"src/lib.rs","line":7,"missing_evidence":[],"agent_readiness":{"ready":false,"state":"requires_human_review","reasons":["operation family `unknown` is not safe for automatic repair delegation"]},"bucket_reason":"not_ready_for_automatic_repair","context_command":"unsafe-review context card-2 --json","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, not a Miri result, and not an automatic repair queue"}]}}"#),
@@ -23145,6 +23331,7 @@ review_after = "2026-08-01"
         write_empty_manual_repair_queue_artifact(dir)?;
         write_empty_tokmd_packets_artifact(dir)?;
         write_review_kit_artifact(dir, 1, 1, Some("card-1"))?;
+        write_gate_manifest_artifact(dir)?;
         Ok(())
     }
 
@@ -23269,6 +23456,7 @@ This artifact is static unsafe contract review. It routes reviewers to credible 
         write_empty_manual_repair_queue_artifact(dir)?;
         write_empty_tokmd_packets_artifact(dir)?;
         write_review_kit_artifact(dir, 0, 0, None)?;
+        write_gate_manifest_artifact(dir)?;
         Ok(())
     }
 

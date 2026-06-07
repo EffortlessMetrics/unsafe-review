@@ -275,6 +275,42 @@ fixture-backed examples of repair-ready and human-review-only packets.
 
 ## Manual Candidates
 
+Author a new manual candidate skeleton and lint it before import:
+
+```bash
+unsafe-review candidate new --class stable-byte-source-getter-reentry > draft.json
+# edit draft.json and replace every TODO placeholder with real route content
+unsafe-review candidate lint draft.json
+unsafe-review candidate import draft.json --out .unsafe-review/candidates/<id>.json
+```
+
+`candidate new` emits a schema-correct `manual-candidate/v1` skeleton for one
+stable-byte class (`stable-byte-source-getter-reentry`,
+`stable-byte-source-rab-async`, `stable-byte-source-sab-race`,
+`stable-byte-source-helper-dependent`, `stable-byte-source-pathlike-live-view`,
+or `stable-byte-source-native-ffi-read`). Free-text fields carry clearly marked
+`TODO` placeholder text, while the cross-field consistency the importer
+validates is already correct for the chosen class: `stable_byte.class` matches
+`--class`, `stable_byte.proof_required` matches the class-canonical
+`proof_mode.kind`, `fix_boundary` matches `stable_byte.suggested_fix_boundary`,
+and `pr_aperture` matches `stable_byte.pr_aperture`. `--id` defaults to
+`R4R2-S000-TODO` and `--out` writes the skeleton instead of printing it.
+
+`candidate lint` runs the same schema and cross-field validation as
+`candidate import` without importing or writing anything, and additionally
+flags any remaining `TODO` markers in string fields. It reports the first
+schema or cross-field error plus all TODO markers, exits `0` with
+`candidate lint: ok` when clean, and exits `2` listing the problems otherwise.
+A fresh skeleton passes the structural import validation but fails lint until
+its TODO placeholders are replaced.
+
+`candidate new` and `candidate lint` are authoring aids only. The skeleton and
+a passing lint keep `source = "manual"`, `manual_candidate = true`, and
+`analyzer_discovered = false`; they are not analyzer discovery, not witness
+execution, not proof of memory safety, not UB-free status, not Miri-clean
+status, not a site-execution claim, not calibrated precision/recall, and not
+policy gating.
+
 Import a manually discovered advisory candidate:
 
 ```bash
@@ -707,6 +743,55 @@ keeps the saved command hash visible when present.
 
 `unsafe-review` imports receipts. It does not run Miri, `cargo-careful`,
 sanitizers, Loom, Shuttle, Kani, or Crux by default.
+
+## Confirm (Opt-In Witness Execution)
+
+Preview a card's confirmation step without executing anything:
+
+```bash
+unsafe-review confirm <card-id> --dry-run --root .
+```
+
+`--dry-run` resolves the card, then prints the witness route kind, the exact
+command that would run, the working directory, the timeout that would apply,
+and the receipt constructor that would classify the output. It exits 0 and
+executes nothing; it needs neither `--allow-heavy` nor `--author`.
+
+Execute the card's routed witness command locally with the explicit opt-in:
+
+```bash
+unsafe-review confirm <card-id> \
+  --allow-heavy \
+  --author reviewer/name \
+  --root . \
+  --timeout-seconds 600 \
+  --out .unsafe-review/receipts/confirm-miri.json
+```
+
+Without `--allow-heavy` (and without `--dry-run`), `confirm` refuses with exit
+code 2: it executes the routed witness command only with the explicit
+`--allow-heavy` opt-in, and `unsafe-review` never executes witnesses by
+default. `--author` is required with `--allow-heavy` because witness receipts
+record who ran the confirmation.
+
+With `--allow-heavy`, `confirm` picks the `--command` override when given,
+otherwise the card's first witness route that carries a command. Cards that
+route only to `human-deep-review` (or carry no routed command) are refused
+before anything executes. The command runs without a shell: leading
+`VAR=value` or `VAR='value with spaces'` tokens become environment
+assignments and the rest is whitespace-split into argv. The run is killed
+after `--timeout-seconds` (default 600).
+
+The captured output is classified only by the existing saved-output receipt
+constructors for the selected route kind (`miri`, `cargo-careful`,
+`asan`/`msan`/`tsan`/`lsan`, `loom`/`shuttle`, `kani`/`crux`). On success the
+receipt is written to `--out` or
+`.unsafe-review/receipts/confirm-<tool>-<card-hash>.json`; the card upgrades
+only after `check` or `first-pr` imports that saved receipt. If the output does
+not classify as witness evidence, the raw output is saved under
+`target/unsafe-review-confirm/` and no receipt is written; `confirm` never
+fabricates a receipt. A confirm receipt records `strength = "ran"` for a single
+local run; it is not site-execution proof for other configurations.
 
 ## Doctor
 
