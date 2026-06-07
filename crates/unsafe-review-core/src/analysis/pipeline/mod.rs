@@ -17,7 +17,7 @@ use crate::api::{
 use crate::domain::ReviewCard;
 use crate::input::workspace;
 use crate::policy::PolicyState;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -200,6 +200,8 @@ fn analyze_with_receipts(
                 changed_rust_files,
                 changed_non_rust_files,
                 &cards,
+                policy_state.baseline_ids(),
+                &policy_state,
             )),
         )?;
         last_scanned_path = Some(rel.clone());
@@ -214,6 +216,9 @@ fn analyze_with_receipts(
         changed_rust_files,
         changed_non_rust_files,
         &cards,
+        &input.scope,
+        policy_state.baseline_ids(),
+        &policy_state,
     );
     let output = AnalyzeOutput {
         schema_version: "0.1".to_string(),
@@ -251,6 +256,10 @@ fn sort_cards(cards: &mut [ReviewCard]) {
     });
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "mirrors summarize() signature; grouping into a struct would add churn without clarity gain"
+)]
 fn partial_analyze_output(
     input: &AnalyzeInput,
     rust_files: usize,
@@ -258,6 +267,8 @@ fn partial_analyze_output(
     changed_rust_files: usize,
     changed_non_rust_files: usize,
     cards: &[ReviewCard],
+    baseline_ids: &BTreeSet<String>,
+    policy_state: &PolicyState,
 ) -> AnalyzeOutput {
     let mut cards = cards.to_vec();
     sort_cards(&mut cards);
@@ -267,6 +278,9 @@ fn partial_analyze_output(
         changed_rust_files,
         changed_non_rust_files,
         &cards,
+        &input.scope,
+        baseline_ids,
+        policy_state,
     );
     AnalyzeOutput {
         schema_version: "0.1".to_string(),

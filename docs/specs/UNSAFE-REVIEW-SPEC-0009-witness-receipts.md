@@ -158,9 +158,24 @@ Receipt JSON fields:
   "summary": "focused witness passed",
   "command": "cargo +nightly miri test read_header",
   "command_hash": "3e163b0bce29ff2e",
-  "limitations": ["fixture only"]
+  "limitations": ["fixture only"],
+  "verdict": "not_reproduced"
 }
 ```
+
+`verdict` is optional. When present it must be one of:
+
+- `confirmed`
+- `not_reproduced`
+- `inconclusive`
+
+"confirmed" means the UB-risk hypothesis reproduced; "not_reproduced" means
+this single run did not reproduce it — it is NOT a safety claim.
+`inconclusive` marks an ambiguous or partial run. Receipts written before
+this field existed omit it and stay valid; unknown values are rejected. The
+saved-output import constructors record `not_reproduced` because they only
+accept clean targeted runs; they reject outputs carrying hazard signals, so
+`confirmed` is never derivable from them.
 
 `strength` must be one of:
 
@@ -197,7 +212,11 @@ must include a non-empty `command`.
 - no soundness claim
 - no hidden blocking unless policy mode explicitly enables it
 - no duplicate truth outside this spec and linked policy files
-- no witness execution by `unsafe-review`
+- no witness execution by `unsafe-review` by default; the explicit
+  `confirm --allow-heavy` opt-in executes one routed witness command locally
+  and records the result only as a saved witness receipt through the existing
+  saved-output import constructors, with no success claim without a receipt;
+  the template and `import-*` commands still never execute anything
 - no receipt match without exact card identity
 - no claim that a receipt proves arbitrary callers or the whole repository safe
 

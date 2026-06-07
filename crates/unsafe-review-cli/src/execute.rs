@@ -1,7 +1,8 @@
 use crate::command::{
-    CandidateCommand, CandidateImportOptions, CandidateListOptions, CandidateWitnessPlanOptions,
-    CheckOptions, Command, DiffInput, FirstPrOptions, Format, OutcomeOptions,
-    ReceiptTemplateOptions, RepoOptions, SavedOutputReceiptOptions,
+    BaselineAddOptions, BaselineCommand, BaselineInitOptions, CandidateCommand,
+    CandidateImportOptions, CandidateLintOptions, CandidateListOptions, CandidateNewOptions,
+    CandidateWitnessPlanOptions, CheckOptions, Command, ContextQuery, DiffInput, FirstPrOptions,
+    Format, OutcomeOptions, ReceiptTemplateOptions, RepoOptions, SavedOutputReceiptOptions,
 };
 #[cfg(unix)]
 use signal_hook::consts::signal::{SIGINT, SIGTERM};
@@ -20,17 +21,20 @@ use unsafe_review_core::{
     ConcurrencyReceiptInput, DiffSource, DiscoveryOptions, MiriReceiptInput, PolicyMode,
     ProofReceiptInput, RepoScanEvent, RepoScanPhase, RepoScanStatus, SanitizerReceiptInput, Scope,
     WITNESS_RECEIPT_SCHEMA_VERSION, WitnessReceipt, analyze, analyze_with_discovery,
-    analyze_with_discovery_and_repo_events, audit_witness_receipts, compare_outcome_json,
-    discover_repo_files, evaluate_policy_report, evaluate_policy_report_from_output,
-    load_manual_candidates, manual_candidate_implementer_handoff, read_manual_candidate,
-    render_badge_jsons, render_comment_plan, render_github_summary, render_human, render_json,
-    render_lsp, render_manual_candidate_witness_plan, render_markdown, render_outcome_json,
-    render_outcome_markdown, render_policy_report_json, render_policy_report_markdown,
-    render_pr_summary, render_receipt_audit_json, render_receipt_audit_markdown,
-    render_repair_queue, render_sarif, render_witness_plan, validate_witness_receipts,
+    analyze_with_discovery_and_repo_events, audit_witness_receipts, baseline_add, baseline_init,
+    collect_context_range, compare_outcome_json, discover_repo_files, evaluate_policy_report,
+    evaluate_policy_report_from_output, lint_manual_candidate_text, load_manual_candidates,
+    manual_candidate_implementer_handoff, new_manual_candidate_skeleton, read_manual_candidate,
+    render_badge_jsons, render_comment_plan, render_gate_manifest, render_github_summary,
+    render_human, render_json, render_lsp, render_manual_candidate_witness_plan, render_markdown,
+    render_outcome_json, render_outcome_markdown, render_policy_report_json,
+    render_policy_report_markdown, render_pr_summary, render_receipt_audit_json,
+    render_receipt_audit_markdown, render_repair_queue, render_sarif, render_witness_plan,
+    validate_witness_receipts,
 };
 
 mod card_lookup;
+mod confirm;
 mod first_pr;
 
 const NO_CHANGED_GAPS_MESSAGE: &str = "No changed unsafe-review gaps were found.";
@@ -40,6 +44,7 @@ const FIRST_RUN_TRUST_BOUNDARY: &str = "static unsafe contract review only; not 
 type FirstPrRenderer = fn(&AnalyzeOutput) -> String;
 
 const REVIEW_KIT_ARTIFACT: &str = "review-kit.json";
+const GATE_MANIFEST_ARTIFACT: &str = "unsafe-review-gate.json";
 const RECEIPT_AUDIT_ARTIFACT: &str = "receipt-audit.md";
 const POLICY_REPORT_JSON_ARTIFACT: &str = "policy-report.json";
 const POLICY_REPORT_MARKDOWN_ARTIFACT: &str = "policy-report.md";
@@ -56,8 +61,9 @@ const FIRST_PR_RENDERED_ARTIFACTS: [(&str, FirstPrRenderer); 8] = [
     ("lsp.json", render_lsp),
     ("repair-queue.json", render_repair_queue),
 ];
-const FIRST_PR_ARTIFACTS: [&str; 15] = [
+const FIRST_PR_ARTIFACTS: [&str; 16] = [
     REVIEW_KIT_ARTIFACT,
+    GATE_MANIFEST_ARTIFACT,
     "cards.json",
     "pr-summary.md",
     "github-summary.md",
@@ -88,6 +94,10 @@ pub(crate) fn execute(command: Command) -> Result<(), String> {
             print_candidate_help();
             Ok(())
         }
+        Command::BaselineHelp => {
+            print_baseline_help();
+            Ok(())
+        }
         Command::Version => {
             println!("unsafe-review {}", env!("CARGO_PKG_VERSION"));
             Ok(())
@@ -113,8 +123,10 @@ pub(crate) fn execute(command: Command) -> Result<(), String> {
         Command::FirstPr(options) => first_pr(options),
         Command::Badges { root, out } => badges(&root, &out),
         Command::Explain { root, id, format } => explain(&root, &id, format),
-        Command::Context { root, id } => context(&root, &id),
+        Command::Context { root, query } => context(&root, query),
         Command::Candidate(command) => candidate(command),
+        Command::Baseline(command) => run_baseline(command),
+        Command::Confirm(options) => confirm::run(options),
         Command::ReceiptTemplate(options) => receipt_template(options),
         Command::ReceiptValidate { root } => receipt_validate(&root),
         Command::ReceiptAudit(options) => receipt_audit(options),
@@ -238,6 +250,11 @@ fn run_repo_check(options: RepoOptions) -> Result<(), String> {
             ));
         }
     };
+    if reporter.files_discovered() == 0 {
+        eprintln!(
+            "unsafe-review repo: no Rust files selected after include/exclude/ignores; check --root, --include, --exclude, --[no-]large-repo-ignores, and --[no-]respect-gitignore"
+        );
+    }
     let rendered = render_with_format(&output, &check.format);
     if let Some(path) = report_path {
         let partial = repo_partial_path(&path);
@@ -594,6 +611,14 @@ impl RepoStatusReporter {
         format!(
             "repo scan timed out after {seconds}s; use --include/--exclude/--max-files or a scoped --root to reduce scan scope"
         )
+    }
+
+    fn files_discovered(&self) -> usize {
+        self.last_status
+            .lock()
+            .ok()
+            .and_then(|guard| guard.as_ref().map(|s| s.files_discovered))
+            .unwrap_or(0)
     }
 }
 
@@ -1138,6 +1163,10 @@ fn first_pr(options: FirstPrOptions) -> Result<(), String> {
             &FIRST_PR_ARTIFACTS,
         ),
     )?;
+    write_artifact(
+        &options.out_dir.join(GATE_MANIFEST_ARTIFACT),
+        render_gate_manifest(&output),
+    )?;
 
     first_pr::print_first_pr_report(first_pr::FirstPrReport {
         output: &output,
@@ -1157,12 +1186,17 @@ fn enforce_policy(output: &unsafe_review_core::AnalyzeOutput) -> Result<(), Stri
     match output.policy {
         PolicyMode::Advisory => Ok(()),
         PolicyMode::NoNewDebt => {
-            if output.summary.open_actionable_gaps == 0 {
+            // SPEC-0030: fail iff `new` OR `worsened` movement is non-empty.
+            // Inherited debt (baseline-known cards) must NOT fail the gate.
+            // This replaces the previous zero-debt check that blocked brownfield adoption.
+            let new = output.summary.new_gaps;
+            let worsened = output.summary.worsened_gaps;
+            if new == 0 && worsened == 0 {
                 Ok(())
             } else {
                 Err(format!(
-                    "no-new-debt policy found {} open actionable gap(s)",
-                    output.summary.open_actionable_gaps
+                    "no-new-debt policy: {} new gap(s), {} worsened gap(s)",
+                    new, worsened
                 ))
             }
         }
@@ -1431,24 +1465,104 @@ fn explain(root: &Path, id: &str, format: Format) -> Result<(), String> {
     Ok(())
 }
 
-fn context(root: &Path, id: &str) -> Result<(), String> {
-    let output = card_lookup::analyze_repo_cards(root)?;
-    let id = CardId(id.to_string());
-    let packet = match card_lookup::context_packet(&output, &id) {
-        Ok(packet) => packet,
-        Err(_) => card_lookup::manual_candidate_context(root, &id.0)?
-            .ok_or_else(|| format!("card `{id}` not found"))?,
-    };
-    println!("{packet}");
-    Ok(())
+fn context(root: &Path, query: ContextQuery) -> Result<(), String> {
+    match query {
+        ContextQuery::CardId(id) => {
+            let output = card_lookup::analyze_repo_cards(root)?;
+            let card_id = CardId(id.clone());
+            let packet = match card_lookup::context_packet(&output, &card_id) {
+                Ok(packet) => packet,
+                Err(_) => card_lookup::manual_candidate_context(root, &id)?
+                    .ok_or_else(|| format!("card `{id}` not found"))?,
+            };
+            println!("{packet}");
+            Ok(())
+        }
+        ContextQuery::FileRange {
+            file,
+            line_start,
+            line_end,
+            changed_only,
+        } => {
+            let output = card_lookup::analyze_repo_cards(root)?;
+            let envelope =
+                collect_context_range(&output, root, &file, line_start, line_end, changed_only);
+            println!("{envelope}");
+            Ok(())
+        }
+    }
 }
 
 fn candidate(command: CandidateCommand) -> Result<(), String> {
     match command {
+        CandidateCommand::New(options) => candidate_new(options),
         CandidateCommand::Import(options) => candidate_import(options),
+        CandidateCommand::Lint(options) => candidate_lint(options),
         CandidateCommand::List(options) => candidate_list(options),
         CandidateCommand::WitnessPlan(options) => candidate_witness_plan(options),
     }
+}
+
+fn candidate_new(options: CandidateNewOptions) -> Result<(), String> {
+    let candidate = new_manual_candidate_skeleton(&options.class, &options.id)?;
+    let rendered = candidate.to_pretty_json()?;
+    if let Some(out) = options.out {
+        ensure_parent_dir(&out)?;
+        fs::write(&out, rendered).map_err(|err| {
+            format!(
+                "write manual candidate skeleton {} failed: {err}",
+                out.display()
+            )
+        })?;
+        println!("wrote manual candidate skeleton: {}", out.display());
+        println!("id: {}", candidate.id);
+        println!("stable-byte class: {}", options.class);
+        println!("source: manual");
+        println!("manual_candidate: true");
+        println!(
+            "next: replace the TODO placeholders, then run `unsafe-review candidate lint {}` before `candidate import`.",
+            out.display()
+        );
+        println!(
+            "boundary: this skeleton is an authoring aid only; it is not analyzer discovery, not witness execution, not proof, and not policy gating."
+        );
+        println!("trust boundary: {}", candidate.trust_boundary);
+    } else {
+        print!("{rendered}");
+    }
+    Ok(())
+}
+
+fn candidate_lint(options: CandidateLintOptions) -> Result<(), String> {
+    let text = fs::read_to_string(&options.input).map_err(|err| {
+        format!(
+            "read manual candidate {} failed: {err}",
+            options.input.display()
+        )
+    })?;
+    let problems = lint_manual_candidate_text(&text);
+    if problems.is_empty() {
+        println!("candidate lint: ok");
+        println!(
+            "checked: manual-candidate/v1 schema, cross-field consistency, and TODO markers; nothing was imported or written."
+        );
+        println!(
+            "boundary: lint is advisory authoring validation only; it is not analyzer discovery, not witness execution, not proof of memory safety, not UB-free status, not Miri-clean status, not a site-execution claim, and not policy gating."
+        );
+        return Ok(());
+    }
+    let mut message = format!(
+        "candidate lint: {} problem(s) in {}",
+        problems.len(),
+        options.input.display()
+    );
+    for problem in &problems {
+        message.push_str(&format!("\n- {problem}"));
+    }
+    message.push_str(
+        "\nlint reports the first schema or cross-field error plus all TODO markers; nothing was imported or written.",
+    );
+    Err(message)
 }
 
 fn candidate_import(options: CandidateImportOptions) -> Result<(), String> {
@@ -1853,6 +1967,9 @@ fn receipt_template(options: ReceiptTemplateOptions) -> Result<(), String> {
         } else {
             Some(options.limitations)
         },
+        // Templates never claim a run happened, so no verdict is emitted;
+        // authors may add one after an actual run.
+        verdict: None,
     };
     receipt.validate()?;
     let rendered = receipt.to_pretty_json()?;
@@ -2087,6 +2204,115 @@ fn receipt_import_proof(options: SavedOutputReceiptOptions) -> Result<(), String
     Ok(())
 }
 
+fn run_baseline(command: BaselineCommand) -> Result<(), String> {
+    match command {
+        BaselineCommand::Init(options) => run_baseline_init(options),
+        BaselineCommand::Add(options) => run_baseline_add(options),
+        BaselineCommand::Help => {
+            print_baseline_help();
+            Ok(())
+        }
+    }
+}
+
+fn run_baseline_init(options: BaselineInitOptions) -> Result<(), String> {
+    let result = baseline_init(
+        &options.root,
+        options.out.as_deref(),
+        options.review_after.as_deref(),
+    )?;
+    println!("baseline init: ok");
+    println!("captured: {} open actionable card(s)", result.captured);
+    println!("ledger: {}", result.ledger_path.display());
+    println!("snapshot: {}", result.snapshot_path.display());
+    if result.ledger_existed {
+        println!(
+            "note: ledger already existed; merged existing entries (new entries added, unchanged entries kept)."
+        );
+    } else {
+        println!("note: new ledger created.");
+    }
+    println!();
+    println!("next:");
+    println!(
+        "  git add {} {}",
+        result.ledger_path.display(),
+        result.snapshot_path.display()
+    );
+    println!("  git commit -m 'baseline: record pre-existing debt floor'");
+    println!("  # from now on:");
+    println!(
+        "  unsafe-review check --policy no-new-debt   # fails only when the diff adds or worsens debt"
+    );
+    println!();
+    println!(
+        "trust boundary: baseline entries are debt records, not safety records. A baseline init pass means only that the open actionable gaps were recorded as pre-existing; it does not prove memory safety, UB-free status, Miri-clean status, or that any unsafe site executed safely."
+    );
+    Ok(())
+}
+
+fn run_baseline_add(options: BaselineAddOptions) -> Result<(), String> {
+    baseline_add(
+        &options.root,
+        &options.card_id,
+        &options.owner,
+        &options.reason,
+        &options.evidence,
+        options.review_after.as_deref(),
+        options.out.as_deref(),
+    )?;
+    println!("baseline add: ok");
+    println!("card: {}", options.card_id);
+    println!("owner: {}", options.owner);
+    println!(
+        "trust boundary: baseline entries are debt records, not safety records. Adding a card to the baseline records that the gap pre-existed; it does not prove memory safety, UB-free status, Miri-clean status, or that the unsafe site executed safely."
+    );
+    Ok(())
+}
+
+fn print_baseline_help() {
+    println!("unsafe-review baseline: record pre-existing debt as the coverage floor (SPEC-0030)");
+    println!();
+    println!("Usage:");
+    println!(
+        "  unsafe-review baseline init [--root .] [--out policy/unsafe-review-baseline.toml] [--review-after YYYY-MM-DD]"
+    );
+    println!(
+        "  unsafe-review baseline add --card-id <UR-...-cN> --owner <name> --reason <text> --evidence <text> [--root .] [--review-after YYYY-MM-DD] [--out policy/unsafe-review-baseline.toml]"
+    );
+    println!();
+    println!("What baseline does:");
+    println!(
+        "- `init` scans the repo for open actionable cards and records each as a baseline ledger entry with its current coverage state in the snapshot."
+    );
+    println!(
+        "- `add` adds or updates a single ledger entry and its snapshot state without rescanning the entire ledger."
+    );
+    println!(
+        "- The baseline ledger is `policy/unsafe-review-baseline.toml`; the snapshot is `policy/unsafe-review-baseline-snapshot.toml`."
+    );
+    println!();
+    println!("Brownfield onboarding:");
+    println!("  unsafe-review baseline init");
+    println!(
+        "  git add policy/unsafe-review-baseline.toml policy/unsafe-review-baseline-snapshot.toml"
+    );
+    println!("  git commit -m 'baseline: record pre-existing debt floor'");
+    println!("  # from now on:");
+    println!("  unsafe-review check --policy no-new-debt");
+    println!();
+    println!("Trust boundary:");
+    println!(
+        "- Baseline entries are debt records, not safety records. A baseline init pass means only that the open actionable gaps were recorded as pre-existing debt."
+    );
+    println!(
+        "- Adding a card to the baseline does not prove memory safety, UB-free status, Miri-clean status, or that any unsafe site executed safely."
+    );
+    println!(
+        "- unsafe-review does not execute witnesses, post comments, edit source, run an agent, or enforce blocking policy by default."
+    );
+}
+
 fn print_help() {
     println!("unsafe-review: cheap unsafe contract review for Rust");
     println!();
@@ -2095,7 +2321,7 @@ fn print_help() {
         "  check   [--root .] [--base origin/main | --diff file|-] [--format human|json|markdown|pr-summary|github-summary|sarif|comment-plan|lsp|witness-plan] [--policy advisory|no-new-debt] [--out file]"
     );
     println!(
-        "  repo    [--root .] [--include glob] [--exclude glob] [--list-files] [--progress] [--timeout-seconds N] [--respect-gitignore|--no-respect-gitignore] [--max-files N] [--format human|json|markdown|pr-summary|github-summary|sarif|comment-plan|lsp|witness-plan] [--policy advisory|no-new-debt] [--out file] [--max-cards N]"
+        "  repo    [--root .] [--include glob] [--exclude glob] [--list-files|--dry-run] [--progress] [--timeout-seconds N] [--respect-gitignore|--no-respect-gitignore] [--large-repo-ignores|--no-large-repo-ignores] [--max-files N] [--format human|json|markdown|pr-summary|github-summary|sarif|comment-plan|lsp|witness-plan] [--policy advisory|no-new-debt] [--out file] [--max-cards N]"
     );
     println!(
         "  first-pr [--root .] [--base origin/main|--diff file|-] [--out-dir target/unsafe-review] [--max-cards N]"
@@ -2105,11 +2331,23 @@ fn print_help() {
     println!("  badges  [--root .] [--out badges]");
     println!("  explain [--root .] [--json|--format json] <card-id>");
     println!("  context [--root .] [--json|--format json] <card-id>");
+    println!("  context [--root .] --file <path> --lines Y-Z [--changed-only] --json");
+    println!("  candidate new --class <stable-byte-class> [--id R4R2-S000-TODO] [--out file]");
     println!(
         "  candidate import <manual-candidate.json> [--out .unsafe-review/candidates/<id>.json]"
     );
+    println!("  candidate lint <manual-candidate.json>");
     println!("  candidate list [--root .] [--format json|markdown] [--out file]");
     println!("  candidate witness-plan [--root .] <candidate-id> [--out file]");
+    println!(
+        "  baseline init [--root .] [--out policy/unsafe-review-baseline.toml] [--review-after YYYY-MM-DD]"
+    );
+    println!(
+        "  baseline add --card-id <UR-...-cN> --owner <name> --reason <text> --evidence <text> [--root .] [--review-after YYYY-MM-DD] [--out policy/unsafe-review-baseline.toml]"
+    );
+    println!(
+        "  confirm <card-id> --dry-run|--allow-heavy [--author <owner>] [--root .] [--base origin/main|--diff file] [--expires-at <date>] [--timeout-seconds 600] [--command <override>] [--out file]  (executes the routed witness command only with --allow-heavy; never default; --dry-run previews without executing)"
+    );
     println!("  support");
     println!(
         "  outcome --before <cards.json> --after <cards.json> [--format json|markdown] [--out file]"
@@ -2151,13 +2389,16 @@ fn print_repo_help() {
     println!();
     println!("Usage:");
     println!(
-        "  unsafe-review repo [--root .] [--include glob] [--exclude glob] [--list-files] [--progress] [--timeout-seconds N] [--respect-gitignore|--no-respect-gitignore] [--max-files N] [--format human|json|markdown|pr-summary|github-summary|sarif|comment-plan|lsp|witness-plan] [--policy advisory|no-new-debt] [--out file] [--max-cards N]"
+        "  unsafe-review repo [--root .] [--include glob] [--exclude glob] [--list-files|--dry-run] [--progress] [--timeout-seconds N] [--respect-gitignore|--no-respect-gitignore] [--large-repo-ignores|--no-large-repo-ignores] [--max-files N] [--format human|json|markdown|pr-summary|github-summary|sarif|comment-plan|lsp|witness-plan] [--policy advisory|no-new-debt] [--out file] [--max-cards N]"
     );
     println!();
     println!("What repo scans today:");
     println!("- Discovers *.rs files under --root, defaulting to the current directory.");
     println!(
         "- Discovery respects gitignore files by default and skips .git, .github, .unsafe-review*, target, node_modules, vendor, build, dist, and generated directories."
+    );
+    println!(
+        "- Discovery also skips large-repo directories (node_modules, vendor, build, dist, generated) by default; use --no-large-repo-ignores to include them."
     );
     println!(
         "- Repo mode scans the selected Rust files; --base and --diff are accepted by the shared parser but do not make repo a diff-only scan."
@@ -2171,7 +2412,12 @@ fn print_repo_help() {
     println!(
         "- --respect-gitignore is the default; --no-respect-gitignore includes ignored Rust files."
     );
-    println!("- --list-files prints selected Rust files and exits without analysis.");
+    println!(
+        "- --large-repo-ignores is the default; --no-large-repo-ignores disables the large-repo directory skip set."
+    );
+    println!(
+        "- --list-files prints selected Rust files and exits without analysis; --dry-run is an alias."
+    );
     println!("- With --list-files, --format supports human, json, or markdown output.");
     println!("- --progress prints scan-status heartbeats to stderr during analysis.");
     println!(
@@ -2191,7 +2437,9 @@ fn print_repo_help() {
     println!(
         "- Prefer scoped roots or include/exclude filters such as --include 'src/**/*.rs' and --exclude '**/generated/**'."
     );
-    println!("- Use --list-files before a large scan to confirm the selected Rust files.");
+    println!(
+        "- Use --list-files or --dry-run before a large scan to confirm the selected Rust files."
+    );
     println!(
         "- Use --timeout-seconds with --out on long scans to keep an incomplete status sidecar and any completed-file partial report."
     );
@@ -2223,8 +2471,12 @@ fn print_candidate_help() {
     println!();
     println!("Usage:");
     println!(
+        "  unsafe-review candidate new --class <stable-byte-class> [--id R4R2-S000-TODO] [--out file]"
+    );
+    println!(
         "  unsafe-review candidate import <manual-candidate.json> [--out .unsafe-review/candidates/<id>.json]"
     );
+    println!("  unsafe-review candidate lint <manual-candidate.json>");
     println!("  unsafe-review candidate list [--root .] [--format json|markdown] [--out file]");
     println!("  unsafe-review candidate witness-plan [--root .] <candidate-id> [--out file]");
     println!();
@@ -2241,13 +2493,35 @@ fn print_candidate_help() {
     println!();
     println!("Commands:");
     println!(
+        "- new emits a schema-correct manual-candidate skeleton for one stable-byte class with TODO placeholder text in free-text fields; cross-field consistency (class, proof mode, fix boundary, PR aperture) is pre-filled so only authoring content remains."
+    );
+    println!(
+        "- new accepts --class with one of: stable-byte-source-getter-reentry, stable-byte-source-rab-async, stable-byte-source-sab-race, stable-byte-source-helper-dependent, stable-byte-source-pathlike-live-view, stable-byte-source-native-ffi-read."
+    );
+    println!(
         "- import reads a manual candidate JSON file, validates it, and writes a canonical artifact."
+    );
+    println!(
+        "- lint validates a manual candidate file with the same schema and cross-field checks as import, without importing or writing anything, and also flags remaining TODO placeholder markers; it reports the first schema error plus all TODO markers."
+    );
+    println!(
+        "- lint exits 0 with `candidate lint: ok` when clean and exits nonzero listing the problems otherwise."
     );
     println!(
         "- list reports imported manual candidates from .unsafe-review/candidates without adding them to ReviewCard-only outputs."
     );
     println!(
         "- witness-plan renders the candidate's advisory witness-plan projection by candidate ID."
+    );
+    println!();
+    println!("Authoring flow:");
+    println!(
+        "  unsafe-review candidate new --class stable-byte-source-getter-reentry > draft.json"
+    );
+    println!("  # edit draft.json and replace every TODO placeholder");
+    println!("  unsafe-review candidate lint draft.json");
+    println!(
+        "  unsafe-review candidate import draft.json --out .unsafe-review/candidates/<id>.json"
     );
     println!();
     println!("After import:");
@@ -2264,6 +2538,9 @@ fn print_candidate_help() {
     println!("Trust boundary:");
     println!(
         "- Manual candidates are not analyzer-discovered findings, not proof of memory safety, not UB-free status, not Miri-clean status, not a site-execution claim unless a matching witness receipt says so, and not policy gating."
+    );
+    println!(
+        "- candidate new and candidate lint are authoring aids only: manual candidates remain manual/advisory with source `manual`, manual_candidate `true`, and analyzer_discovered `false`; a passing lint is not analyzer discovery, not witness execution, and not proof."
     );
     println!(
         "- unsafe-review does not execute witnesses, post comments, edit source, run an agent, or enforce blocking policy by default."

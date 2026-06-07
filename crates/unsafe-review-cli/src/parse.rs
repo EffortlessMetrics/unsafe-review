@@ -1,11 +1,16 @@
 use crate::command::{
-    CandidateCommand, CandidateImportOptions, CandidateListOptions, CandidateWitnessPlanOptions,
-    CheckOptions, Command, DiffInput, FirstPrOptions, Format, OutcomeOptions, RepoOptions,
+    BaselineAddOptions, BaselineCommand, BaselineInitOptions, CandidateCommand,
+    CandidateImportOptions, CandidateLintOptions, CandidateListOptions, CandidateNewOptions,
+    CandidateWitnessPlanOptions, CheckOptions, Command, ContextQuery, DiffInput, FirstPrOptions,
+    Format, OutcomeOptions, RepoOptions,
 };
 use std::path::PathBuf;
-use unsafe_review_core::PolicyMode;
+use unsafe_review_core::{MANUAL_CANDIDATE_STABLE_BYTE_CLASSES, PolicyMode};
+
+const DEFAULT_CANDIDATE_SKELETON_ID: &str = "R4R2-S000-TODO";
 
 mod check_parse;
+mod confirm;
 mod policy;
 mod receipt;
 
@@ -28,6 +33,11 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, S
     {
         return Ok(Command::CandidateHelp);
     }
+    if command == "baseline"
+        && (rest.is_empty() || has_help_flag(&rest) || is_exact_help_word(&rest))
+    {
+        return Ok(Command::BaselineHelp);
+    }
     if has_help_flag(&rest) {
         return Ok(Command::Help);
     }
@@ -46,6 +56,8 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, S
         "explain" => parse_explain(rest),
         "context" => parse_context(rest),
         "candidate" => parse_candidate(rest).map(Command::Candidate),
+        "baseline" => parse_baseline(rest).map(Command::Baseline),
+        "confirm" => confirm::parse_confirm(rest).map(Command::Confirm),
         "outcome" => parse_outcome(rest).map(Command::Outcome),
         "policy" => policy::parse_policy_command(rest),
         "receipt" => receipt::parse_receipt(rest),
@@ -64,11 +76,77 @@ fn parse_candidate(args: Vec<String>) -> Result<CandidateCommand, String> {
     };
     let rest = rest.collect::<Vec<_>>();
     match subcommand.as_str() {
+        "new" => parse_candidate_new(rest).map(CandidateCommand::New),
         "import" => parse_candidate_import(rest).map(CandidateCommand::Import),
+        "lint" => parse_candidate_lint(rest).map(CandidateCommand::Lint),
         "list" => parse_candidate_list(rest).map(CandidateCommand::List),
         "witness-plan" => parse_candidate_witness_plan(rest).map(CandidateCommand::WitnessPlan),
         other => Err(format!("unknown candidate subcommand `{other}`")),
     }
+}
+
+fn parse_candidate_new(args: Vec<String>) -> Result<CandidateNewOptions, String> {
+    let mut class: Option<String> = None;
+    let mut id = DEFAULT_CANDIDATE_SKELETON_ID.to_string();
+    let mut out = None;
+    let mut idx = 0usize;
+    while idx < args.len() {
+        match args[idx].as_str() {
+            "--class" => {
+                idx += 1;
+                class = Some(value(&args, idx, "--class")?.to_string());
+            }
+            arg if arg.starts_with("--class=") => {
+                class = Some(inline_value(arg, "--class")?.to_string());
+            }
+            "--id" => {
+                idx += 1;
+                id = value(&args, idx, "--id")?.to_string();
+            }
+            arg if arg.starts_with("--id=") => {
+                id = inline_value(arg, "--id")?.to_string();
+            }
+            "--out" => {
+                idx += 1;
+                out = Some(parse_path_value(&args, idx, "--out")?);
+            }
+            arg if arg.starts_with("--out=") => {
+                out = Some(parse_inline_path_value(arg, "--out")?);
+            }
+            other => return Err(format!("unknown candidate new argument `{other}`")),
+        }
+        idx += 1;
+    }
+    let class = class.ok_or_else(|| {
+        format!(
+            "missing --class; valid stable-byte classes: {}",
+            MANUAL_CANDIDATE_STABLE_BYTE_CLASSES.join(", ")
+        )
+    })?;
+    if !MANUAL_CANDIDATE_STABLE_BYTE_CLASSES.contains(&class.as_str()) {
+        return Err(format!(
+            "unknown stable-byte class `{class}`; valid classes: {}",
+            MANUAL_CANDIDATE_STABLE_BYTE_CLASSES.join(", ")
+        ));
+    }
+    Ok(CandidateNewOptions { class, id, out })
+}
+
+fn parse_candidate_lint(args: Vec<String>) -> Result<CandidateLintOptions, String> {
+    let mut input: Option<PathBuf> = None;
+    for arg in &args {
+        match arg.as_str() {
+            value if value.starts_with('-') => {
+                return Err(format!("unknown candidate lint argument `{value}`"));
+            }
+            value => {
+                set_single_path(&mut input, value, "manual candidate input")?;
+            }
+        }
+    }
+    Ok(CandidateLintOptions {
+        input: input.ok_or_else(|| "missing manual candidate input".to_string())?,
+    })
 }
 
 fn parse_candidate_import(args: Vec<String>) -> Result<CandidateImportOptions, String> {
@@ -176,6 +254,154 @@ fn parse_candidate_witness_plan(args: Vec<String>) -> Result<CandidateWitnessPla
         id: id.ok_or_else(|| "missing manual candidate id".to_string())?,
         out,
     })
+}
+
+fn parse_baseline(args: Vec<String>) -> Result<BaselineCommand, String> {
+    let mut rest = args.into_iter();
+    let Some(subcommand) = rest.next() else {
+        return Ok(BaselineCommand::Help);
+    };
+    let rest = rest.collect::<Vec<_>>();
+    match subcommand.as_str() {
+        "init" => parse_baseline_init(rest).map(BaselineCommand::Init),
+        "add" => parse_baseline_add(rest).map(BaselineCommand::Add),
+        other => Err(format!("unknown baseline subcommand `{other}`")),
+    }
+}
+
+fn parse_baseline_init(args: Vec<String>) -> Result<BaselineInitOptions, String> {
+    let mut options = BaselineInitOptions::default();
+    let mut idx = 0usize;
+    while idx < args.len() {
+        match args[idx].as_str() {
+            "--root" => {
+                idx += 1;
+                options.root = parse_path_value(&args, idx, "--root")?;
+            }
+            arg if arg.starts_with("--root=") => {
+                options.root = parse_inline_path_value(arg, "--root")?;
+            }
+            "--out" => {
+                idx += 1;
+                options.out = Some(parse_path_value(&args, idx, "--out")?);
+            }
+            arg if arg.starts_with("--out=") => {
+                options.out = Some(parse_inline_path_value(arg, "--out")?);
+            }
+            "--review-after" => {
+                idx += 1;
+                options.review_after = Some(parse_iso_date_value(&args, idx, "--review-after")?);
+            }
+            arg if arg.starts_with("--review-after=") => {
+                options.review_after = Some(parse_inline_iso_date_value(arg, "--review-after")?);
+            }
+            other => return Err(format!("unknown baseline init argument `{other}`")),
+        }
+        idx += 1;
+    }
+    Ok(options)
+}
+
+fn parse_baseline_add(args: Vec<String>) -> Result<BaselineAddOptions, String> {
+    let mut root = PathBuf::from(".");
+    let mut card_id: Option<String> = None;
+    let mut owner: Option<String> = None;
+    let mut reason: Option<String> = None;
+    let mut evidence: Option<String> = None;
+    let mut review_after: Option<String> = None;
+    let mut out: Option<PathBuf> = None;
+    let mut idx = 0usize;
+    while idx < args.len() {
+        match args[idx].as_str() {
+            "--root" => {
+                idx += 1;
+                root = parse_path_value(&args, idx, "--root")?;
+            }
+            arg if arg.starts_with("--root=") => {
+                root = parse_inline_path_value(arg, "--root")?;
+            }
+            "--card-id" => {
+                idx += 1;
+                card_id = Some(value(&args, idx, "--card-id")?.to_string());
+            }
+            arg if arg.starts_with("--card-id=") => {
+                card_id = Some(inline_value(arg, "--card-id")?.to_string());
+            }
+            "--owner" => {
+                idx += 1;
+                owner = Some(value(&args, idx, "--owner")?.to_string());
+            }
+            arg if arg.starts_with("--owner=") => {
+                owner = Some(inline_value(arg, "--owner")?.to_string());
+            }
+            "--reason" => {
+                idx += 1;
+                reason = Some(value(&args, idx, "--reason")?.to_string());
+            }
+            arg if arg.starts_with("--reason=") => {
+                reason = Some(inline_value(arg, "--reason")?.to_string());
+            }
+            "--evidence" => {
+                idx += 1;
+                evidence = Some(value(&args, idx, "--evidence")?.to_string());
+            }
+            arg if arg.starts_with("--evidence=") => {
+                evidence = Some(inline_value(arg, "--evidence")?.to_string());
+            }
+            "--review-after" => {
+                idx += 1;
+                review_after = Some(parse_iso_date_value(&args, idx, "--review-after")?);
+            }
+            arg if arg.starts_with("--review-after=") => {
+                review_after = Some(parse_inline_iso_date_value(arg, "--review-after")?);
+            }
+            "--out" => {
+                idx += 1;
+                out = Some(parse_path_value(&args, idx, "--out")?);
+            }
+            arg if arg.starts_with("--out=") => {
+                out = Some(parse_inline_path_value(arg, "--out")?);
+            }
+            other => return Err(format!("unknown baseline add argument `{other}`")),
+        }
+        idx += 1;
+    }
+    Ok(BaselineAddOptions {
+        root,
+        card_id: card_id.ok_or("missing --card-id")?,
+        owner: owner.ok_or("missing --owner")?,
+        reason: reason.ok_or("missing --reason")?,
+        evidence: evidence.ok_or("missing --evidence")?,
+        review_after,
+        out,
+    })
+}
+
+fn parse_iso_date_value(args: &[String], idx: usize, flag: &str) -> Result<String, String> {
+    let raw = value(args, idx, flag)?;
+    validate_iso_date(raw, flag)?;
+    Ok(raw.to_string())
+}
+
+fn parse_inline_iso_date_value(arg: &str, flag: &str) -> Result<String, String> {
+    let raw = inline_value(arg, flag)?;
+    validate_iso_date(raw, flag)?;
+    Ok(raw.to_string())
+}
+
+fn validate_iso_date(raw: &str, flag: &str) -> Result<(), String> {
+    let bytes = raw.as_bytes();
+    if bytes.len() == 10
+        && bytes[0..4].iter().all(u8::is_ascii_digit)
+        && bytes[4] == b'-'
+        && bytes[5..7].iter().all(u8::is_ascii_digit)
+        && bytes[7] == b'-'
+        && bytes[8..10].iter().all(u8::is_ascii_digit)
+    {
+        Ok(())
+    } else {
+        Err(format!("{flag} must be a YYYY-MM-DD date, got `{raw}`"))
+    }
 }
 
 fn has_help_flag(args: &[String]) -> bool {
@@ -289,7 +515,7 @@ fn parse_repo(args: Vec<String>) -> Result<RepoOptions, String> {
                     .exclude
                     .push(inline_value(arg, "--exclude")?.to_string());
             }
-            "--list-files" => {
+            "--list-files" | "--dry-run" => {
                 options.list_files = true;
             }
             "--progress" => {
@@ -314,6 +540,12 @@ fn parse_repo(args: Vec<String>) -> Result<RepoOptions, String> {
             }
             "--no-respect-gitignore" | "--no-gitignore" => {
                 options.discovery.respect_gitignore = false;
+            }
+            "--large-repo-ignores" => {
+                options.discovery.large_repo_ignores = true;
+            }
+            "--no-large-repo-ignores" => {
+                options.discovery.large_repo_ignores = false;
             }
             "--max-files" => {
                 idx += 1;
@@ -398,7 +630,11 @@ fn parse_explain(args: Vec<String>) -> Result<Command, String> {
 
 fn parse_context(args: Vec<String>) -> Result<Command, String> {
     let mut root = PathBuf::from(".");
-    let mut id: Option<String> = None;
+    let mut card_id: Option<String> = None;
+    let mut file: Option<PathBuf> = None;
+    let mut line_start: Option<u32> = None;
+    let mut line_end: Option<u32> = None;
+    let mut changed_only = false;
     let mut idx = 0usize;
     while idx < args.len() {
         match args[idx].as_str() {
@@ -408,6 +644,30 @@ fn parse_context(args: Vec<String>) -> Result<Command, String> {
             }
             arg if arg.starts_with("--root=") => {
                 root = parse_inline_path_value(arg, "--root")?;
+            }
+            "--file" => {
+                idx += 1;
+                let raw = value(&args, idx, "--file")?;
+                file = Some(PathBuf::from(raw));
+            }
+            arg if arg.starts_with("--file=") => {
+                file = Some(PathBuf::from(inline_value(arg, "--file")?));
+            }
+            "--lines" => {
+                idx += 1;
+                let raw = value(&args, idx, "--lines")?;
+                let (s, e) = parse_line_range(raw)?;
+                line_start = Some(s);
+                line_end = Some(e);
+            }
+            arg if arg.starts_with("--lines=") => {
+                let raw = inline_value(arg, "--lines")?;
+                let (s, e) = parse_line_range(raw)?;
+                line_start = Some(s);
+                line_end = Some(e);
+            }
+            "--changed-only" => {
+                changed_only = true;
             }
             "--json" => {}
             "--format" => {
@@ -425,14 +685,75 @@ fn parse_context(args: Vec<String>) -> Result<Command, String> {
             value if value.starts_with('-') => {
                 return Err(format!("unknown context argument `{value}`"));
             }
-            value => set_card_id(&mut id, value)?,
+            value => set_card_id(&mut card_id, value)?,
         }
         idx += 1;
     }
-    Ok(Command::Context {
-        root,
-        id: id.ok_or_else(|| "missing card id".to_string())?,
-    })
+
+    // Determine the query mode: file-range or card-id.
+    let has_file = file.is_some();
+    let has_lines = line_start.is_some();
+    let has_id = card_id.is_some();
+
+    if has_file && has_id {
+        return Err("context: use either a card-id or --file/--lines, not both".to_string());
+    }
+    if has_lines && !has_file {
+        return Err("context: --lines requires --file".to_string());
+    }
+    if has_file && !has_lines {
+        return Err("context: --file requires --lines Y-Z".to_string());
+    }
+    if changed_only && !has_file {
+        return Err("context: --changed-only requires --file and --lines".to_string());
+    }
+
+    if let (Some(f), Some(s), Some(e)) = (file, line_start, line_end) {
+        return Ok(Command::Context {
+            root,
+            query: ContextQuery::FileRange {
+                file: f,
+                line_start: s,
+                line_end: e,
+                changed_only,
+            },
+        });
+    }
+
+    match card_id {
+        Some(id) => Ok(Command::Context {
+            root,
+            query: ContextQuery::CardId(id),
+        }),
+        None => Err(
+            "missing card id (or use --file <path> --lines Y-Z for a file-range scan)".to_string(),
+        ),
+    }
+}
+
+fn parse_line_range(raw: &str) -> Result<(u32, u32), String> {
+    let Some((left, right)) = raw.split_once('-') else {
+        return Err(format!(
+            "invalid --lines value `{raw}`: expected format Y-Z (e.g. 10-20)"
+        ));
+    };
+    let start = left.parse::<u32>().map_err(|_parse_err| {
+        format!("invalid --lines value `{raw}`: start `{left}` is not a positive integer")
+    })?;
+    let end = right.parse::<u32>().map_err(|_parse_err| {
+        format!("invalid --lines value `{raw}`: end `{right}` is not a positive integer")
+    })?;
+    if start == 0 || end == 0 {
+        return Err(format!(
+            "invalid --lines value `{raw}`: line numbers must be >= 1"
+        ));
+    }
+    if start > end {
+        return Err(format!(
+            "invalid --lines value `{raw}`: start {start} is after end {end}"
+        ));
+    }
+    Ok((start, end))
 }
 
 fn parse_outcome(args: Vec<String>) -> Result<OutcomeOptions, String> {
@@ -770,6 +1091,141 @@ mod tests {
     }
 
     #[test]
+    fn parses_candidate_new_command() -> Result<(), String> {
+        let command = parse(args([
+            "unsafe-review",
+            "candidate",
+            "new",
+            "--class",
+            "stable-byte-source-getter-reentry",
+            "--id=R4R2-S010",
+            "--out",
+            "target/draft-candidate.json",
+        ]))?;
+
+        let Command::Candidate(CandidateCommand::New(options)) = command else {
+            return Err("expected candidate new command".to_string());
+        };
+        assert_eq!(options.class, "stable-byte-source-getter-reentry");
+        assert_eq!(options.id, "R4R2-S010");
+        assert_eq!(
+            options.out,
+            Some(PathBuf::from("target/draft-candidate.json"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn candidate_new_defaults_skeleton_id() -> Result<(), String> {
+        let command = parse(args([
+            "unsafe-review",
+            "candidate",
+            "new",
+            "--class=stable-byte-source-sab-race",
+        ]))?;
+
+        let Command::Candidate(CandidateCommand::New(options)) = command else {
+            return Err("expected candidate new command".to_string());
+        };
+        assert_eq!(options.class, "stable-byte-source-sab-race");
+        assert_eq!(options.id, "R4R2-S000-TODO");
+        assert_eq!(options.out, None);
+        Ok(())
+    }
+
+    #[test]
+    fn candidate_new_rejects_unknown_class_listing_valid_classes() {
+        let command = parse(args([
+            "unsafe-review",
+            "candidate",
+            "new",
+            "--class",
+            "stable-byte-source-unknown",
+        ]));
+
+        let err = command.err().unwrap_or_default();
+        assert!(
+            err.contains("unknown stable-byte class `stable-byte-source-unknown`"),
+            "{err}"
+        );
+        for class in MANUAL_CANDIDATE_STABLE_BYTE_CLASSES {
+            assert!(err.contains(class), "{err} missing {class}");
+        }
+    }
+
+    #[test]
+    fn candidate_new_requires_class() {
+        let command = parse(args(["unsafe-review", "candidate", "new"]));
+
+        let err = command.err().unwrap_or_default();
+        assert!(err.contains("missing --class"), "{err}");
+        assert!(err.contains("stable-byte-source-getter-reentry"), "{err}");
+    }
+
+    #[test]
+    fn candidate_new_rejects_unknown_arguments() {
+        let command = parse(args([
+            "unsafe-review",
+            "candidate",
+            "new",
+            "--class=stable-byte-source-sab-race",
+            "--format=json",
+        ]));
+
+        assert_eq!(
+            command,
+            Err("unknown candidate new argument `--format=json`".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_candidate_lint_command() -> Result<(), String> {
+        let command = parse(args(["unsafe-review", "candidate", "lint", "draft.json"]))?;
+
+        assert_eq!(
+            command,
+            Command::Candidate(CandidateCommand::Lint(CandidateLintOptions {
+                input: PathBuf::from("draft.json"),
+            }))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn candidate_lint_requires_input_file() {
+        let command = parse(args(["unsafe-review", "candidate", "lint"]));
+
+        assert_eq!(command, Err("missing manual candidate input".to_string()));
+    }
+
+    #[test]
+    fn candidate_lint_rejects_extra_inputs_and_flags() {
+        let extra = parse(args([
+            "unsafe-review",
+            "candidate",
+            "lint",
+            "draft.json",
+            "other.json",
+        ]));
+        let flag = parse(args([
+            "unsafe-review",
+            "candidate",
+            "lint",
+            "--out",
+            "draft.json",
+        ]));
+
+        assert_eq!(
+            extra,
+            Err("expected exactly one manual candidate input".to_string())
+        );
+        assert_eq!(
+            flag,
+            Err("unknown candidate lint argument `--out`".to_string())
+        );
+    }
+
+    #[test]
     fn parses_candidate_import_command() -> Result<(), String> {
         let command = parse(args([
             "unsafe-review",
@@ -887,6 +1343,72 @@ mod tests {
             return Err("expected repo command".to_string());
         };
         assert!(options.progress);
+        Ok(())
+    }
+
+    #[test]
+    fn repo_dry_run_is_alias_for_list_files() -> Result<(), String> {
+        let command = parse(args(["unsafe-review", "repo", "--dry-run"]))?;
+
+        let Command::Repo(options) = command else {
+            return Err("expected repo command".to_string());
+        };
+        assert!(options.list_files);
+        Ok(())
+    }
+
+    #[test]
+    fn repo_dry_run_combined_with_other_flags() -> Result<(), String> {
+        let command = parse(args([
+            "unsafe-review",
+            "repo",
+            "--dry-run",
+            "--include=src/**/*.rs",
+            "--max-files=100",
+        ]))?;
+
+        let Command::Repo(options) = command else {
+            return Err("expected repo command".to_string());
+        };
+        assert!(options.list_files);
+        assert_eq!(options.discovery.include, vec!["src/**/*.rs".to_string()]);
+        assert_eq!(options.discovery.max_files, Some(100));
+        Ok(())
+    }
+
+    #[test]
+    fn repo_large_repo_ignores_flag() -> Result<(), String> {
+        let command = parse(args(["unsafe-review", "repo", "--large-repo-ignores"]))?;
+
+        let Command::Repo(options) = command else {
+            return Err("expected repo command".to_string());
+        };
+        assert!(options.discovery.large_repo_ignores);
+        Ok(())
+    }
+
+    #[test]
+    fn repo_no_large_repo_ignores_flag() -> Result<(), String> {
+        let command = parse(args(["unsafe-review", "repo", "--no-large-repo-ignores"]))?;
+
+        let Command::Repo(options) = command else {
+            return Err("expected repo command".to_string());
+        };
+        assert!(!options.discovery.large_repo_ignores);
+        Ok(())
+    }
+
+    #[test]
+    fn repo_large_repo_ignores_default_is_true() -> Result<(), String> {
+        let command = parse(args(["unsafe-review", "repo"]))?;
+
+        let Command::Repo(options) = command else {
+            return Err("expected repo command".to_string());
+        };
+        assert!(
+            options.discovery.large_repo_ignores,
+            "large_repo_ignores must default to true to preserve existing behavior"
+        );
         Ok(())
     }
 
@@ -1107,7 +1629,7 @@ mod tests {
             command,
             Command::Context {
                 root: PathBuf::from("."),
-                id: "UR-card".to_string()
+                query: ContextQuery::CardId("UR-card".to_string()),
             }
         );
         Ok(())
@@ -1197,7 +1719,7 @@ mod tests {
             context,
             Command::Context {
                 root: PathBuf::from("fixtures/raw_pointer_deref"),
-                id: "UR-card".to_string(),
+                query: ContextQuery::CardId("UR-card".to_string()),
             }
         );
         Ok(())
@@ -1252,6 +1774,284 @@ mod tests {
 
         assert_eq!(explain, Err("expected exactly one card id".to_string()));
         assert_eq!(context, Err("expected exactly one card id".to_string()));
+    }
+
+    #[test]
+    fn parses_context_file_range() -> Result<(), String> {
+        let command = parse(args([
+            "unsafe-review",
+            "context",
+            "--file",
+            "src/lib.rs",
+            "--lines",
+            "10-20",
+            "--json",
+        ]))?;
+        assert_eq!(
+            command,
+            Command::Context {
+                root: PathBuf::from("."),
+                query: ContextQuery::FileRange {
+                    file: PathBuf::from("src/lib.rs"),
+                    line_start: 10,
+                    line_end: 20,
+                    changed_only: false,
+                },
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn parses_context_file_range_changed_only() -> Result<(), String> {
+        let command = parse(args([
+            "unsafe-review",
+            "context",
+            "--root",
+            "fixtures/raw_pointer_alignment",
+            "--file=src/lib.rs",
+            "--lines=5-15",
+            "--changed-only",
+            "--json",
+        ]))?;
+        assert_eq!(
+            command,
+            Command::Context {
+                root: PathBuf::from("fixtures/raw_pointer_alignment"),
+                query: ContextQuery::FileRange {
+                    file: PathBuf::from("src/lib.rs"),
+                    line_start: 5,
+                    line_end: 15,
+                    changed_only: true,
+                },
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_context_file_without_lines() {
+        let command = parse(args(["unsafe-review", "context", "--file", "src/lib.rs"]));
+        assert_eq!(
+            command,
+            Err("context: --file requires --lines Y-Z".to_string())
+        );
+    }
+
+    #[test]
+    fn rejects_context_lines_without_file() {
+        let command = parse(args(["unsafe-review", "context", "--lines", "10-20"]));
+        assert_eq!(command, Err("context: --lines requires --file".to_string()));
+    }
+
+    #[test]
+    fn rejects_context_file_and_card_id_together() {
+        let command = parse(args([
+            "unsafe-review",
+            "context",
+            "--file",
+            "src/lib.rs",
+            "--lines",
+            "10-20",
+            "UR-card",
+        ]));
+        assert_eq!(
+            command,
+            Err("context: use either a card-id or --file/--lines, not both".to_string())
+        );
+    }
+
+    #[test]
+    fn rejects_context_changed_only_without_file() {
+        let command = parse(args([
+            "unsafe-review",
+            "context",
+            "--changed-only",
+            "UR-card",
+        ]));
+        assert_eq!(
+            command,
+            Err("context: --changed-only requires --file and --lines".to_string())
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_line_range_formats() {
+        let bad_range = parse(args([
+            "unsafe-review",
+            "context",
+            "--file",
+            "src/lib.rs",
+            "--lines",
+            "abc-20",
+        ]));
+        assert!(
+            bad_range
+                .err()
+                .unwrap_or_default()
+                .contains("not a positive integer"),
+            "expected parse error for non-numeric start"
+        );
+
+        let reversed = parse(args([
+            "unsafe-review",
+            "context",
+            "--file",
+            "src/lib.rs",
+            "--lines",
+            "20-10",
+        ]));
+        assert_eq!(
+            reversed,
+            Err("invalid --lines value `20-10`: start 20 is after end 10".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_confirm_command_with_allow_heavy_opt_in() -> Result<(), String> {
+        let command = parse(args([
+            "unsafe-review",
+            "confirm",
+            "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1",
+            "--allow-heavy",
+            "--root=fixtures/raw_pointer_alignment",
+            "--author",
+            "core/fixtures",
+            "--expires-at=2026-09-18",
+            "--timeout-seconds=120",
+            "--command",
+            "cargo +nightly miri test read_header",
+            "--out",
+            "target/confirm-receipt.json",
+        ]))?;
+
+        let Command::Confirm(options) = command else {
+            return Err("expected confirm command".to_string());
+        };
+        assert_eq!(
+            options.card_id,
+            "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1"
+        );
+        assert_eq!(
+            options.root,
+            PathBuf::from("fixtures/raw_pointer_alignment")
+        );
+        assert_eq!(options.author, "core/fixtures");
+        assert_eq!(options.expires_at.as_deref(), Some("2026-09-18"));
+        assert_eq!(options.timeout_seconds, 120);
+        assert_eq!(
+            options.command.as_deref(),
+            Some("cargo +nightly miri test read_header")
+        );
+        assert_eq!(
+            options.out,
+            Some(PathBuf::from("target/confirm-receipt.json"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn confirm_defaults_timeout_to_600_seconds() -> Result<(), String> {
+        let command = parse(args([
+            "unsafe-review",
+            "confirm",
+            "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1",
+            "--allow-heavy",
+            "--author=core/fixtures",
+        ]))?;
+
+        let Command::Confirm(options) = command else {
+            return Err("expected confirm command".to_string());
+        };
+        assert_eq!(options.timeout_seconds, 600);
+        assert_eq!(options.expires_at, None);
+        assert_eq!(options.command, None);
+        assert_eq!(options.out, None);
+        Ok(())
+    }
+
+    #[test]
+    fn confirm_refuses_without_allow_heavy_opt_in() {
+        let command = parse(args([
+            "unsafe-review",
+            "confirm",
+            "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1",
+            "--author",
+            "core/fixtures",
+        ]));
+
+        let err = command.err().unwrap_or_default();
+        assert!(err.contains("only with the explicit --allow-heavy opt-in"));
+        assert!(err.contains("unsafe-review never executes witnesses by default"));
+        assert!(err.contains("--dry-run to preview"));
+    }
+
+    #[test]
+    fn confirm_dry_run_needs_neither_allow_heavy_nor_author() -> Result<(), String> {
+        let command = parse(args([
+            "unsafe-review",
+            "confirm",
+            "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1",
+            "--dry-run",
+            "--root=fixtures/raw_pointer_alignment",
+        ]))?;
+
+        let Command::Confirm(options) = command else {
+            return Err("expected confirm command".to_string());
+        };
+        assert!(options.dry_run);
+        assert_eq!(options.author, "");
+        assert_eq!(options.timeout_seconds, 600);
+        Ok(())
+    }
+
+    #[test]
+    fn confirm_rejects_dry_run_combined_with_allow_heavy() {
+        let command = parse(args([
+            "unsafe-review",
+            "confirm",
+            "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1",
+            "--dry-run",
+            "--allow-heavy",
+            "--author=core/fixtures",
+        ]));
+
+        let err = command.err().unwrap_or_default();
+        assert!(err.contains("choose only one of --dry-run or --allow-heavy"));
+    }
+
+    #[test]
+    fn confirm_requires_author_for_accountability() {
+        let command = parse(args([
+            "unsafe-review",
+            "confirm",
+            "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1",
+            "--allow-heavy",
+        ]));
+
+        let err = command.err().unwrap_or_default();
+        assert!(err.contains("confirm requires --author"));
+        assert!(err.contains("accountability"));
+    }
+
+    #[test]
+    fn confirm_rejects_conflicting_diff_sources() {
+        let command = parse(args([
+            "unsafe-review",
+            "confirm",
+            "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1",
+            "--allow-heavy",
+            "--author=core/fixtures",
+            "--base",
+            "origin/main",
+            "--diff",
+            "change.diff",
+        ]));
+
+        assert_eq!(
+            command,
+            Err("choose only one of --base or --diff".to_string())
+        );
     }
 
     #[test]

@@ -14,24 +14,27 @@ mod policy;
 mod util;
 
 pub use api::{
-    AnalysisMode, AnalyzeInput, AnalyzeOutput, DiffSource, DiscoveryOptions, OutcomeReport,
-    PolicyMode, PolicyReport, ReceiptAuditReport, RepoScanEvent, RepoScanPhase, RepoScanStatus,
-    ReviewCardConfirmationProjection, Scope, analyze, analyze_with_discovery,
+    AnalysisMode, AnalyzeInput, AnalyzeOutput, BaselineInitResult, DiffSource, DiscoveryOptions,
+    OutcomeReport, PolicyMode, PolicyReport, ReceiptAuditReport, RepoScanEvent, RepoScanPhase,
+    RepoScanStatus, ReviewCardConfirmationProjection, Scope, analyze, analyze_with_discovery,
     analyze_with_discovery_and_progress, analyze_with_discovery_and_repo_events,
-    audit_witness_receipts, collect_context, compare_outcome_json, discover_repo_files,
-    evaluate_policy_report, evaluate_policy_report_from_output, explain_card, project_editor,
+    audit_witness_receipts, baseline_add, baseline_init, collect_context, collect_context_range,
+    compare_outcome_json, discover_repo_files, evaluate_policy_report,
+    evaluate_policy_report_from_output, explain_card, project_editor,
     project_review_card_confirmation, render_badge_jsons, render_comment_plan,
-    render_github_summary, render_human, render_json, render_lsp, render_markdown,
-    render_outcome_json, render_outcome_markdown, render_policy_report_json,
+    render_gate_manifest, render_github_summary, render_human, render_json, render_lsp,
+    render_markdown, render_outcome_json, render_outcome_markdown, render_policy_report_json,
     render_policy_report_markdown, render_pr_summary, render_receipt_audit_json,
     render_receipt_audit_markdown, render_repair_queue, render_sarif, render_witness_plan,
     validate_witness_receipts,
 };
 pub use candidate::{
-    MANUAL_CANDIDATE_SCHEMA_VERSION, ManualCandidate, ManualCandidateEvidence,
-    ManualCandidateLocation, ManualCandidateProofMode, ManualCandidateStableByte,
-    load_manual_candidate, load_manual_candidates, manual_candidate_implementer_handoff,
-    manual_candidate_path, read_manual_candidate, render_manual_candidate_context,
+    MANUAL_CANDIDATE_SCHEMA_VERSION, MANUAL_CANDIDATE_STABLE_BYTE_CLASSES,
+    MANUAL_CANDIDATE_TRUST_BOUNDARY, ManualCandidate, ManualCandidateEvidence,
+    ManualCandidateLocation, ManualCandidateOracleMap, ManualCandidateProofMode,
+    ManualCandidateStableByte, lint_manual_candidate_text, load_manual_candidate,
+    load_manual_candidates, manual_candidate_implementer_handoff, manual_candidate_path,
+    new_manual_candidate_skeleton, read_manual_candidate, render_manual_candidate_context,
     render_manual_candidate_explain, render_manual_candidate_witness_plan,
 };
 pub use domain::{
