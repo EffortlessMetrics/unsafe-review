@@ -13,6 +13,189 @@ comments, edit source, or block by default.
 
 Nothing yet.
 
+## 0.3.5 - 2026-06-08
+
+0.3.5 is the instrument-truthfulness patch. It makes `unsafe-review`'s core
+assertions exact for downstream automation: what scope ran, whether the diff
+input parsed, which exit category occurred, what receipt applies, whether a
+scan completed or was capped, and how to scope large repositories. It adds no
+analyzer breadth. It remains advisory static coverage evidence: it does not
+prove memory safety, UB-free status, Miri-clean status, site execution,
+calibrated precision/recall, or policy readiness, and it does not run
+witnesses, post comments, edit source, or block by default.
+
+### Added
+
+- CLI guide now documents per-file scan cost and the large-repo/brownfield
+  scoping workflow (narrow with `--include`/`--exclude`, preview with
+  `--list-files`, bound with `--timeout-seconds`/`--max-cards`, re-run on a
+  narrower scope), so whole-repo scans of large repositories are scoped
+  deliberately rather than timing out.
+  ([#1546](https://github.com/EffortlessMetrics/unsafe-review-swarm/issues/1546))
+
+- `repo --max-cards N` capped scans now emit a partial status sidecar with
+  `partial: true`, `stop_reason: "max_cards"`, `cap: N`, `cards_found: N`, and
+  a cap-specific `operator.next_action` ("narrow include/exclude filters or raise
+  --max-cards…").  A capped scan exits 0 — it is a successful-but-bounded run, not
+  a failure.  Previously a capped scan emitted an unconditional `phase: "complete"`
+  + `completed: true` sidecar, making truncated scans indistinguishable from
+  complete ones.  All stop reasons now emit a `stop_reason` field: `"none"` for
+  a full complete scan, `"max_cards"` for a cap-stopped scan, `"timeout"` for a
+  timed-out scan, `"terminated"` for a signal-interrupted scan, and `"error"` for
+  an analysis or report-write failure.  Timeout and error share the
+  `phase: "failed"` status but are distinguished by `stop_reason`, so a disk-write
+  or internal error is never mislabeled as a timeout.  A `partial` boolean
+  accompanies the field (`false` only for `stop_reason: "none"`).
+  ([#1545](https://github.com/EffortlessMetrics/unsafe-review-swarm/issues/1545))
+
+- SPEC-0035 (`repo-scan-status/v1` diagnosability) field names corrected to match
+  the shipped JSON sidecar: `scan_scope` (not `scope`), `elapsed_ms` (not
+  `elapsed_seconds`), `files_discovered`/`files_scanned`/`files_remaining` (not
+  `discovered`/`scanned`/`remaining`), `cards_found` (not `cards`), `completed`,
+  `partial`, `stop_reason`, `cap`, `error`, `signal`, `partial_path`, `operator`.
+  Phase vocabulary corrected to match shipped code: `discovering | scanning |
+  complete | failed | terminated` (the spec previously declared `rendering | done |
+  timed_out` which were never implemented).  Timeout stays `phase: "failed"` +
+  `stop_reason: "timeout"` — no breaking rename.
+  ([#1545](https://github.com/EffortlessMetrics/unsafe-review-swarm/issues/1545))
+
+- `cards.json` and `check`/`repo` `--format json` output bump `schema_version`
+  from `0.1` to `0.2` and now carry provenance metadata: top-level
+  `tool_version`, plus a `provenance` block with `tool_version`,
+  `generated_at` (RFC3339 UTC), resolved absolute root (`root_abs`), resolved
+  `base_sha`/`head_sha` in `--base` mode, `diff_path` + `diff_sha256` (SHA-256
+  content digest) in `--diff <file>` mode, and a `dirty_worktree` marker.
+  Fields that cannot be resolved are omitted, not null. The bump is additive —
+  every existing field is unchanged — so consumers routing on `schema_version`
+  should accept `0.2` wherever they accepted `0.1`. Partial/interim repo
+  reports still emit `0.1` without provenance pending the SPEC-0035
+  partial-status reconciliation.
+  ([#1517](https://github.com/EffortlessMetrics/unsafe-review-swarm/issues/1517))
+
+### Changed
+
+- Repo discovery now skips any subdirectory containing a `.git` entry — a nested
+  git checkout (`.git` directory) or a gitfile worktree (`.git` file) — by
+  default, so scratch worktrees and vendored repository copies no longer inflate
+  scan counts as if they were the target repository. The skip is independent of
+  gitignore handling. All scan surfaces (repo posture, badges, baseline) share
+  the same discovery, so the exclusion applies uniformly.
+  ([#1552](https://github.com/EffortlessMetrics/unsafe-review-swarm/issues/1552))
+
+- A supplied `--diff` whose content does not parse as a unified diff is now an
+  explicit input error (exit 2, no analysis, no artifacts) instead of silently
+  falling back to a whole-repo scan that still reported `scope: "diff"`. Empty
+  or whitespace-only diff input and binary-only diffs remain accepted.
+  ([#1516](https://github.com/EffortlessMetrics/unsafe-review-swarm/issues/1516))
+
+- A supplied `--diff` or `--base` that resolves to an empty diff (e.g. `git diff`
+  on a clean branch or an empty diff file) now produces a complete diff-scoped
+  no-op run: scope stays `diff`, 0 selected files, 0 cards, and
+  `--policy no-new-debt` exits 0. Previously, an empty diff caused the pipeline
+  to silently fall back to scanning the whole repository while still reporting
+  `scope: "diff"` in artifacts — inflating counts and misrepresenting the scope.
+  Callers with clean PRs that relied on the whole-repo fallback should switch to
+  `unsafe-review repo` for explicit full-repo analysis.
+  ([#1558](https://github.com/EffortlessMetrics/unsafe-review-swarm/issues/1558))
+
+### Changed (breaking for callers that check exit codes)
+
+- `--policy no-new-debt` violations now exit **1** instead of **2**. The stable
+  contract is: 0 = ran to completion (clean or advisory findings); 1 = ran to
+  completion, policy found new or worsened coverage gaps; 2 = tool did not
+  complete a review (usage, input/IO, or internal error). Callers that tested
+  `$? -ne 0` are unaffected; callers that tested `$? -eq 2` to detect policy
+  failures should update to `$? -eq 1`.
+  ([#1518](https://github.com/EffortlessMetrics/unsafe-review-swarm/issues/1518))
+
+## 0.3.4 - 2026-06-07
+
+0.3.4 is the coverage-instrument usability patch. It ships the post-0.3.3
+coverage-slot model, baseline movement tracking, diff-scoped no-new-debt,
+baseline-aware badges, comment-plan gap-anchoring, LSP file:range context,
+the `unsafe-review-gate.json` routing manifest, repo-scan diagnosability,
+candidate authoring UX, and stable-byte coverage v1. It remains advisory
+static coverage evidence: it does not prove memory safety, UB-free status,
+Miri-clean status, site execution, calibrated precision/recall, or policy
+readiness, and it does not run witnesses, post comments, edit source, or
+block by default.
+
+### Added
+
+- Added the SPEC-0029 unsafe-evidence coverage block: a slot-based model that
+  assigns each `unsafe` site a coverage slot and tracks which slots have
+  evidence, enabling baseline-aware gap reporting.
+  [#1529](https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/1529)
+- Added the SPEC-0030 baseline coverage-movement keystone: baseline recording,
+  movement tracking, diff-scoped `no-new-debt` reporting, and `worsened_gaps`
+  emission. Baseline `init` and `add` authoring subcommands create and extend
+  baselines without changing tool advisory posture.
+  [#1531](https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/1531)
+  [#1536](https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/1536)
+- Added the SPEC-0031 baseline-aware badge: the coverage badge reflects
+  baseline movement state so repos can surface coverage trends without
+  implied proof.
+  [#1532](https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/1532)
+- Added the SPEC-0032 comment-plan coverage-gap hardening: comment plans are
+  now anchored to coverage gaps, preventing phantom anchors and improving
+  comment-plan signal quality.
+  [#1535](https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/1535)
+- Added the SPEC-0033 file:range context scan for LLM/agent consumers: the
+  `context` subcommand now emits a `file:range` context packet with precise
+  source span information for LLM and agent consumers.
+  [#1534](https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/1534)
+- Added the SPEC-0034 `unsafe-review-gate.json` routing manifest: every
+  `first-pr` run writes a structured gate manifest that downstream CI and
+  agent consumers can read to route decisions without parsing human output.
+  [#1533](https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/1533)
+- Added the SPEC-0035 repo-scan diagnosability: `repo` output now includes
+  scan-scope metadata and diagnosability fields so consumers can distinguish
+  scanned-but-empty from not-scanned.
+  [#1528](https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/1528)
+- Added stale JS-buffer span detection: the analyzer flags use of a stale
+  JS `ArrayBuffer`/`TypedArray` span after a GC-reentry point.
+  [#1508](https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/1508)
+  [#1538](https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/1538)
+- Added stable-byte coverage v1 with span-as-arg detection and snapshot
+  suppression: the scanner detects span values passed as arguments after
+  reentry, and suppresses cards when a snapshot is taken before use.
+  [#1538](https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/1538)
+- Added candidate `new` and `lint` authoring subcommands for structured
+  candidate creation and linting without changing the manual/advisory boundary.
+  [#1526](https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/1526)
+- Added opt-in `confirm --allow-heavy` cue executor for running emitted
+  confirmation cues with explicit opt-in; `runtime_executed` is projected
+  into output. Execution remains opt-in and does not change default advisory
+  posture.
+  [#1510](https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/1510)
+  [#1509](https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/1509)
+- Added confirmation state projection and cheapest-confirmation ranking to
+  output surfaces.
+  [#1525](https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/1525)
+- Added dogfood usefulness rollup with a drift rail to catch usefulness
+  regressions across real-crate dogfood samples.
+  [#1527](https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/1527)
+- Required node-parity oracle maps for Bun-oriented candidates.
+  [#1497](https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/1497)
+
+### Changed
+
+- CI now falls back to full GitHub-hosted gate by default with a single tight
+  deterministic core gate plus an advisory ub-review LLM layer.
+  [#1507](https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/1507)
+  [#1524](https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/1524)
+
+### Documented
+
+- Encoded the receipted economic thesis and ownership split in the interop
+  north-star.
+  [#1530](https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/1530)
+- Added ease-of-use lane specs: SPEC-0028 delivery surfaces and ease of use,
+  SPEC-0029 coverage model, SPEC-0030 baseline movement.
+  [#1521](https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/1521)
+- Mirrored source 0.3.3 publication into swarm workbench.
+  [#1506](https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/1506)
+
 ## 0.3.4 - 2026-06-07
 
 0.3.4 is the coverage-instrument usability patch. It ships the post-0.3.3

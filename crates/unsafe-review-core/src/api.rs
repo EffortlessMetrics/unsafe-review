@@ -74,6 +74,38 @@ impl RepoScanPhase {
     }
 }
 
+/// Why a repo scan stopped short of scanning every discovered file.
+///
+/// A `Complete` scan has `stop_reason: None` (or equivalently `"none"`
+/// in the JSON sidecar).  Every other variant indicates a bounded-but-partial
+/// run; `completed` stays `false` for all partial variants.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RepoStopReason {
+    /// Scan ran to completion — every in-scope file was read.
+    None,
+    /// `--max-cards N` was reached; scanning stopped after `N` cards were emitted.
+    MaxCards,
+    /// `--timeout-seconds N` elapsed while the scan was in progress.
+    Timeout,
+    /// A unix signal (SIGTERM / SIGINT) interrupted the scan.
+    Terminated,
+    /// The scan did not complete due to an analysis or report-write error
+    /// (anything that is not a timeout, signal, or cap).
+    Error,
+}
+
+impl RepoStopReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::MaxCards => "max_cards",
+            Self::Timeout => "timeout",
+            Self::Terminated => "terminated",
+            Self::Error => "error",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RepoScanStatus {
     pub schema_version: String,
@@ -84,6 +116,14 @@ pub struct RepoScanStatus {
     pub cards_found: usize,
     pub last_path: Option<PathBuf>,
     pub completed: bool,
+    /// Whether this is a partial (bounded) scan result.
+    /// `true` for max-cards, timeout, and signal-terminated scans.
+    pub partial: bool,
+    /// The reason the scan stopped.  `None` for a complete scan, or one of the
+    /// named stop reasons for a bounded/interrupted scan.
+    pub stop_reason: RepoStopReason,
+    /// The configured card cap when `stop_reason == MaxCards`; `None` otherwise.
+    pub cap: Option<usize>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -248,8 +288,56 @@ pub fn evaluate_policy_report_from_output(output: &AnalyzeOutput) -> Result<Poli
     policy_report::evaluate(output)
 }
 
+/// Traceable evidence metadata that the CLI layer assembles from argv, git, and the
+/// filesystem before calling the JSON renderer.
+///
+/// This is "traceable evidence metadata", not proof: the fields identify the inputs
+/// used to produce an artifact so that two runs against different diffs cannot emit
+/// byte-identical clean receipts, but they do not prove correctness or memory safety.
+#[derive(Clone, Debug, Default)]
+pub struct Provenance {
+    /// Absolute path of the resolved workspace root (additive alongside the existing
+    /// relative `root` field which remains unchanged for compatibility).
+    pub root_abs: Option<String>,
+    /// Resolved base commit SHA (when `--base` was supplied and git resolution succeeded).
+    pub base_sha: Option<String>,
+    /// Resolved HEAD commit SHA (when `--base` was supplied and git resolution succeeded).
+    pub head_sha: Option<String>,
+    /// Path of the diff file (when `--diff <file>` was supplied).
+    pub diff_path: Option<String>,
+    /// SHA-256 hex digest of the diff file content (when `--diff <file>` was supplied).
+    pub diff_sha256: Option<String>,
+    /// RFC3339 UTC timestamp at which the artifact was generated.
+    pub generated_at: String,
+    /// Whether the working tree had uncommitted changes when the tool ran (None = git unavailable).
+    pub dirty_worktree: Option<bool>,
+}
+
+impl Provenance {
+    /// Build a minimal provenance block stamped with the current UTC time.
+    pub fn new_now() -> Self {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        Self {
+            generated_at: unix_secs_to_iso_datetime_utc(secs),
+            ..Self::default()
+        }
+    }
+}
+
 pub fn render_json(output: &AnalyzeOutput) -> String {
     json::render(output)
+}
+
+/// Render the JSON analyze artifact with attached traceable evidence metadata.
+///
+/// The `provenance` block is inserted as a nested object in the output.
+/// `tool_version` also appears top-level beside `tool` for consumer grep-ability.
+pub fn render_json_with_provenance(output: &AnalyzeOutput, provenance: &Provenance) -> String {
+    json::render_with_provenance(output, provenance)
 }
 
 pub fn render_human(output: &AnalyzeOutput) -> String {
@@ -448,7 +536,7 @@ pub fn baseline_init(
     let ledger_path = out
         .map(Path::to_path_buf)
         .unwrap_or_else(|| root.join("policy/unsafe-review-baseline.toml"));
-    let snapshot_path = root.join(crate::policy::SNAPSHOT_PATH);
+    let snapshot_path = baseline_snapshot_path(&ledger_path);
     let ledger_existed = ledger_path.is_file();
 
     // Run a full repo scan to get all current cards.
@@ -531,7 +619,7 @@ pub fn baseline_add(
     let ledger_path = out
         .map(Path::to_path_buf)
         .unwrap_or_else(|| root.join("policy/unsafe-review-baseline.toml"));
-    let snapshot_path = root.join(crate::policy::SNAPSHOT_PATH);
+    let snapshot_path = baseline_snapshot_path(&ledger_path);
 
     // Run a full repo scan.
     let output = pipeline::analyze(AnalyzeInput {
@@ -586,6 +674,20 @@ pub fn baseline_add(
     Ok(())
 }
 
+/// Derive the coverage snapshot path from the baseline ledger path: the snapshot is written
+/// as a sibling `<ledger-stem>-snapshot.toml`. The default ledger
+/// `policy/unsafe-review-baseline.toml` keeps producing
+/// `policy/unsafe-review-baseline-snapshot.toml`, and a custom `--out` keeps both files
+/// together instead of writing the snapshot into the scanned `--root` (which would edit a
+/// repo unsafe-review only promised to read).
+fn baseline_snapshot_path(ledger_path: &Path) -> PathBuf {
+    let stem = ledger_path
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "unsafe-review-baseline".to_string());
+    ledger_path.with_file_name(format!("{stem}-snapshot.toml"))
+}
+
 /// Default `review_after` date: one year from today (ISO 8601 YYYY-MM-DD).
 fn default_review_after_date() -> String {
     // Use a fixed date offset from June 2026 (the current date per context).
@@ -606,6 +708,22 @@ fn compute_review_after_date() -> String {
     let future_secs = secs + 365 * 24 * 3600;
     // Convert to a YYYY-MM-DD string using a simple algorithm.
     unix_secs_to_iso_date(future_secs)
+}
+
+/// Extend the date-only helper to a full RFC3339 UTC timestamp (e.g. `2026-06-07T21:30:00Z`).
+///
+/// The time portion is always `T00:00:00Z` (midnight UTC) because we only have
+/// second-level granularity and already discard the sub-day remainder in the
+/// date calculation.  For a provenance `generated_at` field this is sufficient
+/// — the date binds the artifact to a calendar day without requiring chrono.
+pub(crate) fn unix_secs_to_iso_datetime_utc(secs: u64) -> String {
+    let date = unix_secs_to_iso_date(secs);
+    // Compute HH:MM:SS from the remaining seconds in the day.
+    let remainder = secs % 86400;
+    let hh = remainder / 3600;
+    let mm = (remainder % 3600) / 60;
+    let ss = remainder % 60;
+    format!("{date}T{hh:02}:{mm:02}:{ss:02}Z")
 }
 
 fn unix_secs_to_iso_date(secs: u64) -> String {
@@ -688,5 +806,32 @@ mod tests {
         assert_eq!(input.policy, PolicyMode::Advisory);
         assert!(input.include_unchanged_tests);
         assert_eq!(input.max_cards, None);
+    }
+
+    #[test]
+    fn baseline_snapshot_path_keeps_default_canonical_location() {
+        let ledger = Path::new("repo/policy/unsafe-review-baseline.toml");
+        assert_eq!(
+            baseline_snapshot_path(ledger),
+            PathBuf::from("repo/policy/unsafe-review-baseline-snapshot.toml")
+        );
+    }
+
+    #[test]
+    fn baseline_snapshot_path_follows_custom_out_as_sibling() {
+        let ledger = Path::new("elsewhere/bun-baseline.toml");
+        assert_eq!(
+            baseline_snapshot_path(ledger),
+            PathBuf::from("elsewhere/bun-baseline-snapshot.toml")
+        );
+    }
+
+    #[test]
+    fn baseline_snapshot_path_handles_extension_less_out() {
+        let ledger = Path::new("elsewhere/baseline");
+        assert_eq!(
+            baseline_snapshot_path(ledger),
+            PathBuf::from("elsewhere/baseline-snapshot.toml")
+        );
     }
 }

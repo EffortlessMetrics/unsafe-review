@@ -22,7 +22,7 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
         os("json"),
     ])?;
     let value = parse_json(&stdout_text(&json)?)?;
-    assert_eq!(value["schema_version"], "0.1");
+    assert_eq!(value["schema_version"], "0.2");
     assert_eq!(value["scope"], "diff");
     assert_eq!(value["summary"]["changed_files"], 1);
     assert_eq!(value["summary"]["changed_non_rust_files"], 0);
@@ -34,6 +34,30 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     );
     assert_eq!(value["cards"][0]["operation_family"], "raw_pointer_read");
     let card_id = json_str(&value["cards"][0]["id"], "cards[0].id")?;
+
+    // schema 0.2 provenance block assertions (instrument-truthfulness lane)
+    assert!(
+        value["tool_version"].is_string(),
+        "tool_version must be present in schema 0.2 artifact"
+    );
+    assert!(
+        value["provenance"].is_object(),
+        "provenance block must be present in schema 0.2 artifact"
+    );
+    assert!(
+        value["provenance"]["diff_sha256"]
+            .as_str()
+            .is_some_and(|s| s.len() == 64),
+        "provenance.diff_sha256 must be a 64-char hex string when --diff <file> is used"
+    );
+    let generated_at = json_str(
+        &value["provenance"]["generated_at"],
+        "provenance.generated_at",
+    )?;
+    assert!(
+        generated_at.ends_with('Z') && generated_at.contains('T'),
+        "provenance.generated_at must be RFC3339 UTC: {generated_at}"
+    );
 
     let human = run_success([
         os("check"),
@@ -1967,7 +1991,7 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
     assert!(stdout.contains("enforce blocking policy"));
 
     let cards = parse_json(&fs::read_to_string(out_dir.join("cards.json"))?)?;
-    assert_eq!(cards["schema_version"], "0.1");
+    assert_eq!(cards["schema_version"], "0.2");
     assert_eq!(cards["scope"], "diff");
     assert_eq!(cards["policy"], "advisory");
     assert_eq!(cards["summary"]["cards"], 1);
@@ -2502,8 +2526,11 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
             assert_eq!(entry["format"], "sarif");
         }
         match expected {
-            "review-kit.json" | "cards.json" | "comment-plan.json" | "lsp.json"
-            | "repair-queue.json" | "policy-report.json" => {
+            "cards.json" => {
+                assert_eq!(entry["schema_version"], "0.2")
+            }
+            "review-kit.json" | "comment-plan.json" | "lsp.json" | "repair-queue.json"
+            | "policy-report.json" => {
                 assert_eq!(entry["schema_version"], "0.1")
             }
             "unsafe-review-gate.json" => {
@@ -3802,6 +3829,47 @@ fn repo_help_reports_repo_specific_scale_guidance() -> Result<(), Box<dyn Error>
 }
 
 #[test]
+fn repo_scan_skips_nested_git_checkouts() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_alignment");
+    let temp = TempDir::new("unsafe-review-repo-nested-git-e2e")?;
+
+    // Copy the target fixture to the temp root so we control its layout.
+    copy_dir_all(&fixture, temp.path())?;
+
+    // Create a nested directory that looks like a git checkout: it contains a
+    // .git directory and a src/lib.rs with unsafe code that would produce cards.
+    let vendor_clone = temp.path().join("vendor-clone");
+    fs::create_dir_all(vendor_clone.join(".git"))?;
+    fs::create_dir_all(vendor_clone.join("src"))?;
+    fs::write(
+        vendor_clone.join("src/lib.rs"),
+        "// nested checkout — must not contribute cards\n\
+         unsafe fn nested_raw_ptr(ptr: *const u8) -> u8 { *ptr }\n",
+    )?;
+
+    let output = run_success([
+        os("repo"),
+        os("--root"),
+        temp.path().as_os_str().to_os_string(),
+        os("--format"),
+        os("json"),
+    ])?;
+    let repo = parse_json(&stdout_text(&output)?)?;
+
+    // The fixture itself has exactly 1 card; the nested checkout must not add more.
+    assert_eq!(
+        repo["summary"]["cards"], 1,
+        "nested checkout must not inflate the card count: {repo}"
+    );
+    assert_eq!(
+        repo["summary"]["open_actionable_gaps"], 1,
+        "nested checkout must not inflate open-gap count: {repo}"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn check_reports_missing_diff_file_as_cli_failure() -> Result<(), Box<dyn Error>> {
     let fixture = fixture_root("safe_code_no_cards");
     let missing_diff = fixture.join("missing.diff");
@@ -3827,6 +3895,150 @@ fn check_reports_missing_diff_file_as_cli_failure() -> Result<(), Box<dyn Error>
         stderr.contains("missing.diff"),
         "stderr should include the missing diff path: {stderr}"
     );
+
+    Ok(())
+}
+
+#[test]
+fn check_reports_unparseable_diff_as_cli_failure() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_alignment");
+    let temp = TempDir::new("unsafe-review-garbage-diff-e2e")?;
+
+    // Copy the fixture into a temp dir so we can place the garbage diff alongside it.
+    copy_dir_all(&fixture, temp.path())?;
+
+    let garbage_diff = temp.path().join("garbage.diff");
+    fs::write(&garbage_diff, "this is not a diff at all")?;
+
+    let cards_out = temp.path().join("cards.json");
+
+    let output = run_failure([
+        os("check"),
+        os("--root"),
+        temp.path().as_os_str().to_os_string(),
+        os("--diff"),
+        garbage_diff.as_os_str().to_os_string(),
+        os("--format"),
+        os("json"),
+        os("--out"),
+        cards_out.as_os_str().to_os_string(),
+    ])?;
+
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        stdout_text(&output)?.trim(),
+        "",
+        "stdout should be empty on parse failure"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("garbage.diff"),
+        "stderr should include the diff path: {stderr}"
+    );
+    assert!(
+        stderr.contains("could not be parsed as a unified diff"),
+        "stderr should describe the parse failure: {stderr}"
+    );
+    assert!(
+        stderr.contains("no analysis was run"),
+        "stderr should state no analysis was run: {stderr}"
+    );
+    assert!(
+        !cards_out.exists(),
+        "output file must not be created when diff is unparseable"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn check_empty_diff_is_complete_noop_not_whole_repo_scan() -> Result<(), Box<dyn Error>> {
+    // A valid but empty diff (e.g. from `git diff` on a clean branch) must
+    // produce a complete diff-scoped no-op run: scope=diff, 0 selected files,
+    // 0 cards, no whole-repo cards.  This is distinct from a malformed diff
+    // (which exits 2) and from a no-diff-supplied run (which keeps its own
+    // existing behavior).
+    //
+    // Covers issue #1558 (instrument-truthfulness: valid empty diff = no-op).
+    let fixture = fixture_root("raw_pointer_alignment");
+    let temp = TempDir::new("unsafe-review-empty-diff-e2e")?;
+
+    // Copy the fixture so we can place an empty diff alongside it.
+    copy_dir_all(&fixture, temp.path())?;
+
+    let empty_diff = temp.path().join("empty.diff");
+    fs::write(&empty_diff, "")?;
+
+    let output = run_success([
+        os("check"),
+        os("--root"),
+        temp.path().as_os_str().to_os_string(),
+        os("--diff"),
+        empty_diff.as_os_str().to_os_string(),
+        os("--format"),
+        os("json"),
+    ])?;
+
+    let value = parse_json(&stdout_text(&output)?)?;
+    assert_eq!(value["scope"], "diff", "empty diff must produce scope=diff");
+    assert_eq!(
+        value["summary"]["cards"], 0,
+        "empty diff must produce 0 cards, not whole-repo cards"
+    );
+    assert_eq!(
+        value["summary"]["changed_files"], 0,
+        "empty diff must report 0 changed_files"
+    );
+    assert_eq!(
+        value["summary"]["changed_rust_files"], 0,
+        "empty diff must report 0 changed_rust_files"
+    );
+    assert!(
+        value["cards"].as_array().is_some_and(Vec::is_empty),
+        "empty diff must produce an empty cards array"
+    );
+    assert!(
+        value["trust_boundary"]
+            .as_str()
+            .is_some_and(|s| s.contains("not memory-safety proof")),
+        "trust boundary must still be present on no-op output"
+    );
+    // The no-op output must not read as a safety pass.
+    let rendered = serde_json::to_string(&value)?;
+    assert!(
+        !rendered.contains("all clear") && !rendered.contains("All clear"),
+        "no-op output must not contain 'all clear'"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn check_empty_diff_no_new_debt_exits_0() -> Result<(), Box<dyn Error>> {
+    // A valid empty diff with --policy no-new-debt must exit 0: no new unsafe
+    // seams were added, so the no-new-debt policy is satisfied.
+    let fixture = fixture_root("raw_pointer_alignment");
+    let temp = TempDir::new("unsafe-review-empty-diff-nnd-e2e")?;
+    copy_dir_all(&fixture, temp.path())?;
+    let empty_diff = temp.path().join("empty.diff");
+    fs::write(&empty_diff, "")?;
+
+    let output = run_success([
+        os("check"),
+        os("--root"),
+        temp.path().as_os_str().to_os_string(),
+        os("--diff"),
+        empty_diff.as_os_str().to_os_string(),
+        os("--format"),
+        os("json"),
+        os("--policy"),
+        os("no-new-debt"),
+    ])?;
+
+    let value = parse_json(&stdout_text(&output)?)?;
+    assert_eq!(value["scope"], "diff");
+    assert_eq!(value["summary"]["cards"], 0);
+    assert_eq!(value["policy"], "no-new-debt");
 
     Ok(())
 }
@@ -4056,7 +4268,7 @@ fn repo_inventory_and_badges_count_open_gaps_without_safety_claim() -> Result<()
         os("json"),
     ])?;
     let repo = parse_json(&stdout_text(&repo)?)?;
-    assert_eq!(repo["schema_version"], "0.1");
+    assert_eq!(repo["schema_version"], "0.2");
     assert_eq!(repo["tool"], "unsafe-review");
     assert_eq!(repo["scope"], "repo");
     assert_eq!(repo["mode"], "repo");
@@ -4236,6 +4448,9 @@ fn repo_progress_writes_status_sidecar_for_out_reports() -> Result<(), Box<dyn E
     assert_eq!(status["scan_scope"]["large_repo_ignores"], true);
     assert_eq!(status["scan_scope"]["max_files"], 5);
     assert_eq!(status["completed"], true);
+    assert_eq!(status["partial"], false);
+    assert_eq!(status["stop_reason"], "none");
+    assert_eq!(status["cap"], Value::Null);
     assert_eq!(status["files_discovered"], 1);
     assert_eq!(status["files_scanned"], 1);
     assert_eq!(status["files_remaining"], 0);
@@ -4289,6 +4504,11 @@ fn repo_output_failure_keeps_partial_and_marks_status_incomplete() -> Result<(),
     assert_eq!(status["phase"], "failed");
     assert_default_repo_status_scope(&status, &fixture, 0)?;
     assert_eq!(status["completed"], false);
+    assert_eq!(status["partial"], true);
+    // A report-write failure is an error, not a timeout — the shared
+    // record_incomplete path must label it accurately.
+    assert_eq!(status["stop_reason"], "error");
+    assert_eq!(status["cap"], Value::Null);
     assert_eq!(status["files_discovered"], 1);
     assert_eq!(status["files_scanned"], 1);
     assert_eq!(status["cards_found"], 1);
@@ -4362,6 +4582,10 @@ fn repo_analysis_failure_keeps_completed_file_partial_snapshot() -> Result<(), B
     assert_eq!(status["phase"], "failed");
     assert_default_repo_status_scope(&status, &scan_root, 1)?;
     assert_eq!(status["completed"], false);
+    assert_eq!(status["partial"], true);
+    // An analysis read failure mid-scan is an error, not a timeout.
+    assert_eq!(status["stop_reason"], "error");
+    assert_eq!(status["cap"], Value::Null);
     assert_eq!(status["files_discovered"], 2);
     assert_eq!(status["files_scanned"], 1);
     assert_eq!(status["cards_found"], 1);
@@ -4451,6 +4675,9 @@ fn repo_timeout_keeps_completed_file_partial_snapshot() -> Result<(), Box<dyn Er
     assert_eq!(status["phase"], "failed");
     assert_default_repo_status_scope(&status, &scan_root, 1)?;
     assert_eq!(status["completed"], false);
+    assert_eq!(status["partial"], true);
+    assert_eq!(status["stop_reason"], "timeout");
+    assert_eq!(status["cap"], Value::Null);
     assert_eq!(status["files_discovered"], 2);
     assert_eq!(status["files_scanned"], 1);
     assert_eq!(status["cards_found"], 1);
@@ -4529,6 +4756,9 @@ fn repo_sigterm_writes_interrupted_status_sidecar() -> Result<(), Box<dyn Error>
     assert_eq!(status["phase"], "terminated");
     assert_default_repo_status_scope(&status, &fixture, 0)?;
     assert_eq!(status["completed"], false);
+    assert_eq!(status["partial"], true);
+    assert_eq!(status["stop_reason"], "terminated");
+    assert_eq!(status["cap"], Value::Null);
     assert_eq!(status["signal"], "SIGTERM");
     assert!(
         status["error"]
@@ -4614,6 +4844,9 @@ fn repo_sigterm_keeps_completed_file_partial_report() -> Result<(), Box<dyn Erro
     assert_eq!(status["phase"], "terminated");
     assert_default_repo_status_scope(&status, &scan_root, 1)?;
     assert_eq!(status["completed"], false);
+    assert_eq!(status["partial"], true);
+    assert_eq!(status["stop_reason"], "terminated");
+    assert_eq!(status["cap"], Value::Null);
     assert_eq!(status["signal"], "SIGTERM");
     assert_eq!(status["files_discovered"], 2);
     assert_eq!(status["files_scanned"], 1);
@@ -5463,11 +5696,27 @@ fn no_new_debt_policy_fails_only_for_unbaselined_actionable_gaps() -> Result<(),
         os("--policy"),
         os("no-new-debt"),
     ])?;
+    // Exit-code taxonomy: policy violations exit 1, tool errors exit 2.
+    assert_eq!(
+        failing.status.code(),
+        Some(1),
+        "no-new-debt violation must exit 1 (policy), not 2 (tool error)"
+    );
     let failing_json = parse_json(&stdout_text(&failing)?)?;
     assert_eq!(failing_json["policy"], "no-new-debt");
     assert_eq!(failing_json["summary"]["open_actionable_gaps"], 1);
     // SPEC-0030: no-new-debt fails on new/worsened gaps, not total open actionable count.
-    assert!(String::from_utf8(failing.stderr)?.contains("no-new-debt policy: 1 new gap(s)"));
+    let failing_stderr = String::from_utf8(failing.stderr.clone())?;
+    assert!(
+        failing_stderr.contains("no-new-debt policy: 1 new gap(s)"),
+        "stderr should contain policy gap counts: {failing_stderr}"
+    );
+    // The policy category prefix must appear in stderr so wrappers can distinguish
+    // policy violations from tool errors.
+    assert!(
+        failing_stderr.contains("policy:"),
+        "stderr should carry the 'policy:' category prefix: {failing_stderr}"
+    );
 
     let temp = TempDir::new("unsafe-review-no-new-debt-e2e")?;
     let copied = temp.path().join("fixture");
@@ -5500,6 +5749,109 @@ fn no_new_debt_policy_fails_only_for_unbaselined_actionable_gaps() -> Result<(),
     assert_eq!(passing["policy"], "no-new-debt");
     assert_eq!(passing["summary"]["open_actionable_gaps"], 0);
     assert_eq!(passing["cards"][0]["class"], "baseline_known");
+
+    Ok(())
+}
+
+// Exit-code taxonomy tests (issue #1518):
+//   0 = ran to completion (clean or advisory findings)
+//   1 = ran to completion: policy violation
+//   2 = tool did not complete: usage / input / IO / internal error
+
+#[test]
+fn unknown_flag_exits_2() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_alignment");
+    let output = run_failure([
+        os("check"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        fixture.join("change.diff").into_os_string(),
+        os("--this-flag-does-not-exist"),
+    ])?;
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "unknown flag must exit 2 (tool/usage error)"
+    );
+    Ok(())
+}
+
+#[test]
+fn missing_diff_file_exits_2() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_alignment");
+    let missing = fixture.join("does-not-exist.diff");
+    let output = run_failure([
+        os("check"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        missing.as_os_str().to_os_string(),
+    ])?;
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "missing diff file must exit 2 (tool/input error)"
+    );
+    Ok(())
+}
+
+#[test]
+fn advisory_run_with_findings_exits_0() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_alignment");
+    // Advisory policy (default) exits 0 even when cards are found.
+    let output = run_success([
+        os("check"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        fixture.join("change.diff").into_os_string(),
+        os("--format"),
+        os("json"),
+    ])?;
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "advisory run with findings must exit 0"
+    );
+    let value = parse_json(&stdout_text(&output)?)?;
+    // Confirm there actually are cards so the test is not vacuous.
+    assert_eq!(
+        value["summary"]["cards"], 1,
+        "fixture should produce 1 card (test is checking exit 0 with findings)"
+    );
+    Ok(())
+}
+
+#[test]
+fn baseline_init_out_override_never_writes_into_root() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_alignment");
+    let temp = TempDir::new("unsafe-review-baseline-out-e2e")?;
+    let copied = temp.path().join("fixture");
+    copy_dir_all(&fixture, &copied)?;
+    let out_dir = temp.path().join("out");
+    fs::create_dir_all(&out_dir)?;
+    let out_ledger = out_dir.join("consumer-baseline.toml");
+
+    let output = run_success([
+        os("baseline"),
+        os("init"),
+        os("--root"),
+        copied.as_os_str().to_os_string(),
+        os("--out"),
+        out_ledger.as_os_str().to_os_string(),
+    ])?;
+    let stdout = stdout_text(&output)?;
+    assert!(stdout.contains("baseline init: ok"));
+    assert!(stdout.contains("consumer-baseline-snapshot.toml"));
+
+    // Both authored files follow --out as siblings.
+    assert!(out_ledger.is_file());
+    assert!(out_dir.join("consumer-baseline-snapshot.toml").is_file());
+
+    // The scanned root stays read-only: no ledger, snapshot, or policy directory
+    // is created inside --root when --out points elsewhere.
+    assert!(!copied.join("policy").exists());
 
     Ok(())
 }
@@ -5989,6 +6341,122 @@ fn assert_manual_candidate_witness_follow_up(text: &str) {
     );
     assert!(trust_index.is_some(), "trust boundary section should exist");
     assert!(witness_index < trust_index);
+}
+
+#[test]
+fn repo_max_cards_cap_emits_partial_status_sidecar() -> Result<(), Box<dyn Error>> {
+    // Build a temp crate with >=2 unsafe sites so max-cards=1 stops early.
+    let temp = TempDir::new("unsafe-review-repo-maxcards-e2e")?;
+    let scan_root = temp.path().join("fixture");
+    fs::create_dir_all(scan_root.join("src"))?;
+    fs::write(
+        scan_root.join("Cargo.toml"),
+        "[package]\nname = \"maxcards-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+    )?;
+    // Two unsafe files — cap of 1 guarantees the scan stops after the first card.
+    fs::write(
+        scan_root.join("src/lib.rs"),
+        "pub unsafe fn alpha(ptr: *const u8) -> u8 { unsafe { *ptr } }\n",
+    )?;
+    fs::write(
+        scan_root.join("src/beta.rs"),
+        "pub unsafe fn beta(ptr: *const u8) -> u8 { unsafe { *ptr } }\n",
+    )?;
+
+    let report_path = temp.path().join("repo.json");
+    let status_path = temp.path().join("repo.json.status.json");
+    let partial_path = temp.path().join("repo.json.partial");
+
+    // A capped scan is NOT an error — exit code must be success.
+    let output = run_success([
+        os("repo"),
+        os("--root"),
+        scan_root.as_os_str().to_os_string(),
+        os("--format"),
+        os("json"),
+        os("--out"),
+        report_path.as_os_str().to_os_string(),
+        os("--max-cards"),
+        os("1"),
+    ])?;
+
+    assert_eq!(stdout_text(&output)?.trim(), "");
+
+    // The final report is written (a capped scan still promotes the capped result).
+    assert!(
+        report_path.exists(),
+        "capped repo scan should write a final report"
+    );
+    // The partial file is promoted away after success.
+    assert!(
+        !partial_path.exists(),
+        "capped scan should promote the partial file and remove it"
+    );
+
+    // Status sidecar must exist and carry the partial/cap markers.
+    assert!(
+        status_path.exists(),
+        "capped repo scan should write a status sidecar"
+    );
+    let status = parse_json(&fs::read_to_string(&status_path)?)?;
+    assert_eq!(status["schema_version"], "repo-scan-status/v1");
+    assert_eq!(
+        status["phase"], "complete",
+        "capped scan phase should still be 'complete'"
+    );
+    assert_eq!(
+        status["completed"], false,
+        "capped scan completed must be false"
+    );
+    assert_eq!(
+        status["partial"], true,
+        "capped scan must mark partial=true"
+    );
+    assert_eq!(
+        status["stop_reason"], "max_cards",
+        "capped scan must carry stop_reason=max_cards"
+    );
+    assert_eq!(
+        status["cap"], 1,
+        "capped scan must record the configured cap"
+    );
+    assert_eq!(
+        status["cards_found"], 1,
+        "capped scan cards_found must equal the emitted card count"
+    );
+    assert!(status["error"].is_null(), "capped scan must not set error");
+    assert!(
+        status["signal"].is_null(),
+        "capped scan must not set signal"
+    );
+    assert!(
+        status["partial_path"].is_null(),
+        "capped scan must not set partial_path (the final report is the capped artifact)"
+    );
+
+    // Operator block: state=capped, next_action mentions include/exclude or max-cards.
+    let operator = status
+        .get("operator")
+        .ok_or("repo status missing operator")?;
+    assert_eq!(operator["state"], "capped");
+    assert_eq!(operator["partial_report_available"], false);
+    let next_action = operator["next_action"].as_str().unwrap_or("");
+    assert!(
+        next_action.contains("include/exclude") || next_action.contains("max-cards"),
+        "operator next_action should guide narrowing scope or raising cap: {next_action}"
+    );
+    let limitation = operator["partial_report_limitation"].as_str().unwrap_or("");
+    assert!(
+        limitation.contains("Completed-file snapshot only"),
+        "operator limitation should say partial snapshot scope: {limitation}"
+    );
+    let boundary = operator["claim_boundary"].as_str().unwrap_or("");
+    assert!(
+        boundary.contains("not complete repo posture"),
+        "operator claim_boundary must carry partial posture wording: {boundary}"
+    );
+
+    Ok(())
 }
 
 fn assert_default_repo_status_scope(

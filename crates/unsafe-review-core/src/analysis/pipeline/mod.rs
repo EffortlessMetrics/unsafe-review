@@ -11,8 +11,8 @@ use self::input_loading::{load_diff_index, package_name};
 use self::summary::summarize;
 use super::{receipts, scanner};
 use crate::api::{
-    AnalysisMode, AnalyzeInput, AnalyzeOutput, DiscoveryOptions, RepoScanEvent, RepoScanPhase,
-    RepoScanStatus, Scope,
+    AnalysisMode, AnalyzeInput, AnalyzeOutput, DiffSource, DiscoveryOptions, RepoScanEvent,
+    RepoScanPhase, RepoScanStatus, RepoStopReason, Scope,
 };
 use crate::domain::ReviewCard;
 use crate::input::workspace;
@@ -117,7 +117,12 @@ fn analyze_with_receipts(
     } else {
         receipts::ReceiptIndex::default()
     };
-    let candidate_files = if repo_mode || diff_index.is_empty() {
+    // A diff was *supplied* when the source is Text or File (even if the
+    // parsed index is empty — an empty `git diff` is a valid zero-change diff,
+    // not a repo-scan trigger).  Only NoneRepoScan means "no diff at all" and
+    // should fall back to scanning everything.
+    let diff_supplied = !matches!(input.diff, DiffSource::NoneRepoScan);
+    let candidate_files = if repo_mode || !diff_supplied {
         all_rust_files.clone()
     } else {
         all_rust_files
@@ -126,7 +131,7 @@ fn analyze_with_receipts(
             .cloned()
             .collect::<Vec<_>>()
     };
-    let changed_rust_files = if repo_mode || diff_index.is_empty() {
+    let changed_rust_files = if repo_mode || !diff_supplied {
         candidate_files.len()
     } else {
         diff_index.changed_rust_file_count()
@@ -137,6 +142,7 @@ fn analyze_with_receipts(
     let max_cards = input.max_cards.unwrap_or(usize::MAX);
     let mut files_scanned = 0usize;
     let mut last_scanned_path = None;
+    let mut scan_capped = false;
     emit_repo_status(
         &mut events,
         repo_status(
@@ -206,6 +212,7 @@ fn analyze_with_receipts(
         )?;
         last_scanned_path = Some(rel.clone());
         if reached_max_cards {
+            scan_capped = true;
             break 'files;
         }
     }
@@ -230,8 +237,22 @@ fn analyze_with_receipts(
         summary,
         cards,
     };
-    emit_repo_event(
-        &mut events,
+    // Emit a final status event.  A capped scan emits a partial status that
+    // carries stop_reason=max_cards and cap=N so consumers and the gate
+    // manifest cannot mistake a truncated scan for a complete one.
+    let final_status = if scan_capped {
+        repo_status_capped(
+            &started,
+            discovered_files,
+            files_scanned,
+            output.cards.len(),
+            last_scanned_path,
+            // input.max_cards is Some(_) because scan_capped is only set when
+            // cards.len() reached max_cards, which requires max_cards < usize::MAX,
+            // which requires input.max_cards to be Some(_).
+            input.max_cards.unwrap_or(max_cards),
+        )
+    } else {
         repo_status(
             RepoScanPhase::Complete,
             &started,
@@ -240,9 +261,9 @@ fn analyze_with_receipts(
             output.cards.len(),
             last_scanned_path,
             true,
-        ),
-        Some(output.clone()),
-    )?;
+        )
+    };
+    emit_repo_event(&mut events, final_status, Some(output.clone()))?;
     Ok(output)
 }
 
@@ -333,6 +354,32 @@ fn repo_status(
         cards_found,
         last_path,
         completed,
+        partial: false,
+        stop_reason: RepoStopReason::None,
+        cap: None,
+    }
+}
+
+fn repo_status_capped(
+    started: &Instant,
+    files_discovered: usize,
+    files_scanned: usize,
+    cards_found: usize,
+    last_path: Option<PathBuf>,
+    cap: usize,
+) -> RepoScanStatus {
+    RepoScanStatus {
+        schema_version: "repo-scan-status/v1".to_string(),
+        phase: RepoScanPhase::Complete,
+        elapsed_ms: started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+        files_discovered,
+        files_scanned,
+        cards_found,
+        last_path,
+        completed: false,
+        partial: true,
+        stop_reason: RepoStopReason::MaxCards,
+        cap: Some(cap),
     }
 }
 
@@ -5721,5 +5768,166 @@ evidence = "test fixture"
             .map_err(|err| format!("system clock before UNIX_EPOCH: {err}"))?
             .as_nanos();
         Ok(std::env::temp_dir().join(format!("{prefix}-{nanos}")))
+    }
+
+    /// Build a minimal temporary crate with one `unsafe fn` so the repo-scan
+    /// path and diff-scoped paths produce contrasting results.
+    fn temp_unsafe_crate(prefix: &str) -> Result<PathBuf, String> {
+        let root = unique_temp_dir(prefix)?;
+        fs::create_dir_all(root.join("src")).map_err(|err| format!("create dirs failed: {err}"))?;
+        fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"empty-diff-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+        )
+        .map_err(|err| format!("write Cargo.toml failed: {err}"))?;
+        fs::write(
+            root.join("src/lib.rs"),
+            "pub unsafe fn danger(ptr: *const u8) -> u8 { unsafe { *ptr } }\n",
+        )
+        .map_err(|err| format!("write src/lib.rs failed: {err}"))?;
+        Ok(root)
+    }
+
+    #[test]
+    fn empty_diff_text_yields_zero_candidates_zero_cards() -> Result<(), String> {
+        // Scope::Diff + DiffSource::Text("") → zero candidate files, zero cards.
+        // This is the core fix for issue #1558: a valid empty diff must NOT
+        // fall back to scanning all files.
+        let root = temp_unsafe_crate("unsafe-review-empty-diff-text")?;
+        let output = analyze(AnalyzeInput {
+            root: root.clone(),
+            scope: Scope::Diff,
+            diff: DiffSource::Text(String::new()),
+            mode: AnalysisMode::Draft,
+            policy: PolicyMode::Advisory,
+            include_unchanged_tests: true,
+            max_cards: None,
+        });
+        let _ = fs::remove_dir_all(&root);
+        let output = output?;
+
+        assert_eq!(output.scope, Scope::Diff);
+        assert_eq!(
+            output.summary.cards, 0,
+            "empty diff should produce zero cards, not whole-repo cards"
+        );
+        assert_eq!(
+            output.summary.changed_rust_files, 0,
+            "empty diff should report zero changed rust files"
+        );
+        assert_eq!(
+            output.summary.changed_files, 0,
+            "empty diff should report zero changed files"
+        );
+        assert!(output.cards.is_empty(), "card list must be empty");
+        Ok(())
+    }
+
+    #[test]
+    fn none_repo_scan_repo_scope_still_produces_cards() -> Result<(), String> {
+        // Control: Scope::Repo + NoneRepoScan → all files scanned, cards produced.
+        // This is the existing repo-scan default; the fix must not change it.
+        let root = temp_unsafe_crate("unsafe-review-none-repo-scan")?;
+        let output = analyze(AnalyzeInput {
+            root: root.clone(),
+            scope: Scope::Repo,
+            diff: DiffSource::NoneRepoScan,
+            mode: AnalysisMode::Repo,
+            policy: PolicyMode::Advisory,
+            include_unchanged_tests: true,
+            max_cards: None,
+        });
+        let _ = fs::remove_dir_all(&root);
+        let output = output?;
+
+        assert_eq!(output.scope, Scope::Repo);
+        assert!(
+            output.summary.changed_rust_files > 0,
+            "NoneRepoScan repo scan with an unsafe file should report changed_rust_files > 0"
+        );
+        assert!(
+            !output.cards.is_empty(),
+            "NoneRepoScan repo scan should still produce cards from the unsafe file"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn capped_repo_scan_final_status_is_partial_with_stop_reason_max_cards() -> Result<(), String> {
+        // Build a temp crate with TWO unsafe files so that a cap of 1 card stops early.
+        let root = unique_temp_dir("unsafe-review-cap-status")?;
+        fs::create_dir_all(root.join("src")).map_err(|err| format!("create dirs failed: {err}"))?;
+        fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"cap-status-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+        )
+        .map_err(|err| format!("write Cargo.toml failed: {err}"))?;
+        fs::write(
+            root.join("src/lib.rs"),
+            "pub unsafe fn alpha(ptr: *const u8) -> u8 { unsafe { *ptr } }\n",
+        )
+        .map_err(|err| format!("write src/lib.rs failed: {err}"))?;
+        fs::write(
+            root.join("src/beta.rs"),
+            "pub unsafe fn beta(ptr: *const u8) -> u8 { unsafe { *ptr } }\n",
+        )
+        .map_err(|err| format!("write src/beta.rs failed: {err}"))?;
+
+        let mut final_statuses: Vec<RepoScanStatus> = Vec::new();
+        let output = analyze_with_discovery_and_repo_events(
+            AnalyzeInput {
+                root: root.clone(),
+                scope: Scope::Repo,
+                diff: DiffSource::NoneRepoScan,
+                mode: AnalysisMode::Repo,
+                policy: PolicyMode::Advisory,
+                include_unchanged_tests: true,
+                max_cards: Some(1),
+            },
+            DiscoveryOptions::repo_defaults(),
+            |event| {
+                if event.status.completed || event.status.partial {
+                    final_statuses.push(event.status.clone());
+                }
+                Ok(())
+            },
+        )?;
+
+        let _ = fs::remove_dir_all(&root);
+
+        // The scan stops at cap=1, so exactly 1 card is emitted.
+        assert_eq!(
+            output.cards.len(),
+            1,
+            "capped scan should emit exactly cap=1 card"
+        );
+
+        // The final status must carry partial=true and stop_reason=MaxCards.
+        let final_status = final_statuses
+            .last()
+            .ok_or_else(|| "expected at least one final partial/completed status".to_string())?;
+        assert!(
+            final_status.partial,
+            "capped scan final status must be partial=true"
+        );
+        assert_eq!(
+            final_status.stop_reason,
+            RepoStopReason::MaxCards,
+            "capped scan stop_reason must be MaxCards"
+        );
+        assert_eq!(
+            final_status.cap,
+            Some(1),
+            "capped scan must record cap=Some(1)"
+        );
+        assert!(
+            !final_status.completed,
+            "capped scan must not report completed=true"
+        );
+        assert_eq!(
+            final_status.cards_found, 1,
+            "final status cards_found must equal the emitted card count"
+        );
+        Ok(())
     }
 }
