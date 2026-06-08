@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 use unsafe_review_core::{
     AnalysisMode, AnalyzeInput, AnalyzeOutput, CardId, CargoCarefulReceiptInput,
     ConcurrencyReceiptInput, DiffSource, DiscoveryOptions, MiriReceiptInput, PolicyMode,
-    ProofReceiptInput, Provenance, RepoScanEvent, RepoScanPhase, RepoScanStatus,
+    ProofReceiptInput, Provenance, RepoScanEvent, RepoScanPhase, RepoScanStatus, RepoStopReason,
     SanitizerReceiptInput, Scope, WITNESS_RECEIPT_SCHEMA_VERSION, WitnessReceipt, analyze,
     analyze_with_discovery, analyze_with_discovery_and_repo_events, audit_witness_receipts,
     baseline_add, baseline_init, collect_context_range, compare_outcome_json, discover_repo_files,
@@ -449,6 +449,11 @@ struct RepoStatusReporter {
     last_phase: Option<String>,
     last_discovery_heartbeat: usize,
     last_scan_heartbeat: usize,
+    /// Set true the moment `record_event` detects a `--timeout-seconds` timeout
+    /// and returns the timeout error.  This is the single source of truth that
+    /// distinguishes a timeout incomplete-scan from an analysis/write error on
+    /// the shared `record_incomplete` path.
+    hit_timeout: bool,
     _signal_guard: Option<RepoSignalGuard>,
 }
 
@@ -508,6 +513,7 @@ impl RepoStatusReporter {
             last_phase: None,
             last_discovery_heartbeat: 0,
             last_scan_heartbeat: 0,
+            hit_timeout: false,
             _signal_guard: signal_guard,
         })
     }
@@ -541,6 +547,7 @@ impl RepoStatusReporter {
             eprintln!("{}", format_repo_progress(&status));
         }
         if self.timed_out(&status) {
+            self.hit_timeout = true;
             return Err(self.timeout_error());
         }
         Ok(())
@@ -560,6 +567,15 @@ impl RepoStatusReporter {
             .lock()
             .map_err(|err| format!("repo status lock poisoned: {err}"))?
             .clone();
+        // A timeout is only ever surfaced when `record_event` detects it and
+        // returns the timeout error (setting `hit_timeout`).  Every other
+        // incomplete stop on this shared path — analysis error mid-scan or a
+        // report-write failure — is an `Error`, not a timeout.
+        let stop_reason = if self.hit_timeout {
+            RepoStopReason::Timeout
+        } else {
+            RepoStopReason::Error
+        };
         fs::write(
             &path,
             render_repo_scan_incomplete_status(
@@ -567,6 +583,7 @@ impl RepoStatusReporter {
                 error,
                 partial_path.filter(|path| path.exists()),
                 &self.scan_scope,
+                stop_reason,
             )?,
         )
         .map_err(|err| format!("write {} failed: {err}", path.display()))?;
@@ -828,6 +845,12 @@ fn render_repo_scan_status(
     status: &RepoScanStatus,
     scan_scope: &RepoScanScopeMetadata,
 ) -> Result<String, String> {
+    let (operator_state, partial, stop_reason) = if status.partial {
+        // max-cards cap: successful but bounded — not failure, not signal.
+        ("capped", true, status.stop_reason.as_str())
+    } else {
+        ("complete", false, status.stop_reason.as_str())
+    };
     let value = serde_json::json!({
         "schema_version": status.schema_version.as_str(),
         "phase": status.phase.as_str(),
@@ -839,10 +862,13 @@ fn render_repo_scan_status(
         "cards_found": status.cards_found,
         "last_path": status.last_path.as_ref().map(|path| repo_path_display(path)),
         "completed": status.completed,
+        "partial": partial,
+        "stop_reason": stop_reason,
+        "cap": status.cap,
         "error": null,
         "signal": null,
         "partial_path": null,
-        "operator": repo_status_operator_json("complete", None),
+        "operator": repo_status_operator_json(operator_state, None, status.cap),
     });
     let mut rendered = serde_json::to_string_pretty(&value)
         .map_err(|err| format!("render repo status JSON failed: {err}"))?;
@@ -855,6 +881,7 @@ fn render_repo_scan_incomplete_status(
     error: &str,
     partial_path: Option<&Path>,
     scan_scope: &RepoScanScopeMetadata,
+    stop_reason: RepoStopReason,
 ) -> Result<String, String> {
     let value = serde_json::json!({
         "schema_version": status
@@ -871,10 +898,13 @@ fn render_repo_scan_incomplete_status(
             .and_then(|status| status.last_path.as_ref())
             .map(|path| repo_path_display(path)),
         "completed": false,
+        "partial": true,
+        "stop_reason": stop_reason.as_str(),
+        "cap": null,
         "error": error,
         "signal": null,
         "partial_path": partial_path.map(|path| path.display().to_string()),
-        "operator": repo_status_operator_json("failed", partial_path),
+        "operator": repo_status_operator_json("failed", partial_path, None),
     });
     let mut rendered = serde_json::to_string_pretty(&value)
         .map_err(|err| format!("render repo status JSON failed: {err}"))?;
@@ -904,10 +934,13 @@ fn render_repo_scan_interrupted_status(
             .and_then(|status| status.last_path.as_ref())
             .map(|path| repo_path_display(path)),
         "completed": false,
+        "partial": true,
+        "stop_reason": RepoStopReason::Terminated.as_str(),
+        "cap": null,
         "error": format!("repo scan interrupted by {signal_name}"),
         "signal": signal_name,
         "partial_path": partial_path.map(|path| path.display().to_string()),
-        "operator": repo_status_operator_json("terminated", partial_path),
+        "operator": repo_status_operator_json("terminated", partial_path, None),
     });
     let mut rendered = serde_json::to_string_pretty(&value)
         .map_err(|err| format!("render repo status JSON failed: {err}"))?;
@@ -918,12 +951,14 @@ fn render_repo_scan_interrupted_status(
 fn repo_status_operator_json(
     state: &'static str,
     partial_path: Option<&Path>,
+    cap: Option<usize>,
 ) -> serde_json::Value {
     let partial_report_available = partial_path.is_some();
     let partial_report_limitation = match (state, partial_report_available) {
         ("complete", _) => {
             "No partial report is retained after a successful scan; use the final report for the recorded scan scope."
         }
+        ("capped", _) => "Completed-file snapshot only; not complete repo posture.",
         (_, true) => "Completed-file snapshot only; not complete repo posture.",
         _ => {
             "No completed-file partial report was retained; the status sidecar is the durable incomplete-scan artifact."
@@ -932,6 +967,9 @@ fn repo_status_operator_json(
     let next_action = match (state, partial_report_available) {
         ("complete", _) => {
             "Use the promoted final report for the recorded scan_scope; rerun with adjusted include/exclude filters if the scope is not the intended review lane."
+        }
+        ("capped", _) => {
+            "Inspect the capped report for completed-file findings, then narrow include/exclude filters or raise --max-cards to scan the remaining files; rerun with the same scan_scope to reproduce."
         }
         ("failed", true) => {
             "Inspect partial_path for completed-file findings, then rerun repo with the recorded scan_scope after fixing the error, narrowing scope, or increasing timeout."
@@ -947,13 +985,17 @@ fn repo_status_operator_json(
         }
         _ => "Inspect scan_scope and status fields, then rerun repo with the intended scope.",
     };
-    serde_json::json!({
+    let mut obj = serde_json::json!({
         "state": state,
         "partial_report_available": partial_report_available,
         "partial_report_limitation": partial_report_limitation,
         "next_action": next_action,
         "claim_boundary": "Operational scan status only; partial reports are completed-file snapshots and are not complete repo posture, witness execution, proof, UB-free status, Miri-clean status, site-execution proof, or policy gating.",
-    })
+    });
+    if let Some(cap_value) = cap {
+        obj["cap"] = serde_json::json!(cap_value);
+    }
+    obj
 }
 
 fn repo_scan_scope_json(scan_scope: &RepoScanScopeMetadata) -> serde_json::Value {
@@ -2674,8 +2716,54 @@ fn print_candidate_help() {
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_diff_path, writable_status, yes_no};
+    use super::{
+        RepoScanScopeMetadata, render_repo_scan_incomplete_status, resolve_diff_path,
+        writable_status, yes_no,
+    };
     use std::path::{Path, PathBuf};
+    use unsafe_review_core::{DiscoveryOptions, RepoStopReason};
+
+    fn test_scan_scope() -> RepoScanScopeMetadata {
+        RepoScanScopeMetadata::new(Path::new("/tmp/repo"), &DiscoveryOptions::repo_defaults())
+    }
+
+    #[test]
+    fn incomplete_status_labels_timeout_distinctly_from_error() -> Result<(), String> {
+        let scope = test_scan_scope();
+
+        // The shared record_incomplete path serves timeout AND non-timeout
+        // (analysis/write) errors. The stop_reason must be accurate for each.
+        let timeout_json = render_repo_scan_incomplete_status(
+            None,
+            "repo scan timed out after 1s",
+            None,
+            &scope,
+            RepoStopReason::Timeout,
+        )?;
+        let timeout: serde_json::Value = serde_json::from_str(&timeout_json)
+            .map_err(|err| format!("parse timeout status failed: {err}"))?;
+        assert_eq!(timeout["phase"], "failed");
+        assert_eq!(timeout["partial"], true);
+        assert_eq!(timeout["stop_reason"], "timeout");
+
+        let error_json = render_repo_scan_incomplete_status(
+            None,
+            "rename partial repo report failed: is a directory",
+            None,
+            &scope,
+            RepoStopReason::Error,
+        )?;
+        let error: serde_json::Value = serde_json::from_str(&error_json)
+            .map_err(|err| format!("parse error status failed: {err}"))?;
+        assert_eq!(error["phase"], "failed");
+        assert_eq!(error["partial"], true);
+        assert_eq!(
+            error["stop_reason"], "error",
+            "a non-timeout incomplete scan must not be mislabeled as a timeout"
+        );
+
+        Ok(())
+    }
 
     #[test]
     fn resolve_diff_path_joins_relative_path_to_root() {
