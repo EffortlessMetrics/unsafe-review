@@ -46,6 +46,12 @@ creating non-Rust ReviewCards or changing advisory policy.
 `pr-summary` and `github-summary` render the same diff scope as a reviewer-facing
 header bullet when a diff is supplied.
 
+A valid empty diff — such as `git diff` output when no files changed — is a
+complete diff-scoped no-op run: scope is `diff`, zero files are selected, zero
+cards are emitted, and `--policy no-new-debt` exits 0. This is distinct from a
+malformed diff (which exits 2 with a parse diagnostic and runs no analysis) and
+from running without `--diff`/`--base` (which keeps its existing behavior).
+
 Use `--root` when reviewing a fixture or another workspace:
 
 ```bash
@@ -56,8 +62,8 @@ unsafe-review check \
 ```
 
 The default policy is `advisory`; it reports cards but does not fail the
-command. The explicit no-new-debt mode exits nonzero when unbaselined actionable
-gaps remain:
+command. The explicit no-new-debt mode exits 1 when unbaselined actionable
+coverage gaps remain:
 
 ```bash
 unsafe-review check --base origin/main --policy no-new-debt
@@ -452,7 +458,9 @@ paths. Repo discovery respects gitignore files by default; use
 `--no-respect-gitignore` only when the review intentionally includes ignored
 Rust files. Repo discovery also skips common large or generated directories by
 default: `.git`, `.github`, `.unsafe-review*`, `target`, `node_modules`,
-`vendor`, `build`, `dist`, and `generated`.
+`vendor`, `build`, `dist`, and `generated`. Any subdirectory that contains a
+`.git` entry (nested git checkout or gitfile worktree) is also skipped, so
+scratch worktrees and vendored repository copies do not inflate the scan.
 
 Use `--list-files` as a dry run before scanning a large repo:
 
@@ -474,6 +482,35 @@ sorting, so it bounds both `--list-files` output and repo analysis input.
 `--timeout-seconds <n>` bounds repo analysis wall time cooperatively; it does
 not interrupt a single file mid-scan, but it prevents a long scan from looking
 successful after the configured budget expires.
+
+### Scan cost and large-repo scoping
+
+Per-file scan time is not uniform: it grows with file size and unsafe density,
+and large files dominate a run. Observed on a real large repository, a
+740-line file with 52 unsafe sites took ~36s and an ~1100-line file took ~28s,
+so a 123-file subtree extrapolated past 1200s. A whole-repo scan of a
+thousand-plus-file repository is generally intractable without scoping, and an
+unscoped run that exceeds `--timeout-seconds` records a partial scan
+(`stop_reason: "timeout"`) rather than a complete posture.
+
+Scope deliberately on large or brownfield repositories rather than scanning
+everything:
+
+- Narrow with `--include`/`--exclude` to the review lane you actually care about
+  (one crate, one subtree), instead of the whole tree.
+- Preview the selection with `--list-files` before a real scan to confirm the
+  scope and rough file count.
+- Bound the run with `--timeout-seconds` and/or `--max-cards`. Both stops are
+  recorded truthfully in `<out>.status.json` (`stop_reason: "timeout"` or
+  `"max_cards"`, `partial: true`) and as a `<out>.partial` completed-file
+  snapshot; neither a capped nor a timed-out scan is reported as complete.
+- Re-run on a narrower scope (or a higher cap) to cover the remaining files,
+  using the `scan_scope` recorded in the status sidecar to replay.
+
+A partial scan is a snapshot of the files that finished, not whole-repo posture.
+Default-ignored directories, nested git checkouts, and gitfile worktrees (see
+above) are already excluded, so the cost is over the in-scope first-party Rust
+files only.
 
 Badge JSON reports open review gaps, not raw unsafe usage and not safety status:
 
@@ -822,3 +859,20 @@ Use `--out` to write artifacts without printing them:
 ```bash
 unsafe-review check --diff change.diff --format sarif --out target/unsafe-review/cards.sarif
 ```
+
+## Exit Code Contract
+
+| Code | Meaning |
+|------|---------|
+| `0` | Ran to completion: clean, or advisory findings (default advisory policy) |
+| `1` | Ran to completion: `--policy no-new-debt` found new or worsened coverage gaps |
+| `2` | Tool did not complete a review: usage error, missing/unreadable input, I/O error, or internal error |
+
+The distinction matters for CI: exit 1 means the diff added coverage debt (the
+tool reviewed the diff and found it); exit 2 means the tool could not complete a
+review (check flags, diff path, and root). The stderr prefix names the category:
+`unsafe-review: policy: …` for exit 1 and `unsafe-review: …` for exit 2.
+
+Advisory policy (the default) always exits 0 when the review completes,
+regardless of findings. Exit 1 only fires when `--policy no-new-debt` is
+explicit and the diff adds or worsens coverage gaps.

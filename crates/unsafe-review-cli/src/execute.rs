@@ -19,18 +19,18 @@ use std::time::{Duration, Instant};
 use unsafe_review_core::{
     AnalysisMode, AnalyzeInput, AnalyzeOutput, CardId, CargoCarefulReceiptInput,
     ConcurrencyReceiptInput, DiffSource, DiscoveryOptions, MiriReceiptInput, PolicyMode,
-    ProofReceiptInput, RepoScanEvent, RepoScanPhase, RepoScanStatus, SanitizerReceiptInput, Scope,
-    WITNESS_RECEIPT_SCHEMA_VERSION, WitnessReceipt, analyze, analyze_with_discovery,
-    analyze_with_discovery_and_repo_events, audit_witness_receipts, baseline_add, baseline_init,
-    collect_context_range, compare_outcome_json, discover_repo_files, evaluate_policy_report,
-    evaluate_policy_report_from_output, lint_manual_candidate_text, load_manual_candidates,
-    manual_candidate_implementer_handoff, new_manual_candidate_skeleton, read_manual_candidate,
-    render_badge_jsons, render_comment_plan, render_gate_manifest, render_github_summary,
-    render_human, render_json, render_lsp, render_manual_candidate_witness_plan, render_markdown,
-    render_outcome_json, render_outcome_markdown, render_policy_report_json,
-    render_policy_report_markdown, render_pr_summary, render_receipt_audit_json,
-    render_receipt_audit_markdown, render_repair_queue, render_sarif, render_witness_plan,
-    validate_witness_receipts,
+    ProofReceiptInput, Provenance, RepoScanEvent, RepoScanPhase, RepoScanStatus, RepoStopReason,
+    SanitizerReceiptInput, Scope, WITNESS_RECEIPT_SCHEMA_VERSION, WitnessReceipt, analyze,
+    analyze_with_discovery, analyze_with_discovery_and_repo_events, audit_witness_receipts,
+    baseline_add, baseline_init, collect_context_range, compare_outcome_json, discover_repo_files,
+    evaluate_policy_report, evaluate_policy_report_from_output, lint_manual_candidate_text,
+    load_manual_candidates, manual_candidate_implementer_handoff, new_manual_candidate_skeleton,
+    read_manual_candidate, render_badge_jsons, render_comment_plan, render_gate_manifest,
+    render_github_summary, render_human, render_json, render_json_with_provenance, render_lsp,
+    render_manual_candidate_witness_plan, render_markdown, render_outcome_json,
+    render_outcome_markdown, render_policy_report_json, render_policy_report_markdown,
+    render_pr_summary, render_receipt_audit_json, render_receipt_audit_markdown,
+    render_repair_queue, render_sarif, render_witness_plan, validate_witness_receipts,
 };
 
 mod card_lookup;
@@ -80,7 +80,7 @@ const FIRST_PR_ARTIFACTS: [&str; 16] = [
     "repair-queue.json",
 ];
 
-pub(crate) fn execute(command: Command) -> Result<(), String> {
+pub(crate) fn execute(command: Command) -> Result<(), crate::RunFailure> {
     match command {
         Command::Help => {
             print_help();
@@ -106,7 +106,7 @@ pub(crate) fn execute(command: Command) -> Result<(), String> {
             print_support();
             Ok(())
         }
-        Command::Doctor { root } => doctor(&root),
+        Command::Doctor { root } => doctor(&root).map_err(crate::RunFailure::Tool),
         Command::Check(options) => run_check(
             options,
             Scope::Diff,
@@ -120,24 +120,40 @@ pub(crate) fn execute(command: Command) -> Result<(), String> {
             AnalysisMode::Draft,
             DiscoveryOptions::default(),
         ),
-        Command::FirstPr(options) => first_pr(options),
-        Command::Badges { root, out } => badges(&root, &out),
-        Command::Explain { root, id, format } => explain(&root, &id, format),
-        Command::Context { root, query } => context(&root, query),
-        Command::Candidate(command) => candidate(command),
-        Command::Baseline(command) => run_baseline(command),
-        Command::Confirm(options) => confirm::run(options),
-        Command::ReceiptTemplate(options) => receipt_template(options),
-        Command::ReceiptValidate { root } => receipt_validate(&root),
-        Command::ReceiptAudit(options) => receipt_audit(options),
-        Command::ReceiptImportMiri(options) => receipt_import_miri(options),
-        Command::ReceiptImportCareful(options) => receipt_import_careful(options),
-        Command::ReceiptImportSanitizer(options) => receipt_import_sanitizer(options),
-        Command::ReceiptImportConcurrency(options) => receipt_import_concurrency(options),
-        Command::ReceiptImportProof(options) => receipt_import_proof(options),
-        Command::Outcome(options) => outcome(options),
-        Command::PolicyReport(options) => policy_report(options),
-        Command::Lsp => crate::lsp::serve(),
+        Command::FirstPr(options) => first_pr(options).map_err(crate::RunFailure::Tool),
+        Command::Badges { root, out } => badges(&root, &out).map_err(crate::RunFailure::Tool),
+        Command::Explain { root, id, format } => {
+            explain(&root, &id, format).map_err(crate::RunFailure::Tool)
+        }
+        Command::Context { root, query } => context(&root, query).map_err(crate::RunFailure::Tool),
+        Command::Candidate(command) => candidate(command).map_err(crate::RunFailure::Tool),
+        Command::Baseline(command) => run_baseline(command).map_err(crate::RunFailure::Tool),
+        Command::Confirm(options) => confirm::run(options).map_err(crate::RunFailure::Tool),
+        Command::ReceiptTemplate(options) => {
+            receipt_template(options).map_err(crate::RunFailure::Tool)
+        }
+        Command::ReceiptValidate { root } => {
+            receipt_validate(&root).map_err(crate::RunFailure::Tool)
+        }
+        Command::ReceiptAudit(options) => receipt_audit(options).map_err(crate::RunFailure::Tool),
+        Command::ReceiptImportMiri(options) => {
+            receipt_import_miri(options).map_err(crate::RunFailure::Tool)
+        }
+        Command::ReceiptImportCareful(options) => {
+            receipt_import_careful(options).map_err(crate::RunFailure::Tool)
+        }
+        Command::ReceiptImportSanitizer(options) => {
+            receipt_import_sanitizer(options).map_err(crate::RunFailure::Tool)
+        }
+        Command::ReceiptImportConcurrency(options) => {
+            receipt_import_concurrency(options).map_err(crate::RunFailure::Tool)
+        }
+        Command::ReceiptImportProof(options) => {
+            receipt_import_proof(options).map_err(crate::RunFailure::Tool)
+        }
+        Command::Outcome(options) => outcome(options).map_err(crate::RunFailure::Tool),
+        Command::PolicyReport(options) => policy_report(options).map_err(crate::RunFailure::Tool),
+        Command::Lsp => crate::lsp::serve().map_err(crate::RunFailure::Tool),
     }
 }
 
@@ -177,8 +193,9 @@ fn run_check(
     scope: Scope,
     mode: AnalysisMode,
     discovery: DiscoveryOptions,
-) -> Result<(), String> {
-    let diff = diff_source(&options)?;
+) -> Result<(), crate::RunFailure> {
+    let provenance = build_provenance(&options);
+    let diff = diff_source(&options).map_err(crate::RunFailure::Tool)?;
     let policy = options.policy.clone();
     let output = analyze_with_discovery(
         AnalyzeInput {
@@ -191,12 +208,14 @@ fn run_check(
             max_cards: options.max_cards,
         },
         discovery,
-    )?;
-    let rendered = render_with_format(&output, &options.format);
+    )
+    .map_err(crate::RunFailure::Tool)?;
+    let rendered = render_with_format_and_provenance(&output, &options.format, Some(&provenance));
     if let Some(path) = options.out {
-        ensure_parent_dir(&path)?;
-        fs::write(&path, rendered)
-            .map_err(|err| format!("write {} failed: {err}", path.display()))?;
+        ensure_parent_dir(&path).map_err(crate::RunFailure::Tool)?;
+        fs::write(&path, rendered).map_err(|err| {
+            crate::RunFailure::Tool(format!("write {} failed: {err}", path.display()))
+        })?;
     } else {
         println!("{rendered}");
     }
@@ -204,16 +223,17 @@ fn run_check(
     Ok(())
 }
 
-fn repo(options: RepoOptions) -> Result<(), String> {
+fn repo(options: RepoOptions) -> Result<(), crate::RunFailure> {
     if options.list_files {
-        return repo_list_files(options);
+        return repo_list_files(options).map_err(crate::RunFailure::Tool);
     }
     run_repo_check(options)
 }
 
-fn run_repo_check(options: RepoOptions) -> Result<(), String> {
+fn run_repo_check(options: RepoOptions) -> Result<(), crate::RunFailure> {
     let check = options.check;
-    let diff = diff_source(&check)?;
+    let provenance = build_provenance(&check);
+    let diff = diff_source(&check).map_err(crate::RunFailure::Tool)?;
     let policy = check.policy.clone();
     let report_path = check.out.clone();
     let partial_path = report_path.as_deref().map(repo_partial_path);
@@ -226,7 +246,8 @@ fn run_repo_check(options: RepoOptions) -> Result<(), String> {
         check.format.clone(),
         options.timeout_seconds,
         scan_scope,
-    )?;
+    )
+    .map_err(crate::RunFailure::Tool)?;
     maybe_pause_for_repo_interrupt_test();
     let output = match analyze_with_discovery_and_repo_events(
         AnalyzeInput {
@@ -243,11 +264,11 @@ fn run_repo_check(options: RepoOptions) -> Result<(), String> {
     ) {
         Ok(output) => output,
         Err(err) => {
-            return Err(repo_incomplete_error(
+            return Err(crate::RunFailure::Tool(repo_incomplete_error(
                 &mut reporter,
                 &err,
                 partial_path.as_deref(),
-            ));
+            )));
         }
     };
     if reporter.files_discovered() == 0 {
@@ -255,11 +276,15 @@ fn run_repo_check(options: RepoOptions) -> Result<(), String> {
             "unsafe-review repo: no Rust files selected after include/exclude/ignores; check --root, --include, --exclude, --[no-]large-repo-ignores, and --[no-]respect-gitignore"
         );
     }
-    let rendered = render_with_format(&output, &check.format);
+    let rendered = render_with_format_and_provenance(&output, &check.format, Some(&provenance));
     if let Some(path) = report_path {
         let partial = repo_partial_path(&path);
         if let Err(err) = write_repo_report(&path, &partial, rendered) {
-            return Err(repo_incomplete_error(&mut reporter, &err, Some(&partial)));
+            return Err(crate::RunFailure::Tool(repo_incomplete_error(
+                &mut reporter,
+                &err,
+                Some(&partial),
+            )));
         }
     } else {
         println!("{rendered}");
@@ -424,6 +449,11 @@ struct RepoStatusReporter {
     last_phase: Option<String>,
     last_discovery_heartbeat: usize,
     last_scan_heartbeat: usize,
+    /// Set true the moment `record_event` detects a `--timeout-seconds` timeout
+    /// and returns the timeout error.  This is the single source of truth that
+    /// distinguishes a timeout incomplete-scan from an analysis/write error on
+    /// the shared `record_incomplete` path.
+    hit_timeout: bool,
     _signal_guard: Option<RepoSignalGuard>,
 }
 
@@ -483,6 +513,7 @@ impl RepoStatusReporter {
             last_phase: None,
             last_discovery_heartbeat: 0,
             last_scan_heartbeat: 0,
+            hit_timeout: false,
             _signal_guard: signal_guard,
         })
     }
@@ -516,6 +547,7 @@ impl RepoStatusReporter {
             eprintln!("{}", format_repo_progress(&status));
         }
         if self.timed_out(&status) {
+            self.hit_timeout = true;
             return Err(self.timeout_error());
         }
         Ok(())
@@ -535,6 +567,15 @@ impl RepoStatusReporter {
             .lock()
             .map_err(|err| format!("repo status lock poisoned: {err}"))?
             .clone();
+        // A timeout is only ever surfaced when `record_event` detects it and
+        // returns the timeout error (setting `hit_timeout`).  Every other
+        // incomplete stop on this shared path — analysis error mid-scan or a
+        // report-write failure — is an `Error`, not a timeout.
+        let stop_reason = if self.hit_timeout {
+            RepoStopReason::Timeout
+        } else {
+            RepoStopReason::Error
+        };
         fs::write(
             &path,
             render_repo_scan_incomplete_status(
@@ -542,6 +583,7 @@ impl RepoStatusReporter {
                 error,
                 partial_path.filter(|path| path.exists()),
                 &self.scan_scope,
+                stop_reason,
             )?,
         )
         .map_err(|err| format!("write {} failed: {err}", path.display()))?;
@@ -803,6 +845,12 @@ fn render_repo_scan_status(
     status: &RepoScanStatus,
     scan_scope: &RepoScanScopeMetadata,
 ) -> Result<String, String> {
+    let (operator_state, partial, stop_reason) = if status.partial {
+        // max-cards cap: successful but bounded — not failure, not signal.
+        ("capped", true, status.stop_reason.as_str())
+    } else {
+        ("complete", false, status.stop_reason.as_str())
+    };
     let value = serde_json::json!({
         "schema_version": status.schema_version.as_str(),
         "phase": status.phase.as_str(),
@@ -814,10 +862,13 @@ fn render_repo_scan_status(
         "cards_found": status.cards_found,
         "last_path": status.last_path.as_ref().map(|path| repo_path_display(path)),
         "completed": status.completed,
+        "partial": partial,
+        "stop_reason": stop_reason,
+        "cap": status.cap,
         "error": null,
         "signal": null,
         "partial_path": null,
-        "operator": repo_status_operator_json("complete", None),
+        "operator": repo_status_operator_json(operator_state, None, status.cap),
     });
     let mut rendered = serde_json::to_string_pretty(&value)
         .map_err(|err| format!("render repo status JSON failed: {err}"))?;
@@ -830,6 +881,7 @@ fn render_repo_scan_incomplete_status(
     error: &str,
     partial_path: Option<&Path>,
     scan_scope: &RepoScanScopeMetadata,
+    stop_reason: RepoStopReason,
 ) -> Result<String, String> {
     let value = serde_json::json!({
         "schema_version": status
@@ -846,10 +898,13 @@ fn render_repo_scan_incomplete_status(
             .and_then(|status| status.last_path.as_ref())
             .map(|path| repo_path_display(path)),
         "completed": false,
+        "partial": true,
+        "stop_reason": stop_reason.as_str(),
+        "cap": null,
         "error": error,
         "signal": null,
         "partial_path": partial_path.map(|path| path.display().to_string()),
-        "operator": repo_status_operator_json("failed", partial_path),
+        "operator": repo_status_operator_json("failed", partial_path, None),
     });
     let mut rendered = serde_json::to_string_pretty(&value)
         .map_err(|err| format!("render repo status JSON failed: {err}"))?;
@@ -879,10 +934,13 @@ fn render_repo_scan_interrupted_status(
             .and_then(|status| status.last_path.as_ref())
             .map(|path| repo_path_display(path)),
         "completed": false,
+        "partial": true,
+        "stop_reason": RepoStopReason::Terminated.as_str(),
+        "cap": null,
         "error": format!("repo scan interrupted by {signal_name}"),
         "signal": signal_name,
         "partial_path": partial_path.map(|path| path.display().to_string()),
-        "operator": repo_status_operator_json("terminated", partial_path),
+        "operator": repo_status_operator_json("terminated", partial_path, None),
     });
     let mut rendered = serde_json::to_string_pretty(&value)
         .map_err(|err| format!("render repo status JSON failed: {err}"))?;
@@ -893,12 +951,14 @@ fn render_repo_scan_interrupted_status(
 fn repo_status_operator_json(
     state: &'static str,
     partial_path: Option<&Path>,
+    cap: Option<usize>,
 ) -> serde_json::Value {
     let partial_report_available = partial_path.is_some();
     let partial_report_limitation = match (state, partial_report_available) {
         ("complete", _) => {
             "No partial report is retained after a successful scan; use the final report for the recorded scan scope."
         }
+        ("capped", _) => "Completed-file snapshot only; not complete repo posture.",
         (_, true) => "Completed-file snapshot only; not complete repo posture.",
         _ => {
             "No completed-file partial report was retained; the status sidecar is the durable incomplete-scan artifact."
@@ -907,6 +967,9 @@ fn repo_status_operator_json(
     let next_action = match (state, partial_report_available) {
         ("complete", _) => {
             "Use the promoted final report for the recorded scan_scope; rerun with adjusted include/exclude filters if the scope is not the intended review lane."
+        }
+        ("capped", _) => {
+            "Inspect the capped report for completed-file findings, then narrow include/exclude filters or raise --max-cards to scan the remaining files; rerun with the same scan_scope to reproduce."
         }
         ("failed", true) => {
             "Inspect partial_path for completed-file findings, then rerun repo with the recorded scan_scope after fixing the error, narrowing scope, or increasing timeout."
@@ -922,13 +985,17 @@ fn repo_status_operator_json(
         }
         _ => "Inspect scan_scope and status fields, then rerun repo with the intended scope.",
     };
-    serde_json::json!({
+    let mut obj = serde_json::json!({
         "state": state,
         "partial_report_available": partial_report_available,
         "partial_report_limitation": partial_report_limitation,
         "next_action": next_action,
         "claim_boundary": "Operational scan status only; partial reports are completed-file snapshots and are not complete repo posture, witness execution, proof, UB-free status, Miri-clean status, site-execution proof, or policy gating.",
-    })
+    });
+    if let Some(cap_value) = cap {
+        obj["cap"] = serde_json::json!(cap_value);
+    }
+    obj
 }
 
 fn repo_scan_scope_json(scan_scope: &RepoScanScopeMetadata) -> serde_json::Value {
@@ -1087,6 +1154,7 @@ fn maybe_pause_for_repo_interrupt_after_scan(_status: &RepoScanStatus) {}
 fn first_pr(options: FirstPrOptions) -> Result<(), String> {
     let mut check = options.check;
     check.policy = PolicyMode::Advisory;
+    let provenance = build_provenance(&check);
     let diff = diff_source(&check)?;
     let root = check.root.clone();
     let output = analyze(AnalyzeInput {
@@ -1114,9 +1182,15 @@ fn first_pr(options: FirstPrOptions) -> Result<(), String> {
         .map_err(|err| format!("create {} failed: {err}", options.out_dir.display()))?;
     let mut comment_plan_artifact = None;
     for (name, renderer) in FIRST_PR_RENDERED_ARTIFACTS {
+        // cards.json uses the provenance-aware renderer to emit schema 0.2.
+        let raw_rendered = if name == "cards.json" {
+            render_json_with_provenance(&output, &provenance)
+        } else {
+            renderer(&output)
+        };
         let rendered = first_pr::render_first_pr_front_door_artifact(
             name,
-            renderer(&output),
+            raw_rendered,
             &root,
             &manual_candidates,
         );
@@ -1182,7 +1256,7 @@ fn first_pr(options: FirstPrOptions) -> Result<(), String> {
     Ok(())
 }
 
-fn enforce_policy(output: &unsafe_review_core::AnalyzeOutput) -> Result<(), String> {
+fn enforce_policy(output: &unsafe_review_core::AnalyzeOutput) -> Result<(), crate::RunFailure> {
     match output.policy {
         PolicyMode::Advisory => Ok(()),
         PolicyMode::NoNewDebt => {
@@ -1194,13 +1268,17 @@ fn enforce_policy(output: &unsafe_review_core::AnalyzeOutput) -> Result<(), Stri
             if new == 0 && worsened == 0 {
                 Ok(())
             } else {
-                Err(format!(
+                Err(crate::RunFailure::PolicyViolation(format!(
                     "no-new-debt policy: {} new gap(s), {} worsened gap(s)",
                     new, worsened
-                ))
+                )))
             }
         }
-        PolicyMode::Blocking => Err("blocking policy is not implemented".to_string()),
+        // PolicyMode::Blocking is not a policy violation — the tool did not
+        // complete a review because the mode is unimplemented.
+        PolicyMode::Blocking => Err(crate::RunFailure::Tool(
+            "blocking policy is not implemented".to_string(),
+        )),
     }
 }
 
@@ -1244,6 +1322,76 @@ fn read_stdin_diff() -> Result<DiffSource, String> {
     Ok(DiffSource::Text(text))
 }
 
+/// Build a [`Provenance`] block from CLI `CheckOptions`.
+///
+/// This is the seam between the CLI layer (where argv, base ref, and diff path are
+/// known) and the core JSON renderer.  Git queries use the same `ProcessCommand`
+/// pattern as the existing base-diff computation in `diff_source`.  Resolution
+/// failures are silent — "when available" semantics per the brief.
+fn build_provenance(options: &CheckOptions) -> Provenance {
+    let mut prov = Provenance::new_now();
+
+    // Resolved absolute root.
+    prov.root_abs = options
+        .root
+        .canonicalize()
+        .ok()
+        .map(|p| p.to_string_lossy().replace('\\', "/"));
+
+    // --base mode: resolve base and head SHAs via `git rev-parse`.
+    if let Some(base) = &options.base {
+        prov.base_sha = git_rev_parse(&options.root, base);
+        prov.head_sha = git_rev_parse(&options.root, "HEAD");
+    }
+
+    // --diff <file> mode: record path + SHA-256 of content.
+    if let Some(DiffInput::File(diff_path)) = &options.diff {
+        let resolved = resolve_diff_path(&options.root, diff_path);
+        prov.diff_path = Some(resolved.to_string_lossy().replace('\\', "/"));
+        if let Ok(bytes) = fs::read(&resolved) {
+            prov.diff_sha256 = Some(unsafe_review_core::sha256_hex_of(&bytes));
+        }
+    }
+
+    // Dirty-worktree marker when git is available.
+    prov.dirty_worktree = git_dirty_worktree(&options.root);
+
+    prov
+}
+
+/// Run `git rev-parse <ref>` in `root` and return the trimmed stdout on success.
+fn git_rev_parse(root: &Path, reference: &str) -> Option<String> {
+    let output = ProcessCommand::new("git")
+        .arg("-C")
+        .arg(root)
+        .arg("rev-parse")
+        .arg("--verify")
+        .arg(reference)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if sha.is_empty() { None } else { Some(sha) }
+}
+
+/// Return `Some(true)` when `git status --porcelain` is non-empty (dirty),
+/// `Some(false)` when clean, or `None` when git is unavailable / not a repo.
+fn git_dirty_worktree(root: &Path) -> Option<bool> {
+    let output = ProcessCommand::new("git")
+        .arg("-C")
+        .arg(root)
+        .arg("status")
+        .arg("--porcelain")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(!output.stdout.is_empty())
+}
+
 fn resolve_diff_path(root: &Path, path: &Path) -> PathBuf {
     if path.exists() || path.is_absolute() {
         path.to_path_buf()
@@ -1263,9 +1411,23 @@ fn ensure_parent_dir(path: &Path) -> Result<(), String> {
 }
 
 fn render_with_format(output: &unsafe_review_core::AnalyzeOutput, format: &Format) -> String {
+    render_with_format_and_provenance(output, format, None)
+}
+
+fn render_with_format_and_provenance(
+    output: &unsafe_review_core::AnalyzeOutput,
+    format: &Format,
+    provenance: Option<&Provenance>,
+) -> String {
     match format {
         Format::Human => render_human(output),
-        Format::Json => render_json(output),
+        Format::Json => {
+            if let Some(prov) = provenance {
+                render_json_with_provenance(output, prov)
+            } else {
+                render_json(output)
+            }
+        }
         Format::Markdown => render_markdown(output),
         Format::PrSummary => render_pr_summary(output),
         Format::GithubSummary => render_github_summary(output),
@@ -2381,6 +2543,11 @@ fn print_help() {
     println!();
     println!("Flags may be passed as `--flag value` or `--flag=value`.");
     println!();
+    println!("Exit codes:");
+    println!("  0  ran to completion: clean, or advisory findings (advisory policy default)");
+    println!("  1  ran to completion: no-new-debt policy found new or worsened coverage gaps");
+    println!("  2  tool did not complete a review: usage, input/IO, or internal error");
+    println!();
     println!("Trust boundary: {FIRST_RUN_TRUST_BOUNDARY}");
 }
 
@@ -2428,7 +2595,7 @@ fn print_repo_help() {
         "- --format <name> chooses human, json, markdown, pr-summary, github-summary, sarif, comment-plan, lsp, or witness-plan output."
     );
     println!(
-        "- --policy advisory is the default; --policy no-new-debt exits nonzero for open actionable gaps."
+        "- --policy advisory is the default; --policy no-new-debt exits 1 for new or worsened coverage gaps."
     );
     println!("- --out <file> writes the rendered report to a file instead of stdout.");
     println!("- --max-cards <N> stops after N cards are collected; it does not limit discovery.");
@@ -2505,7 +2672,7 @@ fn print_candidate_help() {
         "- lint validates a manual candidate file with the same schema and cross-field checks as import, without importing or writing anything, and also flags remaining TODO placeholder markers; it reports the first schema error plus all TODO markers."
     );
     println!(
-        "- lint exits 0 with `candidate lint: ok` when clean and exits nonzero listing the problems otherwise."
+        "- lint exits 0 with `candidate lint: ok` when clean and exits 2 listing the problems otherwise."
     );
     println!(
         "- list reports imported manual candidates from .unsafe-review/candidates without adding them to ReviewCard-only outputs."
@@ -2549,8 +2716,54 @@ fn print_candidate_help() {
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_diff_path, writable_status, yes_no};
+    use super::{
+        RepoScanScopeMetadata, render_repo_scan_incomplete_status, resolve_diff_path,
+        writable_status, yes_no,
+    };
     use std::path::{Path, PathBuf};
+    use unsafe_review_core::{DiscoveryOptions, RepoStopReason};
+
+    fn test_scan_scope() -> RepoScanScopeMetadata {
+        RepoScanScopeMetadata::new(Path::new("/tmp/repo"), &DiscoveryOptions::repo_defaults())
+    }
+
+    #[test]
+    fn incomplete_status_labels_timeout_distinctly_from_error() -> Result<(), String> {
+        let scope = test_scan_scope();
+
+        // The shared record_incomplete path serves timeout AND non-timeout
+        // (analysis/write) errors. The stop_reason must be accurate for each.
+        let timeout_json = render_repo_scan_incomplete_status(
+            None,
+            "repo scan timed out after 1s",
+            None,
+            &scope,
+            RepoStopReason::Timeout,
+        )?;
+        let timeout: serde_json::Value = serde_json::from_str(&timeout_json)
+            .map_err(|err| format!("parse timeout status failed: {err}"))?;
+        assert_eq!(timeout["phase"], "failed");
+        assert_eq!(timeout["partial"], true);
+        assert_eq!(timeout["stop_reason"], "timeout");
+
+        let error_json = render_repo_scan_incomplete_status(
+            None,
+            "rename partial repo report failed: is a directory",
+            None,
+            &scope,
+            RepoStopReason::Error,
+        )?;
+        let error: serde_json::Value = serde_json::from_str(&error_json)
+            .map_err(|err| format!("parse error status failed: {err}"))?;
+        assert_eq!(error["phase"], "failed");
+        assert_eq!(error["partial"], true);
+        assert_eq!(
+            error["stop_reason"], "error",
+            "a non-timeout incomplete scan must not be mislabeled as a timeout"
+        );
+
+        Ok(())
+    }
 
     #[test]
     fn resolve_diff_path_joins_relative_path_to_root() {
