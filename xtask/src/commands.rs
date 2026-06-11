@@ -23,7 +23,9 @@ pub(crate) enum XtaskCommand {
     CheckManualCandidateExamples,
     CheckFirstHour,
     DogfoodUsefulness,
+    SyncCalibrationSnapshot,
     SourceDivergence,
+    BlessGoldens(Vec<String>),
 }
 
 impl XtaskCommand {
@@ -76,8 +78,17 @@ impl XtaskCommand {
             Some("dogfood-usefulness") => {
                 parse_no_extra(args, "dogfood-usefulness", Self::DogfoodUsefulness)
             }
+            Some("sync-calibration-snapshot") => parse_no_extra(
+                args,
+                "sync-calibration-snapshot",
+                Self::SyncCalibrationSnapshot,
+            ),
             Some("source-divergence") | Some("check-source-sync") => {
                 parse_no_extra(args, "source-divergence", Self::SourceDivergence)
+            }
+            Some("bless-goldens") => {
+                // Trailing args are optional fixture names — zero or more allowed.
+                Ok(Self::BlessGoldens(args[2..].to_vec()))
             }
             Some(other) => Err(format!("unknown xtask command `{other}`")),
         }
