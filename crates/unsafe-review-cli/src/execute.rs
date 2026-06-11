@@ -248,7 +248,11 @@ fn run_repo_check(options: RepoOptions) -> Result<(), crate::RunFailure> {
         scan_scope,
     )
     .map_err(crate::RunFailure::Tool)?;
+    if let Some(path) = reporter.status_path.as_deref() {
+        write_scan_start_stub(path, &reporter.scan_scope).map_err(crate::RunFailure::Tool)?;
+    }
     maybe_pause_for_repo_interrupt_test();
+    maybe_exit_for_repo_stub_test();
     let output = match analyze_with_discovery_and_repo_events(
         AnalyzeInput {
             root: check.root,
@@ -948,6 +952,38 @@ fn render_repo_scan_interrupted_status(
     Ok(rendered)
 }
 
+fn write_scan_start_stub(
+    status_path: &Path,
+    scan_scope: &RepoScanScopeMetadata,
+) -> Result<(), String> {
+    ensure_parent_dir(status_path)?;
+    let value = serde_json::json!({
+        "schema_version": "repo-scan-status/v1",
+        "phase": "discovering",
+        "scan_scope": repo_scan_scope_json(scan_scope),
+        "elapsed_ms": 0u64,
+        "files_discovered": 0u64,
+        "files_scanned": 0u64,
+        "files_remaining": 0u64,
+        "cards_found": 0u64,
+        "last_path": serde_json::Value::Null,
+        "completed": false,
+        "partial": false,
+        "stop_reason": "none",
+        "cap": serde_json::Value::Null,
+        "error": serde_json::Value::Null,
+        "signal": serde_json::Value::Null,
+        "partial_path": serde_json::Value::Null,
+        "operator": repo_status_operator_json("in_progress", None, None),
+    });
+    let mut rendered = serde_json::to_string_pretty(&value)
+        .map_err(|err| format!("render repo status stub JSON failed: {err}"))?;
+    rendered.push('\n');
+    fs::write(status_path, rendered)
+        .map_err(|err| format!("write {} failed: {err}", status_path.display()))?;
+    Ok(())
+}
+
 fn repo_status_operator_json(
     state: &'static str,
     partial_path: Option<&Path>,
@@ -959,6 +995,9 @@ fn repo_status_operator_json(
             "No partial report is retained after a successful scan; use the final report for the recorded scan scope."
         }
         ("capped", _) => "Completed-file snapshot only; not complete repo posture.",
+        ("in_progress", _) => {
+            "No partial report is retained; the scan has not yet produced output."
+        }
         (_, true) => "Completed-file snapshot only; not complete repo posture.",
         _ => {
             "No completed-file partial report was retained; the status sidecar is the durable incomplete-scan artifact."
@@ -970,6 +1009,9 @@ fn repo_status_operator_json(
         }
         ("capped", _) => {
             "Inspect the capped report for completed-file findings, then narrow include/exclude filters or raise --max-cards to scan the remaining files; rerun with the same scan_scope to reproduce."
+        }
+        ("in_progress", _) => {
+            "Scan has not yet produced output; if this sidecar persists the process was likely killed before the scan started. Rerun with the same scan_scope to reproduce."
         }
         ("failed", true) => {
             "Inspect partial_path for completed-file findings, then rerun repo with the recorded scan_scope after fixing the error, narrowing scope, or increasing timeout."
@@ -1150,6 +1192,16 @@ fn maybe_pause_for_repo_interrupt_after_scan(status: &RepoScanStatus) {
 
 #[cfg(not(debug_assertions))]
 fn maybe_pause_for_repo_interrupt_after_scan(_status: &RepoScanStatus) {}
+
+#[cfg(debug_assertions)]
+fn maybe_exit_for_repo_stub_test() {
+    if std::env::var("UNSAFE_REVIEW_INTERNAL_REPO_STUB_TEST_EXIT").is_ok() {
+        std::process::exit(3);
+    }
+}
+
+#[cfg(not(debug_assertions))]
+fn maybe_exit_for_repo_stub_test() {}
 
 fn first_pr(options: FirstPrOptions) -> Result<(), String> {
     let mut check = options.check;
@@ -2302,6 +2354,7 @@ fn receipt_import_sanitizer(options: SavedOutputReceiptOptions) -> Result<(), St
         expires_at: options.expires_at,
         command: options.command,
         limitations: options.limitations,
+        allow_runtime: options.allow_runtime,
     })?;
     let rendered = receipt.to_pretty_json()?;
     if let Some(path) = options.out {
@@ -2518,7 +2571,7 @@ fn print_help() {
         "  policy report [--root .] [--base origin/main|--diff file] [--format json|markdown] [--out file] [--max-cards N]"
     );
     println!(
-        "  receipt template <card-id> --tool <lane> --strength <level> --author <owner> --recorded-at <utc> --expires-at <date> [--summary text] [--command text] [--limitation text] [--out file]"
+        "  receipt template <card-id> --tool <lane> --strength configured|ran|test_targeted|site_reached|reviewed --author <owner> --recorded-at <utc> --expires-at <date> [--summary text] [--command text] [--limitation text] [--out file]"
     );
     println!(
         "  receipt import-miri <card-id> --log <file> --author <owner> --recorded-at <utc> --expires-at <date> --command <cmd> [--limitation text] [--out file]"
@@ -2527,7 +2580,7 @@ fn print_help() {
         "  receipt import-careful <card-id> --log <file> --author <owner> --recorded-at <utc> --expires-at <date> --command <cmd> [--limitation text] [--out file]"
     );
     println!(
-        "  receipt import-sanitizer <card-id> --tool asan|msan|tsan|lsan --log <file> --author <owner> --recorded-at <utc> --expires-at <date> --command <cmd> [--limitation text] [--out file]"
+        "  receipt import-sanitizer <card-id> --tool asan|msan|tsan|lsan --log <file> --author <owner> --recorded-at <utc> --expires-at <date> --command <cmd> [--allow-runtime] [--limitation text] [--out file]"
     );
     println!(
         "  receipt import-concurrency <card-id> --tool loom|shuttle --log <file> --author <owner> --recorded-at <utc> --expires-at <date> --command <cmd> [--limitation text] [--out file]"

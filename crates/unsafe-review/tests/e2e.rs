@@ -3733,6 +3733,7 @@ fn confirm_dry_run_previews_routed_command_without_executing() -> Result<(), Box
     assert!(text.contains("operation family: raw_pointer_read"));
     assert!(text.contains("route: miri"));
     assert!(text.contains("command: cargo +nightly miri test read_header"));
+    assert!(text.contains("command provenance: analyzer-derived route"));
     assert!(text.contains("timeout: 600s"));
     assert!(text.contains("expected evidence: a `miri` witness receipt"));
     assert!(text.contains("dry run only; nothing was executed"));
@@ -4863,6 +4864,114 @@ fn repo_sigterm_keeps_completed_file_partial_report() -> Result<(), Box<dyn Erro
 }
 
 #[test]
+fn repo_scan_start_stub_written_before_pipeline() -> Result<(), Box<dyn Error>> {
+    // Verify that <out>.status.json is written immediately after RepoStatusReporter::new,
+    // before analyze_with_discovery_and_repo_events fires its first event.
+    // The debug exit hook (UNSAFE_REVIEW_INTERNAL_REPO_STUB_TEST_EXIT) causes the process
+    // to exit(3) right after the stub is written, so we can observe the pre-pipeline state.
+    let fixture = fixture_root("raw_pointer_alignment");
+    let temp = TempDir::new("unsafe-review-repo-stub-e2e")?;
+    let report_path = temp.path().join("repo.json");
+    let status_path = temp.path().join("repo.json.status.json");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_unsafe-review"))
+        .args([
+            os("repo"),
+            os("--root"),
+            fixture.as_os_str().to_os_string(),
+            os("--include"),
+            os("src/lib.rs"),
+            os("--format"),
+            os("json"),
+            os("--out"),
+            report_path.as_os_str().to_os_string(),
+        ])
+        .env("UNSAFE_REVIEW_INTERNAL_REPO_STUB_TEST_EXIT", "1")
+        .output()?;
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "expected stub-test exit code 3\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert!(
+        !report_path.exists(),
+        "final report must not exist before the pipeline ran"
+    );
+    assert!(
+        status_path.exists(),
+        "status sidecar must exist immediately after reporter construction"
+    );
+    let status = parse_json(&fs::read_to_string(&status_path)?)?;
+    assert_eq!(status["schema_version"], "repo-scan-status/v1");
+    assert_eq!(
+        status["phase"], "discovering",
+        "stub phase must be 'discovering'"
+    );
+    assert_eq!(
+        status["stop_reason"], "none",
+        "stub stop_reason must be 'none'"
+    );
+    assert_eq!(status["completed"], false, "stub must not be completed");
+    assert_eq!(status["partial"], false, "stub must not be partial");
+    assert_eq!(status["elapsed_ms"], 0u64, "stub elapsed_ms must be 0");
+    assert_eq!(
+        status["files_discovered"], 0u64,
+        "stub files_discovered must be 0"
+    );
+    assert_eq!(
+        status["files_scanned"], 0u64,
+        "stub files_scanned must be 0"
+    );
+    assert_eq!(
+        status["files_remaining"], 0u64,
+        "stub files_remaining must be 0"
+    );
+    assert_eq!(status["cards_found"], 0u64, "stub cards_found must be 0");
+    assert!(status["last_path"].is_null(), "stub last_path must be null");
+    assert!(status["cap"].is_null(), "stub cap must be null");
+    assert!(status["error"].is_null(), "stub error must be null");
+    assert!(status["signal"].is_null(), "stub signal must be null");
+    assert!(
+        status["partial_path"].is_null(),
+        "stub partial_path must be null"
+    );
+    // scan_scope must be populated with the root from the command
+    assert_eq!(
+        status["scan_scope"]["root"],
+        fixture.display().to_string(),
+        "stub scan_scope.root must be set"
+    );
+    assert_eq!(
+        status["scan_scope"]["include"][0], "src/lib.rs",
+        "stub scan_scope.include must be populated"
+    );
+    let operator = status
+        .get("operator")
+        .ok_or("stub status is missing operator block")?;
+    assert_eq!(
+        operator["state"], "in_progress",
+        "stub operator state must be 'in_progress'"
+    );
+    assert!(
+        operator["next_action"]
+            .as_str()
+            .unwrap_or("")
+            .contains("scan_scope"),
+        "stub operator next_action must mention scan_scope"
+    );
+    let boundary = operator["claim_boundary"].as_str().unwrap_or("");
+    assert!(
+        boundary.contains("Operational scan status only"),
+        "stub operator claim_boundary must carry trust boundary: {boundary}"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn safe_repo_human_output_stays_quiet() -> Result<(), Box<dyn Error>> {
     let fixture = fixture_root("safe_code_no_cards");
 
@@ -5553,6 +5662,102 @@ fn receipt_import_sanitizer_writes_receipt_from_saved_success_log() -> Result<()
 }
 
 #[test]
+fn receipt_import_sanitizer_runtime_failure_records_confirmed() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_alignment_receipted");
+    let temp = TempDir::new("unsafe-review-sanitizer-runtime-failure-e2e")?;
+    let receipt_path = temp.path().join("asan_runtime_failure.json");
+    let card_id =
+        "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1";
+
+    let output = run_success([
+        os("receipt"),
+        os("import-sanitizer"),
+        os(card_id),
+        os("--tool"),
+        os("asan"),
+        os("--allow-runtime"),
+        os("--log"),
+        fixture.join("asan.runtime_failure.log").into_os_string(),
+        os("--author"),
+        os("core/fixtures"),
+        os("--recorded-at"),
+        os("2026-05-18T00:00:00Z"),
+        os("--expires-at"),
+        os("2026-08-18"),
+        os("--command"),
+        os("ASAN_OPTIONS=abort_on_error=0 ./target/release/my-program"),
+        os("--limitation"),
+        os("fixture only"),
+        os("--out"),
+        receipt_path.as_os_str().to_os_string(),
+    ])?;
+
+    assert_eq!(stdout_text(&output)?.trim(), "");
+    let receipt = parse_json(&fs::read_to_string(receipt_path)?)?;
+    assert_eq!(receipt["tool"], "asan");
+    assert_eq!(receipt["strength"], "ran");
+    assert_eq!(receipt["verdict"], "confirmed");
+    let summary = receipt["summary"].as_str().unwrap_or("");
+    assert!(
+        summary.contains("sanitizer signal observed"),
+        "expected 'sanitizer signal observed' in summary, got: {summary}"
+    );
+    let limitations = receipt["limitations"]
+        .as_array()
+        .ok_or("receipt limitations should be an array")?;
+    assert!(
+        limitations
+            .iter()
+            .any(|item| { item.as_str().unwrap_or("").contains("runtime witness mode") })
+    );
+    Ok(())
+}
+
+#[test]
+fn receipt_import_sanitizer_runtime_clean_records_not_reproduced() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_alignment_receipted");
+    let temp = TempDir::new("unsafe-review-sanitizer-runtime-clean-e2e")?;
+    let receipt_path = temp.path().join("asan_runtime_clean.json");
+    let card_id =
+        "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1";
+
+    let output = run_success([
+        os("receipt"),
+        os("import-sanitizer"),
+        os(card_id),
+        os("--tool"),
+        os("asan"),
+        os("--allow-runtime"),
+        os("--log"),
+        fixture.join("asan.runtime_clean.log").into_os_string(),
+        os("--author"),
+        os("core/fixtures"),
+        os("--recorded-at"),
+        os("2026-05-18T00:00:00Z"),
+        os("--expires-at"),
+        os("2026-08-18"),
+        os("--command"),
+        os("ASAN_OPTIONS=abort_on_error=0 ./target/release/my-program"),
+        os("--limitation"),
+        os("fixture only"),
+        os("--out"),
+        receipt_path.as_os_str().to_os_string(),
+    ])?;
+
+    assert_eq!(stdout_text(&output)?.trim(), "");
+    let receipt = parse_json(&fs::read_to_string(receipt_path)?)?;
+    assert_eq!(receipt["tool"], "asan");
+    assert_eq!(receipt["strength"], "ran");
+    assert_eq!(receipt["verdict"], "not_reproduced");
+    let summary = receipt["summary"].as_str().unwrap_or("");
+    assert!(
+        summary.contains("no sanitizer signal"),
+        "expected 'no sanitizer signal' in summary, got: {summary}"
+    );
+    Ok(())
+}
+
+#[test]
 fn receipt_import_concurrency_writes_receipt_from_saved_success_log() -> Result<(), Box<dyn Error>>
 {
     let fixture = fixture_root("unsafe_impl_send");
@@ -5773,6 +5978,50 @@ fn unknown_flag_exits_2() -> Result<(), Box<dyn Error>> {
         output.status.code(),
         Some(2),
         "unknown flag must exit 2 (tool/usage error)"
+    );
+    Ok(())
+}
+
+#[test]
+fn first_pr_unknown_flag_out_exits_2_without_writing_bundle() -> Result<(), Box<dyn Error>> {
+    // Regression test for EffortlessMetrics/unsafe-review#531:
+    // `first-pr --out <dir>` must exit 2 (usage/input error), name the unknown
+    // flag in the diagnostic, and must NOT silently write a review bundle to the
+    // default `target/unsafe-review` output directory.
+    let source_fixture = fixture_root("raw_pointer_alignment");
+    let temp = TempDir::new("unsafe-review-first-pr-unknown-flag-e2e")?;
+    let fixture = temp.path().join("fixture");
+    copy_dir_all(&source_fixture, &fixture)?;
+    // The default out-dir would be inside the fixture copy; confirm it is absent.
+    let default_out_dir = fixture.join("target").join("unsafe-review");
+
+    let output = run_failure([
+        os("first-pr"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        fixture.join("change.diff").into_os_string(),
+        os("--out"),
+        temp.path().join("sensor-dir").as_os_str().to_os_string(),
+    ])?;
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "unknown `--out` flag on first-pr must exit 2 (usage/input error)"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--out"),
+        "diagnostic must name the unknown flag `--out`: {stderr}"
+    );
+    assert!(
+        stderr.contains("--out-dir"),
+        "diagnostic must suggest `--out-dir`: {stderr}"
+    );
+    assert!(
+        !default_out_dir.exists(),
+        "no review bundle must be written to default out-dir on a bad invocation: {default_out_dir:?}"
     );
     Ok(())
 }
