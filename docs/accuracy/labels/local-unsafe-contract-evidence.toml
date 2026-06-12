@@ -21,9 +21,8 @@ expected_hazard = "unknown"
 expected_obligation_key = "unknown"
 expected_contract_state = "present"
 expected_discharge_state = "present"
-expected_witness_route_kinds = ["human-deep-review"]
 label_source = "fixture_golden"
-rationale = "A private unsafe function with a documented safety contract has local contract evidence and remains advisory."
+rationale = "A private unsafe fn with a local safety comment has a contract but no witness receipt; the guarded_unwitnessed card is actionable in all scopes."
 
 [[samples]]
 id = "private-unsafe-helper-safety-comment-contract-only"
@@ -36,9 +35,8 @@ expected_hazard = "unknown"
 expected_obligation_key = "unknown"
 expected_contract_state = "present"
 expected_discharge_state = "missing"
-expected_witness_route_kinds = ["human-deep-review"]
 label_source = "fixture_golden"
-rationale = "A local SAFETY comment can provide contract evidence while still leaving guard evidence missing."
+rationale = "A private unsafe helper with a local SAFETY comment but no guard still emits a guard_missing card; the card is actionable in all scopes."
 
 [[samples]]
 id = "local-safety-colon-comment-contract-only"

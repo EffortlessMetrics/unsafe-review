@@ -713,6 +713,34 @@ fn context_packet_queues_contract_gaps_for_public_safety_docs() -> Result<(), Bo
     Ok(())
 }
 
+/// Pin: an unsafe fn with no classified operation family emits a contract_missing card
+/// in diff scope. The card is advisory-only with operation_family = "unknown".
+#[test]
+fn unknown_family_unsafe_fn_emits_contract_missing_card_in_diff_scope() -> Result<(), Box<dyn Error>>
+{
+    let fixture = fixture_root("unsafe_fn_unknown_family_no_card");
+
+    let json = run_success([
+        os("check"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        fixture.join("change.diff").into_os_string(),
+        os("--format"),
+        os("json"),
+    ])?;
+    let value = parse_json(&stdout_text(&json)?)?;
+    assert_eq!(
+        value["summary"]["cards"], 1,
+        "unknown-family unsafe fn must emit a card in diff scope"
+    );
+    assert_eq!(value["cards"][0]["class"], "contract_missing");
+    assert_eq!(value["cards"][0]["operation_family"], "unknown");
+    assert_eq!(value["cards"][0]["site"]["kind"], "unsafe_fn");
+
+    Ok(())
+}
+
 #[test]
 fn manual_candidate_import_explain_context_and_witness_plan_preserve_manual_marker()
 -> Result<(), Box<dyn Error>> {

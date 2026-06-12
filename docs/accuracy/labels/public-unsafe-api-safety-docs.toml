@@ -22,7 +22,7 @@ expected_obligation_key = "unknown"
 expected_contract_state = "missing"
 expected_discharge_state = "present"
 label_source = "fixture_golden"
-rationale = "A public unsafe function without nearby `# Safety` documentation is missing caller-contract evidence."
+rationale = "A public unsafe fn without nearby `# Safety` documentation is missing caller-contract evidence; the card is actionable in all scopes."
 
 [[samples]]
 id = "public-unsafe-trait-missing-safety-docs"
@@ -41,7 +41,7 @@ rationale = "A public unsafe trait without nearby `# Safety` documentation is mi
 [[samples]]
 id = "public-unsafe-fn-safety-comment-not-docs"
 fixture = "public_unsafe_fn_safety_comment_not_docs"
-kind = "false_positive_control"
+kind = "positive"
 expected_cards = 1
 expected_class = "contract_missing"
 expected_operation_family = "unknown"
@@ -50,7 +50,7 @@ expected_obligation_key = "unknown"
 expected_contract_state = "missing"
 expected_discharge_state = "present"
 label_source = "fixture_golden"
-rationale = "A local `SAFETY:` comment near a public unsafe API is not accepted as public `# Safety` documentation."
+rationale = "A public unsafe fn with only a local SAFETY comment (not public # Safety docs) is still missing the caller-contract evidence; the card is actionable."
 
 [[samples]]
 id = "split-public-unsafe-fn-missing-safety-docs"
@@ -64,7 +64,7 @@ expected_obligation_key = "unknown"
 expected_contract_state = "missing"
 expected_discharge_state = "present"
 label_source = "fixture_golden"
-rationale = "Split public unsafe function syntax still requires nearby `# Safety` documentation."
+rationale = "A split public unsafe fn without nearby `# Safety` documentation is missing caller-contract evidence; the card is actionable."
 
 [[samples]]
 id = "public-unsafe-fn-with-safety-docs"
@@ -78,7 +78,7 @@ expected_obligation_key = "unknown"
 expected_contract_state = "present"
 expected_discharge_state = "present"
 label_source = "fixture_golden"
-rationale = "A public unsafe function with a `# Safety` section is accepted as caller-contract evidence."
+rationale = "A public unsafe fn with `# Safety` docs has a contract but no witness receipt; the guarded_unwitnessed card is actionable."
 
 [[samples]]
 id = "public-unsafe-fn-safety-colon-docs"
@@ -92,4 +92,4 @@ expected_obligation_key = "unknown"
 expected_contract_state = "present"
 expected_discharge_state = "present"
 label_source = "fixture_golden"
-rationale = "A public unsafe function with documented `Safety:` prose is accepted as caller-contract evidence."
+rationale = "A public unsafe fn with `Safety:` colon docs has a contract but no witness receipt; the guarded_unwitnessed card is actionable."

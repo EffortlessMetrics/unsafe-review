@@ -1004,6 +1004,7 @@ fn agent_packet_preserves_delegation_boundaries_across_families() -> Result<(), 
         "get_unchecked_mut_bounds",
         "maybeuninit_assume_init",
         "vec_set_len",
+        "public_unsafe_fn_missing_safety",
         "atomic_pointer_state_fetch_ops",
         "ffi_sanitizer_route",
     ] {
