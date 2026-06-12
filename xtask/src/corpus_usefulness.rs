@@ -127,6 +127,10 @@ pub(crate) const SUBSET: &[(&str, &str)] = &[
         "raw_pointer_deref_brownfield_inherited",
         "brownfield/inherited debt: pre-existing baselined gap shows inherited_cards=1 with new_gaps=0 for a safe-only diff",
     ),
+    (
+        "raw_pointer_deref_resolved",
+        "resolved corpus case: PR adds # Safety contract to pub unsafe fn (unsafe retained); baseline-captured gap disappears, resolved_cards=1, new_cards=0",
+    ),
 ];
 
 // ── public API ─────────────────────────────────────────────────────────────
