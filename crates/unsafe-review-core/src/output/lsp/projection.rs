@@ -35,6 +35,15 @@ pub type EditorDiagnostic = serde_json::Value;
 pub type EditorHover = serde_json::Value;
 pub type EditorCodeAction = serde_json::Value;
 
+/// Render the rich hover markdown for a single [`ReviewCard`].
+///
+/// This is the same content as `lsp.json` `hovers[].contents`: obligations,
+/// evidence state, hazard families, verify commands, witness route, handoff
+/// commands, and the advisory trust boundary.
+pub(crate) fn render_hover(card: &ReviewCard) -> String {
+    hover::contents(card)
+}
+
 pub(crate) fn project_editor(output: &AnalyzeOutput) -> EditorProjection {
     let projection = LspProjection::from(output);
     EditorProjection {
@@ -380,12 +389,16 @@ fn position_for(card: &ReviewCard) -> LspPosition {
     }
 }
 
+/// Return the LSP `DiagnosticSeverity` integer derived from the card's class.
+///
+/// Severity encodes "what kind of review concern is this?" and must agree
+/// with the SARIF `level` emitted by the same card (both derive from
+/// [`ReviewClass::lsp_severity`] / [`ReviewClass::sarif_level`]).
+///
+/// Priority is a ranking/ordering/budget signal only and is intentionally
+/// NOT used here.
 fn severity_for(card: &ReviewCard) -> usize {
-    if matches!(card.priority, Priority::High) {
-        2
-    } else {
-        3
-    }
+    card.class.lsp_severity()
 }
 
 fn status_for(output: &AnalyzeOutput) -> LspStatus {

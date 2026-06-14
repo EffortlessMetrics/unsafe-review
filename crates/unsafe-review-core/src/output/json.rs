@@ -1,11 +1,15 @@
 use crate::api::{AnalyzeOutput, Provenance, Scope, Summary};
+use crate::domain::coverage::compute_agent_lsp_readiness;
 use crate::domain::{
     AgentLspReadiness, BaselineState, CommentPlanStatus, Coverage, CoverageBlock, EvidenceState,
     ManualContext, ObligationEvidence, OperationFamily, OutcomeMovement, ReviewCard,
     WitnessReceiptCoverage, WitnessRoute,
 };
-use crate::output::REVIEWCARD_TRUST_BOUNDARY as TRUST_BOUNDARY;
+use crate::output::agent::card_has_scoped_repairs;
+use crate::output::comment_plan;
 use crate::output::confirmation::ConfirmationCue;
+use crate::output::{REVIEWCARD_TRUST_BOUNDARY as TRUST_BOUNDARY, UNKNOWN_OWNER};
+use crate::policy::SnapshotCoverage;
 use crate::util::path_display;
 use serde::Serialize;
 
@@ -74,6 +78,7 @@ struct JsonProvenance {
 impl<'a> JsonAnalyzeOutput<'a> {
     /// Build from output without provenance (schema 0.1, backward-compatible).
     fn from_plain(output: &'a AnalyzeOutput) -> Self {
+        let statuses = comment_plan::card_statuses(output);
         Self {
             schema_version: SCHEMA_VERSION_PLAIN,
             tool: &output.tool,
@@ -84,7 +89,18 @@ impl<'a> JsonAnalyzeOutput<'a> {
             trust_boundary: TRUST_BOUNDARY,
             root: path_display(&output.root),
             summary: JsonSummary::from(&output.summary),
-            cards: output.cards.iter().map(JsonCard::from).collect(),
+            cards: output
+                .cards
+                .iter()
+                .map(|card| {
+                    let status = statuses
+                        .get(&card.id)
+                        .copied()
+                        .unwrap_or(CommentPlanStatus::NotEligible);
+                    let snapshot = output.coverage_snapshot.get(&card.id.0);
+                    JsonCard::from_with_status(card, status, snapshot)
+                })
+                .collect(),
             provenance: None,
         }
     }
@@ -101,6 +117,7 @@ impl<'a> JsonAnalyzeOutput<'a> {
             diff_sha256: provenance.diff_sha256.clone(),
             dirty_worktree: provenance.dirty_worktree,
         };
+        let statuses = comment_plan::card_statuses(output);
         Self {
             schema_version: SCHEMA_VERSION_WITH_PROVENANCE,
             tool: &output.tool,
@@ -111,7 +128,18 @@ impl<'a> JsonAnalyzeOutput<'a> {
             trust_boundary: TRUST_BOUNDARY,
             root: path_display(&output.root),
             summary: JsonSummary::from(&output.summary),
-            cards: output.cards.iter().map(JsonCard::from).collect(),
+            cards: output
+                .cards
+                .iter()
+                .map(|card| {
+                    let status = statuses
+                        .get(&card.id)
+                        .copied()
+                        .unwrap_or(CommentPlanStatus::NotEligible);
+                    let snapshot = output.coverage_snapshot.get(&card.id.0);
+                    JsonCard::from_with_status(card, status, snapshot)
+                })
+                .collect(),
             provenance: Some(json_provenance),
         }
     }
@@ -136,6 +164,12 @@ struct JsonSummary {
     /// Coverage movement counts (SPEC-0030).
     new_gaps: usize,
     worsened_gaps: usize,
+    /// Baseline cards whose evidence coverage improved (pure improvement: at least one slot
+    /// advanced, no slot regressed).  Always 0 until a baseline coverage snapshot exists.
+    ///
+    /// An improved card is still advisory, still open, still present — NOT resolved, NOT safe,
+    /// NOT UB-free, NOT Miri-clean, and NOT a site-execution claim.
+    improved_gaps: usize,
     resolved_gaps: usize,
     inherited_gaps: usize,
 }
@@ -159,6 +193,7 @@ impl From<&Summary> for JsonSummary {
             static_unknown: summary.static_unknown,
             new_gaps: summary.new_gaps,
             worsened_gaps: summary.worsened_gaps,
+            improved_gaps: summary.improved_gaps,
             resolved_gaps: summary.resolved_gaps,
             inherited_gaps: summary.inherited_gaps,
         }
@@ -197,8 +232,40 @@ struct JsonCard<'a> {
     coverage: JsonCoverageBlock,
 }
 
-impl<'a> From<&'a ReviewCard> for JsonCard<'a> {
-    fn from(card: &'a ReviewCard) -> Self {
+impl<'a> JsonCard<'a> {
+    /// Build a `JsonCard` for `card`, overriding `comment_plan_status` with
+    /// the value computed by the comment-plan selection pass (SPEC-0032).
+    ///
+    /// `snapshot` is the per-card coverage snapshot from `AnalyzeOutput.coverage_snapshot`,
+    /// used to project `baseline_state`/`outcome_movement` from the same slot-level comparison
+    /// the summary uses (SPEC-0030 §single-truth, output audit #1687).
+    ///
+    /// This is the only valid constructor.  Callers must supply the status
+    /// from [`comment_plan::card_statuses`] so that `cards.json` always
+    /// projects the same `comment_plan_status` as `comment-plan.json`.
+    fn from_with_status(
+        card: &'a ReviewCard,
+        comment_plan_status: CommentPlanStatus,
+        snapshot: Option<&SnapshotCoverage>,
+    ) -> Self {
+        let mut coverage_block = card.coverage_block();
+        coverage_block.comment_plan_status = comment_plan_status;
+        // Apply snapshot-level movement so per-card baseline_state/outcome_movement
+        // agree with summary.worsened_gaps / summary.improved_gaps (SPEC-0030 §single-truth).
+        if let Some(snap) = snapshot {
+            coverage_block.apply_snapshot_slots(
+                &snap.contract_coverage,
+                &snap.guard_coverage,
+                &snap.test_reach_coverage,
+                &snap.witness_receipt_coverage,
+            );
+        }
+        // Guarantee: cards.json coverage.agent_lsp_readiness uses the exact
+        // has_card_scoped_repairs value (output audit #1687, findings 3+4).
+        // Both cards.json and the agent packet now call compute_agent_lsp_readiness
+        // with the same has_card_scoped_repairs so neither surface can diverge.
+        coverage_block.agent_lsp_readiness =
+            compute_agent_lsp_readiness(card, card_has_scoped_repairs(card)).state;
         Self {
             id: &card.id.0,
             class_name: card.class.as_str(),
@@ -233,7 +300,7 @@ impl<'a> From<&'a ReviewCard> for JsonCard<'a> {
             next_action: &card.next_action.summary,
             verify_commands: &card.next_action.verify_commands,
             confirmation_cue: ConfirmationCue::from(card),
-            coverage: JsonCoverageBlock::from(card.coverage_block()),
+            coverage: JsonCoverageBlock::from(coverage_block),
         }
     }
 }
@@ -316,7 +383,7 @@ impl<'a> From<&'a ReviewCard> for JsonSite<'a> {
             line: card.site.location.line,
             column: card.site.location.column,
             kind: card.site.kind.as_str(),
-            owner: card.site.owner.as_deref().unwrap_or("unknown"),
+            owner: card.site.owner.as_deref().unwrap_or(UNKNOWN_OWNER),
             visibility: &card.site.visibility,
             public_api_surface: card.site.public_api_surface,
             snippet: &card.site.snippet,
@@ -411,6 +478,7 @@ fn agent_lsp_readiness_str(readiness: AgentLspReadiness) -> &'static str {
 /// both a non-test `pub fn` and the test module below.
 const FIXTURE_GOLDENS: &[&str] = &[
     "raw_pointer_alignment",
+    "raw_pointer_alignment_debug_assert_only_not_guard",
     "raw_pointer_alignment_receipted",
     "raw_pointer_alignment_is_aligned_guard",
     "raw_pointer_alignment_post_check_not_guard",
@@ -430,6 +498,7 @@ const FIXTURE_GOLDENS: &[&str] = &[
     "public_unsafe_fn_safety_colon_docs",
     "public_unsafe_trait_missing_safety",
     "public_unsafe_fn_safety_comment_not_docs",
+    "pub_crate_unsafe_fn_missing_safety",
     "documented_private_unsafe_fn",
     "local_safety_colon_comment",
     "private_unsafe_helper_safety_comment",
@@ -533,8 +602,12 @@ const FIXTURE_GOLDENS: &[&str] = &[
     "raw_pointer_read_typed_shadowed_origin_not_guard",
     "raw_pointer_read_other_len_not_guard",
     "raw_pointer_read_reassigned_origin_not_guard",
+    "raw_pointer_read_unaligned_other_len_not_guard",
     "raw_pointer_write_assignment",
     "raw_pointer_write_unaligned",
+    "raw_pointer_write_other_len_not_guard",
+    "raw_pointer_write_same_origin_bounds_guard",
+    "raw_pointer_bounds_debug_assert_only_not_guard",
     "raw_pointer_write_bytes",
     "raw_pointer_write_bool_bytes_guard",
     "raw_pointer_write_bool_reassigned_byte_not_guard",
@@ -596,6 +669,7 @@ const FIXTURE_GOLDENS: &[&str] = &[
     "ptr_copy_slice_range_shadowed_dst_path_not_guard",
     "ptr_copy_slice_range_shadowed_dst_not_guard",
     "ptr_copy_other_len_not_guard",
+    "multiline_ptr_copy",
     "ptr_replace_value",
     "copy_nonoverlapping",
     "copy_nonoverlapping_slice_range_guard",
@@ -688,8 +762,10 @@ const FIXTURE_GOLDENS: &[&str] = &[
     "str_from_utf8_unchecked_match_ok_string_not_guard",
     "str_from_utf8_unchecked_match_ok_reassigned_not_guard",
     "str_from_utf8_unchecked_match_ok_shadowed_not_guard",
+    "from_utf8_unchecked_safe_wrapper_no_cards",
     "zeroed_invalid_value",
     "zeroed_valid_u32",
+    "zeroed_safe_wrapper_no_cards",
     "inline_asm_human_review",
     "pointer_arithmetic_num_ctrl_bytes_guard",
     "pointer_arithmetic_other_offset_not_guard",
@@ -700,9 +776,12 @@ const FIXTURE_GOLDENS: &[&str] = &[
     "pointer_arithmetic_disjunct_bounds_not_guard",
     "pointer_arithmetic_closed_branch_not_guard",
     "pointer_arithmetic_slice_end",
+    "pointer_arithmetic_safe_method_add_no_cards",
+    "pointer_arithmetic_unsafe_fn_offset",
     "slice_from_raw_parts_mut",
     "slice_from_raw_parts_mut_maybeuninit",
     "slice_from_raw_parts_mut_other_maybeuninit_not_guard",
+    "from_raw_parts_safe_ctor_no_cards",
     "vec_from_raw_parts",
     "vec_from_raw_parts_capacity_guard",
     "vec_from_raw_parts_capacity_assert_guard",
@@ -788,6 +867,7 @@ const FIXTURE_GOLDENS: &[&str] = &[
     "maybeuninit_assume_init_ref",
     "maybeuninit_assume_init_mut",
     "maybeuninit_assume_init_drop",
+    "assume_init_safe_method_no_cards",
     "vec_set_len",
     "vec_set_len_comment_not_guard",
     "vec_set_len_initialized_loop",
@@ -826,6 +906,7 @@ const FIXTURE_GOLDENS: &[&str] = &[
     "vec_set_len_start_bound_shrink",
     "vec_set_len_stale_start_bound_shrink_not_guard",
     "vec_set_len_zero_clear",
+    "set_len_safe_method_no_cards",
     "drop_in_place_deallocation",
     "drop_in_place_box_origin",
     "drop_in_place_reassigned_origin_not_guard",
@@ -920,6 +1001,10 @@ const FIXTURE_GOLDENS: &[&str] = &[
     "ffi_libc_call_sanitizer_route",
     "ffi_non_libc_wrapper_call_not_route",
     "ffi_local_libc_module_call_not_route",
+    "ffi_same_named_method_not_route",
+    "ffi_inner_libc_path_not_route",
+    "ffi_token_in_string_not_route",
+    "ptr_read_path_segment_not_raw",
     "get_unchecked_mut_bounds",
     "get_unchecked_mut_len_guard",
     "get_unchecked_mut_conjunct_len_guard",
@@ -971,6 +1056,8 @@ const FIXTURE_GOLDENS: &[&str] = &[
     "get_unchecked_mut_match_get_shadowed_receiver_not_guard",
     "static_lifetime_mut_ref_not_static_mut",
     "pin_new_unchecked",
+    "unsafe_fn_unknown_family_no_card",
+    "unsafe_fn_pointer_field_no_cards",
 ];
 
 /// Regenerate `expected.cards.json` for each named fixture (or all
@@ -1003,7 +1090,19 @@ pub fn bless_fixture_card_goldens(names: &[&str]) -> Result<Vec<std::path::PathB
             include_unchanged_tests: true,
             max_cards: None,
         })?;
-        let cards: Vec<JsonCard<'_>> = output.cards.iter().map(JsonCard::from).collect();
+        let statuses = crate::output::comment_plan::card_statuses(&output);
+        let cards: Vec<JsonCard<'_>> = output
+            .cards
+            .iter()
+            .map(|card| {
+                let status = statuses
+                    .get(&card.id)
+                    .copied()
+                    .unwrap_or(CommentPlanStatus::NotEligible);
+                let snapshot = output.coverage_snapshot.get(&card.id.0);
+                JsonCard::from_with_status(card, status, snapshot)
+            })
+            .collect();
         let path = root.join("expected.cards.json");
         let mut text = serde_json::to_string_pretty(&cards)
             .map_err(|err| format!("serialize {fixture} cards failed: {err}"))?;
@@ -1055,7 +1154,7 @@ mod tests {
             value["cards"][0]["next_action"]
                 .as_str()
                 .unwrap_or("")
-                .contains("Add or expose the local guard")
+                .contains("Add or expose local guards")
         );
         assert!(value["cards"][0]["verify_commands"].is_array());
         assert_eq!(
@@ -1188,7 +1287,19 @@ mod tests {
             // Serialize the typed Vec<JsonCard> directly so that serde emits
             // keys in struct-field order (not alphabetically as serde_json::Value
             // would after a round-trip through BTreeMap).
-            let cards: Vec<JsonCard<'_>> = output.cards.iter().map(JsonCard::from).collect();
+            let statuses = comment_plan::card_statuses(&output);
+            let cards: Vec<JsonCard<'_>> = output
+                .cards
+                .iter()
+                .map(|card| {
+                    let status = statuses
+                        .get(&card.id)
+                        .copied()
+                        .unwrap_or(CommentPlanStatus::NotEligible);
+                    let snapshot = output.coverage_snapshot.get(&card.id.0);
+                    JsonCard::from_with_status(card, status, snapshot)
+                })
+                .collect();
             let path = fixture_root(fixture).join("expected.cards.json");
             let mut text = serde_json::to_string_pretty(&cards)
                 .map_err(|err| format!("serialize {fixture} cards failed: {err}"))?;
@@ -1327,6 +1438,65 @@ mod tests {
         assert!(
             ts.contains('T'),
             "generated_at must contain T separator: {ts}"
+        );
+        Ok(())
+    }
+
+    /// Drift-lock: `site.owner = None` renders as `UNKNOWN_OWNER` ("unknown") on every surface
+    /// (cards.json, agent packet, markdown sink-cluster), so consumers joining cards across
+    /// surfaces see the identical string.  Previously json used "unknown", agent used "", and
+    /// markdown used "(unknown owner)".
+    #[test]
+    fn owner_none_placeholder_is_identical_across_json_agent_and_markdown_surfaces()
+    -> Result<(), String> {
+        let mut output = fixture_output("raw_pointer_alignment")?;
+        let card = output
+            .cards
+            .first_mut()
+            .ok_or_else(|| "fixture should emit one card".to_string())?;
+        // Force owner to None so we exercise the placeholder path on every surface.
+        card.site.owner = None;
+
+        // Surface 1: cards.json
+        let json_value = parse_json(&render(&output))?;
+        let json_owner = json_value["cards"][0]["site"]["owner"]
+            .as_str()
+            .ok_or("cards.json site.owner must be a string")?;
+
+        // Surface 2: agent packet
+        let card = output.cards.first().ok_or("fixture should emit one card")?;
+        let agent_value = parse_json(&crate::output::agent::render(card))?;
+        let agent_context_owner = agent_value["context"]["owner"]
+            .as_str()
+            .ok_or("agent packet context.owner must be a string")?;
+        let agent_source_owner = agent_value["source_context"]["unsafe_site"]["owner"]
+            .as_str()
+            .ok_or("agent packet source_context.unsafe_site.owner must be a string")?;
+
+        // All three must equal UNKNOWN_OWNER.
+        assert_eq!(
+            json_owner,
+            crate::output::UNKNOWN_OWNER,
+            "cards.json owner placeholder must be UNKNOWN_OWNER"
+        );
+        assert_eq!(
+            agent_context_owner,
+            crate::output::UNKNOWN_OWNER,
+            "agent context owner placeholder must be UNKNOWN_OWNER"
+        );
+        assert_eq!(
+            agent_source_owner,
+            crate::output::UNKNOWN_OWNER,
+            "agent source_context.unsafe_site owner placeholder must be UNKNOWN_OWNER"
+        );
+        // All three are equal to each other.
+        assert_eq!(
+            json_owner, agent_context_owner,
+            "cards.json and agent context owner placeholder must be identical"
+        );
+        assert_eq!(
+            json_owner, agent_source_owner,
+            "cards.json and agent source_context owner placeholder must be identical"
         );
         Ok(())
     }

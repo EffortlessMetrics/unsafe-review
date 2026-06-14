@@ -11,8 +11,6 @@ comments, edit source, or block by default.
 
 ## Unreleased
 
-Nothing yet.
-
 ## 0.3.6 - 2026-06-11
 
 0.3.6 is the CLI-truthfulness and evidence-intake patch. It makes the command

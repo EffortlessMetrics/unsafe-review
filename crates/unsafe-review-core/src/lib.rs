@@ -13,20 +13,24 @@ mod output;
 mod policy;
 mod util;
 
+pub use output::comment_plan::COMMENT_BODY_WORD_LIMIT;
+
 pub use api::{
     AnalysisMode, AnalyzeInput, AnalyzeOutput, BaselineInitResult, DiffSource, DiscoveryOptions,
-    OutcomeReport, PolicyMode, PolicyReport, Provenance, ReceiptAuditReport, RepoScanEvent,
-    RepoScanPhase, RepoScanStatus, RepoStopReason, ReviewCardConfirmationProjection, Scope,
-    analyze, analyze_with_discovery, analyze_with_discovery_and_progress,
-    analyze_with_discovery_and_repo_events, audit_witness_receipts, baseline_add, baseline_init,
-    bless_fixture_card_goldens, collect_context, collect_context_range, compare_outcome_json,
-    discover_repo_files, evaluate_policy_report, evaluate_policy_report_from_output, explain_card,
-    project_editor, project_review_card_confirmation, render_badge_jsons, render_comment_plan,
-    render_gate_manifest, render_github_summary, render_human, render_json,
-    render_json_with_provenance, render_lsp, render_markdown, render_outcome_json,
-    render_outcome_markdown, render_policy_report_json, render_policy_report_markdown,
-    render_pr_summary, render_receipt_audit_json, render_receipt_audit_markdown,
-    render_repair_queue, render_sarif, render_witness_plan, validate_witness_receipts,
+    FILE_TIMINGS_CAP, OutcomeReport, PerFileScanStats, PolicyMode, PolicyReport, Provenance,
+    ReceiptAuditReport, RepoScanEvent, RepoScanPhase, RepoScanStatus, RepoStopReason,
+    ReviewCardConfirmationProjection, ScanCost, Scope, analyze, analyze_with_discovery,
+    analyze_with_discovery_and_progress, analyze_with_discovery_and_repo_events,
+    audit_witness_receipts, baseline_add, baseline_init, bless_fixture_card_goldens,
+    collect_context, collect_context_range, compare_outcome_json, discover_repo_files,
+    evaluate_policy_report, evaluate_policy_report_from_output, explain_card, project_editor,
+    project_review_card_confirmation, render_badge_jsons, render_comment_plan,
+    render_gate_manifest, render_gate_manifest_repo, render_github_summary, render_human,
+    render_json, render_json_with_provenance, render_lsp, render_lsp_hover, render_markdown,
+    render_outcome_json, render_outcome_markdown, render_policy_report_json,
+    render_policy_report_markdown, render_pr_summary, render_receipt_audit_json,
+    render_receipt_audit_markdown, render_repair_queue, render_sarif, render_usefulness_telemetry,
+    render_usefulness_telemetry_with_cost, render_witness_plan, validate_witness_receipts,
 };
 
 /// Compute the SHA-256 hex digest of raw bytes.

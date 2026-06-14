@@ -96,7 +96,11 @@ fn contains_unqualified_call_name(line: &str, name: &str) -> bool {
     while let Some(pos) = cursor.find(name) {
         let absolute = offset + pos;
         let before = line[..absolute].chars().next_back();
-        let starts_on_boundary = before.is_none_or(|ch| !is_ident_continue(ch) && ch != ':');
+        // Reject matches where the preceding char is a method-call receiver dot (`.`),
+        // a path separator (`:`), or any ident-continue char — those indicate the name
+        // is part of a qualified path or a method-call chain, not a bare extern call.
+        let starts_on_boundary =
+            before.is_none_or(|ch| !is_ident_continue(ch) && ch != ':' && ch != '.');
         let after = &line[absolute + name.len()..];
         if starts_on_boundary && call_suffix(after) {
             return true;
@@ -114,7 +118,13 @@ fn matching_call_path_prefix(line: &str, prefix: &str) -> Option<String> {
     while let Some(pos) = cursor.find(prefix) {
         let absolute = offset + pos;
         let before = line[..absolute].chars().next_back();
-        let starts_on_boundary = before.is_none_or(|ch| !is_ident_continue(ch));
+        // Reject ident-continue chars, path separators (`:`), and member
+        // access (`.`) before the prefix so that an inner path segment such
+        // as `something::libc::` does not match as a top-level libc prefix.
+        // This mirrors the `contains_call_path` / `contains_unqualified_call_name`
+        // boundary checks.
+        let starts_on_boundary =
+            before.is_none_or(|ch| !is_ident_continue(ch) && ch != ':' && ch != '.');
         let after_prefix = &line[absolute + prefix.len()..];
         if starts_on_boundary && call_path_suffix(after_prefix) {
             let path_end = after_prefix.find('(').unwrap_or(after_prefix.len());
@@ -211,6 +221,56 @@ mod tests {
                 &local_modules
             ),
             None
+        );
+    }
+
+    #[test]
+    fn inner_path_segment_libc_does_not_match_as_prefix() {
+        // `something::libc::call()` — `libc` is an inner segment, not the root.
+        // The boundary check must reject the `:` preceding `libc::`.
+        let extern_names = BTreeSet::new();
+        let local_modules = BTreeSet::new();
+
+        // Inner segment: must NOT route to FFI.
+        assert_eq!(
+            ffi_boundary_match(
+                "unsafe { something::libc::strlen(ptr) }",
+                &extern_names,
+                &local_modules
+            ),
+            None,
+            "inner-segment `something::libc::strlen` must not route to FFI"
+        );
+        // Top-level path: MUST still route to FFI.
+        assert_eq!(
+            ffi_boundary_match(
+                "unsafe { libc::strlen(ptr) }",
+                &extern_names,
+                &local_modules
+            ),
+            Some(FfiBoundaryApplicability::known_foreign_path("libc::strlen")),
+            "top-level `libc::strlen` must still route to FFI"
+        );
+    }
+
+    #[test]
+    fn method_receiver_dot_does_not_match_same_named_extern() {
+        // A method call `f.close()` must not match the unqualified extern name `close`
+        // even when `close` is declared in an `extern "C"` block in the same file.
+        let extern_names = BTreeSet::from(["close".to_string()]);
+        let local_modules = BTreeSet::new();
+
+        // Method-call receiver form — must NOT route to FFI.
+        assert_eq!(
+            ffi_boundary_match("unsafe { f.close() }", &extern_names, &local_modules),
+            None,
+            "method-call receiver `.close()` must not match unqualified extern `close`"
+        );
+        // Bare unqualified call — MUST still route to FFI.
+        assert_eq!(
+            ffi_boundary_match("unsafe { close(fd) }", &extern_names, &local_modules),
+            Some(FfiBoundaryApplicability::same_file_extern("close")),
+            "bare call `close(fd)` must still route to FFI"
         );
     }
 }

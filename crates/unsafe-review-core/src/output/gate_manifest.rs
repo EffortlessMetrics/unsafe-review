@@ -34,6 +34,69 @@ pub(crate) fn render(output: &AnalyzeOutput) -> String {
     }
 }
 
+/// Render the gate manifest for a `repo` run.
+///
+/// Repo mode writes a single output file (named by `--out`); there is no
+/// bundle directory, so the first-pr artifact pointers (`pr_summary`, `sarif`,
+/// `lsp`, `comment_plan`, `repair_queue`, `receipt_audit`, `review_kit`,
+/// `policy_report`) are absent — they were not emitted and must not be faked
+/// (SPEC-0034: "Missing optional artifacts are omitted, not faked.").
+///
+/// The `report_filename` parameter is the basename of the `--out` file
+/// (e.g. `"repo.json"`); it is recorded as the `cards` artifact pointer so
+/// `ub-review` can locate the ReviewCard dataset relative to the manifest.
+///
+/// The manifest is advisory posture only — not a merge verdict, not proof,
+/// not UB-free/Miri-clean/site-execution.  The `status` field is always
+/// `"advisory"`.
+pub(crate) fn render_repo(output: &AnalyzeOutput, report_filename: &str) -> String {
+    let manifest = GateManifestRepo {
+        schema_version: GATE_SCHEMA_VERSION,
+        dialect: "unsafe-review",
+        status: "advisory",
+        summary: GateMovementSummary::from(&output.summary),
+        artifacts: GateArtifactsRepo {
+            cards: report_filename.to_owned(),
+        },
+        trust_boundary: GATE_MANIFEST_TRUST_BOUNDARY,
+        tool: "unsafe-review",
+        tool_version: env!("CARGO_PKG_VERSION"),
+    };
+    match serde_json::to_string_pretty(&manifest) {
+        Ok(mut text) => {
+            text.push('\n');
+            text
+        }
+        Err(err) => {
+            format!("{{\n  \"error\": \"gate manifest serialization failed: {err}\"\n}}\n")
+        }
+    }
+}
+
+/// Gate manifest for a `repo` run — only the artifacts repo mode actually writes.
+#[derive(Serialize)]
+struct GateManifestRepo {
+    schema_version: &'static str,
+    dialect: &'static str,
+    status: &'static str,
+    summary: GateMovementSummary,
+    artifacts: GateArtifactsRepo,
+    trust_boundary: &'static str,
+    tool: &'static str,
+    tool_version: &'static str,
+}
+
+/// Relative artifact pointers for a `repo` run.
+///
+/// Only the main ReviewCard output file is recorded here; first-pr-specific
+/// artifacts (`pr_summary`, `sarif`, `lsp`, …) are absent because repo mode
+/// does not emit them.
+#[derive(Serialize)]
+struct GateArtifactsRepo {
+    /// Basename of the `--out` file — the ReviewCard dataset for this run.
+    cards: String,
+}
+
 #[derive(Serialize)]
 struct GateManifest {
     schema_version: &'static str,
@@ -61,12 +124,18 @@ impl From<&AnalyzeOutput> for GateManifest {
     }
 }
 
-/// The four-bucket movement block from SPEC-0030, copied verbatim from `Summary`.
+/// The five-bucket movement block from SPEC-0030, copied verbatim from `Summary`.
 /// Field names align with ripr's canonical movement counter vocabulary.
 #[derive(Serialize)]
 struct GateMovementSummary {
     new_gaps: usize,
     worsened_gaps: usize,
+    /// Baseline cards whose evidence coverage improved (at least one slot advanced, no slot
+    /// regressed).  Always 0 until a baseline coverage snapshot exists.
+    ///
+    /// An improved card is still advisory, still open, still present — NOT resolved, NOT safe,
+    /// NOT UB-free, NOT Miri-clean, and NOT a site-execution claim.
+    improved_gaps: usize,
     resolved_gaps: usize,
     inherited_gaps: usize,
 }
@@ -76,6 +145,7 @@ impl From<&Summary> for GateMovementSummary {
         Self {
             new_gaps: summary.new_gaps,
             worsened_gaps: summary.worsened_gaps,
+            improved_gaps: summary.improved_gaps,
             resolved_gaps: summary.resolved_gaps,
             inherited_gaps: summary.inherited_gaps,
         }
@@ -105,6 +175,9 @@ struct GateArtifacts {
     lsp: &'static str,
     /// Policy report JSON (always present for first-pr).
     policy_report: &'static str,
+    /// Usefulness telemetry artifact (SPEC-0038; always present for first-pr).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    usefulness_telemetry: Option<&'static str>,
     /// Scope from the analysis run ("diff" or "repo").
     #[serde(skip)]
     _scope_marker: Scope,
@@ -116,12 +189,13 @@ impl From<&AnalyzeOutput> for GateArtifacts {
             cards: "cards.json",
             comment_plan: "comment-plan.json",
             repair_queue: "repair-queue.json",
-            receipt_audit: "receipt-audit.md",
+            receipt_audit: "receipt-audit.json",
             review_kit: "review-kit.json",
             pr_summary: "pr-summary.md",
             sarif: "cards.sarif",
             lsp: "lsp.json",
             policy_report: "policy-report.json",
+            usefulness_telemetry: Some("usefulness-telemetry.json"),
             _scope_marker: output.scope.clone(),
         }
     }
@@ -195,6 +269,7 @@ mod tests {
         let output = fixture_output("raw_pointer_alignment")?;
         let expected_new = output.summary.new_gaps;
         let expected_worsened = output.summary.worsened_gaps;
+        let expected_improved = output.summary.improved_gaps;
         let expected_resolved = output.summary.resolved_gaps;
         let expected_inherited = output.summary.inherited_gaps;
 
@@ -211,6 +286,12 @@ mod tests {
                 .as_u64()
                 .ok_or("worsened_gaps not u64")?,
             expected_worsened as u64
+        );
+        assert_eq!(
+            summary["improved_gaps"]
+                .as_u64()
+                .ok_or("improved_gaps not u64")?,
+            expected_improved as u64
         );
         assert_eq!(
             summary["resolved_gaps"]
@@ -237,7 +318,7 @@ mod tests {
         assert_eq!(artifacts["cards"], "cards.json");
         assert_eq!(artifacts["comment_plan"], "comment-plan.json");
         assert_eq!(artifacts["repair_queue"], "repair-queue.json");
-        assert_eq!(artifacts["receipt_audit"], "receipt-audit.md");
+        assert_eq!(artifacts["receipt_audit"], "receipt-audit.json");
         assert_eq!(artifacts["review_kit"], "review-kit.json");
         assert_eq!(artifacts["pr_summary"], "pr-summary.md");
         assert_eq!(artifacts["sarif"], "cards.sarif");

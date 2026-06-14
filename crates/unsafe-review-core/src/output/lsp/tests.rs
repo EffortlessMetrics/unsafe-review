@@ -1,5 +1,6 @@
 use super::*;
 use crate::api::{AnalysisMode, AnalyzeInput, DiffSource, PolicyMode, Scope, analyze};
+use crate::domain::ReviewClass;
 use std::path::PathBuf;
 
 #[test]
@@ -81,7 +82,7 @@ fn lsp_projection_is_parseable_and_read_only() -> Result<(), String> {
         value["diagnostics"][0]["next_action"]
             .as_str()
             .unwrap_or("")
-            .contains("Add or expose the local guard")
+            .contains("Add or expose local guards")
     );
     assert_eq!(value["diagnostics"][0]["witness_routes"][0]["kind"], "miri");
     assert!(
@@ -231,8 +232,8 @@ fn lsp_projection_is_parseable_and_read_only() -> Result<(), String> {
                 && action["payload"]["kind"] == "unsafe-review.related_test"
                 && action["payload"]["card_id"] == value["diagnostics"][0]["card_id"]
                 && action["payload"]["file"] == "src/lib.rs"
-                && action["payload"]["line"] == 3
-                && action["payload"]["name"] == "read_header"
+                && action["payload"]["line"] == 16
+                && action["payload"]["name"] == "reads_header"
         })
     }));
     assert!(value["code_actions"].as_array().is_some_and(|actions| {
@@ -289,6 +290,52 @@ fn lsp_projection_empty_output_has_no_editor_items() -> Result<(), String> {
             .contains("not UB-free status")
     );
     Ok(())
+}
+
+/// Regression guard: LSP severity must derive from card CLASS, not priority.
+///
+/// `guard_missing` → LSP 2 (Warning) regardless of whether the card has
+/// High, Medium, or Low priority.  The fixture produces a `guard_missing` card
+/// which also happens to have High priority, but the assertion documents that
+/// the class is the deterministic source — not the priority.
+#[test]
+fn lsp_diagnostic_severity_derives_from_class_not_priority() -> Result<(), String> {
+    let output = fixture_output("raw_pointer_alignment")?;
+    // Confirm the fixture yields a guard_missing card (class is the driver).
+    assert!(
+        output
+            .cards
+            .iter()
+            .any(|c| c.class == ReviewClass::GuardMissing),
+        "fixture must produce a guard_missing card for this regression test"
+    );
+    let value = parse_json(&render(&output))?;
+    // guard_missing → sarif_level "warning" → lsp_severity 2 (Warning).
+    assert_eq!(
+        value["diagnostics"][0]["severity"], 2,
+        "guard_missing class must produce LSP severity 2 (Warning)"
+    );
+    Ok(())
+}
+
+/// Drift-lock: for classes that are non-actionable, the LSP severity must be
+/// 4 (Hint) — the lowest non-error severity — confirming they do not mislead
+/// the editor into showing Warning-level decorations.
+#[test]
+fn lsp_non_actionable_classes_produce_hint_severity() {
+    let non_actionable = [
+        ReviewClass::GuardedAndWitnessed,
+        ReviewClass::BaselineKnown,
+        ReviewClass::Suppressed,
+    ];
+    for class in non_actionable {
+        assert_eq!(
+            class.lsp_severity(),
+            4,
+            "non-actionable class {} must produce LSP severity 4 (Hint)",
+            class.as_str()
+        );
+    }
 }
 
 fn fixture_output(name: &str) -> Result<AnalyzeOutput, String> {

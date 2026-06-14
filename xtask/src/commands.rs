@@ -26,6 +26,10 @@ pub(crate) enum XtaskCommand {
     SyncCalibrationSnapshot,
     SourceDivergence,
     BlessGoldens(Vec<String>),
+    CorpusBackstop(Option<PathBuf>),
+    CheckCorpusBackstopSchema(PathBuf),
+    CorpusUsefulness(Option<PathBuf>),
+    CheckCorpusUsefulnessSchema(PathBuf),
 }
 
 impl XtaskCommand {
@@ -90,6 +94,17 @@ impl XtaskCommand {
                 // Trailing args are optional fixture names — zero or more allowed.
                 Ok(Self::BlessGoldens(args[2..].to_vec()))
             }
+            Some("corpus-backstop") => Ok(Self::CorpusBackstop(parse_opt_out_path(args)?)),
+            Some("check-corpus-backstop-schema") => Ok(Self::CheckCorpusBackstopSchema(
+                command_args::require_subcommand_dir_arg(args, "check-corpus-backstop-schema")?,
+            )),
+            Some("corpus-usefulness") => Ok(Self::CorpusUsefulness(parse_opt_out_path_for(
+                "corpus-usefulness",
+                args,
+            )?)),
+            Some("check-corpus-usefulness-schema") => Ok(Self::CheckCorpusUsefulnessSchema(
+                command_args::require_subcommand_dir_arg(args, "check-corpus-usefulness-schema")?,
+            )),
             Some(other) => Err(format!("unknown xtask command `{other}`")),
         }
     }
@@ -98,4 +113,39 @@ impl XtaskCommand {
 fn parse_no_extra<T>(args: &[String], name: &str, value: T) -> Result<T, String> {
     command_args::require_no_extra_args(args, name)?;
     Ok(value)
+}
+
+/// Parse an optional `--out <path>` argument from a subcommand's args slice.
+/// Accepts: no extra args (returns None), or `--out <path>` (returns Some(path)).
+fn parse_opt_out_path(args: &[String]) -> Result<Option<PathBuf>, String> {
+    match args.get(2).map(|s| s.as_str()) {
+        None => Ok(None),
+        Some("--out") => {
+            let path = args
+                .get(3)
+                .ok_or_else(|| "--out requires a path argument".to_string())?;
+            command_args::require_max_args(args, "corpus-backstop", 4)?;
+            Ok(Some(PathBuf::from(path)))
+        }
+        Some(other) => Err(format!(
+            "`corpus-backstop` does not accept argument `{other}`; use --out <path>"
+        )),
+    }
+}
+
+/// Parse an optional `--out <path>` argument for a named subcommand.
+fn parse_opt_out_path_for(subcommand: &str, args: &[String]) -> Result<Option<PathBuf>, String> {
+    match args.get(2).map(|s| s.as_str()) {
+        None => Ok(None),
+        Some("--out") => {
+            let path = args
+                .get(3)
+                .ok_or_else(|| "--out requires a path argument".to_string())?;
+            command_args::require_max_args(args, subcommand, 4)?;
+            Ok(Some(PathBuf::from(path)))
+        }
+        Some(other) => Err(format!(
+            "`{subcommand}` does not accept argument `{other}`; use --out <path>"
+        )),
+    }
 }

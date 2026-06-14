@@ -88,10 +88,14 @@ pub(super) struct FirstPrReport<'a> {
     pub(super) no_changed_gaps_message: &'a str,
     pub(super) no_changed_gaps_limitation: &'a str,
     pub(super) artifacts: &'a [&'a str],
+    /// Total bytes written to all artifact files in `out_dir` for this run.
+    /// Diagnostic only — not a coverage claim, proof, UB-free, Miri-clean,
+    /// site-execution, or performance guarantee.
+    pub(super) output_bytes: u64,
 }
 
 pub(super) fn print_first_pr_report(report: FirstPrReport<'_>) {
-    print_first_pr_overview(report.output, report.out_dir);
+    print_first_pr_overview(report.output, report.out_dir, report.output_bytes);
     print_manual_candidate_handoff(report.out_dir, report.root, report.manual_candidates);
     print_receipt_audit_handoff(report.check);
     print_policy_report_handoff(report.out_dir);
@@ -113,7 +117,7 @@ fn print_receipt_audit_handoff(check: &CheckOptions) {
 
 fn print_policy_report_handoff(out_dir: &Path) {
     println!("Policy report:");
-    println!("  {}", out_dir.join("policy-report.md").display());
+    println!("  {}", artifact_path_display(out_dir, "policy-report.md"));
     println!("  ReviewCard-only policy simulation; manual candidates are not policy inputs");
 }
 
@@ -126,7 +130,7 @@ fn print_manual_candidate_handoff(
     println!("Manual candidates:");
     println!(
         "  {} (manual/advisory; not analyzer ReviewCards)",
-        out_dir.join("manual-candidates.json").display()
+        artifact_path_display(out_dir, "manual-candidates.json")
     );
     println!("  Count: {}", manual_candidates.len());
     println!(
@@ -165,11 +169,11 @@ fn print_manual_candidate_handoff(
     );
     println!(
         "  Manual repair queue: {} (copy-only; unsafe-review did not run an agent)",
-        out_dir.join("manual-repair-queue.json").display()
+        artifact_path_display(out_dir, "manual-repair-queue.json")
     );
     println!(
         "  Tokmd packet export: {} (formatting input only; tokmd was not run)",
-        out_dir.join("tokmd-packets.json").display()
+        artifact_path_display(out_dir, "tokmd-packets.json")
     );
     println!(
         "  manual candidates are advisory manual targets, not analyzer-discovered, not policy inputs, and unsafe-review did not run witnesses"
@@ -249,21 +253,24 @@ fn shell_arg(value: &str) -> String {
     }
 }
 
-fn print_first_pr_overview(output: &AnalyzeOutput, out_dir: &Path) {
+fn print_first_pr_overview(output: &AnalyzeOutput, out_dir: &Path, output_bytes: u64) {
     println!("unsafe-review first-pr");
     println!("unsafe-review wrote an advisory PR bundle.");
-    println!("- Artifact directory: {}", out_dir.display());
+    println!("- Artifact directory: {}", card_path_display(out_dir));
     println!("- Review cards: {}", output.summary.cards);
     println!(
         "- Open actionable gaps: {}",
         output.summary.open_actionable_gaps
     );
+    // Output bundle disk footprint — diagnostic only; not a coverage claim,
+    // proof, UB-free, Miri-clean, site-execution, or performance guarantee.
+    println!("- Output bundle: {output_bytes} bytes");
     println!("Open:");
-    println!("  {}", out_dir.join("pr-summary.md").display());
+    println!("  {}", artifact_path_display(out_dir, "pr-summary.md"));
     println!("Agent repair queue:");
     println!(
         "  {} (copy-only; unsafe-review did not run an agent)",
-        out_dir.join("repair-queue.json").display()
+        artifact_path_display(out_dir, "repair-queue.json")
     );
 }
 
@@ -1552,6 +1559,7 @@ pub(super) fn render_manual_candidates_artifact(
             "lsp.json": "ReviewCard-only saved editor projection; manual candidates are not emitted as analyzer diagnostics.",
             "repair-queue.json": "ReviewCard-only repair queue; manual candidates are not automatic repair tasks.",
             "receipt-audit.md": "Receipts may match manual candidate IDs as manual/advisory targets without importing them as ReviewCard witness evidence.",
+            "receipt-audit.json": "Receipts may match manual candidate IDs as manual/advisory targets without importing them as ReviewCard witness evidence.",
             "policy-report.json": "ReviewCard-only policy simulation; manual candidates are not policy gating inputs.",
             "policy-report.md": "ReviewCard-only policy simulation; manual candidates are not policy gating inputs."
         },
@@ -2397,6 +2405,7 @@ fn artifact_kind(path: &str) -> &'static str {
         "comment-plan.json" => "comment_plan",
         "witness-plan.md" => "witness_plan",
         "receipt-audit.md" => "receipt_audit",
+        "receipt-audit.json" => "receipt_audit",
         "policy-report.json" => "policy_report_json",
         "policy-report.md" => "policy_report_markdown",
         "manual-candidates.json" => "manual_candidates",
@@ -2404,6 +2413,7 @@ fn artifact_kind(path: &str) -> &'static str {
         "tokmd-packets.json" => "tokmd_packets",
         "lsp.json" => "saved_lsp",
         "repair-queue.json" => "repair_queue",
+        "usefulness-telemetry.json" => "usefulness_telemetry",
         _ => "unknown",
     }
 }
@@ -2425,12 +2435,13 @@ fn artifact_schema_version(path: &str) -> Option<&'static str> {
         // cards.json was bumped to 0.2 when provenance metadata was added.
         "cards.json" => Some("0.2"),
         "review-kit.json" | "comment-plan.json" | "lsp.json" | "repair-queue.json"
-        | "policy-report.json" => Some("0.1"),
+        | "policy-report.json" | "receipt-audit.json" => Some("0.1"),
         "unsafe-review-gate.json" => Some("unsafe-review-gate/v1"),
         "manual-candidates.json" => Some("manual-candidates/v1"),
         "manual-repair-queue.json" => Some("manual-repair-queue/v1"),
         "tokmd-packets.json" => Some("tokmd-packets/v1"),
         "cards.sarif" => Some("2.1.0"),
+        "usefulness-telemetry.json" => Some("usefulness-telemetry/v1"),
         _ => None,
     }
 }
@@ -2438,7 +2449,7 @@ fn artifact_schema_version(path: &str) -> Option<&'static str> {
 fn print_artifact_paths(out_dir: &Path, artifacts: &[&str]) {
     println!("Artifacts:");
     for name in artifacts {
-        println!("  {}", out_dir.join(name).display());
+        println!("  {}", artifact_path_display(out_dir, name));
     }
 }
 
@@ -2454,6 +2465,14 @@ fn print_trust_boundary() {
 
 fn card_path_display(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
+}
+
+/// Return a forward-slash-normalised display string for an artifact path,
+/// joining `base` and `name` exactly as the file is written on disk but
+/// normalising the separator so every `println!` surface shows `/` on all
+/// platforms.  On-disk paths and machine-readable outputs are unaffected.
+fn artifact_path_display(base: &Path, name: &str) -> String {
+    base.join(name).to_string_lossy().replace('\\', "/")
 }
 
 #[cfg(test)]
@@ -2476,6 +2495,24 @@ mod tests {
     }
 
     #[test]
+    fn usefulness_telemetry_artifact_is_classified_not_unknown() {
+        // Regression: usefulness-telemetry.json (SPEC-0038) must be a known
+        // review-kit artifact, or check-first-pr-artifacts rejects the bundle
+        // with an unknown kind. Producer kind/format/schema must match the
+        // xtask expectation (advisory_artifacts::expected_review_kit_*).
+        assert_eq!(
+            artifact_kind("usefulness-telemetry.json"),
+            "usefulness_telemetry"
+        );
+        assert_ne!(artifact_kind("usefulness-telemetry.json"), "unknown");
+        assert_eq!(artifact_format("usefulness-telemetry.json"), "json");
+        assert_eq!(
+            artifact_schema_version("usefulness-telemetry.json"),
+            Some("usefulness-telemetry/v1")
+        );
+    }
+
+    #[test]
     fn review_kit_manifest_lists_artifacts_and_boundary() -> Result<(), String> {
         let output = AnalyzeOutput {
             schema_version: "0.1".to_string(),
@@ -2493,6 +2530,8 @@ mod tests {
                 ..Default::default()
             },
             cards: Vec::new(),
+            diff_scoped_files: std::collections::BTreeSet::new(),
+            coverage_snapshot: std::collections::BTreeMap::new(),
         };
         let check = CheckOptions {
             root: Path::new("fixtures/safe_code_no_cards").to_path_buf(),
@@ -3071,6 +3110,54 @@ mod tests {
           }],
           "trust_boundary": "manual candidate; not analyzer-discovered; not witness execution; not proof of memory safety; not UB-free status; not Miri-clean status; not site-execution proof; not policy readiness"
         }"#
+    }
+
+    #[test]
+    fn artifact_path_display_normalises_separators() {
+        // On every platform the helper must produce forward slashes only.
+        // The base path is constructed with `Path::new` using a backslash-
+        // containing string so that the test exercises the replacement on
+        // platforms where `Path` does not convert separators itself.
+        let base = Path::new("C:\\Users\\smoke\\out");
+        assert_eq!(
+            artifact_path_display(base, "pr-summary.md"),
+            "C:/Users/smoke/out/pr-summary.md"
+        );
+        assert_eq!(
+            artifact_path_display(base, "repair-queue.json"),
+            "C:/Users/smoke/out/repair-queue.json"
+        );
+        assert_eq!(
+            artifact_path_display(base, "policy-report.md"),
+            "C:/Users/smoke/out/policy-report.md"
+        );
+        assert_eq!(
+            artifact_path_display(base, "manual-candidates.json"),
+            "C:/Users/smoke/out/manual-candidates.json"
+        );
+        assert_eq!(
+            artifact_path_display(base, "manual-repair-queue.json"),
+            "C:/Users/smoke/out/manual-repair-queue.json"
+        );
+        assert_eq!(
+            artifact_path_display(base, "tokmd-packets.json"),
+            "C:/Users/smoke/out/tokmd-packets.json"
+        );
+        // Verify no backslash is present in any result.
+        for name in &[
+            "pr-summary.md",
+            "repair-queue.json",
+            "policy-report.md",
+            "manual-candidates.json",
+            "manual-repair-queue.json",
+            "tokmd-packets.json",
+        ] {
+            let display = artifact_path_display(base, name);
+            assert!(
+                !display.contains('\\'),
+                "artifact_path_display({name}) produced backslash: {display}"
+            );
+        }
     }
 
     fn unique_test_root(name: &str) -> Result<std::path::PathBuf, String> {

@@ -1,11 +1,86 @@
 use crate::domain::coverage::{Coverage, WitnessReceiptCoverage};
 use crate::domain::{Confidence, OperationFamily, Priority, ReviewCard, ReviewClass};
 use crate::output::REVIEWCARD_TRUST_BOUNDARY;
-use crate::output::confirmation::{
-    build_this_first, confirmation_step, hypothesis_to_confirm, minimal_repro_comment,
-};
+use crate::output::confirmation::{build_this_first, confirmation_step, hypothesis_to_confirm};
+
+/// Importance rank used to select the best candidates within the comment-plan
+/// budget (SPEC-0022 §5, SPEC-0032).
+///
+/// Lower numeric value = higher importance. Candidates are sorted ascending
+/// before the family/obligation dedup and budget cap are applied, so the
+/// highest-importance unique card per family fills each budget slot.
+///
+/// Ranking key (descending importance):
+/// 1. Priority: `High` first (rank 0), all others rank 1.
+/// 2. Gap severity:
+///    `contract_coverage: missing` = 0
+///    `guard_coverage: missing`    = 1
+///    `guard_coverage: weak`       = 2
+///    `test_reach_coverage: weak`  = 3
+///    `test_reach_coverage: missing` = 4
+///    `witness_receipt_coverage: missing` = 5
+/// 3. Confidence: `High` first (rank 0), all others rank 1.
+/// 4. Stable tiebreak: `(file, line)` ascending — matches the global card
+///    order from `sort_cards`, so ties produce deterministic output.
+///
+/// This ranking is purely about which coverage gaps to surface first. It is
+/// not a severity claim, proof, or policy gate.
+pub(super) fn importance_rank(card: &ReviewCard) -> (u8, u8, u8, &std::path::Path, usize) {
+    let priority_rank: u8 = if matches!(card.priority, Priority::High) {
+        0
+    } else {
+        1
+    };
+    let gap_rank: u8 = gap_severity_rank(card);
+    let confidence_rank: u8 = if matches!(card.confidence, Confidence::High) {
+        0
+    } else {
+        1
+    };
+    (
+        priority_rank,
+        gap_rank,
+        confidence_rank,
+        card.site.location.file.as_path(),
+        card.site.location.line,
+    )
+}
+
+/// Numeric rank for the primary coverage gap (lower = more severe / higher importance).
+///
+/// Priority order matches `selection_reason` and `coverage_gap`:
+/// `contract_coverage: missing` → `guard_coverage: missing` →
+/// `guard_coverage: weak` → `test_reach_coverage: weak` →
+/// `test_reach_coverage: missing` → `witness_receipt_coverage: missing`.
+fn gap_severity_rank(card: &ReviewCard) -> u8 {
+    let block = card.coverage_block();
+    if block.contract_coverage != Coverage::Present {
+        return 0;
+    }
+    if block.guard_coverage == Coverage::Missing {
+        return 1;
+    }
+    if block.guard_coverage == Coverage::Weak {
+        return 2;
+    }
+    if block.test_reach_coverage == Coverage::Weak {
+        return 3;
+    }
+    if block.test_reach_coverage != Coverage::Present {
+        return 4;
+    }
+    // Witness receipt gap or fallback.
+    5
+}
 
 const PLAN_BOUNDARY: &str = "Plan boundary: artifact-only inline comment candidate; unsafe-review did not post this comment, run witnesses, or make a policy decision.";
+
+/// Maximum word count for a comment-plan comment body.
+///
+/// This bound is enforced by the producer (`comment_body`) and cross-checked by the
+/// xtask `check-first-pr-artifacts` gate. Single-sourced here so producer and gate
+/// cannot drift. Word count is computed by `str::split_whitespace().count()`.
+pub const COMMENT_BODY_WORD_LIMIT: usize = 220;
 
 #[derive(Clone, Copy)]
 pub(super) struct ReviewBudgetReason {
@@ -83,6 +158,16 @@ const NOT_SELECTED_UNKNOWN_FAMILY_REASON: ReviewBudgetReason = ReviewBudgetReaso
     code: "human_deep_review_only",
     message: "operation family unknown",
 };
+/// Applied to an owner/Unknown-family card when a more-specific operation card
+/// from the same changed region is already present. Replaces the generic
+/// `human_deep_review_only` reason for that sub-case so reviewers understand
+/// the owner card is grouped behind the operation card, not simply excluded for
+/// being unknown.
+pub(super) const NOT_SELECTED_COVERED_BY_OPERATION_CARD_REASON: ReviewBudgetReason =
+    ReviewBudgetReason {
+        code: "covered_by_specific_operation_card",
+        message: "owner-contract obligation covered by a more-specific operation card at the same region",
+    };
 const NOT_SELECTED_CONFIDENCE_REASON: ReviewBudgetReason = ReviewBudgetReason {
     code: "lower_relevance",
     message: "confidence below inline comment threshold",
@@ -120,6 +205,31 @@ pub(super) fn non_selection_reason(card: &ReviewCard) -> ReviewBudgetReason {
     } else {
         NOT_SELECTED_POLICY_FALLBACK_REASON
     }
+}
+
+/// Determine whether an owner/Unknown-family card's changed region is already
+/// covered by at least one specific (non-Unknown-family) card in `all_cards`.
+///
+/// "Same region" is defined as the same file. Owner cards (`unsafe fn` sites)
+/// span an entire function body and the specific operation cards they generate
+/// are located inside that function, so file-level co-location is the right
+/// granularity for grouping.
+///
+/// This function is used only for the `not_selected` non-selection reason; it
+/// does not change card identity, evidence counts, or structured artifacts.
+pub(super) fn owner_card_covered_by_specific_operation(
+    owner_card: &ReviewCard,
+    all_cards: &[ReviewCard],
+) -> bool {
+    if !matches!(owner_card.operation.family, OperationFamily::Unknown) {
+        return false;
+    }
+    let owner_file = &owner_card.site.location.file;
+    all_cards.iter().any(|other| {
+        !matches!(other.operation.family, OperationFamily::Unknown)
+            && other.site.changed
+            && &other.site.location.file == owner_file
+    })
 }
 
 /// Derive the primary coverage gap for a card (SPEC-0032).
@@ -235,6 +345,18 @@ pub(super) fn actionability(card: &ReviewCard) -> &'static str {
     }
 }
 
+/// Render the inline comment body for a planned comment.
+///
+/// The body is bounded to [`COMMENT_BODY_WORD_LIMIT`] words so the producer
+/// never emits a body the `check-first-pr-artifacts` gate would reject.
+///
+/// Sections are ordered by essentialness. The required sections — `Next
+/// action` and `Trust boundary` — are always present. The `Minimal repro cue`
+/// and `Witness route` sections are omitted from the body because their
+/// information is already carried by the structured fields (`minimal_repro`,
+/// `witness_routes`) in the surrounding JSON object and by `Build/run this
+/// first` and `Verify command`. Dropping them saves ~50 words without losing
+/// any actionable guidance or trust-boundary wording.
 pub(super) fn comment_body(card: &ReviewCard) -> String {
     let mut body = String::new();
     body.push_str(&format!(
@@ -255,20 +377,9 @@ pub(super) fn comment_body(card: &ReviewCard) -> String {
         build_this_first(card).summary
     ));
     body.push_str(&format!(
-        "Minimal repro cue: {}.\n\n",
-        minimal_repro_comment(card)
-    ));
-    body.push_str(&format!(
         "Confirmation step: {}\n\n",
         confirmation_step(card)
     ));
-    if let Some(route) = card.routes.first() {
-        body.push_str(&format!(
-            "Witness route: `{}` because {}.\n\n",
-            route.kind.as_str(),
-            route.reason
-        ));
-    }
     if let Some(command) = card.next_action.verify_commands.first() {
         body.push_str(&format!("Verify command: `{command}`\n\n"));
     }

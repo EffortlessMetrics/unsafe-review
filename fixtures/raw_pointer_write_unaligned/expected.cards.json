@@ -148,7 +148,7 @@
       "Missing visible local guard for inferred safety obligations",
       "No witness receipt imported for this card"
     ],
-    "next_action": "Add or expose the local guard that discharges the `raw_pointer_write_unaligned` safety obligation.",
+    "next_action": "Add or expose local guards for these `raw_pointer_write_unaligned` safety obligations: (1) pointer is live and dereferenceable for the accessed type, (2) memory is initialized for the accessed type, (3) access remains inside one live allocation.",
     "verify_commands": [
       "cargo +nightly miri test write_unaligned_header",
       "cargo +nightly careful test write_unaligned_header"
@@ -185,7 +185,7 @@
       "manual_context": "absent",
       "baseline_state": "new",
       "outcome_movement": "regressed",
-      "comment_plan_status": "not_eligible",
+      "comment_plan_status": "selected",
       "agent_lsp_readiness": "ready"
     }
   }

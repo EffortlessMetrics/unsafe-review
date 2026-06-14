@@ -3,6 +3,7 @@ use crate::command::{
     CandidateImportOptions, CandidateLintOptions, CandidateListOptions, CandidateNewOptions,
     CandidateWitnessPlanOptions, CheckOptions, Command, ContextQuery, DiffInput, FirstPrOptions,
     Format, OutcomeOptions, ReceiptTemplateOptions, RepoOptions, SavedOutputReceiptOptions,
+    SubcommandHelpTarget,
 };
 #[cfg(unix)]
 use signal_hook::consts::signal::{SIGINT, SIGTERM};
@@ -20,17 +21,19 @@ use unsafe_review_core::{
     AnalysisMode, AnalyzeInput, AnalyzeOutput, CardId, CargoCarefulReceiptInput,
     ConcurrencyReceiptInput, DiffSource, DiscoveryOptions, MiriReceiptInput, PolicyMode,
     ProofReceiptInput, Provenance, RepoScanEvent, RepoScanPhase, RepoScanStatus, RepoStopReason,
-    SanitizerReceiptInput, Scope, WITNESS_RECEIPT_SCHEMA_VERSION, WitnessReceipt, analyze,
-    analyze_with_discovery, analyze_with_discovery_and_repo_events, audit_witness_receipts,
-    baseline_add, baseline_init, collect_context_range, compare_outcome_json, discover_repo_files,
-    evaluate_policy_report, evaluate_policy_report_from_output, lint_manual_candidate_text,
-    load_manual_candidates, manual_candidate_implementer_handoff, new_manual_candidate_skeleton,
-    read_manual_candidate, render_badge_jsons, render_comment_plan, render_gate_manifest,
+    SanitizerReceiptInput, ScanCost, Scope, WITNESS_RECEIPT_SCHEMA_VERSION, WitnessReceipt,
+    analyze, analyze_with_discovery, analyze_with_discovery_and_repo_events,
+    audit_witness_receipts, baseline_add, baseline_init, collect_context_range,
+    compare_outcome_json, discover_repo_files, evaluate_policy_report,
+    evaluate_policy_report_from_output, lint_manual_candidate_text, load_manual_candidates,
+    manual_candidate_implementer_handoff, new_manual_candidate_skeleton, read_manual_candidate,
+    render_badge_jsons, render_comment_plan, render_gate_manifest, render_gate_manifest_repo,
     render_github_summary, render_human, render_json, render_json_with_provenance, render_lsp,
     render_manual_candidate_witness_plan, render_markdown, render_outcome_json,
     render_outcome_markdown, render_policy_report_json, render_policy_report_markdown,
     render_pr_summary, render_receipt_audit_json, render_receipt_audit_markdown,
-    render_repair_queue, render_sarif, render_witness_plan, validate_witness_receipts,
+    render_repair_queue, render_sarif, render_usefulness_telemetry_with_cost, render_witness_plan,
+    validate_witness_receipts,
 };
 
 mod card_lookup;
@@ -46,11 +49,13 @@ type FirstPrRenderer = fn(&AnalyzeOutput) -> String;
 const REVIEW_KIT_ARTIFACT: &str = "review-kit.json";
 const GATE_MANIFEST_ARTIFACT: &str = "unsafe-review-gate.json";
 const RECEIPT_AUDIT_ARTIFACT: &str = "receipt-audit.md";
+const RECEIPT_AUDIT_JSON_ARTIFACT: &str = "receipt-audit.json";
 const POLICY_REPORT_JSON_ARTIFACT: &str = "policy-report.json";
 const POLICY_REPORT_MARKDOWN_ARTIFACT: &str = "policy-report.md";
 const MANUAL_CANDIDATES_ARTIFACT: &str = "manual-candidates.json";
 const MANUAL_REPAIR_QUEUE_ARTIFACT: &str = "manual-repair-queue.json";
 const TOKMD_PACKETS_ARTIFACT: &str = "tokmd-packets.json";
+const USEFULNESS_TELEMETRY_ARTIFACT: &str = "usefulness-telemetry.json";
 const FIRST_PR_RENDERED_ARTIFACTS: [(&str, FirstPrRenderer); 8] = [
     ("cards.json", render_json),
     ("pr-summary.md", render_pr_summary),
@@ -61,7 +66,7 @@ const FIRST_PR_RENDERED_ARTIFACTS: [(&str, FirstPrRenderer); 8] = [
     ("lsp.json", render_lsp),
     ("repair-queue.json", render_repair_queue),
 ];
-const FIRST_PR_ARTIFACTS: [&str; 16] = [
+const FIRST_PR_ARTIFACTS: [&str; 18] = [
     REVIEW_KIT_ARTIFACT,
     GATE_MANIFEST_ARTIFACT,
     "cards.json",
@@ -71,11 +76,13 @@ const FIRST_PR_ARTIFACTS: [&str; 16] = [
     "comment-plan.json",
     "witness-plan.md",
     RECEIPT_AUDIT_ARTIFACT,
+    RECEIPT_AUDIT_JSON_ARTIFACT,
     POLICY_REPORT_JSON_ARTIFACT,
     POLICY_REPORT_MARKDOWN_ARTIFACT,
     MANUAL_CANDIDATES_ARTIFACT,
     MANUAL_REPAIR_QUEUE_ARTIFACT,
     TOKMD_PACKETS_ARTIFACT,
+    USEFULNESS_TELEMETRY_ARTIFACT,
     "lsp.json",
     "repair-queue.json",
 ];
@@ -96,6 +103,10 @@ pub(crate) fn execute(command: Command) -> Result<(), crate::RunFailure> {
         }
         Command::BaselineHelp => {
             print_baseline_help();
+            Ok(())
+        }
+        Command::SubcommandHelp(target) => {
+            print_subcommand_help(target);
             Ok(())
         }
         Command::Version => {
@@ -283,12 +294,48 @@ fn run_repo_check(options: RepoOptions) -> Result<(), crate::RunFailure> {
     let rendered = render_with_format_and_provenance(&output, &check.format, Some(&provenance));
     if let Some(path) = report_path {
         let partial = repo_partial_path(&path);
-        if let Err(err) = write_repo_report(&path, &partial, rendered) {
-            return Err(crate::RunFailure::Tool(repo_incomplete_error(
-                &mut reporter,
-                &err,
-                Some(&partial),
-            )));
+        let output_bytes = match write_repo_report(&path, &partial, rendered) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                return Err(crate::RunFailure::Tool(repo_incomplete_error(
+                    &mut reporter,
+                    &err,
+                    Some(&partial),
+                )));
+            }
+        };
+        // Stamp the output byte count into the status sidecar now that the final
+        // report has been written.  Errors here are non-fatal — the report is
+        // already safely written; we surface the warning but do not fail the run.
+        if let Err(err) = reporter.record_final_output_bytes(output_bytes) {
+            eprintln!(
+                "unsafe-review repo: warning: failed to update output_bytes in status sidecar: {err}"
+            );
+        }
+        // Emit the gate manifest (SPEC-0034 parity with first-pr).
+        // The manifest goes in the same directory as the main report, named
+        // `unsafe-review-gate.json`.  The `cards` artifact pointer is the
+        // basename of the report file so consumers can locate the ReviewCard
+        // dataset relative to the manifest.  Errors are non-fatal: the report
+        // is already written; we surface the warning but do not fail the run.
+        // The manifest is advisory posture only — not a merge verdict, not
+        // proof, not UB-free/Miri-clean/site-execution.
+        let report_filename = path
+            .file_name()
+            .map(|n| n.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_else(|| path.to_string_lossy().replace('\\', "/"));
+        let gate_manifest_path = path
+            .parent()
+            .map(|dir| dir.join(GATE_MANIFEST_ARTIFACT))
+            .unwrap_or_else(|| std::path::PathBuf::from(GATE_MANIFEST_ARTIFACT));
+        if let Err(err) = write_artifact(
+            &gate_manifest_path,
+            render_gate_manifest_repo(&output, &report_filename),
+        ) {
+            eprintln!(
+                "unsafe-review repo: warning: failed to write {}: {err}",
+                gate_manifest_path.display()
+            );
         }
     } else {
         println!("{rendered}");
@@ -646,6 +693,13 @@ impl RepoStatusReporter {
     }
 
     fn timed_out(&self, status: &RepoScanStatus) -> bool {
+        // A capped scan (stop_reason == MaxCards) is a terminal success, not a
+        // timeout, even if the timeout clock has elapsed by the time the final
+        // capped event arrives.  Only treat a non-terminal, non-capped status as
+        // timed-out to avoid misreporting a successful max-cards run as timeout.
+        if status.stop_reason == RepoStopReason::MaxCards {
+            return false;
+        }
         !status.completed
             && self
                 .timeout
@@ -665,6 +719,30 @@ impl RepoStatusReporter {
             .ok()
             .and_then(|guard| guard.as_ref().map(|s| s.files_discovered))
             .unwrap_or(0)
+    }
+
+    /// Stamp the output byte count into the last-known status and re-write the
+    /// status sidecar.  Called once, after the final report file is successfully
+    /// written.  No-op when no `--out` path was given (stdout-only runs).
+    ///
+    /// The byte count is the disk footprint of this run's output artifact —
+    /// diagnostic only, not a coverage claim, proof, UB-free, Miri-clean,
+    /// site-execution, or performance guarantee.
+    fn record_final_output_bytes(&mut self, output_bytes: u64) -> Result<(), String> {
+        let Some(path) = self.status_path.clone() else {
+            return Ok(());
+        };
+        let mut last_status = self
+            .last_status
+            .lock()
+            .map_err(|err| format!("repo status lock poisoned: {err}"))?;
+        let Some(ref mut status) = *last_status else {
+            return Ok(());
+        };
+        status.output_bytes = Some(output_bytes);
+        ensure_parent_dir(&path)?;
+        fs::write(&path, render_repo_scan_status(status, &self.scan_scope)?)
+            .map_err(|err| format!("write {} failed: {err}", path.display()))
     }
 }
 
@@ -855,6 +933,21 @@ fn render_repo_scan_status(
     } else {
         ("complete", false, status.stop_reason.as_str())
     };
+    // Render per-file timings when present.  The field is absent (null) for
+    // large scans (>= FILE_TIMINGS_CAP files) — truncation honesty: we do not
+    // silently emit a partial list.  Diagnostic only; not a proof, coverage
+    // claim, UB-free, Miri-clean, site-execution, or performance guarantee.
+    let file_timings_json = status.file_timings.as_ref().map(|timings| {
+        timings
+            .iter()
+            .map(|entry| {
+                serde_json::json!({
+                    "file": repo_path_display(&entry.file),
+                    "scan_ms": entry.scan_ms,
+                })
+            })
+            .collect::<Vec<_>>()
+    });
     let value = serde_json::json!({
         "schema_version": status.schema_version.as_str(),
         "phase": status.phase.as_str(),
@@ -869,6 +962,12 @@ fn render_repo_scan_status(
         "partial": partial,
         "stop_reason": stop_reason,
         "cap": status.cap,
+        "file_timings": file_timings_json,
+        // Total bytes written to the output artifact for this run.  Present only
+        // when the final report was successfully written; null otherwise.
+        // Diagnostic aperture only — not a coverage claim, proof, UB-free,
+        // Miri-clean, site-execution, or performance guarantee.
+        "output_bytes": status.output_bytes,
         "error": null,
         "signal": null,
         "partial_path": null,
@@ -905,6 +1004,11 @@ fn render_repo_scan_incomplete_status(
         "partial": true,
         "stop_reason": stop_reason.as_str(),
         "cap": null,
+        // Per-file timings are not available in incomplete/error states; the field
+        // is null rather than a partial list (truncation honesty).
+        "file_timings": serde_json::Value::Null,
+        // No output artifact was produced for an incomplete scan.
+        "output_bytes": serde_json::Value::Null,
         "error": error,
         "signal": null,
         "partial_path": partial_path.map(|path| path.display().to_string()),
@@ -941,6 +1045,11 @@ fn render_repo_scan_interrupted_status(
         "partial": true,
         "stop_reason": RepoStopReason::Terminated.as_str(),
         "cap": null,
+        // Per-file timings are not available in signal-interrupted states; the field
+        // is null rather than a partial list (truncation honesty).
+        "file_timings": serde_json::Value::Null,
+        // No output artifact was produced for a signal-interrupted scan.
+        "output_bytes": serde_json::Value::Null,
         "error": format!("repo scan interrupted by {signal_name}"),
         "signal": signal_name,
         "partial_path": partial_path.map(|path| path.display().to_string()),
@@ -971,6 +1080,10 @@ fn write_scan_start_stub(
         "partial": false,
         "stop_reason": "none",
         "cap": serde_json::Value::Null,
+        // Per-file timings are not available in the pre-discovery start stub.
+        "file_timings": serde_json::Value::Null,
+        // No output artifact has been produced yet at start-stub time.
+        "output_bytes": serde_json::Value::Null,
         "error": serde_json::Value::Null,
         "signal": serde_json::Value::Null,
         "partial_path": serde_json::Value::Null,
@@ -990,17 +1103,35 @@ fn repo_status_operator_json(
     cap: Option<usize>,
 ) -> serde_json::Value {
     let partial_report_available = partial_path.is_some();
-    let partial_report_limitation = match (state, partial_report_available) {
+    // Operational routing flag: true when a consumer (ub-review / agent / CI) can
+    // safely ingest the scan output without further disambiguation.  A complete scan
+    // and a max-cards capped scan both produce a usable report; in-progress, failed,
+    // and terminated states do not.  This is routing metadata only — it is not a
+    // memory-safety, UB-free, Miri-clean, site-execution, calibrated, or proof claim.
+    let downstream_consumable = matches!(state, "complete" | "capped");
+    // `partial_report_limitation` uses card-level wording for the capped arm
+    // (all files were scanned; only the card list is truncated to `--max-cards`)
+    // and file-level wording only for genuinely file-truncated paths.
+    let partial_report_limitation: String = match (state, partial_report_available) {
         ("complete", _) => {
-            "No partial report is retained after a successful scan; use the final report for the recorded scan scope."
+            "No partial report is retained after a successful scan; use the final report for the recorded scan scope.".to_string()
         }
-        ("capped", _) => "Completed-file snapshot only; not complete repo posture.",
+        ("capped", _) => {
+            // All files were scanned; the card list was truncated at the cap.
+            // This is not file-level truncation — no files were skipped.
+            match cap {
+                Some(n) => format!(
+                    "All files scanned; card list truncated to --max-cards (cap={n})."
+                ),
+                None => "All files scanned; card list truncated to --max-cards cap.".to_string(),
+            }
+        }
         ("in_progress", _) => {
-            "No partial report is retained; the scan has not yet produced output."
+            "No partial report is retained; the scan has not yet produced output.".to_string()
         }
-        (_, true) => "Completed-file snapshot only; not complete repo posture.",
+        (_, true) => "Completed-file snapshot only; not complete repo posture.".to_string(),
         _ => {
-            "No completed-file partial report was retained; the status sidecar is the durable incomplete-scan artifact."
+            "No completed-file partial report was retained; the status sidecar is the durable incomplete-scan artifact.".to_string()
         }
     };
     let next_action = match (state, partial_report_available) {
@@ -1029,6 +1160,7 @@ fn repo_status_operator_json(
     };
     let mut obj = serde_json::json!({
         "state": state,
+        "downstream_consumable": downstream_consumable,
         "partial_report_available": partial_report_available,
         "partial_report_limitation": partial_report_limitation,
         "next_action": next_action,
@@ -1092,8 +1224,12 @@ fn out_with_suffix(out: &Path, suffix: &str) -> PathBuf {
     }
 }
 
-fn write_repo_report(path: &Path, partial_path: &Path, rendered: String) -> Result<(), String> {
+/// Write the final repo report via write-then-rename, returning the number of
+/// bytes written.  The byte count is the disk footprint of this run's output
+/// artifact — diagnostic only, not a coverage or safety claim.
+fn write_repo_report(path: &Path, partial_path: &Path, rendered: String) -> Result<u64, String> {
     ensure_parent_dir(partial_path)?;
+    let byte_count = rendered.len() as u64;
     fs::write(partial_path, rendered).map_err(|err| {
         format!(
             "write partial repo report {} failed: {err}",
@@ -1107,7 +1243,7 @@ fn write_repo_report(path: &Path, partial_path: &Path, rendered: String) -> Resu
             path.display()
         )
     })?;
-    Ok(())
+    Ok(byte_count)
 }
 
 fn repo_incomplete_error(
@@ -1203,12 +1339,105 @@ fn maybe_exit_for_repo_stub_test() {
 #[cfg(not(debug_assertions))]
 fn maybe_exit_for_repo_stub_test() {}
 
+/// Detect the git repository root that contains `start_dir`.
+///
+/// Runs `git rev-parse --show-toplevel` in `start_dir`.  Returns the
+/// repository root as an absolute path, or an actionable error naming the
+/// exact command to run instead.
+fn detect_git_root(start_dir: &Path) -> Result<PathBuf, String> {
+    let output = ProcessCommand::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(start_dir)
+        .output()
+        .map_err(|err| {
+            format!(
+                "failed to run git: {err}. \
+                 Run `unsafe-review first-pr --root <repo> --base <ref>` to supply the paths explicitly."
+            )
+        })?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "could not detect a git repository in the current directory ({}).\n\
+             Run `unsafe-review first-pr --root <repo> --base <ref>` to supply them explicitly.",
+            stderr.trim()
+        ));
+    }
+    let root = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok(PathBuf::from(root))
+}
+
+/// Detect a sensible default base ref for `unsafe-review pr` in `repo_root`.
+///
+/// Resolution order:
+/// 1. Try `origin/HEAD` — run `git symbolic-ref refs/remotes/origin/HEAD` and
+///    strip the `refs/remotes/` prefix (e.g. `origin/main`).
+/// 2. Try whether `origin/main` exists via `git rev-parse --verify origin/main`.
+/// 3. Try whether `origin/master` exists via `git rev-parse --verify origin/master`.
+///
+/// If none resolve, return an actionable error naming `--base`.
+fn detect_default_base(repo_root: &Path) -> Result<String, String> {
+    // Step 1: try origin/HEAD symbolic ref.
+    let sym_output = ProcessCommand::new("git")
+        .args(["symbolic-ref", "refs/remotes/origin/HEAD"])
+        .current_dir(repo_root)
+        .output();
+    if let Ok(out) = sym_output
+        && out.status.success()
+    {
+        let target = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        // target looks like "refs/remotes/origin/main"; strip "refs/remotes/"
+        let base = target
+            .strip_prefix("refs/remotes/")
+            .unwrap_or(&target)
+            .to_string();
+        if !base.is_empty() {
+            return Ok(base);
+        }
+    }
+    // Step 2: try origin/main, then origin/master.
+    for candidate in ["origin/main", "origin/master"] {
+        let verify_output = ProcessCommand::new("git")
+            .args(["rev-parse", "--verify", candidate])
+            .current_dir(repo_root)
+            .output();
+        if let Ok(out) = verify_output
+            && out.status.success()
+        {
+            return Ok(candidate.to_string());
+        }
+    }
+    Err(
+        "could not detect a default base ref (tried origin/HEAD, origin/main, origin/master).\n\
+         Run `unsafe-review pr --base <ref>` or `unsafe-review first-pr --base <ref>` \
+         and pass a branch, tag, or commit SHA that exists in the repository \
+         (e.g. --base origin/main)."
+            .to_string(),
+    )
+}
+
 fn first_pr(options: FirstPrOptions) -> Result<(), String> {
     let mut check = options.check;
     check.policy = PolicyMode::Advisory;
+    // When the caller requested auto-detection (i.e. `unsafe-review pr` with no
+    // explicit --root/--base/--diff), resolve the git root and default base ref
+    // from the current working directory.  This happens in execute, not parse,
+    // so parse only ever sees the user-supplied arguments.
+    if options.auto_detect {
+        let cwd = std::env::current_dir()
+            .map_err(|err| format!("could not read current directory: {err}"))?;
+        let detected_root = detect_git_root(&cwd)?;
+        let detected_base = detect_default_base(&detected_root)?;
+        check.root = detected_root;
+        check.base = Some(detected_base);
+    }
     let provenance = build_provenance(&check);
     let diff = diff_source(&check)?;
     let root = check.root.clone();
+    // Start wall-clock timer before analysis — used to populate scan_cost in
+    // usefulness-telemetry.json (SPEC-0038 §scan_cost).  Core must not measure
+    // wall time; this is the only place where an Instant is allowed for this purpose.
+    let scan_started = Instant::now();
     let output = analyze(AnalyzeInput {
         root: root.clone(),
         scope: Scope::Diff,
@@ -1232,6 +1461,11 @@ fn first_pr(options: FirstPrOptions) -> Result<(), String> {
 
     fs::create_dir_all(&options.out_dir)
         .map_err(|err| format!("create {} failed: {err}", options.out_dir.display()))?;
+    // Accumulate bytes written across all artifact writes.  The total is
+    // the disk footprint of this run's output bundle — diagnostic only,
+    // not a coverage claim, proof, UB-free, Miri-clean, site-execution, or
+    // performance guarantee.
+    let mut output_bytes: u64 = 0;
     let mut comment_plan_artifact = None;
     for (name, renderer) in FIRST_PR_RENDERED_ARTIFACTS {
         // cards.json uses the provenance-aware renderer to emit schema 0.2.
@@ -1249,29 +1483,33 @@ fn first_pr(options: FirstPrOptions) -> Result<(), String> {
         if name == "comment-plan.json" {
             comment_plan_artifact = Some(rendered.clone());
         }
-        write_artifact(&options.out_dir.join(name), rendered)?;
+        output_bytes += write_artifact(&options.out_dir.join(name), rendered)?;
     }
-    write_artifact(
+    output_bytes += write_artifact(
         &options.out_dir.join(RECEIPT_AUDIT_ARTIFACT),
         render_receipt_audit_markdown(&receipt_audit),
     )?;
-    write_artifact(
+    output_bytes += write_artifact(
+        &options.out_dir.join(RECEIPT_AUDIT_JSON_ARTIFACT),
+        render_receipt_audit_json(&receipt_audit),
+    )?;
+    output_bytes += write_artifact(
         &options.out_dir.join(POLICY_REPORT_JSON_ARTIFACT),
         render_policy_report_json(&policy_report),
     )?;
-    write_artifact(
+    output_bytes += write_artifact(
         &options.out_dir.join(POLICY_REPORT_MARKDOWN_ARTIFACT),
         render_policy_report_markdown(&policy_report),
     )?;
-    write_artifact(
+    output_bytes += write_artifact(
         &options.out_dir.join(MANUAL_CANDIDATES_ARTIFACT),
         first_pr::render_manual_candidates_artifact(&root, &manual_candidates),
     )?;
-    write_artifact(
+    output_bytes += write_artifact(
         &options.out_dir.join(MANUAL_REPAIR_QUEUE_ARTIFACT),
         first_pr::render_manual_repair_queue_artifact(&root, &manual_candidates),
     )?;
-    write_artifact(
+    output_bytes += write_artifact(
         &options.out_dir.join(TOKMD_PACKETS_ARTIFACT),
         first_pr::render_tokmd_packets_artifact(
             &root,
@@ -1279,7 +1517,7 @@ fn first_pr(options: FirstPrOptions) -> Result<(), String> {
             comment_plan_artifact.as_deref(),
         ),
     )?;
-    write_artifact(
+    output_bytes += write_artifact(
         &options.out_dir.join(REVIEW_KIT_ARTIFACT),
         first_pr::render_review_kit_manifest(
             &output,
@@ -1289,9 +1527,23 @@ fn first_pr(options: FirstPrOptions) -> Result<(), String> {
             &FIRST_PR_ARTIFACTS,
         ),
     )?;
-    write_artifact(
+    output_bytes += write_artifact(
         &options.out_dir.join(GATE_MANIFEST_ARTIFACT),
         render_gate_manifest(&output),
+    )?;
+    // Build scan_cost for the telemetry injection.  elapsed_ms is measured here
+    // (after all other artifacts are written); output_bytes at this point is the
+    // subtotal excluding the telemetry file itself (it cannot include its own
+    // size because it is rendered before being written).
+    // Diagnostic only — not a coverage claim, proof, UB-free, Miri-clean,
+    // site-execution, or performance guarantee.
+    let scan_cost = ScanCost {
+        elapsed_ms: scan_started.elapsed().as_millis() as u64,
+        output_bytes_total: output_bytes,
+    };
+    output_bytes += write_artifact(
+        &options.out_dir.join(USEFULNESS_TELEMETRY_ARTIFACT),
+        render_usefulness_telemetry_with_cost(&output, Some(&scan_cost)),
     )?;
 
     first_pr::print_first_pr_report(first_pr::FirstPrReport {
@@ -1303,6 +1555,7 @@ fn first_pr(options: FirstPrOptions) -> Result<(), String> {
         no_changed_gaps_message: NO_CHANGED_GAPS_MESSAGE,
         no_changed_gaps_limitation: NO_CHANGED_GAPS_LIMITATION,
         artifacts: &FIRST_PR_ARTIFACTS,
+        output_bytes,
     });
 
     Ok(())
@@ -1334,9 +1587,15 @@ fn enforce_policy(output: &unsafe_review_core::AnalyzeOutput) -> Result<(), crat
     }
 }
 
-fn write_artifact(path: &Path, rendered: String) -> Result<(), String> {
+/// Write a single artifact file, returning the number of bytes written.
+/// The byte count contributes to the run's total output footprint telemetry —
+/// diagnostic only, not a coverage claim, proof, UB-free, Miri-clean,
+/// site-execution, or performance guarantee.
+fn write_artifact(path: &Path, rendered: String) -> Result<u64, String> {
     ensure_parent_dir(path)?;
-    fs::write(path, rendered).map_err(|err| format!("write {} failed: {err}", path.display()))
+    let byte_count = rendered.len() as u64;
+    fs::write(path, rendered).map_err(|err| format!("write {} failed: {err}", path.display()))?;
+    Ok(byte_count)
 }
 
 fn diff_source(options: &CheckOptions) -> Result<DiffSource, String> {
@@ -1354,16 +1613,37 @@ fn diff_source(options: &CheckOptions) -> Result<DiffSource, String> {
             .output()
             .map_err(|err| format!("failed to run git diff: {err}"))?;
         if !output.status.success() {
-            return Err(format!(
-                "git diff failed: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            ));
+            let git_stderr = String::from_utf8_lossy(&output.stderr);
+            let git_stderr = git_stderr.trim();
+            return Err(git_ref_error(base, git_stderr));
         }
         return Ok(DiffSource::Text(
             String::from_utf8_lossy(&output.stdout).into_owned(),
         ));
     }
     Ok(DiffSource::NoneRepoScan)
+}
+
+/// Format a `git diff` failure into an actionable error message.
+///
+/// When git stderr contains well-known "unknown revision" phrases we add a hint
+/// that names the bad ref and suggests valid alternatives.  The original git
+/// message is always preserved so power users retain the full detail.
+fn git_ref_error(base: &str, git_stderr: &str) -> String {
+    let is_ref_error = git_stderr.contains("unknown revision")
+        || git_stderr.contains("ambiguous argument")
+        || git_stderr.contains("bad revision")
+        || git_stderr.contains("not a tree object")
+        || git_stderr.contains("does not exist");
+    if is_ref_error {
+        format!(
+            "base ref '{base}' could not be resolved by git ({git_stderr}). \
+             Pass a branch, tag, or commit SHA that exists in the repository \
+             (e.g. --base origin/main), or supply --diff <file> instead."
+        )
+    } else {
+        format!("git diff failed: {git_stderr}")
+    }
 }
 
 fn read_stdin_diff() -> Result<DiffSource, String> {
@@ -1798,6 +2078,12 @@ fn candidate_import(options: CandidateImportOptions) -> Result<(), String> {
 }
 
 fn candidate_list(options: CandidateListOptions) -> Result<(), String> {
+    if !options.root.is_dir() {
+        return Err(format!(
+            "root {} is not a directory",
+            options.root.display()
+        ));
+    }
     let candidates = load_manual_candidates(&options.root)?;
     let rendered = match options.format {
         Format::Json => render_candidate_list_json(&options.root, &candidates)?,
@@ -2198,6 +2484,9 @@ fn receipt_template(options: ReceiptTemplateOptions) -> Result<(), String> {
 }
 
 fn receipt_validate(root: &Path) -> Result<(), String> {
+    if !root.is_dir() {
+        return Err(format!("root {} is not a directory", root.display()));
+    }
     let count = validate_witness_receipts(root.to_path_buf())?;
     println!("witness receipts: {count} valid");
     Ok(())
@@ -2438,6 +2727,20 @@ fn run_baseline_init(options: BaselineInitOptions) -> Result<(), String> {
     )?;
     println!("baseline init: ok");
     println!("captured: {} open actionable card(s)", result.captured);
+    if !result.cards.is_empty() {
+        println!("debt scope:");
+        for card in &result.cards {
+            let file = repo_path_display(&card.site.location.file);
+            let line = card.site.location.line;
+            let family = card.operation.family.as_str();
+            let hazards: Vec<&str> = card.hazards.iter().map(|h| h.as_str()).collect();
+            let hazard_list = hazards.join(", ");
+            println!(
+                "  {}  {}:{}  {}  [{}]",
+                card.id.0, file, line, family, hazard_list
+            );
+        }
+    }
     println!("ledger: {}", result.ledger_path.display());
     println!("snapshot: {}", result.snapshot_path.display());
     if result.ledger_existed {
@@ -2483,6 +2786,389 @@ fn run_baseline_add(options: BaselineAddOptions) -> Result<(), String> {
         "trust boundary: baseline entries are debt records, not safety records. Adding a card to the baseline records that the gap pre-existed; it does not prove memory safety, UB-free status, Miri-clean status, or that the unsafe site executed safely."
     );
     Ok(())
+}
+
+fn print_subcommand_help(target: SubcommandHelpTarget) {
+    match target {
+        SubcommandHelpTarget::Check => print_check_help(),
+        SubcommandHelpTarget::FirstPr => print_first_pr_help(),
+        SubcommandHelpTarget::Pilot => print_pilot_help(),
+        SubcommandHelpTarget::Explain => print_explain_help(),
+        SubcommandHelpTarget::Context => print_context_help(),
+        SubcommandHelpTarget::Confirm => print_confirm_help(),
+        SubcommandHelpTarget::Receipt => print_receipt_help(),
+        SubcommandHelpTarget::Outcome => print_outcome_help(),
+        SubcommandHelpTarget::Policy => print_policy_help(),
+        SubcommandHelpTarget::Doctor => print_doctor_help(),
+        SubcommandHelpTarget::Badges => print_badges_help(),
+        SubcommandHelpTarget::Lsp => print_lsp_help(),
+        SubcommandHelpTarget::Support => print_support(),
+    }
+}
+
+fn print_check_help() {
+    println!("unsafe-review check: advisory diff-scoped unsafe contract review");
+    println!();
+    println!("Usage:");
+    println!(
+        "  unsafe-review check [--root .] [--base <ref> | --diff <file|->] \
+         [--format human|json|markdown|pr-summary|github-summary|sarif|comment-plan|lsp|witness-plan] \
+         [--policy advisory|no-new-debt] [--out <file>] [--max-cards <N>]"
+    );
+    println!();
+    println!("Options:");
+    println!(
+        "- --root <dir>     repository or subdirectory to review (default: current directory)"
+    );
+    println!("- --base <ref>     git ref to diff against HEAD; e.g. origin/main");
+    println!("- --diff <file|->  read a unified diff from a file or stdin (-)");
+    println!(
+        "- --format <name>  output format: human (default), json, markdown, pr-summary, github-summary, sarif, comment-plan, lsp, or witness-plan"
+    );
+    println!(
+        "- --policy <name>  advisory (default, exit 0) or no-new-debt (exit 1 for new/worsened gaps)"
+    );
+    println!("- --out <file>     write rendered output to a file instead of stdout");
+    println!("- --max-cards <N>  stop collecting after N cards");
+    println!("- --json           shorthand for --format json");
+    println!("- --markdown       shorthand for --format markdown");
+    println!();
+    println!("Examples:");
+    println!("  unsafe-review check --base origin/main");
+    println!("  unsafe-review check --diff change.diff --format json --out target/cards.json");
+    println!("  unsafe-review check --diff - --format sarif < patch.diff");
+    println!("  unsafe-review check --base origin/main --policy no-new-debt");
+    println!();
+    println!("Trust boundary: {FIRST_RUN_TRUST_BOUNDARY}");
+}
+
+fn print_first_pr_help() {
+    println!("unsafe-review first-pr: write a full advisory PR artifact bundle");
+    println!();
+    println!("Usage:");
+    println!(
+        "  unsafe-review first-pr [--root .] [--base origin/main | --diff <file|->] \
+         [--out-dir target/unsafe-review] [--max-cards <N>]"
+    );
+    println!();
+    println!("  review   alias for first-pr");
+    println!();
+    println!("What first-pr writes:");
+    println!("- cards.json, pr-summary.md, github-summary.md, cards.sarif, comment-plan.json,");
+    println!(
+        "  witness-plan.md, lsp.json, repair-queue.json, receipt-audit.md, receipt-audit.json,"
+    );
+    println!("  policy-report.json, policy-report.md, manual-candidates.json,");
+    println!(
+        "  manual-repair-queue.json, tokmd-packets.json, review-kit.json, unsafe-review-gate.json"
+    );
+    println!();
+    println!("Options:");
+    println!("- --root <dir>    repository or subdirectory to review (default: current directory)");
+    println!("- --base <ref>    git ref to diff against HEAD (default: origin/main)");
+    println!("- --diff <file|-> read diff from a file or stdin instead of --base");
+    println!("- --out-dir <dir> directory for all artifacts (default: target/unsafe-review)");
+    println!("- --max-cards <N> stop collecting after N cards");
+    println!();
+    println!("Examples:");
+    println!("  unsafe-review first-pr");
+    println!("  unsafe-review first-pr --diff change.diff --out-dir target/review");
+    println!("  unsafe-review review --base origin/main --max-cards 20");
+    println!();
+    println!("Trust boundary: always advisory; {FIRST_RUN_TRUST_BOUNDARY}");
+    println!(
+        "unsafe-review does not execute witnesses, post comments, edit source, or enforce blocking policy by default."
+    );
+}
+
+fn print_pilot_help() {
+    println!("unsafe-review pilot: quick diff review capped at 5 cards");
+    println!();
+    println!("Usage:");
+    println!("  unsafe-review pilot [--root .] [--base <ref> | --diff <file|->] [--max-cards <N>]");
+    println!();
+    println!("What pilot does:");
+    println!(
+        "- Same diff-scoped analysis as `check`, but defaults --max-cards to 5 for a fast first look."
+    );
+    println!("- Accepts all `check` flags except --policy (always advisory) and --out.");
+    println!();
+    println!("Examples:");
+    println!("  unsafe-review pilot --base origin/main");
+    println!("  unsafe-review pilot --diff change.diff --format json");
+    println!("  unsafe-review pilot --base origin/main --max-cards 10");
+    println!();
+    println!("Trust boundary: {FIRST_RUN_TRUST_BOUNDARY}");
+}
+
+fn print_explain_help() {
+    println!("unsafe-review explain: show full detail for a single ReviewCard");
+    println!();
+    println!("Usage:");
+    println!("  unsafe-review explain [--root .] [--format json|markdown] <card-id>");
+    println!();
+    println!("Options:");
+    println!("- --root <dir>    repository root (default: current directory)");
+    println!("- --format <name> json (default) or markdown");
+    println!("- --json          shorthand for --format json");
+    println!("- --markdown      shorthand for --format markdown");
+    println!();
+    println!("Examples:");
+    println!("  unsafe-review explain UR-abc123-c1");
+    println!("  unsafe-review explain --format markdown UR-abc123-c1");
+    println!("  unsafe-review explain --json --root /path/to/repo UR-abc123-c1");
+    println!();
+    println!("Trust boundary: {FIRST_RUN_TRUST_BOUNDARY}");
+}
+
+fn print_context_help() {
+    println!("unsafe-review context: emit an LLM-ready context packet for a card or file range");
+    println!();
+    println!("Usage:");
+    println!("  unsafe-review context [--root .] [--json] <card-id>");
+    println!(
+        "  unsafe-review context [--root .] --file <path> --lines Y-Z [--changed-only] --json"
+    );
+    println!();
+    println!("Options:");
+    println!("- --root <dir>      repository root (default: current directory)");
+    println!("- --json            output format (context only supports json)");
+    println!("- --file <path>     file path for file-range scan mode");
+    println!("- --lines Y-Z       line range to include in the context packet");
+    println!("- --changed-only    restrict to changed lines within the range");
+    println!();
+    println!("Examples:");
+    println!("  unsafe-review context --json UR-abc123-c1");
+    println!("  unsafe-review context --root /path/to/repo --json UR-abc123-c1");
+    println!("  unsafe-review context --file src/lib.rs --lines 10-50 --json");
+    println!("  unsafe-review context --file src/lib.rs --lines 10-50 --changed-only --json");
+    println!();
+    println!("Trust boundary: {FIRST_RUN_TRUST_BOUNDARY}");
+}
+
+fn print_confirm_help() {
+    println!("unsafe-review confirm: route and optionally execute a witness for a ReviewCard");
+    println!();
+    println!("Usage:");
+    println!(
+        "  unsafe-review confirm <card-id> --dry-run [--author <owner>] [--root .] \
+         [--base <ref> | --diff <file>] [--expires-at <YYYY-MM-DD>] \
+         [--timeout-seconds 600] [--command <override>] [--out <file>]"
+    );
+    println!(
+        "  unsafe-review confirm <card-id> --allow-heavy --author <owner> [--root .] \
+         [--base <ref> | --diff <file>] [--expires-at <YYYY-MM-DD>] \
+         [--timeout-seconds 600] [--command <override>] [--out <file>]"
+    );
+    println!();
+    println!("Options:");
+    println!("- --dry-run            preview the routed witness command without executing it");
+    println!(
+        "- --allow-heavy        execute the routed witness command (required opt-in; never default)"
+    );
+    println!(
+        "- --author <owner>     who is running the confirmation (required with --allow-heavy)"
+    );
+    println!("- --root <dir>         repository root (default: current directory)");
+    println!("- --base <ref>         git ref to diff against HEAD");
+    println!("- --diff <file>        read diff from a file");
+    println!("- --expires-at <date>  expiry date for the witness receipt (YYYY-MM-DD)");
+    println!("- --timeout-seconds N  witness timeout in seconds (default: 600)");
+    println!("- --command <cmd>      override the routed witness command");
+    println!("- --out <file>         write the receipt to a file instead of stdout");
+    println!();
+    println!("Examples:");
+    println!("  unsafe-review confirm UR-abc123-c1 --dry-run");
+    println!(
+        "  unsafe-review confirm UR-abc123-c1 --allow-heavy --author alice --expires-at 2026-12-31"
+    );
+    println!();
+    println!("Trust boundary:");
+    println!(
+        "- confirm executes the routed witness command only with --allow-heavy; unsafe-review never executes witnesses by default."
+    );
+    println!("- --dry-run previews the confirmation step without executing.");
+    println!("- {FIRST_RUN_TRUST_BOUNDARY}");
+}
+
+fn print_receipt_help() {
+    println!("unsafe-review receipt: manage witness receipts for ReviewCards");
+    println!();
+    println!("Usage:");
+    println!(
+        "  unsafe-review receipt template <card-id> --tool <lane> \
+         --strength <level> --author <owner> --recorded-at <utc> \
+         --expires-at <date> [--summary <text>] [--command <text>] \
+         [--limitation <text>] [--out <file>]"
+    );
+    println!(
+        "  unsafe-review receipt import-miri <card-id> --log <file> \
+         --author <owner> --recorded-at <utc> --expires-at <date> \
+         --command <cmd> [--limitation <text>] [--out <file>]"
+    );
+    println!(
+        "  unsafe-review receipt import-careful <card-id> --log <file> \
+         --author <owner> --recorded-at <utc> --expires-at <date> \
+         --command <cmd> [--limitation <text>] [--out <file>]"
+    );
+    println!(
+        "  unsafe-review receipt import-sanitizer <card-id> --tool asan|msan|tsan|lsan \
+         --log <file> --author <owner> --recorded-at <utc> --expires-at <date> \
+         --command <cmd> [--allow-runtime] [--limitation <text>] [--out <file>]"
+    );
+    println!(
+        "  unsafe-review receipt import-concurrency <card-id> --tool loom|shuttle \
+         --log <file> --author <owner> --recorded-at <utc> --expires-at <date> \
+         --command <cmd> [--limitation <text>] [--out <file>]"
+    );
+    println!(
+        "  unsafe-review receipt import-proof <card-id> --tool kani|crux \
+         --log <file> --author <owner> --recorded-at <utc> --expires-at <date> \
+         --command <cmd> [--limitation <text>] [--out <file>]"
+    );
+    println!("  unsafe-review receipt validate [--root .]");
+    println!(
+        "  unsafe-review receipt audit [--root .] [--base <ref> | --diff <file>] \
+         [--format json|markdown] [--out <file>] [--max-cards <N>]"
+    );
+    println!();
+    println!("Subcommands:");
+    println!("- template         emit a receipt skeleton for manual authoring");
+    println!("- import-miri      import a saved cargo-miri test log as a witness receipt");
+    println!("- import-careful   import a saved cargo-careful test log as a witness receipt");
+    println!(
+        "- import-sanitizer  import a saved sanitizer (asan/msan/tsan/lsan) log as a witness receipt"
+    );
+    println!(
+        "- import-concurrency import a saved concurrency-checker (loom/shuttle) log as a witness receipt"
+    );
+    println!(
+        "- import-proof      import a saved formal-proof tool (kani/crux) log as a witness receipt"
+    );
+    println!("- validate         validate all receipts in .unsafe-review/receipts/");
+    println!("- audit            check receipt coverage for cards found in a diff or repo scan");
+    println!();
+    println!("Examples:");
+    println!("  unsafe-review receipt import-miri UR-abc123-c1 \\");
+    println!("    --log target/miri-output.txt --author alice \\");
+    println!("    --recorded-at 2026-06-10T12:00:00Z --expires-at 2026-12-31 \\");
+    println!("    --command 'cargo +nightly miri test'");
+    println!("  unsafe-review receipt validate");
+    println!("  unsafe-review receipt audit --base origin/main --format markdown");
+    println!();
+    println!("Trust boundary:");
+    println!(
+        "- Receipts record external evidence; they do not prove memory safety or UB-free status."
+    );
+    println!("- {FIRST_RUN_TRUST_BOUNDARY}");
+}
+
+fn print_outcome_help() {
+    println!("unsafe-review outcome: compare two cards.json snapshots");
+    println!();
+    println!("Usage:");
+    println!(
+        "  unsafe-review outcome --before <cards.json> --after <cards.json> \
+         [--format json|markdown] [--out <file>]"
+    );
+    println!();
+    println!("Options:");
+    println!("- --before <file>  path to the baseline cards.json snapshot");
+    println!("- --after <file>   path to the updated cards.json snapshot");
+    println!("- --format <name>  json (default) or markdown");
+    println!("- --json           shorthand for --format json");
+    println!("- --markdown       shorthand for --format markdown");
+    println!("- --out <file>     write rendered output to a file instead of stdout");
+    println!();
+    println!("Examples:");
+    println!("  unsafe-review outcome --before before/cards.json --after after/cards.json");
+    println!(
+        "  unsafe-review outcome --before before/cards.json --after after/cards.json --format markdown --out outcome.md"
+    );
+    println!();
+    println!("Trust boundary: {FIRST_RUN_TRUST_BOUNDARY}");
+}
+
+fn print_policy_help() {
+    println!("unsafe-review policy: advisory policy simulation");
+    println!();
+    println!("Usage:");
+    println!(
+        "  unsafe-review policy report [--root .] [--base <ref> | --diff <file>] \
+         [--format json|markdown] [--out <file>] [--max-cards <N>]"
+    );
+    println!();
+    println!("Subcommands:");
+    println!("- report   show which cards would trigger a no-new-debt policy gate");
+    println!();
+    println!("Options:");
+    println!("- --root <dir>    repository root (default: current directory)");
+    println!("- --base <ref>    git ref to diff against HEAD");
+    println!("- --diff <file>   read diff from a file");
+    println!("- --format <name> json (default) or markdown");
+    println!("- --out <file>    write rendered output to a file instead of stdout");
+    println!("- --max-cards <N> stop collecting after N cards");
+    println!();
+    println!("Examples:");
+    println!("  unsafe-review policy report --base origin/main");
+    println!("  unsafe-review policy report --diff change.diff --format markdown");
+    println!();
+    println!("Trust boundary:");
+    println!("- Policy report is advisory simulation only; it does not enforce gating.");
+    println!("- {FIRST_RUN_TRUST_BOUNDARY}");
+}
+
+fn print_doctor_help() {
+    println!("unsafe-review doctor: check the repository setup");
+    println!();
+    println!("Usage:");
+    println!("  unsafe-review doctor [--root .]");
+    println!();
+    println!("Options:");
+    println!("- --root <dir>  repository root to inspect (default: current directory)");
+    println!();
+    println!("Examples:");
+    println!("  unsafe-review doctor");
+    println!("  unsafe-review doctor --root /path/to/repo");
+    println!();
+    println!("Trust boundary: {FIRST_RUN_TRUST_BOUNDARY}");
+}
+
+fn print_badges_help() {
+    println!("unsafe-review badges: generate badge JSON files for the repository");
+    println!();
+    println!("Usage:");
+    println!("  unsafe-review badges [--root .] [--out badges]");
+    println!();
+    println!("Options:");
+    println!("- --root <dir>  repository root to scan (default: current directory)");
+    println!("- --out <dir>   output directory for badge JSON files (default: badges)");
+    println!();
+    println!("Examples:");
+    println!("  unsafe-review badges");
+    println!("  unsafe-review badges --root /path/to/repo --out target/badges");
+    println!();
+    println!("Trust boundary: {FIRST_RUN_TRUST_BOUNDARY}");
+}
+
+fn print_lsp_help() {
+    println!("unsafe-review lsp: start the Language Server Protocol server");
+    println!();
+    println!("Usage:");
+    println!("  unsafe-review lsp");
+    println!();
+    println!("What lsp does:");
+    println!(
+        "- Reads lsp.json (the saved LSP diagnostic artifact from first-pr) and serves it over the LSP stdio protocol."
+    );
+    println!(
+        "- Intended for editor integration where the lsp.json was produced by a previous first-pr or check run."
+    );
+    println!();
+    println!("Examples:");
+    println!("  unsafe-review lsp");
+    println!();
+    println!("Trust boundary: {FIRST_RUN_TRUST_BOUNDARY}");
 }
 
 fn print_baseline_help() {
@@ -2537,6 +3223,9 @@ fn print_help() {
     );
     println!(
         "  repo    [--root .] [--include glob] [--exclude glob] [--list-files|--dry-run] [--progress] [--timeout-seconds N] [--respect-gitignore|--no-respect-gitignore] [--large-repo-ignores|--no-large-repo-ignores] [--max-files N] [--format human|json|markdown|pr-summary|github-summary|sarif|comment-plan|lsp|witness-plan] [--policy advisory|no-new-debt] [--out file] [--max-cards N]"
+    );
+    println!(
+        "  pr      zero-config entry point: auto-detects root and base ref; alias for first-pr"
     );
     println!(
         "  first-pr [--root .] [--base origin/main|--diff file|-] [--out-dir target/unsafe-review] [--max-cards N]"
@@ -2770,11 +3459,13 @@ fn print_candidate_help() {
 #[cfg(test)]
 mod tests {
     use super::{
-        RepoScanScopeMetadata, render_repo_scan_incomplete_status, resolve_diff_path,
-        writable_status, yes_no,
+        RepoScanScopeMetadata, render_repo_scan_incomplete_status, render_repo_scan_status,
+        repo_status_operator_json, resolve_diff_path, writable_status, yes_no,
     };
     use std::path::{Path, PathBuf};
-    use unsafe_review_core::{DiscoveryOptions, RepoStopReason};
+    use unsafe_review_core::{
+        DiscoveryOptions, PerFileScanStats, RepoScanPhase, RepoScanStatus, RepoStopReason,
+    };
 
     fn test_scan_scope() -> RepoScanScopeMetadata {
         RepoScanScopeMetadata::new(Path::new("/tmp/repo"), &DiscoveryOptions::repo_defaults())
@@ -2798,6 +3489,10 @@ mod tests {
         assert_eq!(timeout["phase"], "failed");
         assert_eq!(timeout["partial"], true);
         assert_eq!(timeout["stop_reason"], "timeout");
+        assert_eq!(
+            timeout["operator"]["downstream_consumable"], false,
+            "a timed-out scan is not downstream-consumable"
+        );
 
         let error_json = render_repo_scan_incomplete_status(
             None,
@@ -2813,6 +3508,10 @@ mod tests {
         assert_eq!(
             error["stop_reason"], "error",
             "a non-timeout incomplete scan must not be mislabeled as a timeout"
+        );
+        assert_eq!(
+            error["operator"]["downstream_consumable"], false,
+            "a failed scan is not downstream-consumable"
         );
 
         Ok(())
@@ -2847,5 +3546,117 @@ mod tests {
         assert_eq!(yes_no(false), "no");
         assert_eq!(writable_status(true), "writable");
         assert_eq!(writable_status(false), "not writable");
+    }
+
+    /// Bug A regression: `repo_status_operator_json` for the "capped" state must
+    /// use card-level wording (all files scanned, card list truncated) rather than
+    /// file-level truncation wording.  The cap value must appear in the limitation.
+    #[test]
+    fn capped_operator_json_uses_card_level_wording() {
+        let op = repo_status_operator_json("capped", None, Some(3));
+        let limitation = op["partial_report_limitation"].as_str().unwrap_or("");
+        assert!(
+            limitation.contains("All files scanned"),
+            "capped limitation must say all files were scanned (not file-level truncation): {limitation}"
+        );
+        assert!(
+            limitation.contains("card list truncated"),
+            "capped limitation must say card list was truncated: {limitation}"
+        );
+        assert!(
+            limitation.contains("cap=3") || limitation.contains("3"),
+            "capped limitation must include the cap value: {limitation}"
+        );
+        assert!(
+            !limitation.contains("Completed-file snapshot only"),
+            "capped limitation must not use file-level snapshot wording: {limitation}"
+        );
+        // downstream_consumable must remain true for capped scans.
+        assert_eq!(
+            op["downstream_consumable"], true,
+            "capped scan must remain downstream-consumable"
+        );
+    }
+
+    /// Bug A regression: a capped-success status (stop_reason=MaxCards) must not be
+    /// treated as a timeout by `render_repo_scan_status`, even if the timeout clock
+    /// has elapsed.  This covers the `timed_out()` guard on the MaxCards terminal state.
+    ///
+    /// We verify via the rendered JSON that a MaxCards status produces
+    /// state="capped" (not "failed") and stop_reason="max_cards" (not "timeout").
+    #[test]
+    fn capped_status_json_is_not_labelled_as_timeout() -> Result<(), String> {
+        let scope = test_scan_scope();
+        let status = RepoScanStatus {
+            schema_version: "repo-scan-status/v1".to_string(),
+            phase: RepoScanPhase::Complete,
+            elapsed_ms: 5000,
+            files_discovered: 10,
+            files_scanned: 5,
+            cards_found: 1,
+            last_path: None,
+            completed: false,
+            partial: true,
+            stop_reason: RepoStopReason::MaxCards,
+            cap: Some(1),
+            file_timings: None,
+            output_bytes: None,
+        };
+        let rendered = render_repo_scan_status(&status, &scope)?;
+        let value: serde_json::Value = serde_json::from_str(&rendered)
+            .map_err(|err| format!("parse capped status failed: {err}"))?;
+        assert_eq!(
+            value["stop_reason"], "max_cards",
+            "capped status must carry stop_reason=max_cards, not timeout"
+        );
+        assert_eq!(
+            value["operator"]["state"], "capped",
+            "capped status operator state must be 'capped', not 'failed'"
+        );
+        assert_eq!(
+            value["operator"]["downstream_consumable"], true,
+            "capped scan must be downstream-consumable"
+        );
+        let limitation = value["operator"]["partial_report_limitation"]
+            .as_str()
+            .unwrap_or("");
+        assert!(
+            limitation.contains("All files scanned"),
+            "capped limitation must use card-level wording: {limitation}"
+        );
+        Ok(())
+    }
+
+    /// Verify that `render_repo_scan_status` on a capped status with cap=N embeds
+    /// the actual cap value in the operator limitation string.
+    #[test]
+    fn capped_operator_limitation_embeds_cap_value() -> Result<(), String> {
+        let scope = test_scan_scope();
+        let status = RepoScanStatus {
+            schema_version: "repo-scan-status/v1".to_string(),
+            phase: RepoScanPhase::Complete,
+            elapsed_ms: 100,
+            files_discovered: 4,
+            files_scanned: 4,
+            cards_found: 7,
+            last_path: None,
+            completed: false,
+            partial: true,
+            stop_reason: RepoStopReason::MaxCards,
+            cap: Some(7),
+            file_timings: Some(Vec::<PerFileScanStats>::new()),
+            output_bytes: None,
+        };
+        let rendered = render_repo_scan_status(&status, &scope)?;
+        let value: serde_json::Value = serde_json::from_str(&rendered)
+            .map_err(|err| format!("parse capped status failed: {err}"))?;
+        let limitation = value["operator"]["partial_report_limitation"]
+            .as_str()
+            .unwrap_or("");
+        assert!(
+            limitation.contains("cap=7") || limitation.contains("7"),
+            "limitation must embed the cap value 7: {limitation}"
+        );
+        Ok(())
     }
 }

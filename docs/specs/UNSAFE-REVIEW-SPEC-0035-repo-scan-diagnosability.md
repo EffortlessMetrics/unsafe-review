@@ -89,11 +89,16 @@ first-class artifact:
   "partial": false,
   "stop_reason": "none | max_cards | timeout | terminated",
   "cap": null,
+  "file_timings": [
+    { "file": "crates/foo/src/raw.rs", "scan_ms": 12 }
+  ],
+  "output_bytes": 142857,
   "error": null,
   "signal": null,
   "partial_path": null,
   "operator": {
     "state": "complete | capped | failed | terminated",
+    "downstream_consumable": true,
     "partial_report_available": false,
     "partial_report_limitation": "...",
     "next_action": "...",
@@ -101,6 +106,40 @@ first-class artifact:
   }
 }
 ```
+
+**`file_timings` (optional, diagnostic only):** An array of `{ "file": string,
+"scan_ms": number }` entries, one per scanned file, in scan order.  Present only
+when the number of candidate files is fewer than 100 (the `FILE_TIMINGS_CAP`);
+absent (`null`) for larger scans.
+
+**Truncation honesty:** the field is either the complete list for the scanned
+files or `null` — it is never silently truncated to a subset.  For a
+`max_cards`-capped scan, the list covers the files scanned before the cap was
+hit (i.e., `timings.length == files_scanned`), which may be fewer than
+`files_discovered`; this is correct and expected.  For timeout, error, signal,
+and start-stub states the field is always `null`.
+
+**`output_bytes` (optional, diagnostic only):** Total bytes written to the
+output artifact for this run.  Present (`some positive integer`) only after the
+final report file is successfully written — i.e., in the `complete` state after
+a clean scan when `--out` was given.  `null` for in-progress (start-stub),
+error, timeout, signal-terminated, and capped states where no final artifact was
+produced.
+
+**Claim boundary:** `output_bytes` is a **diagnostic aperture only** — it
+measures the disk footprint of this run's output artifact and nothing more.  A
+large value does not assert more coverage.  A small value does not assert the
+absence of unsafe operations.  It is not a coverage claim, memory-safety proof,
+UB-free status, Miri-clean status, site-execution proof, calibrated metric, or
+performance guarantee.  It is operational diagnosis for identifying runs that
+produce unexpectedly large or small output bundles.
+
+**Claim boundary:** per-file timing is a **diagnostic aperture only**.  A slow
+file does not assert a detection miss, a proof gap, or any safety/UB-free/
+Miri-clean/site-execution status.  A fast file does not assert the absence of
+unsafe operations.  Timing is operational diagnosis for identifying scan
+bottlenecks and is not a coverage claim, memory-safety proof, or performance
+guarantee.
 
 **Phase vocabulary (shipped):**
 - `discovering` — workspace file enumeration in progress.
@@ -168,12 +207,20 @@ a partial or completed report can navigate to the seam without a second lookup.
 ### The operator block
 
 Every status sidecar and terminal diagnostic carries an operator block with
-three fields: `state` (what the scan is/was doing), `next_action` (the single
-concrete step — raise the timeout, narrow `--include`, inspect `last_path`), and
-`claim_boundary` (what the artifact does and does not assert). The block is the
-human-facing projection of the same trust boundary every surface ships
-(UNSAFE-REVIEW-SPEC-0028); cross-tool consumers read it per
+four fields: `state` (what the scan is/was doing), `downstream_consumable`
+(operational routing flag), `next_action` (the single concrete step — raise the
+timeout, narrow `--include`, inspect `last_path`), and `claim_boundary` (what
+the artifact does and does not assert). The block is the human-facing projection
+of the same trust boundary every surface ships (UNSAFE-REVIEW-SPEC-0028);
+cross-tool consumers read it per
 [`docs/interop/sibling-tools.md`](../interop/sibling-tools.md).
+
+`downstream_consumable` is `true` for states `complete` and `capped` — the only
+states where the scan produced a usable report artifact that a consumer (ub-review,
+agent, CI) can safely ingest without further disambiguation.  It is `false` for
+`in_progress`, `failed`, and `terminated`.  This is **operational routing
+metadata only**; it is not a memory-safety, UB-free, Miri-clean,
+site-execution, calibrated, or proof claim.
 
 ## Non-goals
 
@@ -214,9 +261,34 @@ and operator block report what the scan did; they make no safety claim.
   - A run with `--out` that is stopped before the pipeline enters (start-stub test)
     leaves `<out>.status.json` with `phase: "discovering"`, `stop_reason: "none"`,
     `completed: false`, `partial: false`, and a populated `scan_scope`.
-- `cargo test -p unsafe-review-core --lib` — pipeline unit test: `max_cards: Some(1)`
-  over a multi-card tree emits a final status with `partial: true`,
-  `stop_reason: MaxCards`, `cap: Some(1)`, `completed: false`.
+- `cargo test -p unsafe-review-core --lib` — pipeline unit tests:
+  - `max_cards: Some(1)` over a multi-card tree emits a final status with
+    `partial: true`, `stop_reason: MaxCards`, `cap: Some(1)`, `completed: false`.
+  - `per_file_timings_present_for_small_repo_scan` — a two-file repo scan with
+    fewer than `FILE_TIMINGS_CAP` files produces `file_timings: Some(_)` with
+    exactly `files_scanned` entries.
+  - `per_file_timings_partial_when_scan_capped_at_max_cards` — a capped scan
+    still emits timing entries for the files that were scanned before the cap.
+  - `per_file_timings_absent_when_file_count_at_or_above_cap` — a scan with
+    exactly `FILE_TIMINGS_CAP` files produces `file_timings: None` (truncation
+    honesty).
+  - `output_bytes_none_in_all_pipeline_events` — the pipeline never pre-populates
+    `output_bytes`; only the CLI writer layer stamps the value after disk writes.
+- `cargo test -p unsafe-review --test e2e repo_status_sidecar_includes_per_file_timings_for_small_scan`
+  — e2e: completed sidecar carries a `file_timings` array with the correct
+  entry count and correct field shapes.
+- `cargo test -p unsafe-review --test e2e repo_status_sidecar_file_timings_null_for_timeout_path`
+  — e2e: timeout incomplete sidecar has `file_timings: null` (truncation
+  honesty preserved on error paths).
+- `cargo test -p unsafe-review --test e2e repo_status_sidecar_output_bytes_present_for_completed_scan`
+  — e2e: completed sidecar carries `output_bytes` matching the on-disk report
+  file size; field is a positive integer, not null.
+- `cargo test -p unsafe-review --test e2e repo_status_sidecar_output_bytes_null_for_timeout_path`
+  — e2e: timeout incomplete sidecar has `output_bytes: null` (no final artifact
+  produced).
+- `cargo test -p unsafe-review --test e2e first_pr_reports_output_bytes_in_terminal_output`
+  — e2e: a `first-pr` run reports `output_bytes > 0` in terminal output matching
+  the total on-disk size of all artifacts written to `--out-dir`.
 - `cargo run --locked -p xtask -- check-pr`.
 
 ## Machine check

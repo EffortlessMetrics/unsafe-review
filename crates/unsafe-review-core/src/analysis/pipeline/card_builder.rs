@@ -41,6 +41,8 @@ pub(super) fn build_card(
     if !operation_skips_safety_contract(&scanned_site.operation.family) && !contract.present {
         let contract_missing_message = if scanned_site.site.public_api_surface {
             "Missing public `# Safety` documentation for unsafe API"
+        } else if scanned_site.site.visibility == "restricted" {
+            "Missing `# Safety` documentation for restricted-visibility unsafe fn (in-crate callers need the contract)"
         } else {
             "Missing `# Safety` documentation or `SAFETY:` / `Safety:` comment"
         };
@@ -72,7 +74,32 @@ pub(super) fn build_card(
         }
         if class == ReviewClass::GuardedUnwitnessed {
             class = ReviewClass::GuardedAndWitnessed;
-            priority = Priority::Low;
+            // A `confirmed` verdict means the runtime witness observed a
+            // failure at the site. That preserves the safety obligation and
+            // increases urgency: do NOT lower priority. The site was
+            // witnessed (hence `GuardedAndWitnessed`), but the observed
+            // failure is evidence the unsafe code triggered the hazard — not
+            // that it is safe. All other verdicts (absent / `not_reproduced`
+            // / `inconclusive`) lower priority to Low as before.
+            if witness_evidence.verdict.as_deref() != Some("confirmed") {
+                priority = Priority::Low;
+            }
+        }
+    } else if class == ReviewClass::GuardedUnwitnessed
+        && ctx.receipt_index.has_tool_mismatch_for(&id, &routes)
+    {
+        // A receipt exists but its tool does not match any routed witness tool.
+        // Only upgrade from GuardedUnwitnessed: the card is otherwise sound
+        // (contract + guard + reach present) but the receipt is broken.
+        // Surfacing it as WitnessMismatch lets every output surface treat it as
+        // an open actionable condition (see is_actionable() in classification.rs).
+        class = ReviewClass::WitnessMismatch;
+        // Propagate the mismatch summary into the obligation-level witness slot
+        // so that the top-level card.witness.summary and each obligation's
+        // evidence.witness.summary remain consistent (the check-fixtures gate
+        // enforces this invariant).
+        for evidence in &mut obligation_evidence {
+            evidence.witness = crate::domain::EvidenceState::missing(&witness_evidence.summary);
         }
     }
 
@@ -101,7 +128,9 @@ pub(super) fn build_card(
             &class,
             scanned_site.operation.family.as_str(),
             scanned_site.site.public_api_surface,
+            &scanned_site.site.visibility,
             &routes,
+            &obligation_evidence,
         )
     };
     let next_action = NextAction {

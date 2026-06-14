@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Read first
 
 - `AGENTS.md` — the agent operating contract. It governs command style (prefix local commands with `rtk`), repository roles, worktree/branch hygiene, model routing (cheap discovery/verification, mid-tier implementation, top-tier arbitration — project subagent roles in `.claude/agents/`), PR queue discipline, and product boundaries. This file summarizes; AGENTS.md wins on conflict.
-- Source-of-truth stack for choosing and scoping work: `.unsafe-review-spec/goals/active.toml` → linked plan item → linked spec in `docs/specs/`. Make one PR-sized change and run the proof commands the plan item lists.
+- Source-of-truth stack for choosing and scoping work: `.rails/goals/active.toml` → linked plan item → linked spec in `docs/specs/`. Make one PR-sized change and run the proof commands the plan item lists.
 
 ## Repository roles
 
@@ -24,6 +24,14 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 cargo run --locked -p xtask -- check-pr        # docs/policy/fixtures/calibration/dogfood/spec gates
 ```
+
+**Gate order matters.** The required CI gate runs `cargo fmt --all --check`,
+then `cargo clippy --workspace --all-targets --locked -- -D warnings`,
+then `cargo test --workspace --locked`,
+then `cargo run -p xtask -- check-pr` — in that order. `check-pr` does NOT run
+fmt or clippy. Verify the full sequence locally before pushing, or a
+fmt/clippy-only failure costs a CI round-trip.
+
 
 Run a single test (most coverage lives in per-crate `tests/e2e.rs` files that drive the built binary against `fixtures/`):
 
@@ -47,6 +55,32 @@ Fuzzing is manual, not part of the PR gate: `cargo fuzz run analyze` (see `docs/
 CI has exactly one required check: the deterministic core gate (the command sequence above). An advisory ub-review LLM lane rides along in the same job and never blocks the merge. Do not turn advisory unsafe-review findings into default CI failures; read `docs/specs/UNSAFE-REVIEW-SPEC-0024-ci-design.md` before editing CI, workflows, or PR-artifact surfaces.
 
 Commit subjects follow `area: summary` (e.g. `cli:`, `analysis:`, `docs(specs):`, `sync:`, `ci:`), lowercase, imperative.
+
+## Anti-goals and anti-patterns
+
+The following are active constraints, not just omissions. Violating them is a
+product-stance violation, not just a style issue:
+
+- **No full-semantic / type-aware default path.** The analyzer is syntax-first and
+  build-free by choice. Do not add a default path that requires target-repo type
+  resolution, MIR, or `cargo build` success. Optional semantic enrichment is
+  considered case-by-case.
+- **No broad analyzer breadth expansion without dogfood evidence.** New detectors
+  require fixture proof AND a fresh-crate dogfood pass before promotion. Do not add
+  a new operation family based on fixture-green alone.
+- **No default comment-posting or blocking.** unsafe-review is advisory. Default
+  blocking and automatic comment posting remain non-defaults; any posting is
+  explicit opt-in.
+- **No suppressing or deleting evidence to reduce noise.** Group and rank at the
+  surfacing layer (comment-plan, PR-summary budget, ub-review pass). The evidence
+  layer (`ReviewCard`) must remain complete. Deleting a correct card to quiet the
+  output is a product-integrity violation.
+- **No silent stance or semantic changes.** Product stances (what counts as a
+  guard, what counts as test reach, what counts as a discharge) are owner-decided
+  and recorded. Do not silently change a stance as a "fix." Escalate and ledger it.
+- **No proof / UB-free / Miri-clean / site-execution / calibrated claims on any
+  surface.** Every output surface is advisory. The claim-boundary gate enforces
+  this; add no prose that asserts the tool proves, guarantees, or certifies.
 
 ## Lint posture (matters when writing code)
 
@@ -94,6 +128,8 @@ Stability posture: stable-only Rust, no `rustc_private`/MIR. The analyzer is sou
 - `policy/calibration.toml` — manifest mapping every fixture to expected cards, class, operation family, hazard, and support tier. New fixtures require a calibration entry (`check-fixtures` + `check-calibration` enforce this), and new operation families must be registered in the registry appendix under `docs/specs/appendices/` — `check-calibration` cross-checks the registry table against `domain/operation.rs`, `analysis/obligations.rs`, `domain/hazard.rs`, and `domain/witness.rs`.
 - `docs/dogfood/corpus.toml` + `index.json`/`index.md` — evidence from running against real crates and PR diffs; validated by `check-dogfood`.
 - `policy/*.toml` — allowlist ledgers (no-panic, non-Rust files, executables, workflows, network, etc.) validated by `check-policy`. Adding e.g. a new workflow file requires a ledger entry.
+
+**Fixture-suite blindness.** A fixture suite encodes the author's assumptions, so it is blind to assumptions the author did not know they were making. The wave-1 fixtures for every new detector historically placed operations inside `unsafe { }` blocks — correct by the spec, but masking the possibility that a detector would fire on safe-context code entirely. Real-crate dogfood on fresh, unseen code is the check that fixture suites cannot supply: it exercises paths the author never thought to encode as a test case. New detectors need real-context adversarial negative controls (code that resembles the target pattern but is in safe context, inside a comment, or is a function definition), and a fresh-crate dogfood run is the required pre-release validation step before promotion.
 
 ### Documentation system (gated, not optional)
 

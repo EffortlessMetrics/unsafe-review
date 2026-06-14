@@ -19,6 +19,8 @@ mod calibration_constants;
 mod calibration_manifest;
 mod command_args;
 mod commands;
+mod corpus_backstop;
+mod corpus_usefulness;
 mod docs_automation_paths;
 mod dogfood_usefulness;
 mod first_hour;
@@ -451,12 +453,14 @@ const POLICY_FILES: &[&str] = &[
 ];
 const WORKFLOW_ALLOWLIST: &str = "policy/workflow-allowlist.toml";
 const WORKFLOW_DIR: &str = ".github/workflows";
+const CORPUS_BACKSTOP_SAMPLE_REPORT: &str = "policy/corpus-backstop-sample-report.json";
+const CORPUS_USEFULNESS_SAMPLE_ROLLUP: &str = "policy/corpus-usefulness-sample-rollup.json";
 const DOC_ARTIFACT_LEDGER: &str = "policy/doc-artifacts.toml";
 const DOCS_AUTOMATION_LEDGER: &str = "policy/docs-automation.toml";
 const CI_LANE_LEDGER: &str = "policy/ci-lane-whitelist.toml";
 const PACKAGE_BOUNDARY_LEDGER: &str = "policy/package-boundary.toml";
-const SOURCE_OF_TRUTH_INDEX: &str = ".unsafe-review-spec/index.toml";
-const ACTIVE_GOAL_MANIFEST: &str = ".unsafe-review-spec/goals/active.toml";
+const SOURCE_OF_TRUTH_INDEX: &str = ".rails/index.toml";
+const ACTIVE_GOAL_MANIFEST: &str = ".rails/goals/active.toml";
 const DOC_ARTIFACT_KINDS: &[&str] = &["proposal", "spec", "adr", "plan", "goal"];
 const DOC_ARTIFACT_STATUSES: &[&str] = &["proposed", "accepted", "active", "done", "deferred"];
 const DOCS_AUTOMATION_KINDS: &[&str] = &[
@@ -836,7 +840,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
     match commands::XtaskCommand::parse(&args)? {
         commands::XtaskCommand::Help => {
             println!(
-                "xtask commands: check-pr, check-docs, check-policy, check-support-tiers, check-fixtures, check-calibration, check-dogfood, check-fuzz, check-doc-artifacts, check-docs-automation, check-spec-status, check-public-surfaces, check-goals, check-package-boundary, check-ci-lanes, check-advisory-artifacts <dir>, check-first-pr-artifacts <dir>, check-manual-candidate-examples, check-first-hour, dogfood-usefulness, sync-calibration-snapshot, source-divergence, check-source-sync, bless-goldens [fixture ...]"
+                "xtask commands: check-pr, check-docs, check-policy, check-support-tiers, check-fixtures, check-calibration, check-dogfood, check-fuzz, check-doc-artifacts, check-docs-automation, check-spec-status, check-public-surfaces, check-goals, check-package-boundary, check-ci-lanes, check-advisory-artifacts <dir>, check-first-pr-artifacts <dir>, check-manual-candidate-examples, check-first-hour, dogfood-usefulness, sync-calibration-snapshot, source-divergence, check-source-sync, bless-goldens [fixture ...], corpus-backstop [--out <path>], check-corpus-backstop-schema <path>, corpus-usefulness [--out <path>], check-corpus-usefulness-schema <path>"
             );
             Ok(())
         }
@@ -875,6 +879,14 @@ fn run(args: Vec<String>) -> Result<(), String> {
         commands::XtaskCommand::SyncCalibrationSnapshot => sync_calibration_snapshot(),
         commands::XtaskCommand::SourceDivergence => source_sync::report_source_divergence(),
         commands::XtaskCommand::BlessGoldens(names) => bless_goldens(&names),
+        commands::XtaskCommand::CorpusBackstop(out) => corpus_backstop::run(out.as_deref()),
+        commands::XtaskCommand::CheckCorpusBackstopSchema(path) => {
+            corpus_backstop::check_schema(&path)
+        }
+        commands::XtaskCommand::CorpusUsefulness(out) => corpus_usefulness::run(out.as_deref()),
+        commands::XtaskCommand::CheckCorpusUsefulnessSchema(path) => {
+            corpus_usefulness::check_schema(&path)
+        }
     }
 }
 
@@ -921,11 +933,11 @@ fn check_docs() -> Result<(), String> {
         Path::new("docs/handoffs"),
         Path::new("docs/handoffs/README.md"),
     )?;
-    check_no_windows_paths(&[
+    check_local_context(&[
         Path::new("README.md"),
         Path::new("docs"),
         Path::new("plans"),
-        Path::new(".unsafe-review-spec"),
+        Path::new(".rails"),
         Path::new("policy"),
     ])?;
     println!("check-docs: ok");
@@ -956,6 +968,8 @@ fn check_policy() -> Result<(), String> {
     check_package_boundary()?;
     check_ci_lanes()?;
     check_ci_routing_contract()?;
+    corpus_backstop::check_schema(Path::new(CORPUS_BACKSTOP_SAMPLE_REPORT))?;
+    corpus_usefulness::check_schema(Path::new(CORPUS_USEFULNESS_SAMPLE_ROLLUP))?;
     println!("check-policy: ok");
     Ok(())
 }
@@ -2819,6 +2833,17 @@ fn check_unsafe_review_ledger(path: &Path, kind: LedgerKind) -> Result<(), Strin
         for key in ["card_id", "owner", "reason", "evidence"] {
             require_ledger_entry_string(entry, key, &path_display, idx)?;
         }
+        let evidence = entry
+            .get("evidence")
+            .and_then(toml::Value::as_str)
+            .unwrap_or_default();
+        if !looks_like_typed_evidence(evidence) {
+            return Err(format!(
+                "{path_display} entries[{idx}] `evidence` must start with a typed prefix \
+                 (e.g. test:, doc:, spec:, adr:, ripr:, unsafe-review:, coverage:, \
+                 issue:, pr:, baseline-init:) followed by at least one non-whitespace character"
+            ));
+        }
         let has_review_after = ledger_entry_date(entry, "review_after", &path_display, idx)?;
         let has_expires = ledger_entry_date(entry, "expires", &path_display, idx)?;
         match kind {
@@ -2901,6 +2926,32 @@ fn looks_like_counted_card_id(value: &str) -> bool {
         && !prefix.is_empty()
         && !count.is_empty()
         && count.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+/// Typed evidence prefixes accepted by the ledger gate.
+///
+/// Each prefix must be followed by at least one non-whitespace character.
+/// This list aligns with the cargo-allow interop contract documented in
+/// `docs/interop/sibling-tools.md`.
+const TYPED_EVIDENCE_PREFIXES: &[&str] = &[
+    "test:",
+    "doc:",
+    "spec:",
+    "adr:",
+    "ripr:",
+    "unsafe-review:",
+    "coverage:",
+    "issue:",
+    "pr:",
+    "baseline-init:",
+];
+
+fn looks_like_typed_evidence(value: &str) -> bool {
+    TYPED_EVIDENCE_PREFIXES.iter().any(|prefix| {
+        value
+            .strip_prefix(prefix)
+            .is_some_and(|rest| rest.chars().any(|c: char| !c.is_whitespace()))
+    })
 }
 
 fn check_fixtures() -> Result<(), String> {
@@ -6454,9 +6505,9 @@ fn check_fixture_site_metadata(
     }
 
     let visibility = required_json_object_str(site, "visibility", path, idx)?;
-    if !matches!(visibility, "public" | "private") {
+    if !matches!(visibility, "public" | "restricted" | "private") {
         return Err(format!(
-            "{card_context} site.visibility `{visibility}` must be `public` or `private`"
+            "{card_context} site.visibility `{visibility}` must be `public`, `restricted`, or `private`"
         ));
     }
 
@@ -6645,6 +6696,9 @@ fn check_fixture_next_action(
         "review ",
         "document ",
         "mark ",
+        // "keep " is needed for baseline_known and suppressed cards that direct the
+        // reviewer to keep ledger entries current rather than take an action-to-close.
+        "keep ",
     ]
     .iter()
     .any(|prefix| normalized.starts_with(prefix));
@@ -8934,7 +8988,7 @@ fn looks_like_repo_path(value: &str) -> bool {
     value.contains('/') || value.ends_with(".md")
 }
 
-fn check_no_windows_paths(paths: &[&Path]) -> Result<(), String> {
+fn check_local_context(paths: &[&Path]) -> Result<(), String> {
     for path in paths {
         visit_text(path, &mut |file| {
             let text = read_to_string(file)?;
@@ -8942,6 +8996,20 @@ fn check_no_windows_paths(paths: &[&Path]) -> Result<(), String> {
                 if has_windows_path(line) {
                     return Err(format!(
                         "{}:{} contains a Windows-style path",
+                        file.display(),
+                        line_no + 1
+                    ));
+                }
+                if has_unix_absolute_machine_path(line) {
+                    return Err(format!(
+                        "{}:{} contains a Unix absolute machine path",
+                        file.display(),
+                        line_no + 1
+                    ));
+                }
+                if has_session_state_marker(line) {
+                    return Err(format!(
+                        "{}:{} contains a session-state marker",
                         file.display(),
                         line_no + 1
                     ));
@@ -9542,6 +9610,32 @@ fn looks_like_git_diff(text: &str) -> bool {
 
 fn has_windows_path(line: &str) -> bool {
     line.contains(":\\") || line.contains("\\\\")
+}
+
+fn has_unix_absolute_machine_path(line: &str) -> bool {
+    const ROOTS: &[&str] = &["/home/", "/tmp/", "/Users/", "/var/", "/root/", "/private/"];
+    for root in ROOTS {
+        // Accept the root only when it appears at the start of the line or
+        // immediately after a boundary character (space, tab, quote, backtick,
+        // opening paren, or opening bracket).  This avoids firing on generic
+        // prose like "refer to /path/to/foo" or "/proc/self/…".
+        if let Some(idx) = line.find(root) {
+            if idx == 0 {
+                return true;
+            }
+            let prev = line.as_bytes()[idx - 1];
+            if matches!(prev, b' ' | b'\t' | b'"' | b'\'' | b'`' | b'(' | b'[') {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn has_session_state_marker(line: &str) -> bool {
+    // Fire when any whitespace-delimited token ends with ".rescue".
+    line.split_whitespace()
+        .any(|token| token.ends_with(".rescue"))
 }
 
 fn is_forbidden_generated_path(path: &str) -> bool {
@@ -12347,7 +12441,7 @@ OperationFamily::RawPointerRead => vec![
             &ledger, &index,
         ))?;
 
-        assert!(err.contains(".unsafe-review-spec/index.toml"));
+        assert!(err.contains(".rails/index.toml"));
         assert!(err.contains("UNSAFE-REVIEW-SPEC-0026"));
         assert!(err.contains("status `draft` must match"));
         Ok(())
@@ -21784,7 +21878,7 @@ status = "active"
 card_id = "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1"
 owner = "core/policy"
 reason = "accepted current fixture debt"
-evidence = "review-card fixture"
+evidence = "spec: review-card fixture"
 review_after = "2026-08-01"
 "#,
         )
@@ -21809,7 +21903,7 @@ status = "active"
 card_id = "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1"
 owner = "core/policy"
 reason = "false positive under review"
-evidence = "manual review"
+evidence = "issue: manual-review"
 "#,
         )
         .map_err(|err| format!("write ledger failed: {err}"))?;
@@ -21839,7 +21933,7 @@ status = "active"
 card_id = "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment"
 owner = "core/policy"
 reason = "accepted current fixture debt"
-evidence = "review-card fixture"
+evidence = "spec: review-card fixture"
 review_after = "2026-08-01"
 "#,
         )
@@ -21849,6 +21943,79 @@ review_after = "2026-08-01"
 
         fs::remove_file(&path).map_err(|err| format!("remove ledger failed: {err}"))?;
         assert!(result.err().unwrap_or_default().contains("exact counted"));
+        Ok(())
+    }
+
+    #[test]
+    fn policy_ledger_rejects_untyped_evidence() -> Result<(), String> {
+        let path = unique_temp_dir("unsafe-review-untyped-evidence-ledger")?.with_extension("toml");
+        fs::write(
+            &path,
+            r#"schema_version = "0.1"
+policy = "unsafe-review-baseline"
+status = "active"
+
+[[entries]]
+card_id = "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1"
+owner = "core/policy"
+reason = "accepted current fixture debt"
+evidence = "manual review"
+review_after = "2026-08-01"
+"#,
+        )
+        .map_err(|err| format!("write ledger failed: {err}"))?;
+
+        let result = check_unsafe_review_ledger(&path, LedgerKind::Baseline);
+
+        fs::remove_file(&path).map_err(|err| format!("remove ledger failed: {err}"))?;
+        let err = result.err().unwrap_or_default();
+        assert!(
+            err.contains("evidence") && (err.contains("prefix") || err.contains("typed")),
+            "expected error mentioning 'evidence' and 'prefix'/'typed', got: {err}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn policy_ledger_accepts_typed_evidence() -> Result<(), String> {
+        for prefix in [
+            "test: my test",
+            "doc: some doc",
+            "spec: SPEC-0010",
+            "adr: ADR-0001",
+            "ripr: ripr#42",
+            "unsafe-review: UR-card-c1",
+            "coverage: 80%",
+            "issue: #1523",
+            "pr: #42",
+            "baseline-init: capture",
+        ] {
+            let path =
+                unique_temp_dir("unsafe-review-typed-evidence-ledger")?.with_extension("toml");
+            let content = format!(
+                r#"schema_version = "0.1"
+policy = "unsafe-review-baseline"
+status = "active"
+
+[[entries]]
+card_id = "UR-crate-src-lib-rs-owner-operation-raw_pointer_read-read-deadbeef1234-alignment-c1"
+owner = "core/policy"
+reason = "accepted current fixture debt"
+evidence = "{prefix}"
+review_after = "2026-08-01"
+"#
+            );
+            fs::write(&path, &content)
+                .map_err(|err| format!("write ledger failed for prefix '{prefix}': {err}"))?;
+
+            let result = check_unsafe_review_ledger(&path, LedgerKind::Baseline);
+
+            fs::remove_file(&path)
+                .map_err(|err| format!("remove ledger failed for prefix '{prefix}': {err}"))?;
+            result.map_err(|err| {
+                format!("expected typed evidence '{prefix}' to be accepted, got: {err}")
+            })?;
+        }
         Ok(())
     }
 
@@ -22011,11 +22178,13 @@ review_after = "2026-08-01"
                 {"path":"comment-plan.json","kind":"comment_plan","format":"json","schema_version":"0.1"},
                 {"path":"witness-plan.md","kind":"witness_plan","format":"markdown","schema_version":serde_json::Value::Null},
                 {"path":"receipt-audit.md","kind":"receipt_audit","format":"markdown","schema_version":serde_json::Value::Null},
+                {"path":"receipt-audit.json","kind":"receipt_audit","format":"json","schema_version":"0.1"},
                 {"path":"policy-report.json","kind":"policy_report_json","format":"json","schema_version":"0.1"},
                 {"path":"policy-report.md","kind":"policy_report_markdown","format":"markdown","schema_version":serde_json::Value::Null},
                 {"path":"manual-candidates.json","kind":"manual_candidates","format":"json","schema_version":"manual-candidates/v1"},
                 {"path":"manual-repair-queue.json","kind":"manual_repair_queue","format":"json","schema_version":"manual-repair-queue/v1"},
                 {"path":"tokmd-packets.json","kind":"tokmd_packets","format":"json","schema_version":"tokmd-packets/v1"},
+                {"path":"usefulness-telemetry.json","kind":"usefulness_telemetry","format":"json","schema_version":"usefulness-telemetry/v1"},
                 {"path":"lsp.json","kind":"saved_lsp","format":"json","schema_version":"0.1"},
                 {"path":"repair-queue.json","kind":"repair_queue","format":"json","schema_version":"0.1"}
             ],
@@ -22033,6 +22202,7 @@ review_after = "2026-08-01"
             "summary": {
                 "new_gaps": 0,
                 "worsened_gaps": 0,
+                "improved_gaps": 0,
                 "resolved_gaps": 0,
                 "inherited_gaps": 0
             },
@@ -22040,12 +22210,13 @@ review_after = "2026-08-01"
                 "cards": "cards.json",
                 "comment_plan": "comment-plan.json",
                 "repair_queue": "repair-queue.json",
-                "receipt_audit": "receipt-audit.md",
+                "receipt_audit": "receipt-audit.json",
                 "review_kit": "review-kit.json",
                 "pr_summary": "pr-summary.md",
                 "sarif": "cards.sarif",
                 "lsp": "lsp.json",
-                "policy_report": "policy-report.json"
+                "policy_report": "policy-report.json",
+                "usefulness_telemetry": "usefulness-telemetry.json"
             },
             "trust_boundary": "static unsafe-review coverage evidence; not proof, not a merge verdict",
             "tool": "unsafe-review",
@@ -22053,6 +22224,51 @@ review_after = "2026-08-01"
         });
         fs::write(dir.join("unsafe-review-gate.json"), value.to_string())
             .map_err(|err| format!("write gate manifest failed: {err}"))
+    }
+
+    fn write_usefulness_telemetry_artifact(dir: &Path) -> Result<(), String> {
+        let value = serde_json::json!({
+            "schema_version": "usefulness-telemetry/v1",
+            "trust_boundary": "operational diagnostic usefulness only — not calibrated, not a measurement of detection accuracy, not a memory guarantee, not a soundness guarantee, not a gate, and not a merge verdict; all telemetry is projected from ReviewCard/Summary/CoverageBlock/CommentPlan fields deterministically",
+            "card_inventory": {
+                "total_cards": 1,
+                "actionable_cards": 1,
+                "new_cards": 1,
+                "worsened_cards": 0,
+                "resolved_cards": 0,
+                "inherited_cards": 0
+            },
+            "coverage_slots": {
+                "contract_missing": 0,
+                "contract_weak": 0,
+                "guard_missing": 1,
+                "guard_weak": 0,
+                "test_reach_missing": 0,
+                "test_reach_weak": 0,
+                "witness_receipt_missing": 1
+            },
+            "agent_readiness": {
+                "ready": 1,
+                "needs_human": 0,
+                "unsupported": 0
+            },
+            "comment_selection": {
+                "selected_count": 1,
+                "not_selected_count": 0,
+                "not_selected_reason_histogram": {}
+            },
+            "confidence_distribution": {
+                "high": 0,
+                "medium": 1,
+                "low": 0,
+                "unknown": 0
+            },
+            "actionability_distribution": {
+                "specific_guard_missing": 1
+            }
+        });
+        fs::write(dir.join("usefulness-telemetry.json"), value.to_string())
+            .map_err(|err| format!("write usefulness telemetry failed: {err}"))
     }
 
     fn write_empty_manual_candidates_artifact(dir: &Path) -> Result<(), String> {
@@ -22245,6 +22461,7 @@ review_after = "2026-08-01"
             "lsp.json": "ReviewCard-only saved editor projection; manual candidates are not emitted as analyzer diagnostics.",
             "repair-queue.json": "ReviewCard-only repair queue; manual candidates are not automatic repair tasks.",
             "receipt-audit.md": "Receipts may match manual candidate IDs as manual/advisory targets without importing them as ReviewCard witness evidence.",
+            "receipt-audit.json": "Receipts may match manual candidate IDs as manual/advisory targets without importing them as ReviewCard witness evidence.",
             "policy-report.json": "ReviewCard-only policy simulation; manual candidates are not policy gating inputs.",
             "policy-report.md": "ReviewCard-only policy simulation; manual candidates are not policy gating inputs."
         })
@@ -23484,6 +23701,8 @@ review_after = "2026-08-01"
         .map_err(|err| format!("write repair queue failed: {err}"))?;
         fs::write(dir.join("receipt-audit.md"), receipt_audit_markdown())
             .map_err(|err| format!("write receipt audit failed: {err}"))?;
+        fs::write(dir.join("receipt-audit.json"), receipt_audit_json())
+            .map_err(|err| format!("write receipt audit json failed: {err}"))?;
         write_policy_report_artifacts(
             dir,
             vec![policy_report_card_fixture(
@@ -23603,6 +23822,8 @@ review_after = "2026-08-01"
         .map_err(|err| format!("write repair queue failed: {err}"))?;
         fs::write(dir.join("receipt-audit.md"), receipt_audit_markdown())
             .map_err(|err| format!("write receipt audit failed: {err}"))?;
+        fs::write(dir.join("receipt-audit.json"), receipt_audit_json())
+            .map_err(|err| format!("write receipt audit json failed: {err}"))?;
         write_policy_report_artifacts(
             dir,
             vec![
@@ -23651,6 +23872,7 @@ review_after = "2026-08-01"
         write_empty_manual_candidates_artifact(dir)?;
         write_empty_manual_repair_queue_artifact(dir)?;
         write_empty_tokmd_packets_artifact(dir)?;
+        write_usefulness_telemetry_artifact(dir)?;
         write_review_kit_artifact(dir, 1, 1, Some("card-1"))?;
         write_gate_manifest_artifact(dir)?;
         Ok(())
@@ -23772,10 +23994,13 @@ This artifact is static unsafe contract review. It routes reviewers to credible 
         .map_err(|err| format!("write repair queue failed: {err}"))?;
         fs::write(dir.join("receipt-audit.md"), receipt_audit_markdown())
             .map_err(|err| format!("write receipt audit failed: {err}"))?;
+        fs::write(dir.join("receipt-audit.json"), receipt_audit_json())
+            .map_err(|err| format!("write receipt audit json failed: {err}"))?;
         write_policy_report_artifacts(dir, Vec::new(), 0)?;
         write_empty_manual_candidates_artifact(dir)?;
         write_empty_manual_repair_queue_artifact(dir)?;
         write_empty_tokmd_packets_artifact(dir)?;
+        write_usefulness_telemetry_artifact(dir)?;
         write_review_kit_artifact(dir, 0, 0, None)?;
         write_gate_manifest_artifact(dir)?;
         Ok(())
@@ -23785,11 +24010,50 @@ This artifact is static unsafe contract review. It routes reviewers to credible 
         "# unsafe-review receipt audit\n\nStatic audit of saved receipt metadata against current ReviewCards.\n\n## Summary\n\n| Receipts | Matched | Unmatched | Expired | Stale | Wrong identity | Wrong tool | Weaker than route | Command hash mismatch | Duplicate | Invalid |\n|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n| 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |\n\n## Reviewer front panel\n\n- Matched receipt metadata: 0\n- Receipts imported as current witness evidence: 0\n- Receipts without a current card match: 0 unmatched, 0 stale\n- Problem flags: none\n- Next action: keep matching receipt metadata attached to the review record.\n- Boundary: matched witness receipts improve witness evidence only; they do not erase missing contracts, guards, or reach evidence.\n- Manual boundary: manual candidate receipts attach external evidence to that manual candidate only and do not make it analyzer-discovered.\n\n## Trust boundary\n\nStatic witness receipt audit only; does not execute witnesses, does not prove site reach, and does not independently prove site reach.\n"
     }
 
+    fn receipt_audit_json() -> &'static str {
+        r#"{"schema_version":"0.1","tool":"unsafe-review","mode":"receipt-audit","policy":"advisory","audit_date":"2026-01-01","trust_boundary":"Static receipt audit only; does not execute witnesses or external tests and does not independently prove site reach.","limitations":["audits saved receipt metadata only","does not execute Miri, cargo-careful, sanitizers, Loom, Shuttle, Kani, Crux, or external integration tests","matched witness receipts improve witness evidence only and do not erase missing contracts, guards, or reach evidence","matched external integration reach receipts improve reach evidence only and do not erase missing contracts, guards, or witness evidence"],"summary":{"receipts":0,"matched":0,"unmatched":0,"expired":0,"stale":0,"wrong_identity":0,"wrong_tool":0,"weaker_than_required":0,"command_hash_mismatch":0,"duplicate":0,"invalid":0},"cards":[]}"#
+    }
+
     fn unique_temp_dir(prefix: &str) -> Result<PathBuf, String> {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_err(|err| format!("system clock before UNIX_EPOCH: {err}"))?
             .as_nanos();
         Ok(std::env::temp_dir().join(format!("{prefix}-{nanos}")))
+    }
+
+    #[test]
+    fn has_unix_absolute_machine_path_fires_on_machine_roots() {
+        assert!(has_unix_absolute_machine_path("/home/alice/project"));
+        assert!(has_unix_absolute_machine_path("/tmp/build-123"));
+        assert!(has_unix_absolute_machine_path("/Users/bob/src"));
+        assert!(has_unix_absolute_machine_path("path: /var/log/output"));
+        assert!(has_unix_absolute_machine_path("see `/home/ci/run`"));
+    }
+
+    #[test]
+    fn has_unix_absolute_machine_path_ignores_generic_prose() {
+        assert!(!has_unix_absolute_machine_path("see /path/to/file"));
+        assert!(!has_unix_absolute_machine_path("refer to /proc/self/fd"));
+        assert!(!has_unix_absolute_machine_path("no absolute paths here"));
+        assert!(!has_unix_absolute_machine_path("/proc/cpuinfo content"));
+    }
+
+    #[test]
+    fn has_session_state_marker_fires_on_rescue_tokens() {
+        assert!(has_session_state_marker("agent.rescue"));
+        assert!(has_session_state_marker(
+            "restored from foo-bar.rescue today"
+        ));
+        assert!(has_session_state_marker("state: session.rescue"));
+    }
+
+    #[test]
+    fn has_session_state_marker_ignores_non_rescue_prose() {
+        assert!(!has_session_state_marker(
+            "rescue the scan from false positives"
+        ));
+        assert!(!has_session_state_marker("rescued data is advisory"));
+        assert!(!has_session_state_marker("no markers here"));
     }
 }

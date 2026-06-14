@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path};
 
+use unsafe_review_core::COMMENT_BODY_WORD_LIMIT as COMMENT_PLAN_BODY_WORD_LIMIT;
+
 struct AdvisoryArtifactSummary {
     card_ids: BTreeSet<String>,
     card_order: Vec<String>,
@@ -170,7 +172,6 @@ struct ManualCandidateEvidenceProjection {
     limitation: Option<String>,
 }
 
-const COMMENT_PLAN_BODY_WORD_LIMIT: usize = 220;
 const COMMENT_PLAN_REVIEW_BUDGET: usize = 3;
 const MANUAL_CANDIDATE_REVIEW_KIT_QUEUE_LIMIT: usize = 5;
 const MANUAL_CANDIDATE_GITHUB_QUEUE_LIMIT: usize = 1;
@@ -273,7 +274,7 @@ const REPAIR_QUEUE_READINESS_STATES: [&str; 4] = [
     "requires_witness_receipt",
     "unsupported",
 ];
-const FIRST_PR_BUNDLE_ARTIFACTS: [&str; 16] = [
+const FIRST_PR_BUNDLE_ARTIFACTS: [&str; 18] = [
     "review-kit.json",
     "unsafe-review-gate.json",
     "cards.json",
@@ -283,11 +284,13 @@ const FIRST_PR_BUNDLE_ARTIFACTS: [&str; 16] = [
     "comment-plan.json",
     "witness-plan.md",
     "receipt-audit.md",
+    "receipt-audit.json",
     "policy-report.json",
     "policy-report.md",
     "manual-candidates.json",
     "manual-repair-queue.json",
     "tokmd-packets.json",
+    "usefulness-telemetry.json",
     "lsp.json",
     "repair-queue.json",
 ];
@@ -324,6 +327,7 @@ pub(crate) fn check_first_pr_artifacts(dir: &Path) -> Result<(), String> {
         &manual_candidates,
     )?;
     check_receipt_audit_artifact(dir)?;
+    check_receipt_audit_json_artifact(dir)?;
     check_policy_report_artifacts(dir, &summary)?;
     let manual_repair_queue = check_manual_repair_queue_artifact(dir, &manual_candidates)?;
     check_tokmd_packets_artifact(dir, &manual_candidates, &manual_repair_queue)?;
@@ -995,6 +999,24 @@ fn check_receipt_audit_artifact(dir: &Path) -> Result<(), String> {
         &path,
     )?;
 
+    Ok(())
+}
+
+fn check_receipt_audit_json_artifact(dir: &Path) -> Result<(), String> {
+    let path = dir.join("receipt-audit.json");
+    let report = super::parse_json_file(&path)?;
+    super::require_json_str(&report, "schema_version", "0.1", "receipt-audit.json")?;
+    super::require_json_str(&report, "tool", "unsafe-review", "receipt-audit.json")?;
+    super::require_json_str(&report, "mode", "receipt-audit", "receipt-audit.json")?;
+    super::require_json_str(&report, "policy", "advisory", "receipt-audit.json")?;
+    let boundary = report
+        .get("trust_boundary")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "receipt-audit.json is missing trust_boundary".to_string())?;
+    // receipt-audit has its own trust boundary wording (not "static unsafe contract review");
+    // verify the key non-execution claims present in the receipt_audit trust boundary.
+    super::require_text_contains(boundary, "does not execute witnesses", &path)?;
+    super::require_text_contains(boundary, "does not independently prove site reach", &path)?;
     Ok(())
 }
 
@@ -5038,6 +5060,7 @@ fn expected_review_kit_artifact_kind(path: &str) -> &'static str {
         "comment-plan.json" => "comment_plan",
         "witness-plan.md" => "witness_plan",
         "receipt-audit.md" => "receipt_audit",
+        "receipt-audit.json" => "receipt_audit",
         "policy-report.json" => "policy_report_json",
         "policy-report.md" => "policy_report_markdown",
         "manual-candidates.json" => "manual_candidates",
@@ -5045,6 +5068,7 @@ fn expected_review_kit_artifact_kind(path: &str) -> &'static str {
         "tokmd-packets.json" => "tokmd_packets",
         "lsp.json" => "saved_lsp",
         "repair-queue.json" => "repair_queue",
+        "usefulness-telemetry.json" => "usefulness_telemetry",
         _ => "unknown",
     }
 }
@@ -5060,7 +5084,9 @@ fn expected_review_kit_artifact_format(path: &str) -> &'static str {
         | "manual-candidates.json"
         | "manual-repair-queue.json"
         | "tokmd-packets.json"
-        | "policy-report.json" => "json",
+        | "policy-report.json"
+        | "receipt-audit.json"
+        | "usefulness-telemetry.json" => "json",
         "pr-summary.md" | "github-summary.md" | "witness-plan.md" | "receipt-audit.md"
         | "policy-report.md" => "markdown",
         "cards.sarif" => "sarif",
@@ -5081,11 +5107,12 @@ fn check_review_kit_artifact_schema_version(
         // cards.json was bumped to 0.2 when provenance metadata was added.
         "cards.json" => Some("0.2"),
         "review-kit.json" | "comment-plan.json" | "lsp.json" | "repair-queue.json"
-        | "policy-report.json" => Some("0.1"),
+        | "policy-report.json" | "receipt-audit.json" => Some("0.1"),
         "unsafe-review-gate.json" => Some("unsafe-review-gate/v1"),
         "manual-candidates.json" => Some("manual-candidates/v1"),
         "manual-repair-queue.json" => Some("manual-repair-queue/v1"),
         "tokmd-packets.json" => Some("tokmd-packets/v1"),
+        "usefulness-telemetry.json" => Some("usefulness-telemetry/v1"),
         "cards.sarif" => Some("2.1.0"),
         "pr-summary.md" | "github-summary.md" | "witness-plan.md" | "receipt-audit.md"
         | "policy-report.md" => None,
@@ -7009,12 +7036,6 @@ fn require_comment_body_card_projection(
             expected_build_first.summary
         ));
     }
-    let expected_minimal_repro = expected_comment_minimal_repro_body(card);
-    if !body.contains(&expected_minimal_repro) {
-        return Err(format!(
-            "{context} body must project structured minimal_repro cue `{expected_minimal_repro}`"
-        ));
-    }
     if let Some(command) = card.verify_commands.first() {
         let expected = format!("Confirmation step: build/run `{command}` first");
         if !body.contains(&expected) {
@@ -7023,14 +7044,10 @@ fn require_comment_body_card_projection(
             ));
         }
     }
-    if let Some(route) = card.witness_routes.first() {
-        let expected = format!("Witness route: `{}` because {}.", route.kind, route.reason);
-        if !body.contains(&expected) {
-            return Err(format!(
-                "{context} body must project ReviewCard witness route `{expected}`"
-            ));
-        }
-    }
+    // Note: `Minimal repro cue` and `Witness route` sections are intentionally
+    // omitted from the body (their content is carried by the structured
+    // `minimal_repro` and `witness_routes` JSON fields). Removing them keeps the
+    // body within COMMENT_PLAN_BODY_WORD_LIMIT without dropping required guidance.
     if let Some(command) = card.verify_commands.first() {
         let expected = format!("Verify command: `{command}`");
         if !body.contains(&expected) {
@@ -7743,25 +7760,6 @@ fn expected_comment_minimal_repro(card: &CardProjection) -> CommentMinimalReproP
         ],
         limitation: MINIMAL_REPRO_LIMITATION,
     }
-}
-
-fn expected_comment_minimal_repro_body(card: &CardProjection) -> String {
-    if let Some(command) = card.verify_commands.first() {
-        return format!(
-            "Minimal repro cue: confirm ReviewCard `{}` still maps to this site, then build/run `{command}`; attach a receipt only for the same route and identity; cue was not executed.",
-            card.id
-        );
-    }
-    if let Some(route) = card.witness_routes.first() {
-        return format!(
-            "Minimal repro cue: confirm ReviewCard `{}` still maps to this site, then use the `{}` witness route; attach a receipt only for the same route and identity; cue was not executed.",
-            card.id, route.kind
-        );
-    }
-    format!(
-        "Minimal repro cue: confirm ReviewCard `{}` still maps to this site, then derive a focused repro with `unsafe-review explain`; keep it advisory without external evidence; cue was not executed.",
-        card.id
-    )
 }
 
 fn require_not_selected_card_projection(
@@ -9633,11 +9631,13 @@ fn check_advisory_artifact_overclaims(dir: &Path) -> Result<(), String> {
         "comment-plan.json",
         "witness-plan.md",
         "receipt-audit.md",
+        "receipt-audit.json",
         "policy-report.json",
         "policy-report.md",
         "manual-candidates.json",
         "manual-repair-queue.json",
         "tokmd-packets.json",
+        "usefulness-telemetry.json",
         "lsp.json",
         "repair-queue.json",
     ] {
@@ -9666,8 +9666,10 @@ fn is_machine_json_artifact(name: &str) -> bool {
             | "manual-candidates.json"
             | "manual-repair-queue.json"
             | "tokmd-packets.json"
+            | "usefulness-telemetry.json"
             | "lsp.json"
             | "repair-queue.json"
+            | "receipt-audit.json"
     )
 }
 

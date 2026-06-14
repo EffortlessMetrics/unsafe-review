@@ -10,8 +10,11 @@ use std::path::Path;
 ///
 /// Ordinal: `Present`(2) > `Weak`(1) > `Missing`(0).  A card is worsened when ANY
 /// slot has a strictly lower ordinal than the snapshot value.
+///
+/// This type is exposed through [`crate::api::AnalyzeOutput::coverage_snapshot`] so that
+/// output renderers outside `unsafe-review-core` can project per-card movement.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct SnapshotCoverage {
+pub struct SnapshotCoverage {
     /// "present", "weak", or "missing"
     pub(crate) contract_coverage: String,
     /// "present", "weak", or "missing"
@@ -43,6 +46,31 @@ impl SnapshotCoverage {
                 < Self::ordinal(&self.test_reach_coverage)
             || Self::ordinal(&current.witness_receipt_coverage)
                 < Self::ordinal(&self.witness_receipt_coverage)
+    }
+
+    /// Returns `true` when `current` coverage is a **pure improvement** over this snapshot.
+    ///
+    /// A pure improvement means at least one slot has a strictly higher ordinal than the
+    /// snapshot value AND no slot has a lower ordinal.  A mixed up-and-down movement is not
+    /// "improved" — it is "worsened" by precedence, so callers must check `is_worsened_by`
+    /// before calling this method.
+    ///
+    /// Precedence rule (caller-enforced; see `summarize`):
+    /// worsened > improved > inherited.  If any slot regressed it is worsened; if no slot
+    /// regressed but at least one improved it is improved; otherwise it is inherited/unchanged.
+    ///
+    /// This is a coverage-evidence improvement — the card is still advisory, still open, and
+    /// the site is still present.  An improved card is NOT resolved, NOT safe, NOT UB-free,
+    /// NOT Miri-clean, and NOT a site-execution claim.
+    pub(crate) fn is_improved_by(&self, current: &SnapshotCoverage) -> bool {
+        let any_higher = Self::ordinal(&current.contract_coverage)
+            > Self::ordinal(&self.contract_coverage)
+            || Self::ordinal(&current.guard_coverage) > Self::ordinal(&self.guard_coverage)
+            || Self::ordinal(&current.test_reach_coverage)
+                > Self::ordinal(&self.test_reach_coverage)
+            || Self::ordinal(&current.witness_receipt_coverage)
+                > Self::ordinal(&self.witness_receipt_coverage);
+        any_higher && !self.is_worsened_by(current)
     }
 }
 
@@ -579,6 +607,75 @@ expires = "2026-08-01"
         assert!(
             !baseline.is_worsened_by(&current),
             "coverage improvement must NOT be counted as worsened"
+        );
+    }
+
+    // ── SnapshotCoverage::is_improved_by ──────────────────────────────────────
+
+    #[test]
+    fn improved_detected_when_contract_advances_from_missing_to_present() {
+        // Baseline had missing contract; current adds a SAFETY doc → improved.
+        let baseline = snap("missing", "missing", "missing", "missing");
+        let current = snap("present", "missing", "missing", "missing");
+        assert!(
+            baseline.is_improved_by(&current),
+            "missing→present on contract must be detected as improved"
+        );
+    }
+
+    #[test]
+    fn improved_detected_when_guard_advances_from_weak_to_present() {
+        // Baseline had weak guard; current strengthens it → improved.
+        let baseline = snap("missing", "weak", "missing", "missing");
+        let current = snap("missing", "present", "missing", "missing");
+        assert!(
+            baseline.is_improved_by(&current),
+            "weak→present on guard must be detected as improved"
+        );
+    }
+
+    #[test]
+    fn not_improved_when_coverage_unchanged() {
+        // Inherited-unchanged card: same snapshot → NOT improved.
+        let baseline = snap("present", "weak", "missing", "missing");
+        let current = snap("present", "weak", "missing", "missing");
+        assert!(
+            !baseline.is_improved_by(&current),
+            "identical coverage must NOT be counted as improved (inherited-unchanged card)"
+        );
+    }
+
+    #[test]
+    fn not_improved_when_coverage_worsens() {
+        // A slot regressed → worsened wins, not improved.
+        let baseline = snap("present", "present", "present", "missing");
+        let current = snap("weak", "present", "present", "missing");
+        assert!(
+            !baseline.is_improved_by(&current),
+            "regression on any slot must NOT be counted as improved (worsened wins)"
+        );
+    }
+
+    #[test]
+    fn not_improved_when_mixed_up_and_down() {
+        // One slot improved (test_reach: missing→present) but another regressed
+        // (guard: present→weak) → mixed: worsened wins, NOT improved.
+        let baseline = snap("missing", "present", "missing", "missing");
+        let current = snap("missing", "weak", "present", "missing");
+        assert!(
+            !baseline.is_improved_by(&current),
+            "mixed up-and-down movement must NOT be counted as improved (worsened takes precedence)"
+        );
+    }
+
+    #[test]
+    fn improved_when_multiple_slots_advance_and_none_regress() {
+        // Both contract and guard improved → improved.
+        let baseline = snap("missing", "missing", "missing", "missing");
+        let current = snap("present", "weak", "missing", "missing");
+        assert!(
+            baseline.is_improved_by(&current),
+            "multiple slot advances with no regression must be detected as improved"
         );
     }
 

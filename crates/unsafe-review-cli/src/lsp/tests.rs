@@ -8,7 +8,7 @@ use tower_lsp_server::ls_types::{
     HoverProviderCapability, Position,
 };
 use unsafe_review_core::{
-    AnalysisMode, AnalyzeInput, AnalyzeOutput, DiffSource, PolicyMode, Scope, analyze,
+    AnalysisMode, AnalyzeInput, AnalyzeOutput, DiffSource, PolicyMode, ReviewClass, Scope, analyze,
 };
 
 use super::actions::{code_actions_for, execute_card_command};
@@ -18,7 +18,7 @@ use super::diagnostics::{diagnostic_card_id, diagnostics_by_uri};
 use super::hover::hover_for;
 use super::state::clear_uris_for_failure;
 use super::uri::uri_from_path;
-use super::{CMD_PACKET, CMD_REFRESH, CMD_WITNESS_COMMAND};
+use super::{CMD_OPEN_TEST, CMD_PACKET, CMD_REFRESH, CMD_WITNESS_COMMAND, CMD_WITNESS_ROUTE};
 
 fn fixture_output(name: &str) -> Result<(PathBuf, AnalyzeOutput), Box<dyn Error>> {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -55,7 +55,9 @@ fn initialize_returns_read_only_capabilities() -> Result<(), Box<dyn Error>> {
     };
     assert!(commands.contains(&CMD_REFRESH.to_string()));
     assert!(commands.contains(&CMD_PACKET.to_string()));
+    assert!(commands.contains(&CMD_WITNESS_ROUTE.to_string()));
     assert!(commands.contains(&CMD_WITNESS_COMMAND.to_string()));
+    assert!(commands.contains(&CMD_OPEN_TEST.to_string()));
     Ok(())
 }
 
@@ -219,8 +221,30 @@ fn hover_selects_card_at_cursor() -> Result<(), Box<dyn Error>> {
     let HoverContents::Markup(markup) = hover.contents else {
         return Err("expected markdown hover".into());
     };
+    // Card identity and trust boundary (preserved from original).
     assert!(markup.value.contains(&output.cards[0].id.0));
     assert!(markup.value.contains("Trust boundary"));
+    // Rich hover: obligations section must be present.
+    assert!(
+        markup.value.contains("Required safety conditions:"),
+        "hover must contain obligations section (got: {:?})",
+        &markup.value[..markup.value.len().min(200)]
+    );
+    // Rich hover: at least one concrete obligation description.
+    assert!(
+        markup.value.contains("pointer is live"),
+        "hover must contain at least one obligation description (got: {:?})",
+        &markup.value[..markup.value.len().min(200)]
+    );
+    // Rich hover: evidence sections must be present.
+    assert!(
+        markup.value.contains("Evidence found:"),
+        "hover must contain evidence-found section"
+    );
+    assert!(
+        markup.value.contains("Evidence missing:"),
+        "hover must contain evidence-missing section"
+    );
     Ok(())
 }
 
@@ -308,6 +332,65 @@ fn execute_unknown_command_returns_none() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+/// Drift-lock: `CMD_WITNESS_ROUTE` must return a JSON payload with the expected
+/// shape and trust-boundary string.  If the command is removed from the
+/// dispatcher or the route kind is renamed, this test turns red.
+#[test]
+fn execute_explain_witness_route_returns_route_for_card() -> Result<(), Box<dyn Error>> {
+    let (_root, output) = fixture_output("raw_pointer_alignment")?;
+    let card = output
+        .cards
+        .first()
+        .ok_or("fixture must have at least one card")?;
+    let route = card.routes.first().ok_or(
+        "raw_pointer_alignment card must have at least one witness route; \
+         if the fixture changed, update the fixture or pick one that has routes",
+    )?;
+    let result = execute_card_command(CMD_WITNESS_ROUTE, &[json!({"card_id": card.id.0})], &output)
+        .ok_or("CMD_WITNESS_ROUTE must return Some for a card with routes")?;
+    assert_eq!(result["kind"], "unsafe-review.witness_route");
+    assert_eq!(result["card_id"], card.id.0.as_str());
+    assert_eq!(result["route"], route.kind.as_str());
+    assert!(
+        result["trust_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("not a site-execution claim"),
+        "trust_boundary must contain advisory wording"
+    );
+    Ok(())
+}
+
+/// Drift-lock: `CMD_OPEN_TEST` must return a JSON payload with the expected
+/// shape.  If the command is removed from the dispatcher or field names change,
+/// this test turns red.
+#[test]
+fn execute_open_related_test_returns_test_metadata() -> Result<(), Box<dyn Error>> {
+    let (_root, output) = fixture_output("raw_pointer_alignment")?;
+    let card = output
+        .cards
+        .first()
+        .ok_or("fixture must have at least one card")?;
+    let test = card.related_tests.first().ok_or(
+        "raw_pointer_alignment card must have at least one related test; \
+         if the fixture changed, update the fixture or pick one that has related tests",
+    )?;
+    let result = execute_card_command(CMD_OPEN_TEST, &[json!({"card_id": card.id.0})], &output)
+        .ok_or("CMD_OPEN_TEST must return Some for a card with related tests")?;
+    assert_eq!(result["kind"], "unsafe-review.related_test");
+    assert_eq!(result["card_id"], card.id.0.as_str());
+    assert_eq!(result["name"], test.name.as_str());
+    assert!(
+        result["file"].as_str().is_some(),
+        "file field must be a string"
+    );
+    assert!(
+        result["line"].as_u64().is_some(),
+        "line field must be a number"
+    );
+    Ok(())
+}
+
 #[test]
 fn refresh_failure_clears_stale_diagnostics() -> Result<(), Box<dyn Error>> {
     let uri =
@@ -323,4 +406,95 @@ fn refresh_failure_clears_stale_diagnostics() -> Result<(), Box<dyn Error>> {
 #[test]
 fn did_change_does_not_trigger_analysis_by_default() {
     assert!(!should_refresh_on_change(&LspConfig::default()));
+}
+
+/// Drift-lock: non-actionable cards must not appear in LSP diagnostics.
+///
+/// The non-actionable classes (GuardedAndWitnessed, Suppressed, BaselineKnown)
+/// represent resolved or policy-suppressed states; surfacing them as IDE
+/// diagnostics is noise with no required action. This test verifies the filter
+/// added in `diagnostics_by_uri` (issue #1593).
+///
+/// WitnessMismatch was previously listed here but is NOW actionable (issue
+/// #1602): a saved receipt whose tool does not match any routed witness tool is
+/// a live "fix your receipt" condition, not a resolved state. See the positive
+/// arm below for its drift-lock coverage.
+///
+/// Cards are constructed programmatically by cloning a real fixture card and
+/// overriding the class field — the same pattern recommended by the verify pass
+/// (mirrors `domain::coverage` tests) — so no new fixture or calibration entry
+/// is needed for the non-actionable classes.
+#[test]
+fn non_actionable_cards_produce_no_lsp_diagnostic() -> Result<(), Box<dyn Error>> {
+    let (root, base_output) = fixture_output("raw_pointer_alignment")?;
+    let base_card = base_output
+        .cards
+        .first()
+        .ok_or("fixture must have at least one card")?;
+    let non_actionable_classes = [
+        ReviewClass::GuardedAndWitnessed,
+        ReviewClass::Suppressed,
+        ReviewClass::BaselineKnown,
+    ];
+    for class in non_actionable_classes {
+        let class_str = class.as_str();
+        let mut card = base_card.clone();
+        card.class = class;
+        let output = AnalyzeOutput {
+            cards: vec![card],
+            ..base_output.clone()
+        };
+        let diagnostics = diagnostics_by_uri(&root, &output);
+        assert!(
+            diagnostics.is_empty(),
+            "non-actionable class {class_str} produced an LSP diagnostic — it should be filtered out",
+        );
+    }
+    Ok(())
+}
+
+/// Drift-lock (positive arm): actionable cards must still appear in LSP diagnostics.
+///
+/// Verifies that the filter in `diagnostics_by_uri` does not accidentally suppress
+/// actionable cards (issue #1593).
+///
+/// WitnessMismatch is included here (issue #1602): a saved receipt whose tool
+/// does not match any routed witness tool is a live "fix your receipt" condition
+/// and must be visible as an IDE diagnostic. This arm would fail if
+/// `is_actionable()` were reverted to exclude WitnessMismatch.
+#[test]
+fn actionable_cards_produce_lsp_diagnostic() -> Result<(), Box<dyn Error>> {
+    let (root, base_output) = fixture_output("raw_pointer_alignment")?;
+    let base_card = base_output
+        .cards
+        .first()
+        .ok_or("fixture must have at least one card")?;
+    let actionable_classes = [
+        ReviewClass::ContractMissing,
+        ReviewClass::GuardMissing,
+        ReviewClass::GuardedUnwitnessed,
+        ReviewClass::ReachableUnwitnessed,
+        ReviewClass::UnsafeUnreached,
+        ReviewClass::WitnessMismatch,
+        ReviewClass::RequiresLoom,
+        ReviewClass::RequiresSanitizer,
+        ReviewClass::RequiresKaniOrCrux,
+        ReviewClass::MiriUnsupported,
+        ReviewClass::StaticUnknown,
+    ];
+    for class in actionable_classes {
+        let class_str = class.as_str();
+        let mut card = base_card.clone();
+        card.class = class;
+        let output = AnalyzeOutput {
+            cards: vec![card],
+            ..base_output.clone()
+        };
+        let diagnostics = diagnostics_by_uri(&root, &output);
+        assert!(
+            !diagnostics.is_empty(),
+            "actionable class {class_str} produced no LSP diagnostic — it should be included",
+        );
+    }
+    Ok(())
 }
