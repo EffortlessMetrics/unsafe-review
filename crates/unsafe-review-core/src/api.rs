@@ -3,9 +3,11 @@ use crate::domain::{CardId, ReviewCard};
 use crate::input::workspace;
 use crate::output::{
     agent, badges, comment_plan, confirmation, gate_manifest, human, json, lsp, markdown, outcome,
-    policy_report, receipt_audit, repair_queue, sarif, witness_plan,
+    policy_report, receipt_audit, repair_queue, sarif, usefulness_telemetry, witness_plan,
 };
+use crate::policy::SnapshotCoverage;
 use crate::util::path_display;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -106,6 +108,16 @@ impl RepoStopReason {
     }
 }
 
+/// Per-file scan timing entry.  Diagnostic only — not a coverage claim,
+/// proof, UB-free, Miri-clean, site-execution, or performance guarantee.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PerFileScanStats {
+    /// Repository-relative path of the scanned file.
+    pub file: PathBuf,
+    /// Wall-clock milliseconds spent scanning this file (parse + site detection).
+    pub scan_ms: u64,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RepoScanStatus {
     pub schema_version: String,
@@ -124,7 +136,28 @@ pub struct RepoScanStatus {
     pub stop_reason: RepoStopReason,
     /// The configured card cap when `stop_reason == MaxCards`; `None` otherwise.
     pub cap: Option<usize>,
+    /// Per-file timing breakdown for diagnostic use.  Present only when the
+    /// scan covered fewer than [`FILE_TIMINGS_CAP`] files; `None` for large
+    /// scans (cap honesty: the field is absent, not silently truncated).
+    /// This is a **diagnostic aperture only** — not a coverage claim, proof,
+    /// UB-free, Miri-clean, site-execution, or performance guarantee.
+    pub file_timings: Option<Vec<PerFileScanStats>>,
+    /// Total bytes written to the output artifact(s) for this run.  `Some`
+    /// only after the final report file is successfully written; `None` for
+    /// in-progress, error, timeout, signal-terminated, and capped states where
+    /// no final artifact was produced.
+    ///
+    /// This is a **diagnostic aperture only** — it measures the disk footprint
+    /// of this run's output, not the files scanned.  It is not a coverage
+    /// claim, proof, UB-free, Miri-clean, site-execution, or performance
+    /// guarantee.
+    pub output_bytes: Option<u64>,
 }
+
+/// Maximum number of files for which per-file timing is collected.
+/// Scans touching more files omit `file_timings` entirely rather than
+/// silently emitting a partial list (truncation honesty).
+pub const FILE_TIMINGS_CAP: usize = 100;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DiscoveryOptions {
@@ -191,6 +224,14 @@ pub struct Summary {
     /// `new_gaps`      — open actionable cards not in the baseline ledger.
     /// `worsened_gaps` — baseline cards whose coverage regressed (requires a saved coverage
     ///                   snapshot; always 0 until `baseline init` authoring lands).
+    /// `improved_gaps` — baseline cards whose evidence coverage improved (at least one slot
+    ///                   advanced and no slot regressed; requires a saved coverage snapshot;
+    ///                   always 0 until `baseline init` authoring lands).
+    ///                   Precedence: worsened > improved > inherited.  A card is only counted
+    ///                   improved if it is not already counted worsened.
+    ///                   An improved card is still advisory, still open, still present — it is
+    ///                   NOT resolved, NOT safe, NOT UB-free, NOT Miri-clean, and NOT a
+    ///                   site-execution claim.
     /// `resolved_gaps` — baseline ledger entries whose card is no longer present.
     /// `inherited_gaps`— baseline-known cards still open and unchanged.
     ///
@@ -198,6 +239,7 @@ pub struct Summary {
     /// on a repo-mode run it counts all open actionable non-baseline gaps.
     pub new_gaps: usize,
     pub worsened_gaps: usize,
+    pub improved_gaps: usize,
     pub resolved_gaps: usize,
     pub inherited_gaps: usize,
 }
@@ -212,6 +254,17 @@ pub struct AnalyzeOutput {
     pub policy: PolicyMode,
     pub summary: Summary,
     pub cards: Vec<ReviewCard>,
+    /// On a diff-scoped run, the set of candidate files that were scanned.
+    /// Empty for full-scan (repo-mode) runs.  Used to distinguish "baseline
+    /// card resolved because we scanned its file and it is gone" from "baseline
+    /// card not present because its file was out of diff scope" (SPEC-0030).
+    pub diff_scoped_files: BTreeSet<PathBuf>,
+    /// Per-card coverage snapshot loaded from `policy/unsafe-review-baseline-snapshot.toml`.
+    ///
+    /// Output renderers use this to project the per-card `baseline_state`/`outcome_movement`
+    /// from the same slot-level comparison the summary uses (SPEC-0030 §single-truth).
+    /// Empty when no snapshot file exists (no worsened/improved projection possible).
+    pub coverage_snapshot: BTreeMap<String, SnapshotCoverage>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -286,6 +339,25 @@ pub fn evaluate_policy_report(mut input: AnalyzeInput) -> Result<PolicyReport, S
 
 pub fn evaluate_policy_report_from_output(output: &AnalyzeOutput) -> Result<PolicyReport, String> {
     policy_report::evaluate(output)
+}
+
+/// Run cost aperture measured by the CLI emit layer and injected into
+/// `usefulness-telemetry.json` (SPEC-0038 §scan_cost).
+///
+/// Core must not measure wall time — this struct carries the two cost fields
+/// that only the CLI layer can observe.
+///
+/// Diagnostic only — not a coverage claim, proof, UB-free, Miri-clean,
+/// site-execution, or performance guarantee.
+#[derive(Clone, Debug, Default)]
+pub struct ScanCost {
+    /// Wall-clock milliseconds from before `analyze()` through the last artifact
+    /// write, measured in the CLI emit layer.
+    pub elapsed_ms: u64,
+    /// Total bytes written across all output artifacts for this run, accumulated
+    /// in the CLI emit layer.  The telemetry file itself is excluded (it is
+    /// rendered before its own bytes are known).
+    pub output_bytes_total: u64,
 }
 
 /// Traceable evidence metadata that the CLI layer assembles from argv, git, and the
@@ -381,6 +453,21 @@ pub fn project_editor(output: &AnalyzeOutput) -> lsp::EditorProjection {
     lsp::project_editor(output)
 }
 
+/// Render the rich hover markdown for a single [`ReviewCard`] as the live LSP
+/// server would produce it.
+///
+/// The returned string is the same content that `lsp.json` embeds in its
+/// `hovers[].contents` field: obligations, evidence state (contract / guard /
+/// reach / witness), hazard families, verify commands, witness route, handoff
+/// commands, and the advisory trust boundary.
+///
+/// This is **advisory evidence only**: no memory-safety proof, no UB-free
+/// status, no Miri-clean status, and not a site-execution claim unless a
+/// matching witness receipt says so.
+pub fn render_lsp_hover(card: &ReviewCard) -> String {
+    lsp::render_hover(card)
+}
+
 pub fn render_witness_plan(output: &AnalyzeOutput) -> String {
     witness_plan::render(output)
 }
@@ -397,6 +484,49 @@ pub fn render_repair_queue(output: &AnalyzeOutput) -> String {
 /// byte-compared goldens or reproducibility rails.
 pub fn render_gate_manifest(output: &AnalyzeOutput) -> String {
     gate_manifest::render(output)
+}
+
+/// Render `unsafe-review-gate.json` for a `repo` run (SPEC-0034 parity).
+///
+/// Repo mode writes a single output file rather than a bundle directory, so
+/// the first-pr-specific artifact pointers (`pr_summary`, `sarif`, `lsp`, …)
+/// are absent — they were not emitted and must not be faked (SPEC-0034:
+/// "Missing optional artifacts are omitted, not faked.").
+///
+/// `report_filename` is the basename of the `--out` file (e.g. `"repo.json"`);
+/// it becomes the `artifacts.cards` pointer so downstream consumers can locate
+/// the ReviewCard dataset relative to the manifest.
+///
+/// The `status` field is always `"advisory"` — the manifest carries posture,
+/// never a merge verdict, not proof, not UB-free, not Miri-clean, not a
+/// site-execution claim.
+pub fn render_gate_manifest_repo(output: &AnalyzeOutput, report_filename: &str) -> String {
+    gate_manifest::render_repo(output, report_filename)
+}
+
+/// Render the `usefulness-telemetry.json` low-noise usefulness telemetry artifact (SPEC-0038).
+///
+/// This is a pure projection from `AnalyzeOutput` — no new analysis.
+/// Diagnostic operational usefulness only: not calibrated precision/recall,
+/// not accuracy measurement, not memory-safety proof, not UB-free status,
+/// not Miri-clean status, not a site-execution claim, not a gate, and not
+/// a merge verdict.
+pub fn render_usefulness_telemetry(output: &AnalyzeOutput) -> String {
+    usefulness_telemetry::render(output)
+}
+
+/// Render `usefulness-telemetry.json` with CLI-layer scan cost injected
+/// (SPEC-0038 §scan_cost).
+///
+/// The `cost` argument carries `elapsed_ms` and `output_bytes_total` measured
+/// in the CLI emit layer — fields that core cannot compute itself (core must
+/// not measure wall time).  When `cost` is `None` the `scan_cost` section is
+/// omitted and the output is identical to `render_usefulness_telemetry`.
+pub fn render_usefulness_telemetry_with_cost(
+    output: &AnalyzeOutput,
+    cost: Option<&ScanCost>,
+) -> String {
+    usefulness_telemetry::render_with_cost(output, cost)
 }
 
 pub fn project_review_card_confirmation(card: &ReviewCard) -> ReviewCardConfirmationProjection {
@@ -455,7 +585,7 @@ pub fn collect_context(output: &AnalyzeOutput, id: &CardId) -> Option<String> {
         .cards
         .iter()
         .find(|card| &card.id == id)
-        .map(agent::render)
+        .map(|card| agent::render_with_output(output, card))
 }
 
 /// Render a `file_range_scan` envelope for SPEC-0033.
@@ -500,6 +630,7 @@ pub fn collect_context_range(
         })
         .collect();
 
+    let statuses = comment_plan::card_statuses(output);
     agent::render_range_scan(
         queried_display,
         line_start,
@@ -507,6 +638,8 @@ pub fn collect_context_range(
         changed_only,
         &file_cards,
         &output.schema_version,
+        &statuses,
+        &output.coverage_snapshot,
     )
 }
 
@@ -521,6 +654,9 @@ pub struct BaselineInitResult {
     pub ledger_path: PathBuf,
     /// Path to the coverage snapshot written.
     pub snapshot_path: PathBuf,
+    /// The open actionable cards captured, in scan order.
+    /// Used by the CLI to display a debt scope listing for brownfield adoption.
+    pub cards: Vec<ReviewCard>,
 }
 
 /// `baseline init` (SPEC-0030): scan the repo for open actionable cards, capture each
@@ -567,6 +703,7 @@ pub fn baseline_init(
     // Collect open actionable cards.
     let mut ledger_entries: Vec<LedgerEntry> = Vec::new();
     let mut snapshot_entries: BTreeMap<String, SnapshotCoverage> = BTreeMap::new();
+    let mut actionable_cards: Vec<ReviewCard> = Vec::new();
 
     for card in &output.cards {
         if card.class.is_actionable() {
@@ -575,7 +712,7 @@ pub fn baseline_init(
                 owner: "baseline-init".to_string(),
                 reason: "captured by `baseline init`; pre-existing debt, not reviewed as safe"
                     .to_string(),
-                evidence: "baseline-init capture".to_string(),
+                evidence: "baseline-init: captured by baseline init; pre-existing debt".to_string(),
                 review_after: Some(review_after.clone()),
                 expires: None,
             });
@@ -589,6 +726,7 @@ pub fn baseline_init(
                     witness_receipt_coverage: block.witness_receipt_coverage.as_str().to_string(),
                 },
             );
+            actionable_cards.push(card.clone());
         }
     }
 
@@ -601,6 +739,7 @@ pub fn baseline_init(
         ledger_existed,
         ledger_path,
         snapshot_path,
+        cards: actionable_cards,
     })
 }
 

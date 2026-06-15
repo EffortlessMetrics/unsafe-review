@@ -1,0 +1,207 @@
+schema_version = "1.0"
+
+repo = "unsafe-review"
+namespace = ".rails"
+
+[conventions]
+proposal_prefix = "UNSAFE-REVIEW-PROP"
+spec_prefix = "UNSAFE-REVIEW-SPEC"
+adr_prefix = "UNSAFE-REVIEW-ADR"
+lane_prefix = "unsafe-review"
+
+[external_namespaces]
+codex = ".codex"
+speckit = ".spec"
+claude = ".claude"
+jules = ".jules"
+
+[[artifact]]
+id = "UNSAFE-REVIEW-PROP-0002"
+kind = "proposal"
+path = "docs/proposals/UNSAFE-REVIEW-PROP-0002-source-of-truth-stack.md"
+status = "proposed"
+owner = "repo-infra"
+
+[[artifact]]
+id = "UNSAFE-REVIEW-SPEC-0020"
+kind = "spec"
+path = "docs/specs/UNSAFE-REVIEW-SPEC-0020-source-of-truth-stack.md"
+status = "accepted"
+owner = "repo-infra"
+linked_proposal = "UNSAFE-REVIEW-PROP-0002"
+
+[[artifact]]
+id = "UNSAFE-REVIEW-SPEC-0023"
+kind = "spec"
+path = "docs/specs/UNSAFE-REVIEW-SPEC-0023-first-hour-experience.md"
+status = "accepted"
+owner = "product / cli"
+
+[[artifact]]
+id = "UNSAFE-REVIEW-SPEC-0024"
+kind = "spec"
+path = "docs/specs/UNSAFE-REVIEW-SPEC-0024-ci-design.md"
+status = "accepted"
+owner = "repo-infra"
+
+[[artifact]]
+id = "UNSAFE-REVIEW-SPEC-0025"
+kind = "spec"
+path = "docs/specs/UNSAFE-REVIEW-SPEC-0025-docs-automation.md"
+status = "accepted"
+owner = "repo-infra"
+
+[[artifact]]
+id = "UNSAFE-REVIEW-SPEC-0026"
+kind = "spec"
+path = "docs/specs/UNSAFE-REVIEW-SPEC-0026-accuracy-validation-and-calibration.md"
+status = "proposed"
+owner = "calibration"
+
+[[artifact]]
+id = "UNSAFE-REVIEW-SPEC-0027"
+kind = "spec"
+path = "docs/specs/UNSAFE-REVIEW-SPEC-0027-manual-candidate-cards.md"
+status = "proposed"
+owner = "product / cli"
+
+[[artifact]]
+id = "UNSAFE-REVIEW-SPEC-0037"
+kind = "spec"
+path = "docs/specs/UNSAFE-REVIEW-SPEC-0037-pr-gate-composite-action.md"
+status = "proposed"
+owner = "repo-infra / ci"
+
+[[artifact]]
+id = "UNSAFE-REVIEW-SPEC-0038"
+kind = "spec"
+path = "docs/specs/UNSAFE-REVIEW-SPEC-0038-low-noise-usefulness-telemetry.md"
+status = "proposed"
+owner = "product / cli"
+
+[[artifact]]
+id = "UNSAFE-REVIEW-SPEC-0039"
+kind = "spec"
+path = "docs/specs/UNSAFE-REVIEW-SPEC-0039-scheduled-corpus-backstop.md"
+status = "proposed"
+owner = "repo-infra"
+
+[[artifact]]
+id = "UNSAFE-REVIEW-SPEC-0021"
+kind = "spec"
+path = "docs/specs/UNSAFE-REVIEW-SPEC-0021-vscode-openvsx-extension.md"
+status = "accepted"
+owner = "editor/extension"
+
+[[artifact]]
+id = "UNSAFE-REVIEW-SPEC-0022"
+kind = "spec"
+path = "docs/specs/UNSAFE-REVIEW-SPEC-0022-pr-commenting-experience.md"
+status = "accepted"
+owner = "core/spec"
+
+[[artifact]]
+id = "UNSAFE-REVIEW-ADR-0007"
+kind = "adr"
+path = "docs/adr/UNSAFE-REVIEW-ADR-0007-editor-extension-is-thin-adapter.md"
+status = "proposed"
+owner = "editor/extension"
+linked_spec = "UNSAFE-REVIEW-SPEC-0021"
+
+[[lane]]
+id = "docs/source-of-truth-scaffold"
+name = "source-of-truth scaffold"
+path = ".rails/goals/active.toml"
+status = "active"
+owner = "repo-infra"
+
+[[lane]]
+id = "ci-design-rail"
+name = "CI design contract"
+path = ".rails/goals/active.toml"
+status = "active"
+owner = "repo-infra"
+
+[[lane]]
+id = "docs-automation-control-plane"
+name = "docs automation control plane"
+path = ".rails/goals/active.toml"
+status = "active"
+owner = "repo-infra"
+
+[[lane]]
+id = "accuracy-calibration-rail"
+name = "accuracy calibration rail"
+path = ".rails/goals/active.toml"
+status = "active"
+owner = "calibration"
+
+[[lane]]
+id = "manual-candidate-bun-cockpit"
+name = "manual candidate Bun cockpit"
+path = ".rails/goals/active.toml"
+status = "active"
+owner = "product / cli"
+
+[[lane]]
+id = "editor-extension"
+name = "VS Code and Open VSX editor adapter"
+path = ".rails/lanes/editor-extension/tracker.toml"
+status = "active"
+owner = "editor/extension"
+
+[[lane]]
+id = "public-product-surfaces"
+name = "public product surfaces"
+path = ".rails/lanes/public-product-surfaces/tracker.toml"
+status = "proposed"
+owner = "release/public-surface"
+
+[[lane]]
+id = "marketplace-first-hour-ux"
+name = "marketplace and first-hour UX"
+path = ".rails/lanes/marketplace-first-hour-ux/tracker.toml"
+status = "active"
+owner = "product / cli"
+
+[[lane]]
+id = "validation-residue"
+name = "instrument truthfulness and consumer reliability"
+path = ".rails/lanes/validation-residue/implementation-plan.md"
+status = "active"
+owner = "product / cli"
+
+[[lane]]
+id = "usefulness-telemetry-projection"
+name = "low-noise usefulness telemetry projection"
+path = ".rails/lanes/usefulness-telemetry/implementation-plan.md"
+status = "active"
+owner = "product / cli"
+
+[[lane]]
+id = "pr-alias-zero-config-entry-point"
+name = "pr alias zero-config entry point"
+path = ".rails/goals/active.toml"
+status = "active"
+owner = "product / cli"
+
+[[lane]]
+id = "scheduled-corpus-backstop"
+name = "scheduled corpus backstop"
+path = ".rails/goals/active.toml"
+status = "active"
+owner = "repo-infra"
+
+[[lane]]
+id = "corpus-usefulness-rollup"
+name = "corpus-wide usefulness/noise rollup aggregation"
+path = ".rails/goals/active.toml"
+status = "active"
+owner = "repo-infra"
+
+[[lane]]
+id = "adoption-readiness"
+name = "action surface correctness for adopters"
+path = ".rails/goals/active.toml"
+status = "active"
+owner = "repo-infra / ci"

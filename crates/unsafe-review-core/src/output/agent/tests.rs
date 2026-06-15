@@ -103,7 +103,7 @@ fn agent_packet_is_parseable_bounded_and_card_sourced() -> Result<(), String> {
     );
     assert_eq!(
         value["source_context"]["related_tests"][0]["name"],
-        "read_header"
+        "reads_header"
     );
     assert!(
         serde_json::to_string(&value["source_context"]["limits"])
@@ -1004,6 +1004,7 @@ fn agent_packet_preserves_delegation_boundaries_across_families() -> Result<(), 
         "get_unchecked_mut_bounds",
         "maybeuninit_assume_init",
         "vec_set_len",
+        "public_unsafe_fn_missing_safety",
         "atomic_pointer_state_fetch_ops",
         "ffi_sanitizer_route",
     ] {
@@ -1088,6 +1089,237 @@ fn agent_packet_marks_no_missing_cards_not_ready_for_repair() -> Result<(), Stri
     let buckets = json_string_array(&value["repair_queue"]["buckets"], "repair queue buckets")?;
     assert_eq!(buckets, vec!["do_not_auto_repair"]);
     assert!(!buckets.iter().any(|bucket| bucket == "review_only"));
+    Ok(())
+}
+
+// --- SPEC-0029: coverage block in agent context packet ---
+
+#[test]
+fn agent_packet_includes_coverage_block() -> Result<(), String> {
+    let output = fixture_output("raw_pointer_alignment")?;
+    let Some(card) = output.cards.first() else {
+        return Err("fixture should emit one card".to_string());
+    };
+    let value = parse_json(&render(card))?;
+
+    // The coverage block must be present and contain all SPEC-0029 slots.
+    let coverage = &value["coverage"];
+    assert!(
+        coverage.is_object(),
+        "agent packet must include a `coverage` object"
+    );
+
+    // Derive the expected block directly — this verifies no second truth surface.
+    let block = card.coverage_block();
+
+    // All nine slots must be present and match CoverageBlock::derive exactly.
+    assert_eq!(
+        coverage["contract_coverage"].as_str(),
+        Some(block.contract_coverage.as_str()),
+        "coverage.contract_coverage must match CoverageBlock::derive"
+    );
+    assert_eq!(
+        coverage["guard_coverage"].as_str(),
+        Some(block.guard_coverage.as_str()),
+        "coverage.guard_coverage must match CoverageBlock::derive"
+    );
+    assert_eq!(
+        coverage["test_reach_coverage"].as_str(),
+        Some(block.test_reach_coverage.as_str()),
+        "coverage.test_reach_coverage must match CoverageBlock::derive"
+    );
+    assert_eq!(
+        coverage["witness_receipt_coverage"].as_str(),
+        Some(block.witness_receipt_coverage.as_str()),
+        "coverage.witness_receipt_coverage must match CoverageBlock::derive"
+    );
+    assert_eq!(
+        coverage["manual_context"].as_str(),
+        Some(block.manual_context.as_str()),
+        "coverage.manual_context must match CoverageBlock::derive"
+    );
+    assert_eq!(
+        coverage["baseline_state"].as_str(),
+        Some(block.baseline_state.as_str()),
+        "coverage.baseline_state must match CoverageBlock::derive"
+    );
+    assert_eq!(
+        coverage["outcome_movement"].as_str(),
+        Some(block.outcome_movement.as_str()),
+        "coverage.outcome_movement must match CoverageBlock::derive"
+    );
+    assert_eq!(
+        coverage["comment_plan_status"].as_str(),
+        Some(block.comment_plan_status.as_str()),
+        "coverage.comment_plan_status must match CoverageBlock::derive"
+    );
+    assert_eq!(
+        coverage["agent_lsp_readiness"].as_str(),
+        Some(block.agent_lsp_readiness.as_str()),
+        "coverage.agent_lsp_readiness must match CoverageBlock::derive"
+    );
+
+    // Spot-check known values for the raw_pointer_alignment fixture:
+    // - contract_coverage: "present" (SAFETY comment is in source)
+    // - guard_coverage: "missing" (guard_missing class, no discharge)
+    // - witness_receipt_coverage: "missing" (no receipt imported)
+    // - manual_context: "absent" (bare card, no overlay)
+    // - baseline_state: "new" (actionable gap not in any baseline ledger)
+    // - outcome_movement: "regressed" (new baseline → regressed)
+    // - comment_plan_status: "not_eligible" (default, no comment plan run)
+    // - agent_lsp_readiness: "ready" (raw_pointer_read family, Miri route)
+    assert_eq!(coverage["contract_coverage"].as_str(), Some("present"));
+    assert_eq!(coverage["guard_coverage"].as_str(), Some("missing"));
+    assert_eq!(
+        coverage["witness_receipt_coverage"].as_str(),
+        Some("missing")
+    );
+    assert_eq!(coverage["manual_context"].as_str(), Some("absent"));
+    assert_eq!(coverage["baseline_state"].as_str(), Some("new"));
+    assert_eq!(coverage["outcome_movement"].as_str(), Some("regressed"));
+    assert_eq!(
+        coverage["comment_plan_status"].as_str(),
+        Some("not_eligible")
+    );
+    assert_eq!(coverage["agent_lsp_readiness"].as_str(), Some("ready"));
+
+    Ok(())
+}
+
+/// Drift-lock: `coverage.agent_lsp_readiness` must equal `agent_readiness.state`
+/// (mapped) in the agent packet.
+///
+/// Exercises the gate cases listed in output audit #1687 findings 3+4:
+/// empty-missing → unsupported, low-confidence → unsupported, no-verify-commands
+/// → unsupported, all-witness-missing → requires_witness_receipt, ready.
+/// After the collapse to a single shared function, divergence is structurally
+/// impossible for the agent packet (packet.rs overrides the coverage block with
+/// the exact repair-projection state), but this test is a regression guard so
+/// future refactors cannot re-introduce the split.
+#[test]
+fn agent_packet_coverage_agent_lsp_readiness_matches_agent_readiness_state() -> Result<(), String> {
+    use crate::domain::{
+        CardId, Confidence, ContractEvidence, DischargeEvidence, HazardKind, MissingEvidence,
+        NextAction, OperationFamily, Priority, ProofPath, ReachEvidence, ReviewCard, ReviewClass,
+        SourceLocation, UnsafeOperation, UnsafeSite, UnsafeSiteKind, WitnessEvidence, WitnessKind,
+        WitnessRoute,
+    };
+
+    fn base_card() -> ReviewCard {
+        ReviewCard {
+            id: CardId("UR-drift-lock-c1".to_string()),
+            class: ReviewClass::GuardMissing,
+            priority: Priority::Medium,
+            confidence: Confidence::Medium,
+            proof_path: ProofPath::SourceRouteOnly,
+            site: UnsafeSite {
+                location: SourceLocation {
+                    file: "src/lib.rs".into(),
+                    line: 1,
+                    column: 1,
+                },
+                kind: UnsafeSiteKind::Operation,
+                owner: Some("owner".to_string()),
+                visibility: "private".to_string(),
+                public_api_surface: false,
+                changed: true,
+                snippet: "unsafe { *ptr }".to_string(),
+            },
+            operation: UnsafeOperation {
+                expression: "unsafe { *ptr }".to_string(),
+                family: OperationFamily::RawPointerDeref,
+            },
+            hazards: vec![HazardKind::PointerValidity],
+            obligations: vec![],
+            obligation_evidence: vec![],
+            contract: ContractEvidence::missing(),
+            discharge: DischargeEvidence::missing(),
+            reach: ReachEvidence {
+                state: "missing".to_string(),
+                summary: "no tests".to_string(),
+            },
+            witness: WitnessEvidence::missing(),
+            missing: vec![MissingEvidence {
+                kind: "contract".to_string(),
+                message: "no safety contract".to_string(),
+            }],
+            routes: vec![WitnessRoute {
+                kind: WitnessKind::Miri,
+                reason: "test".to_string(),
+                command: Some("cargo miri test".to_string()),
+                required: false,
+            }],
+            next_action: NextAction {
+                summary: "add guard".to_string(),
+                verify_commands: vec!["cargo miri test".to_string()],
+            },
+            related_tests: vec![],
+        }
+    }
+
+    /// Assert that `coverage.agent_lsp_readiness == agent_readiness.state` (mapped)
+    /// in the rendered agent packet for `card`.
+    fn check(label: &str, card: &ReviewCard) -> Result<(), String> {
+        // Map agent_readiness.state → the string used in coverage.agent_lsp_readiness.
+        const READY_COVERAGE: &str = "ready";
+        const NEEDS_HUMAN_COVERAGE: &str = "needs_human";
+        const REQUIRES_RECEIPT_COVERAGE: &str = "requires_witness_receipt";
+        const UNSUPPORTED_COVERAGE: &str = "unsupported";
+
+        let value = parse_json(&render(card))?;
+        let agent_state = value["agent_readiness"]["state"]
+            .as_str()
+            .ok_or_else(|| format!("{label}: agent_readiness.state missing"))?;
+        let coverage_readiness = value["coverage"]["agent_lsp_readiness"]
+            .as_str()
+            .ok_or_else(|| format!("{label}: coverage.agent_lsp_readiness missing"))?;
+
+        // Map agent_readiness.state to the expected coverage string.
+        let expected_coverage = match agent_state {
+            "ready_for_agent" => READY_COVERAGE,
+            "requires_human_review" => NEEDS_HUMAN_COVERAGE,
+            "requires_witness_receipt" => REQUIRES_RECEIPT_COVERAGE,
+            _ => UNSUPPORTED_COVERAGE,
+        };
+
+        if coverage_readiness != expected_coverage {
+            return Err(format!(
+                "{label}: coverage.agent_lsp_readiness={coverage_readiness:?} \
+                 != expected {expected_coverage:?} \
+                 (agent_readiness.state={agent_state:?})"
+            ));
+        }
+        Ok(())
+    }
+
+    // Case 1: ready card (non-empty missing, has scoped repairs, medium confidence,
+    // verify commands present).
+    let ready_card = base_card();
+    check("ready", &ready_card)?;
+
+    // Case 2: empty-missing → unsupported.
+    let mut empty_missing = base_card();
+    empty_missing.missing.clear();
+    check("empty-missing", &empty_missing)?;
+
+    // Case 3: low-confidence → unsupported.
+    let mut low_conf = base_card();
+    low_conf.confidence = Confidence::Low;
+    check("low-confidence", &low_conf)?;
+
+    // Case 4: no verify commands → unsupported.
+    let mut no_verify = base_card();
+    no_verify.next_action.verify_commands.clear();
+    check("no-verify-commands", &no_verify)?;
+
+    // Case 5: all-witness missing → requires_witness_receipt.
+    let mut all_witness = base_card();
+    all_witness.missing = vec![MissingEvidence {
+        kind: "witness".to_string(),
+        message: "no receipt".to_string(),
+    }];
+    check("all-witness-missing", &all_witness)?;
+
     Ok(())
 }
 
@@ -1229,7 +1461,16 @@ fn file_range_scan_returns_envelope_with_correct_shape() -> Result<(), String> {
     };
     // The fixture card is at src/lib.rs; use a wide range to guarantee overlap.
     let cards = vec![card];
-    let envelope_json = render_range_scan("src/lib.rs".to_string(), 1, 1000, false, &cards, "0.1");
+    let envelope_json = render_range_scan(
+        "src/lib.rs".to_string(),
+        1,
+        1000,
+        false,
+        &cards,
+        "0.1",
+        &std::collections::HashMap::new(),
+        &std::collections::BTreeMap::new(),
+    );
     let value = parse_json(&envelope_json)?;
 
     assert_eq!(value["mode"], "file_range_scan");
@@ -1286,6 +1527,8 @@ fn file_range_scan_returns_empty_list_when_no_overlap() -> Result<(), String> {
         false,
         &cards,
         "0.1",
+        &std::collections::HashMap::new(),
+        &std::collections::BTreeMap::new(),
     );
     let value = parse_json(&envelope_json)?;
 
@@ -1325,6 +1568,8 @@ fn file_range_scan_changed_only_includes_new_baseline_cards() -> Result<(), Stri
         true, // changed_only
         &cards,
         "0.1",
+        &std::collections::HashMap::new(),
+        &std::collections::BTreeMap::new(),
     );
     let value = parse_json(&envelope_json)?;
     assert_eq!(value["changed_only"], true);
@@ -1361,6 +1606,8 @@ fn file_range_scan_changed_only_excludes_inherited_baseline_cards() -> Result<()
         false,
         &cards,
         "0.1",
+        &std::collections::HashMap::new(),
+        &std::collections::BTreeMap::new(),
     ))?;
     let with_filter = parse_json(&render_range_scan(
         "src/lib.rs".to_string(),
@@ -1369,6 +1616,8 @@ fn file_range_scan_changed_only_excludes_inherited_baseline_cards() -> Result<()
         true,
         &cards,
         "0.1",
+        &std::collections::HashMap::new(),
+        &std::collections::BTreeMap::new(),
     ))?;
     // Both return the same card (it IS new/worsened), confirming the filter is applied.
     assert_eq!(
@@ -1389,7 +1638,16 @@ fn file_range_scan_packets_ordered_by_site_line() -> Result<(), String> {
     // We can't easily mutate cards without cloning, so just pass the same card twice
     // and verify the dedup-by-id logic keeps them sorted.
     let cards = vec![card, card];
-    let envelope_json = render_range_scan("src/lib.rs".to_string(), 1, 1000, false, &cards, "0.1");
+    let envelope_json = render_range_scan(
+        "src/lib.rs".to_string(),
+        1,
+        1000,
+        false,
+        &cards,
+        "0.1",
+        &std::collections::HashMap::new(),
+        &std::collections::BTreeMap::new(),
+    );
     let value = parse_json(&envelope_json)?;
     let packets = value["packets"]
         .as_array()

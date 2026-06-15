@@ -1,5 +1,5 @@
 use super::atomic_pointer_state::is_atomic_pointer_state_transition;
-use super::copy_operation::copy_operation_family;
+use super::copy_operation::{copy_operation_family, is_incomplete_multiline_copy};
 use super::ffi_boundary::ffi_boundary_applicability;
 use super::maybeuninit_operation::maybeuninit_operation_family;
 use super::nonnull_operation::nonnull_operation_family;
@@ -8,7 +8,8 @@ use super::static_mut::{is_static_mut_item, parse_static_mut_name};
 use super::syntax::{ParsedSource, SyntaxNodeFact};
 use super::target_feature::is_target_feature_attribute;
 use super::transmute_operation::{
-    is_incomplete_multiline_transmute_copy, transmute_operation_family,
+    is_incomplete_multiline_transmute, is_incomplete_multiline_transmute_copy,
+    transmute_operation_family,
 };
 use super::unsafe_impl::{parse_impl_owner, parse_impl_trait_name};
 use super::unwrap_operation::unwrap_operation_family;
@@ -85,7 +86,7 @@ fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
             _ => (UnsafeSiteKind::UnsafeImpl, OperationFamily::Unknown),
         });
     }
-    if line.contains("unsafe fn") {
+    if line.contains("unsafe fn") && line_contains_unsafe_fn_declaration(line) {
         return Some((UnsafeSiteKind::UnsafeFn, OperationFamily::Unknown));
     }
     if line.contains("unsafe trait") {
@@ -98,6 +99,20 @@ fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
         return Some((UnsafeSiteKind::StaticMut, OperationFamily::StaticMut));
     }
     if is_import_item(line) {
+        return None;
+    }
+    // Guard: skip all bare-name call-site detectors when the line is a function
+    // DEFINITION header.  A header like `pub fn set_len(` or `fn assume_init(`
+    // has the target name immediately preceded by `fn `, which makes every
+    // `contains_call_name` / `call_suffix` test match a *definition*, not a call.
+    // This single guard replaces per-detector workarounds (the analogous guard in
+    // `zeroed_operation.rs` becomes redundant but is preserved for stability).
+    //
+    // We still let `unsafe fn` declarations fall through the earlier branch above
+    // (line 89), so this guard fires only for SAFE (or const/async) fn headers.
+    // `unsafe { }` blocks, `unsafe impl`, and `extern` boundaries are already
+    // returned before we reach this point.
+    if is_fn_definition_header(line) {
         return None;
     }
     if let Some(family) = detect_operation_family(line) {
@@ -148,7 +163,8 @@ fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
     if contains_call_name(line, "new_unchecked") {
         return Some((UnsafeSiteKind::Operation, OperationFamily::UnsafeFnCall));
     }
-    if line.contains(".read_unaligned()") || line.contains("ptr::read_unaligned") {
+    if line.contains(".read_unaligned()") || line_contains_anchored_ptr_path(line, "read_unaligned")
+    {
         return Some((
             UnsafeSiteKind::Operation,
             OperationFamily::RawPointerReadUnaligned,
@@ -160,7 +176,10 @@ fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
             OperationFamily::RawPointerWriteUnaligned,
         ));
     }
-    if line.contains(".read()") || line.contains(".read_volatile(") || line.contains("ptr::read") {
+    if line.contains(".read()")
+        || line.contains(".read_volatile(")
+        || line_contains_anchored_ptr_path(line, "read")
+    {
         return Some((UnsafeSiteKind::Operation, OperationFamily::RawPointerRead));
     }
     if is_raw_pointer_write(line) {
@@ -175,6 +194,13 @@ fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
     if line.contains("asm!") {
         return Some((UnsafeSiteKind::Operation, OperationFamily::InlineAsm));
     }
+    // A ref-wrapped deref (`unsafe { &mut *ptr }`, `unsafe { &*ptr }`) is a
+    // raw-pointer dereference.  Check this BEFORE the generic call-wrapper test so
+    // that `unsafe { &mut *self.value.get() }` is classified as `raw_pointer_deref`
+    // and NOT as `unsafe_fn_call` (the `.get()` parens would otherwise match).
+    if unsafe_block_content_is_ref_deref(line) {
+        return Some((UnsafeSiteKind::Operation, OperationFamily::RawPointerDeref));
+    }
     if unsafe_block_contains_call(line) {
         return Some((UnsafeSiteKind::Operation, OperationFamily::UnsafeFnCall));
     }
@@ -185,6 +211,43 @@ fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
         return Some((UnsafeSiteKind::UnsafeBlock, OperationFamily::Unknown));
     }
     None
+}
+
+/// Returns `true` when `line` contains an `unsafe fn` that is a named function
+/// declaration (e.g. `unsafe fn foo(` or `pub unsafe fn bar<T>(`), and `false`
+/// when the only `unsafe fn` occurrence is a fn-pointer type in field or type
+/// position (e.g. `call: unsafe fn(*mut u8),`).
+///
+/// A named declaration always has an identifier character immediately after the
+/// whitespace that follows `fn`.  A fn-pointer type has `(` directly there.
+fn line_contains_unsafe_fn_declaration(line: &str) -> bool {
+    let mut cursor = line;
+    while let Some(pos) = cursor.find("unsafe fn") {
+        let before = cursor[..pos].chars().next_back();
+        let after = &cursor[pos + "unsafe fn".len()..];
+        // `unsafe` must start on an identifier boundary.
+        let starts_on_boundary = before.is_none_or(|ch| !is_ident_continue(ch));
+        // `fn` must end on an identifier boundary (the char after is not ident).
+        let fn_end_char = after.chars().next();
+        let ends_on_boundary = fn_end_char.is_none_or(|ch| !is_ident_continue(ch));
+        if starts_on_boundary && ends_on_boundary {
+            // Look at what follows `unsafe fn` after optional whitespace.
+            let rest = after.trim_start_matches([' ', '\t']);
+            let next_ch = rest.chars().next();
+            // A named declaration starts with an identifier character (letter or `_`).
+            // A fn-pointer type starts with `(`.
+            if next_ch.is_some_and(|ch| ch == '_' || ch.is_ascii_alphabetic()) {
+                return true;
+            }
+            // Not a declaration at this occurrence; keep scanning.
+        }
+        let skip = after
+            .char_indices()
+            .next()
+            .map_or(after.len(), |(_, ch)| ch.len_utf8());
+        cursor = &after[skip..];
+    }
+    false
 }
 
 fn is_extern_boundary(line: &str) -> bool {
@@ -287,6 +350,48 @@ fn is_import_item(line: &str) -> bool {
         || (trimmed.starts_with("pub(") && trimmed.contains(" use "))
 }
 
+/// Returns `true` when `line` is a function **definition** header — i.e. the
+/// line declares a function name (safe, const, async, or extern-ABI variants)
+/// rather than calling one.  The test looks for the `fn` keyword (standalone,
+/// bounded on both sides by non-identifier characters) followed, after optional
+/// whitespace, by an identifier character (the function name).
+///
+/// Examples that return `true`:
+/// - `pub fn set_len(new_len: usize) {`
+/// - `fn assume_init(self) -> T {`
+/// - `const fn from_raw_parts(data: *const T, len: usize) -> &[T] {`
+/// - `async fn from_utf8_unchecked(bytes: &[u8]) -> &str {`
+/// - `pub(crate) unsafe fn zeroed() -> T {` — safe definitions only (unsafe fn
+///   declarations are caught earlier in `detect_site` and never reach this guard,
+///   but even if they did this would correctly identify them as definitions).
+///
+/// Examples that return `false`:
+/// - `let x = mem::zeroed();` (no `fn` keyword)
+/// - `v.set_len(n);` (no `fn` keyword)
+/// - `let f: unsafe fn(*mut u8) = ptr::write;` (fn-pointer type, not a def)
+fn is_fn_definition_header(line: &str) -> bool {
+    let mut cursor = line;
+    while let Some(pos) = cursor.find("fn ") {
+        let before = cursor[..pos].chars().next_back();
+        // `fn` must be a standalone keyword — not part of a longer identifier.
+        let starts_on_boundary = before.is_none_or(|ch| !is_ident_continue(ch));
+        if starts_on_boundary {
+            // What follows `fn ` (after optional whitespace) must be an identifier
+            // character — that means this is a definition `fn name(`, not a
+            // fn-pointer type `fn(*mut u8)`.
+            let rest = &cursor[pos + "fn ".len()..];
+            let next_ch = rest.trim_start_matches([' ', '\t']).chars().next();
+            if next_ch.is_some_and(|ch| ch == '_' || ch.is_ascii_alphabetic()) {
+                return true;
+            }
+        }
+        // Advance past this occurrence and keep scanning.
+        let after = &cursor[pos + 1..];
+        cursor = after;
+    }
+    false
+}
+
 fn detect_operation_family(line: &str) -> Option<OperationFamily> {
     if let Some(family) = copy_operation_family(line) {
         return Some(family);
@@ -325,6 +430,36 @@ fn unsafe_block_contains_call(line: &str) -> bool {
         return false;
     };
     after_open.contains('(') && after_open.contains(')')
+}
+
+/// Returns true when the first expression inside a top-level unsafe block is a
+/// **ref-wrapped** raw-pointer dereference: `unsafe { &*ptr }`, `unsafe { &mut *ptr }`,
+/// `unsafe { &mut *self.value.get() }`, etc.
+///
+/// Bare derefs (`unsafe { *ptr }`) are intentionally excluded: those are already
+/// correctly handled by the syntax scanner's `PREFIX_EXPR` path and do not need a
+/// fallback card.  This function is only for the ref-wrapped forms that confuse the
+/// generic `unsafe_block_contains_call` test via the method-call parentheses.
+///
+/// "Top-level" means the `unsafe` keyword appears at the start of the trimmed text,
+/// so that nested forms like `f(unsafe { &mut *ptr })` are handled exclusively by
+/// the syntax scanner and do not produce a spurious fallback card.
+fn unsafe_block_content_is_ref_deref(line: &str) -> bool {
+    // Only handle blocks where `unsafe` is the start of the statement; nested
+    // `f(unsafe { ... })` forms are correctly classified by the syntax scanner.
+    if !line.starts_with("unsafe") {
+        return false;
+    }
+    let Some(after_unsafe) = unsafe_keyword_tail(line) else {
+        return false;
+    };
+    let Some((_before_block, after_open)) = after_unsafe.split_once('{') else {
+        return false;
+    };
+    // Only the ref-wrapped forms: content must start with `&` (optionally followed by
+    // `mut`) and then have a single `*` deref.  Bare `*ptr` content is excluded.
+    let content = after_open.trim_start();
+    content.starts_with('&') && is_raw_pointer_deref(content)
 }
 
 fn unsafe_keyword_tail(line: &str) -> Option<&str> {
@@ -378,12 +513,14 @@ fn detect_syntax_sites(
 ) -> Vec<DetectedSyntaxSite> {
     let mut sites = Vec::new();
     let unsafe_block_ranges = unsafe_block_ranges(parsed);
+    let unsafe_fn_ranges = unsafe_fn_ranges(parsed);
     let operation_block_ranges = operation_block_ranges(parsed, &unsafe_block_ranges);
     for fact in &parsed.nodes {
         let Some((kind, family)) = detect_syntax_site(
             fact,
             &parsed.text,
             &unsafe_block_ranges,
+            &unsafe_fn_ranges,
             &operation_block_ranges,
             extern_names,
             local_modules,
@@ -594,6 +731,7 @@ fn detect_syntax_site(
     fact: &SyntaxNodeFact,
     source: &str,
     unsafe_block_ranges: &[(usize, usize)],
+    unsafe_fn_ranges: &[(usize, usize)],
     operation_block_ranges: &BTreeSet<(usize, usize)>,
     extern_names: &BTreeSet<String>,
     local_modules: &BTreeSet<String>,
@@ -606,6 +744,12 @@ fn detect_syntax_site(
         return None;
     }
     let declaration = declaration_prefix(&compact);
+    // String/comment-masked variant used by the FFI guard so that extern
+    // names or `libc::` tokens inside string literals or comments within an
+    // unsafe block do not trigger a false FFI card.  Only computed for
+    // BLOCK_EXPR nodes (the kind that reaches the FFI guard), and lazily —
+    // the closure is only invoked when the guard is evaluated.
+    let masked_compact_for_ffi = || syntax_detection_text(&compact);
     match fact.kind.as_str() {
         "FN" if declaration.contains("unsafe fn") => {
             Some((UnsafeSiteKind::UnsafeFn, OperationFamily::Unknown))
@@ -643,7 +787,17 @@ fn detect_syntax_site(
         "BLOCK_EXPR"
             if compact.starts_with("unsafe {")
                 && !operation_block_ranges.contains(&(fact.start, fact.end))
-                && ffi_boundary_applicability(&compact, extern_names, local_modules) =>
+                && ffi_boundary_applicability(
+                    // Run through the string/comment masker so that extern
+                    // names or `libc::` tokens inside string literals or
+                    // block comments within an unsafe block do not card as
+                    // FFI calls.  The CALL_EXPR arm already does this via
+                    // `syntax_detection_text`; this makes the FFI arm
+                    // consistent.
+                    &masked_compact_for_ffi(),
+                    extern_names,
+                    local_modules,
+                ) =>
         {
             Some((UnsafeSiteKind::FfiCall, OperationFamily::Ffi))
         }
@@ -671,7 +825,37 @@ fn detect_syntax_site(
             Some((UnsafeSiteKind::Operation, family))
         }
         "CALL_EXPR" | "METHOD_CALL_EXPR" | "MACRO_EXPR" => {
-            detect_site(&syntax_detection_text(&compact))
+            let result = detect_site(&syntax_detection_text(&compact));
+            // Gate bare-name call-site families on syntactic unsafe scope.
+            // These operations are only legal inside `unsafe { }` blocks or `unsafe fn`
+            // bodies by Rust's rules.  A same-named call outside both is a safe method
+            // (e.g. a bitflag `.add`, a custom `set_len`, a wrapper `from_raw_parts`)
+            // and must not produce a ReviewCard.
+            //
+            // Families covered (mirrors #1693's PointerArithmetic gate):
+            // - PointerArithmetic     (.add/.offset/.sub on raw pointers)
+            // - VecSetLen             (vec.set_len(n))
+            // - SliceFromRawParts     (slice::from_raw_parts / _mut)
+            // - MaybeUninitAssumeInit (assume_init and variants)
+            // - StrFromUtf8Unchecked  (str::from_utf8_unchecked)
+            // - Zeroed                (mem::zeroed)
+            if matches!(
+                result,
+                Some((
+                    UnsafeSiteKind::Operation,
+                    OperationFamily::PointerArithmetic
+                        | OperationFamily::VecSetLen
+                        | OperationFamily::SliceFromRawParts
+                        | OperationFamily::MaybeUninitAssumeInit
+                        | OperationFamily::StrFromUtf8Unchecked
+                        | OperationFamily::Zeroed,
+                ))
+            ) && !is_inside_range(fact, unsafe_block_ranges)
+                && !is_inside_range(fact, unsafe_fn_ranges)
+            {
+                return None;
+            }
+            result
         }
         _ => None,
     }
@@ -737,8 +921,36 @@ fn is_unknown_unsafe_block(compact: &str) -> bool {
         )
 }
 
+/// Returns true when `compact` is a raw-pointer dereference expression, optionally
+/// wrapped in a shared or mutable borrow (`&*expr`, `&mut *expr`).
+///
+/// Accepts:
+/// - `*expr`          (bare deref)
+/// - `&*expr`         (shared borrow of deref, no space between `&` and `*`)
+/// - `& *expr`        (shared borrow of deref, space — produced by compact_whitespace)
+/// - `&mut *expr`     (mutable borrow of deref, the common UnsafeCell pattern)
+/// - `& mut *expr`    (mutable-borrow-of-deref with spaces — produced by compact_whitespace)
+///
+/// Rejects:
+/// - `**expr`         (double deref — different hazard, handled separately)
+/// - `&mut expr`      (borrow of call result with no leading `*` — stays unsafe_fn_call)
+/// - `&expr`          (plain borrow with no deref — stays unsafe_fn_call)
 fn is_raw_pointer_deref(compact: &str) -> bool {
-    compact.starts_with('*') && !compact.starts_with("**")
+    // Strip an optional borrow prefix (&, &mut, or spaced variants) to obtain the
+    // inner expression, then verify the very next character is a single `*` (deref),
+    // never `**` (double-deref, a distinct hazard).
+    let after_borrow = compact
+        .strip_prefix("&mut ")
+        .or_else(|| compact.strip_prefix("& mut "))
+        .or_else(|| compact.strip_prefix("& "));
+    let inner = match after_borrow {
+        Some(rest) => rest,
+        None => {
+            // Handle `&*expr` (no space between `&` and `*`) and bare `*expr`.
+            compact.strip_prefix('&').unwrap_or(compact)
+        }
+    };
+    inner.starts_with('*') && !inner.starts_with("**")
 }
 
 fn prefix_deref_is_assignment_target(fact: &SyntaxNodeFact, source: &str) -> bool {
@@ -762,9 +974,12 @@ fn source_line_at(source: &str, offset: usize) -> Option<&str> {
 }
 
 fn is_raw_pointer_write(line: &str) -> bool {
-    line.contains("ptr::write")
-        || line.contains("ptr::write_volatile")
-        || line.contains("ptr::write_bytes")
+    // `ptr::write*` forms: anchored so that an alias segment ending in `ptr`
+    // (e.g. `registry_ptr::write_entry`) does not match.
+    line_contains_anchored_ptr_path(line, "write")
+        || line_contains_anchored_ptr_path(line, "write_volatile")
+        || line_contains_anchored_ptr_path(line, "write_bytes")
+        // Method-call forms are already anchored by the preceding `.`:
         || line.contains(".write_volatile(")
         || line.contains("ptr.write(")
         || line.contains("ptr.write_volatile(")
@@ -781,7 +996,9 @@ fn is_raw_pointer_write(line: &str) -> bool {
 }
 
 fn is_raw_pointer_write_unaligned(line: &str) -> bool {
-    line.contains("ptr::write_unaligned") || line.contains(".write_unaligned(")
+    // `ptr::write_unaligned` is anchored via `line_contains_anchored_ptr_path`
+    // to reject alias segments like `foo_ptr::write_unaligned`.
+    line_contains_anchored_ptr_path(line, "write_unaligned") || line.contains(".write_unaligned(")
 }
 
 fn assignment_operator_start(text: &str) -> Option<usize> {
@@ -809,12 +1026,57 @@ fn starts_with_assignment_operator(text: &str) -> bool {
     assignment_operator_start(text).is_some_and(|idx| idx == 0)
 }
 
+/// Returns `true` when `line` contains the literal text `ptr::<suffix>` where
+/// `ptr` is a genuine path segment — not an extended identifier whose tail
+/// happens to spell `ptr`, such as `registry_ptr::read_entry`.
+///
+/// Concretely: the character immediately before `ptr` must not be an
+/// ident-continue char (`[a-zA-Z0-9_]`).  A preceding `:` (e.g. in
+/// `std::ptr::read` or `core::ptr::read`) is permitted because it indicates
+/// a valid qualified path, not an extended identifier.  This is intentionally
+/// narrower than the FFI boundary check, which also rejects `:` to prevent
+/// inner path segments from matching the `libc::` prefix.
+fn line_contains_anchored_ptr_path(line: &str, suffix: &str) -> bool {
+    let needle = format!("ptr::{suffix}");
+    let mut cursor = line;
+    let mut offset = 0usize;
+    while let Some(pos) = cursor.find(needle.as_str()) {
+        let absolute = offset + pos;
+        let before = line[..absolute].chars().next_back();
+        // Reject only ident-continue chars: these turn `ptr` into the tail of
+        // a longer identifier (e.g. `registry_ptr`).  Colons are allowed so
+        // that `std::ptr::read` and `core::ptr::read` still match.
+        let starts_on_boundary = before.is_none_or(|ch| !is_ident_continue(ch));
+        if starts_on_boundary {
+            return true;
+        }
+        let skip = pos + needle.len();
+        offset += skip;
+        cursor = &cursor[skip..];
+    }
+    false
+}
+
 fn unsafe_block_ranges(parsed: &ParsedSource) -> Vec<(usize, usize)> {
     parsed
         .nodes
         .iter()
         .filter(|fact| {
             fact.kind == "BLOCK_EXPR" && compact_whitespace(&fact.snippet).starts_with("unsafe {")
+        })
+        .map(|fact| (fact.start, fact.end))
+        .collect()
+}
+
+/// Byte ranges of `unsafe fn` declarations.  Used to determine whether a call
+/// expression is inside an unsafe fn body, where raw-pointer arithmetic is legal
+/// even without a nested `unsafe { }` block.
+fn unsafe_fn_ranges(parsed: &ParsedSource) -> Vec<(usize, usize)> {
+    parsed
+        .nodes
+        .iter()
+        .filter(|fact| {
+            fact.kind == "FN" && compact_whitespace(&fact.snippet).contains("unsafe fn ")
         })
         .map(|fact| (fact.start, fact.end))
         .collect()
@@ -900,20 +1162,28 @@ fn site_key(
 }
 
 fn visibility_for_snippet(snippet: &str) -> &'static str {
-    if is_public_surface(snippet) {
+    let compact = compact_whitespace(snippet);
+    if is_restricted_pub_visibility(&compact) {
+        // pub(crate), pub(super), pub(in path) — visible within the crate or
+        // module but not part of the public API surface.
+        "restricted"
+    } else if compact.starts_with("pub ") || compact.contains(" pub ") {
         "public"
     } else {
         "private"
     }
 }
 
-fn is_public_surface(snippet: &str) -> bool {
-    let compact = compact_whitespace(snippet);
-    starts_with_pub_visibility(&compact) || compact.contains(" pub ") || compact.contains(" pub(")
-}
-
-fn starts_with_pub_visibility(compact: &str) -> bool {
-    compact.starts_with("pub ") || compact.starts_with("pub(")
+/// Returns `true` for `pub(crate)`, `pub(super)`, and `pub(in …)` qualifiers.
+/// These restrict visibility below the crate boundary and are NOT public API —
+/// Clippy's `missing_safety_doc` lint only fires for unrestricted `pub`.
+fn is_restricted_pub_visibility(compact: &str) -> bool {
+    compact.starts_with("pub(crate)")
+        || compact.starts_with("pub(super)")
+        || compact.starts_with("pub(in ")
+        || compact.contains(" pub(crate)")
+        || compact.contains(" pub(super)")
+        || compact.contains(" pub(in ")
 }
 
 fn is_public_api_surface(kind: &UnsafeSiteKind, snippet: &str) -> bool {
@@ -927,7 +1197,12 @@ fn is_public_api_surface(kind: &UnsafeSiteKind, snippet: &str) -> bool {
     ) {
         return false;
     }
-    is_public_surface(snippet)
+    // Only unrestricted `pub` is the public API surface.  `pub(crate)`,
+    // `pub(super)`, and `pub(in …)` are restricted-visibility and must not be
+    // reported as public API.
+    let compact = compact_whitespace(snippet);
+    !is_restricted_pub_visibility(&compact)
+        && (compact.starts_with("pub ") || compact.contains(" pub "))
 }
 
 #[cfg(test)]
@@ -1047,7 +1322,7 @@ mod tests {
         );
 
         let rel = PathBuf::from("src/lib.rs");
-        let sites = scan_file(&root, &rel, Some(&diff), false)?;
+        let sites = scan_file(&root, &rel, Some(&diff), false)?.sites;
 
         fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
         assert_eq!(sites.len(), 1, "unexpected sites: {sites:#?}");
@@ -1074,7 +1349,7 @@ mod tests {
         );
 
         let rel = PathBuf::from("src/lib.rs");
-        let sites = scan_file(&root, &rel, Some(&diff), false)?;
+        let sites = scan_file(&root, &rel, Some(&diff), false)?.sites;
 
         fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
         assert_eq!(sites.len(), 1, "unexpected sites: {sites:#?}");
@@ -1100,7 +1375,7 @@ mod tests {
         );
 
         let rel = PathBuf::from("src/lib.rs");
-        let sites = scan_file(&root, &rel, Some(&diff), false)?;
+        let sites = scan_file(&root, &rel, Some(&diff), false)?.sites;
 
         fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
         assert_eq!(sites.len(), 1, "unexpected sites: {sites:#?}");
@@ -1126,7 +1401,7 @@ mod tests {
         );
 
         let rel = PathBuf::from("src/lib.rs");
-        let sites = scan_file(&root, &rel, Some(&diff), false)?;
+        let sites = scan_file(&root, &rel, Some(&diff), false)?.sites;
 
         fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
         assert_eq!(sites.len(), 1, "unexpected sites: {sites:#?}");
@@ -1153,7 +1428,7 @@ mod tests {
         );
 
         let rel = PathBuf::from("src/lib.rs");
-        let sites = scan_file(&root, &rel, Some(&diff), false)?;
+        let sites = scan_file(&root, &rel, Some(&diff), false)?.sites;
 
         fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
         assert_eq!(sites.len(), 1, "unexpected sites: {sites:#?}");
@@ -1526,7 +1801,7 @@ mod tests {
         )
         .map_err(|err| format!("write temp source failed: {err}"))?;
 
-        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?.sites;
 
         fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
         let operations = sites
@@ -1554,7 +1829,7 @@ mod tests {
         )
         .map_err(|err| format!("write temp source failed: {err}"))?;
 
-        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?.sites;
 
         fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
         assert!(sites.is_empty(), "unexpected sites: {sites:#?}");
@@ -1573,7 +1848,7 @@ mod tests {
         )
         .map_err(|err| format!("write temp source failed: {err}"))?;
 
-        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?.sites;
 
         fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
         assert!(sites.is_empty(), "unexpected sites: {sites:#?}");
@@ -1591,7 +1866,7 @@ mod tests {
         )
         .map_err(|err| format!("write temp source failed: {err}"))?;
 
-        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?.sites;
 
         fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
         assert!(
@@ -1628,7 +1903,7 @@ mod tests {
         )
         .map_err(|err| format!("write temp source failed: {err}"))?;
 
-        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?.sites;
 
         fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
         let extern_block = sites
@@ -1652,7 +1927,7 @@ mod tests {
         )
         .map_err(|err| format!("write temp source failed: {err}"))?;
 
-        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?.sites;
 
         fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
         assert!(
@@ -1683,7 +1958,7 @@ mod tests {
         )
         .map_err(|err| format!("write temp source failed: {err}"))?;
 
-        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?.sites;
 
         fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
         let static_mut_sites = sites
@@ -1721,7 +1996,7 @@ mod tests {
         )
         .map_err(|err| format!("write temp source failed: {err}"))?;
 
-        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?.sites;
 
         fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
         assert!(sites.is_empty(), "unexpected sites: {sites:#?}");
@@ -1739,7 +2014,7 @@ mod tests {
         )
         .map_err(|err| format!("write temp source failed: {err}"))?;
 
-        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?.sites;
 
         fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
         let operations = sites
@@ -1772,7 +2047,7 @@ mod tests {
         )
         .map_err(|err| format!("write temp source failed: {err}"))?;
 
-        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?.sites;
 
         fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
         assert_eq!(sites.len(), 1, "unexpected sites: {sites:#?}");
@@ -1807,7 +2082,7 @@ impl<T> Tagged<T> {\n\
         )
         .map_err(|err| format!("write temp source failed: {err}"))?;
 
-        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?.sites;
 
         fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
         let atomic_sites = sites
@@ -1827,33 +2102,53 @@ impl<T> Tagged<T> {\n\
 
     #[test]
     fn scan_file_keeps_public_surface_on_unsafe_api_not_operations() -> Result<(), String> {
+        // This test uses `pub unsafe fn` (unrestricted) for the public-API check,
+        // and confirms that `pub(crate)` sets visibility="restricted" /
+        // public_api_surface=false, and that inner operations are never public API.
         let root = unique_temp_dir()?;
         fs::create_dir_all(root.join("src"))
             .map_err(|err| format!("create temp src failed: {err}"))?;
         fs::write(
             root.join("src/lib.rs"),
-            "pub(crate) unsafe fn expose(ptr: *const u8) -> u8 {\n    unsafe { *ptr }\n}\n\nunsafe impl Send for LocalType {}\n\nstruct LocalType;\n",
+            "pub unsafe fn expose(ptr: *const u8) -> u8 {\n    unsafe { *ptr }\n}\n\npub(crate) unsafe fn internal(ptr: *const u8) -> u8 {\n    unsafe { *ptr }\n}\n\nunsafe impl Send for LocalType {}\n\nstruct LocalType;\n",
         )
         .map_err(|err| format!("write temp source failed: {err}"))?;
 
-        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?.sites;
 
         fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
+
+        // Unrestricted `pub unsafe fn` → public API surface.
         let public_fn = sites
             .iter()
-            .find(|site| site.site.kind == UnsafeSiteKind::UnsafeFn)
-            .ok_or_else(|| format!("expected unsafe function site: {sites:#?}"))?;
-        assert_eq!(public_fn.site.owner.as_deref(), Some("expose"));
+            .find(|site| {
+                site.site.kind == UnsafeSiteKind::UnsafeFn
+                    && site.site.owner.as_deref() == Some("expose")
+            })
+            .ok_or_else(|| format!("expected public unsafe fn site: {sites:#?}"))?;
         assert_eq!(public_fn.site.visibility, "public");
         assert!(public_fn.site.public_api_surface);
 
-        let deref = sites
+        // `pub(crate) unsafe fn` → restricted visibility, NOT public API surface.
+        let restricted_fn = sites
             .iter()
-            .find(|site| site.operation.family == OperationFamily::RawPointerDeref)
-            .ok_or_else(|| format!("expected raw pointer deref site: {sites:#?}"))?;
-        assert_eq!(deref.site.owner.as_deref(), Some("expose"));
-        assert!(!deref.site.public_api_surface);
+            .find(|site| {
+                site.site.kind == UnsafeSiteKind::UnsafeFn
+                    && site.site.owner.as_deref() == Some("internal")
+            })
+            .ok_or_else(|| format!("expected pub(crate) unsafe fn site: {sites:#?}"))?;
+        assert_eq!(restricted_fn.site.visibility, "restricted");
+        assert!(!restricted_fn.site.public_api_surface);
 
+        // Inner raw-pointer deref operations are never public API surface.
+        for deref in sites
+            .iter()
+            .filter(|site| site.operation.family == OperationFamily::RawPointerDeref)
+        {
+            assert!(!deref.site.public_api_surface);
+        }
+
+        // `unsafe impl Send` (no `pub`) → private, not public API surface.
         let unsafe_impl = sites
             .iter()
             .find(|site| site.site.kind == UnsafeSiteKind::UnsafeImplSend)
@@ -1879,7 +2174,7 @@ impl<T> Tagged<T> {\n\
         )
         .map_err(|err| format!("write temp source failed: {err}"))?;
 
-        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?.sites;
 
         fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
         let families = sites
@@ -1928,8 +2223,8 @@ impl<T> Tagged<T> {\n\
         );
 
         let rel = PathBuf::from("src/lib.rs");
-        let diff_sites = scan_file(&root, &rel, Some(&diff), false)?;
-        let repo_sites = scan_file(&root, &rel, Some(&diff), true)?;
+        let diff_sites = scan_file(&root, &rel, Some(&diff), false)?.sites;
+        let repo_sites = scan_file(&root, &rel, Some(&diff), true)?.sites;
 
         fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
         assert_eq!(
@@ -1958,7 +2253,7 @@ impl<T> Tagged<T> {\n\
         )
         .map_err(|err| format!("write temp source failed: {err}"))?;
 
-        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?.sites;
 
         fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
         assert!(sites.is_empty(), "unexpected sites: {sites:#?}");
@@ -1976,7 +2271,7 @@ impl<T> Tagged<T> {\n\
         )
         .map_err(|err| format!("write temp source failed: {err}"))?;
 
-        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?.sites;
 
         fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
         assert!(sites.is_empty(), "unexpected sites: {sites:#?}");
@@ -1986,7 +2281,7 @@ impl<T> Tagged<T> {\n\
     #[test]
     fn scan_file_does_not_report_detector_literal_matchers() -> Result<(), String> {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let sites = scan_file(&root, &PathBuf::from("src/analysis/scanner.rs"), None, true)?;
+        let sites = scan_file(&root, &PathBuf::from("src/analysis/scanner.rs"), None, true)?.sites;
 
         assert!(
             sites.iter().all(|site| {
@@ -2009,7 +2304,7 @@ impl<T> Tagged<T> {\n\
         )
         .map_err(|err| format!("write temp source failed: {err}"))?;
 
-        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?;
+        let sites = scan_file(&root, &PathBuf::from("src/lib.rs"), None, true)?.sites;
 
         fs::remove_dir_all(&root).map_err(|err| format!("remove temp dir failed: {err}"))?;
         assert!(sites.is_empty(), "unexpected sites: {sites:#?}");
@@ -2043,31 +2338,89 @@ impl<T> Tagged<T> {\n\
     }
 
     #[test]
-    fn restricted_visibility_counts_as_public_surface() {
+    fn restricted_visibility_is_not_public_surface() {
+        // pub(crate), pub(super), pub(in…) are restricted — not public API.
         for snippet in [
             "pub(crate) unsafe fn expose() {}",
             "pub(super) unsafe trait Token {}",
             "pub(in crate::ffi) unsafe fn expose() {}",
         ] {
-            assert_eq!(visibility_for_snippet(snippet), "public");
-            assert!(is_public_surface(snippet));
+            assert_eq!(visibility_for_snippet(snippet), "restricted");
         }
     }
 
     #[test]
-    fn unsafe_api_surface_includes_restricted_pub_items() {
-        assert!(is_public_api_surface(
+    fn unrestricted_pub_is_public_surface() {
+        for snippet in ["pub unsafe fn expose() {}", "pub unsafe trait Token {}"] {
+            assert_eq!(visibility_for_snippet(snippet), "public");
+        }
+    }
+
+    #[test]
+    fn unsafe_api_surface_excludes_restricted_pub_items() {
+        // Restricted-visibility items are NOT public API surface.
+        assert!(!is_public_api_surface(
             &UnsafeSiteKind::UnsafeFn,
             "pub(crate) unsafe fn expose() {}"
         ));
-        assert!(is_public_api_surface(
+        assert!(!is_public_api_surface(
             &UnsafeSiteKind::UnsafeTrait,
             "pub(super) unsafe trait Token {}"
         ));
+        // Unrestricted pub IS public API surface.
+        assert!(is_public_api_surface(
+            &UnsafeSiteKind::UnsafeFn,
+            "pub unsafe fn expose() {}"
+        ));
+        assert!(is_public_api_surface(
+            &UnsafeSiteKind::UnsafeTrait,
+            "pub unsafe trait Token {}"
+        ));
+        // Non-fn/trait kinds are never public API surface.
         assert!(!is_public_api_surface(
             &UnsafeSiteKind::Operation,
             "pub(crate) unsafe { *ptr }"
         ));
+        assert!(!is_public_api_surface(
+            &UnsafeSiteKind::Operation,
+            "pub unsafe { *ptr }"
+        ));
+    }
+
+    #[test]
+    fn text_detection_does_not_card_unsafe_fn_pointer_type_in_field_position() {
+        // Fn-pointer types: `unsafe fn(` — no identifier after `fn`, must NOT card.
+        assert_eq!(
+            detect_site("call: unsafe fn(*mut u8),"),
+            None,
+            "fn-pointer type in a field should not be detected as an unsafe fn site"
+        );
+        assert_eq!(
+            detect_site("    handler: unsafe fn(usize) -> bool,"),
+            None,
+            "fn-pointer type as a struct field should not be detected as an unsafe fn site"
+        );
+        assert_eq!(
+            detect_site("    f: Option<unsafe fn(*mut u8)>,"),
+            None,
+            "fn-pointer type inside Option should not be detected as an unsafe fn site"
+        );
+        // Named declarations: `unsafe fn foo(` — identifier after `fn`, MUST card.
+        assert_eq!(
+            detect_site("pub unsafe fn caller_must_uphold(ptr: *const u8) -> usize {"),
+            Some((UnsafeSiteKind::UnsafeFn, OperationFamily::Unknown)),
+            "named unsafe fn declaration must still be detected"
+        );
+        assert_eq!(
+            detect_site("unsafe fn internal_helper() {"),
+            Some((UnsafeSiteKind::UnsafeFn, OperationFamily::Unknown)),
+            "private named unsafe fn declaration must still be detected"
+        );
+        assert_eq!(
+            detect_site("pub(crate) unsafe fn restricted(ptr: *mut u8) {"),
+            Some((UnsafeSiteKind::UnsafeFn, OperationFamily::Unknown)),
+            "restricted-visibility named unsafe fn declaration must still be detected"
+        );
     }
 
     fn unique_temp_dir() -> Result<PathBuf, String> {

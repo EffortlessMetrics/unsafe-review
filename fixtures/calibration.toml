@@ -3,7 +3,9 @@ status = "experimental"
 
 required_core_fixtures = [
   "raw_pointer_alignment",
+  "raw_pointer_alignment_debug_assert_only_not_guard",
   "raw_pointer_alignment_receipted",
+  "witness_mismatch_tool",
   "align_of_only_not_guard",
   "alignment_other_pointer_not_guard",
   "raw_pointer_alignment_post_check_not_guard",
@@ -16,6 +18,13 @@ required_core_fixtures = [
   "raw_pointer_alignment_modulo_closed_branch_not_guard",
   "raw_pointer_alignment_modulo_reassigned_pointer_not_guard",
   "raw_pointer_deref",
+  "raw_pointer_deref_brownfield_inherited",
+  "raw_pointer_deref_coverage_improved",
+  "raw_pointer_deref_coverage_worsened",
+  "raw_pointer_deref_resolved",
+  "raw_pointer_deref_alignment_post_check_not_guard",
+  "raw_pointer_deref_free_fn_stray_align_not_guard",
+  "raw_pointer_deref_alignment_is_aligned_guard",
   "raw_pointer_read_unaligned",
   "raw_pointer_write_assignment",
   "raw_pointer_write_unaligned",
@@ -23,10 +32,12 @@ required_core_fixtures = [
   "split_unsafe_block",
   "public_unsafe_fn_missing_safety",
   "public_unsafe_trait_missing_safety",
+  "public_unsafe_trait_with_safety_docs",
   "public_unsafe_fn_safety_comment_not_docs",
   "split_public_unsafe_fn_missing_safety",
   "public_unsafe_fn_with_safety_docs",
   "public_unsafe_fn_safety_colon_docs",
+  "pub_crate_unsafe_fn_missing_safety",
   "documented_private_unsafe_fn",
   "private_unsafe_helper_safety_comment",
   "local_safety_colon_comment",
@@ -95,6 +106,8 @@ required_core_fixtures = [
   "maybeuninit_assume_init_ref",
   "maybeuninit_assume_init_mut",
   "maybeuninit_assume_init_drop",
+  "assume_init_definition_no_cards",
+  "assume_init_safe_method_no_cards",
   "vec_set_len",
   "vec_set_len_comment_not_guard",
   "vec_set_len_initialized_loop",
@@ -133,11 +146,18 @@ required_core_fixtures = [
   "vec_set_len_zero_clear",
   "vec_set_len_post_init_not_guard",
   "vec_set_len_unrelated_initialization_not_guard",
+  "vec_set_len_cap_not_len_not_guard",
+  "vec_set_len_len_read_cap_guard_not_guard",
+  "vec_set_len_len_and_cap_guard",
+  "set_len_definition_no_cards",
+  "set_len_safe_method_no_cards",
   "drop_in_place_deallocation",
   "drop_in_place_box_origin",
   "drop_in_place_reassigned_origin_not_guard",
   "atomic_pointer_state_swap",
   "atomic_pointer_state_fetch_ops",
+  "atomic_pointer_state_swap_not_same_call",
+  "atomic_pointer_state_fetch_not_same_call",
   "unwrap_unchecked_result",
   "unwrap_unchecked_infallible_result",
   "unwrap_unchecked_other_infallible_not_guard",
@@ -280,6 +300,7 @@ required_core_fixtures = [
   "ptr_copy_slice_range_shadowed_dst_path_not_guard",
   "ptr_copy_slice_range_shadowed_dst_not_guard",
   "ptr_copy_other_len_not_guard",
+  "multiline_ptr_copy",
   "ptr_replace_value",
   "copy_nonoverlapping",
   "copy_nonoverlapping_slice_range_guard",
@@ -372,8 +393,13 @@ required_core_fixtures = [
   "str_from_utf8_unchecked_let_else_ok_shadowed_not_guard",
   "str_from_utf8_unchecked_match_ok_reassigned_not_guard",
   "str_from_utf8_unchecked_match_ok_shadowed_not_guard",
+  "from_utf8_unchecked_definition_no_cards",
+  "from_utf8_unchecked_safe_wrapper_no_cards",
   "zeroed_invalid_value",
   "zeroed_valid_u32",
+  "zeroed_definition_no_cards",
+  "zeroed_safe_wrapper_no_cards",
+  "zeroed_call_still_cards",
   "inline_asm_human_review",
   "raw_pointer_read_volatile",
   "raw_pointer_read_len_capacity_assert",
@@ -388,6 +414,12 @@ required_core_fixtures = [
   "raw_pointer_read_typed_shadowed_origin_not_guard",
   "raw_pointer_read_other_len_not_guard",
   "raw_pointer_read_reassigned_origin_not_guard",
+  "raw_pointer_read_unaligned_other_len_not_guard",
+  "raw_pointer_write_other_len_not_guard",
+  "raw_pointer_write_same_origin_bounds_guard",
+  "raw_pointer_read_unrelated_is_null_not_guard",
+  "raw_pointer_read_same_receiver_is_null_guard",
+  "raw_pointer_bounds_debug_assert_only_not_guard",
   "pointer_arithmetic_num_ctrl_bytes_guard",
   "pointer_arithmetic_other_offset_not_guard",
   "pointer_arithmetic_reassigned_offset_not_guard",
@@ -397,9 +429,13 @@ required_core_fixtures = [
   "pointer_arithmetic_disjunct_bounds_not_guard",
   "pointer_arithmetic_closed_branch_not_guard",
   "pointer_arithmetic_slice_end",
+  "pointer_arithmetic_safe_method_add_no_cards",
+  "pointer_arithmetic_unsafe_fn_offset",
   "slice_from_raw_parts_mut",
   "slice_from_raw_parts_mut_maybeuninit",
   "slice_from_raw_parts_mut_other_maybeuninit_not_guard",
+  "slice_from_raw_parts_definition_no_cards",
+  "from_raw_parts_safe_ctor_no_cards",
   "vec_from_raw_parts",
   "vec_from_raw_parts_capacity_guard",
   "vec_from_raw_parts_capacity_assert_guard",
@@ -416,6 +452,9 @@ required_core_fixtures = [
   "static_mut_global_state",
   "transmute_invalid_value",
   "transmute_layout_size_guard",
+  "transmute_layout_only_not_guard",
+  "transmute_all_obligations_met",
+  "multiline_transmute_all_obligations_met",
   "transmute_layout_conjunct_branch_guard",
   "transmute_layout_disjunct_branch_not_guard",
   "transmute_layout_mismatch_return_guard",
@@ -464,7 +503,13 @@ required_core_fixtures = [
   "unsafe_impl_send",
   "unsafe_impl_send_generic_owner",
   "unsafe_impl_sync_generic_bound",
+  "unsafe_impl_send_owner_substring_not_reached",
+  "reach_production_ref_in_test_file_not_reached",
+  "reach_owner_called_in_cfg_test_reached",
+  "reach_self_named_test_not_reach",
+  "reach_bare_mention_no_call_not_reach",
   "unsafe_impl_custom_trait_not_send_sync",
+  "unsafe_impl_custom_trait_contract_not_guard",
   "ffi_sanitizer_route",
   "ffi_missing_boundary_contract",
   "ffi_call_sanitizer_route",
@@ -474,6 +519,10 @@ required_core_fixtures = [
   "stable_byte_native_ffi_zstd_owned_copy_control",
   "ffi_non_libc_wrapper_call_not_route",
   "ffi_local_libc_module_call_not_route",
+  "ffi_same_named_method_not_route",
+  "ffi_inner_libc_path_not_route",
+  "ffi_token_in_string_not_route",
+  "ptr_read_path_segment_not_raw",
   "safe_code_no_cards",
   "safe_reference_deref_no_cards",
   "imports_not_unsafe_operations",
@@ -527,6 +576,7 @@ required_core_fixtures = [
   "macro_rules_owner_inference",
   "nested_unsafe_operation_call_dedupe",
   "adjacent_unchanged_unsafe_fn_no_card",
+  "unsafe_fn_pointer_field_no_cards",
   "js_buffer_reentry_sync_compression",
   "js_buffer_reentry_async_helper_capture",
   "js_buffer_reentry_node_fs_rab_scalar_write",
@@ -563,12 +613,26 @@ required_core_fixtures = [
   "panic_from_safe_js_return_guard_no_card",
   "panic_from_safe_js_non_js_signed_no_card",
   "comment_alignment_not_guard",
+  "unsafe_fn_unknown_family_no_card",
+  "raw_pointer_deref_through_unsafecell_get",
+  "raw_pointer_deref_ref_wrapped_cast",
+  "unsafe_fn_call_ref_borrow_not_deref",
 ]
 
 [[cases]]
 fixture = "raw_pointer_alignment"
 kind = "positive"
 claim = "raw pointer read with length evidence still reports missing alignment guard evidence"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_read"
+expected_hazard = "alignment"
+
+[[cases]]
+fixture = "raw_pointer_alignment_debug_assert_only_not_guard"
+kind = "false_positive_control"
+claim = "raw pointer read does not credit debug_assert_eq!(ptr.align_offset(..), 0) as an alignment guard; debug_assert_eq! is compiled out in release builds, so alignment obligation stays missing"
 support_tier = "Raw pointer card slice"
 expected_cards = 1
 expected_class = "guard_missing"
@@ -584,6 +648,16 @@ expected_cards = 1
 expected_class = "guard_missing"
 expected_operation_family = "raw_pointer_read"
 expected_hazard = "alignment"
+
+[[cases]]
+fixture = "witness_mismatch_tool"
+kind = "positive"
+claim = "a receipt whose tool does not match any routed witness tool produces a witness_mismatch card"
+support_tier = "Witness receipt import"
+expected_cards = 1
+expected_class = "witness_mismatch"
+expected_operation_family = "box_from_raw"
+expected_hazard = "pointer_validity"
 
 [[cases]]
 fixture = "align_of_only_not_guard"
@@ -706,6 +780,73 @@ expected_operation_family = "raw_pointer_deref"
 expected_hazard = "pointer_validity"
 
 [[cases]]
+fixture = "raw_pointer_deref_brownfield_inherited"
+kind = "positive"
+claim = "brownfield repo with pre-existing raw pointer deref gap baselined as inherited; a safe-code-only PR shows new_gaps=0 and the card class is baseline_known"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "baseline_known"
+expected_operation_family = "raw_pointer_deref"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "raw_pointer_deref_coverage_improved"
+kind = "positive"
+claim = "coverage-improved movement: baseline-known raw pointer deref card whose contract slot was missing; PR adds a # Safety doc → contract_coverage moves missing→present; improved_gaps=1, worsened_gaps=0, resolved_gaps=0; card is still baseline_known, still advisory, still open — NOT resolved, NOT safe"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "baseline_known"
+expected_operation_family = "raw_pointer_deref"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "raw_pointer_deref_coverage_worsened"
+kind = "positive"
+claim = "coverage-worsened movement: baseline-known raw pointer write card whose contract slot was present in the snapshot; PR removes the # Safety doc → contract_coverage moves present→missing; worsened_gaps=1, improved_gaps=0, resolved_gaps=0; card is still baseline_known, still advisory, still open — NOT resolved, NOT safe"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "baseline_known"
+expected_operation_family = "raw_pointer_write"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "raw_pointer_deref_resolved"
+kind = "negative"
+claim = "resolved corpus case: PR adds # Safety contract to pub unsafe fn (unsafe retained); baseline-captured contract_missing gap is absent from AFTER output so resolved_gaps=1, new_gaps=0, worsened_gaps=0"
+support_tier = "Raw pointer card slice"
+expected_cards = 0
+
+[[cases]]
+fixture = "raw_pointer_deref_alignment_post_check_not_guard"
+kind = "false_positive_control"
+claim = "post-deref is_aligned check does not discharge raw pointer deref alignment obligation"
+support_tier = "Guard evidence mining"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_deref"
+expected_hazard = "alignment"
+
+[[cases]]
+fixture = "raw_pointer_deref_free_fn_stray_align_not_guard"
+kind = "false_positive_control"
+claim = "stray align_offset on a different pointer does not discharge free-fn ptr::read alignment obligation"
+support_tier = "Guard evidence mining"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_read"
+expected_hazard = "alignment"
+
+[[cases]]
+fixture = "raw_pointer_deref_alignment_is_aligned_guard"
+kind = "positive"
+claim = "same-pointer is_aligned early-return before a raw pointer deref discharges the alignment obligation"
+support_tier = "Guard evidence mining"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_deref"
+expected_hazard = "alignment"
+
+[[cases]]
 fixture = "raw_pointer_read_unaligned"
 kind = "positive"
 claim = "read_unaligned reports raw pointer read obligations without requiring an alignment hazard"
@@ -748,7 +889,7 @@ expected_hazard = "alignment"
 [[cases]]
 fixture = "split_unsafe_block"
 kind = "positive"
-claim = "split unsafe block syntax emits a single unknown unsafe-block card when no concrete operation is found"
+claim = "unsafe block with no classified operation family emits a contract_missing card"
 support_tier = "Diff unsafe site inventory"
 expected_cards = 1
 expected_class = "contract_missing"
@@ -758,7 +899,7 @@ expected_hazard = "unknown"
 [[cases]]
 fixture = "public_unsafe_fn_missing_safety"
 kind = "positive"
-claim = "public unsafe function without a # Safety contract reports contract_missing"
+claim = "public unsafe fn without # Safety documentation emits a contract_missing card"
 support_tier = "Contract evidence mining"
 expected_cards = 1
 expected_class = "contract_missing"
@@ -776,9 +917,19 @@ expected_operation_family = "unknown"
 expected_hazard = "unknown"
 
 [[cases]]
+fixture = "public_unsafe_trait_with_safety_docs"
+kind = "positive"
+claim = "public unsafe trait WITH # Safety docs discharges the contract obligation and reports guarded_unwitnessed"
+support_tier = "Contract evidence mining"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "unknown"
+expected_hazard = "unknown"
+
+[[cases]]
 fixture = "public_unsafe_fn_safety_comment_not_docs"
-kind = "false_positive_control"
-claim = "public unsafe function requires # Safety docs and does not accept a local SAFETY comment as public API docs"
+kind = "positive"
+claim = "public unsafe fn with only a SAFETY comment (not # Safety docs) still emits a contract_missing card"
 support_tier = "Contract evidence mining"
 expected_cards = 1
 expected_class = "contract_missing"
@@ -788,7 +939,7 @@ expected_hazard = "unknown"
 [[cases]]
 fixture = "split_public_unsafe_fn_missing_safety"
 kind = "positive"
-claim = "split public unsafe function syntax still reports missing # Safety docs"
+claim = "split public unsafe fn missing safety docs emits a contract_missing card"
 support_tier = "Contract evidence mining"
 expected_cards = 1
 expected_class = "contract_missing"
@@ -798,37 +949,47 @@ expected_hazard = "unknown"
 [[cases]]
 fixture = "public_unsafe_fn_with_safety_docs"
 kind = "positive"
-claim = "public unsafe function with a # Safety contract does not report a missing local declaration guard"
+claim = "public unsafe fn with # Safety docs but no call-shaped test reach emits an unsafe_unreached card"
 support_tier = "Contract evidence mining"
 expected_cards = 1
-expected_class = "guarded_unwitnessed"
+expected_class = "unsafe_unreached"
 expected_operation_family = "unknown"
 expected_hazard = "unknown"
 
 [[cases]]
 fixture = "public_unsafe_fn_safety_colon_docs"
 kind = "positive"
-claim = "public unsafe function with Safety: doc prose is treated as documented contract evidence"
+claim = "public unsafe fn with Safety: colon docs but no witness emits a guarded_unwitnessed card"
 support_tier = "Contract evidence mining"
 expected_cards = 1
 expected_class = "guarded_unwitnessed"
+expected_operation_family = "unknown"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "pub_crate_unsafe_fn_missing_safety"
+kind = "positive"
+claim = "pub(crate) unsafe fn missing # Safety docs emits a contract_missing card with public_api_surface=false"
+support_tier = "Contract evidence mining"
+expected_cards = 1
+expected_class = "contract_missing"
 expected_operation_family = "unknown"
 expected_hazard = "unknown"
 
 [[cases]]
 fixture = "documented_private_unsafe_fn"
 kind = "positive"
-claim = "private unsafe function with a # Safety contract does not report a missing local declaration guard"
+claim = "documented private unsafe fn with SAFETY comment but no call-shaped test reach emits an unsafe_unreached card"
 support_tier = "Contract evidence mining"
 expected_cards = 1
-expected_class = "guarded_unwitnessed"
+expected_class = "unsafe_unreached"
 expected_operation_family = "unknown"
 expected_hazard = "unknown"
 
 [[cases]]
 fixture = "private_unsafe_helper_safety_comment"
 kind = "positive"
-claim = "private unsafe helper can use nearby SAFETY comments as contract evidence without satisfying guard evidence"
+claim = "private unsafe helper without a guard emits a guard_missing card"
 support_tier = "Contract evidence mining"
 expected_cards = 1
 expected_class = "guard_missing"
@@ -921,7 +1082,7 @@ kind = "positive"
 claim = "MaybeUninit::assume_init recognizes same-slot write evidence in an open branch containing the assume_init operation"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
-expected_class = "guarded_unwitnessed"
+expected_class = "unsafe_unreached"
 expected_operation_family = "maybe_uninit_assume_init"
 expected_hazard = "initialized_memory"
 
@@ -931,7 +1092,7 @@ kind = "positive"
 claim = "MaybeUninit::assume_init_read recognizes same-slot write evidence in an open branch containing the assume_init_read operation"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
-expected_class = "guarded_unwitnessed"
+expected_class = "unsafe_unreached"
 expected_operation_family = "maybe_uninit_assume_init"
 expected_hazard = "initialized_memory"
 
@@ -941,7 +1102,7 @@ kind = "positive"
 claim = "MaybeUninit::assume_init_ref recognizes same-slot write evidence in an open branch containing the assume_init_ref operation"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
-expected_class = "guarded_unwitnessed"
+expected_class = "unsafe_unreached"
 expected_operation_family = "maybe_uninit_assume_init"
 expected_hazard = "initialized_memory"
 
@@ -951,7 +1112,7 @@ kind = "positive"
 claim = "MaybeUninit::assume_init_mut recognizes same-slot write evidence in an open branch containing the assume_init_mut operation"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
-expected_class = "guarded_unwitnessed"
+expected_class = "unsafe_unreached"
 expected_operation_family = "maybe_uninit_assume_init"
 expected_hazard = "initialized_memory"
 
@@ -961,7 +1122,7 @@ kind = "positive"
 claim = "MaybeUninit::assume_init_drop recognizes same-slot write evidence in an open branch containing the assume_init_drop operation"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
-expected_class = "guarded_unwitnessed"
+expected_class = "unsafe_unreached"
 expected_operation_family = "maybe_uninit_assume_init"
 expected_hazard = "initialized_memory"
 
@@ -971,7 +1132,7 @@ kind = "positive"
 claim = "MaybeUninit::assume_init recognizes same-slot MaybeUninit::new evidence in an open branch containing the assume_init operation"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
-expected_class = "guarded_unwitnessed"
+expected_class = "unsafe_unreached"
 expected_operation_family = "maybe_uninit_assume_init"
 expected_hazard = "initialized_memory"
 
@@ -981,7 +1142,7 @@ kind = "positive"
 claim = "MaybeUninit::assume_init_read recognizes same-slot MaybeUninit::new evidence in an open branch containing the assume_init_read operation"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
-expected_class = "guarded_unwitnessed"
+expected_class = "unsafe_unreached"
 expected_operation_family = "maybe_uninit_assume_init"
 expected_hazard = "initialized_memory"
 
@@ -991,7 +1152,7 @@ kind = "positive"
 claim = "MaybeUninit::assume_init_ref recognizes same-slot MaybeUninit::new evidence in an open branch containing the assume_init_ref operation"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
-expected_class = "guarded_unwitnessed"
+expected_class = "unsafe_unreached"
 expected_operation_family = "maybe_uninit_assume_init"
 expected_hazard = "initialized_memory"
 
@@ -1001,7 +1162,7 @@ kind = "positive"
 claim = "MaybeUninit::assume_init_mut recognizes same-slot MaybeUninit::new evidence in an open branch containing the assume_init_mut operation"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
-expected_class = "guarded_unwitnessed"
+expected_class = "unsafe_unreached"
 expected_operation_family = "maybe_uninit_assume_init"
 expected_hazard = "initialized_memory"
 
@@ -1011,7 +1172,7 @@ kind = "positive"
 claim = "MaybeUninit::assume_init_drop recognizes same-slot MaybeUninit::new evidence in an open branch containing the assume_init_drop operation"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
-expected_class = "guarded_unwitnessed"
+expected_class = "unsafe_unreached"
 expected_operation_family = "maybe_uninit_assume_init"
 expected_hazard = "initialized_memory"
 
@@ -1496,6 +1657,20 @@ expected_operation_family = "maybe_uninit_assume_init"
 expected_hazard = "initialized_memory"
 
 [[cases]]
+fixture = "assume_init_definition_no_cards"
+kind = "false_positive_control"
+claim = "a safe fn assume_init() definition header is not carded as a MaybeUninit::assume_init call"
+support_tier = "Core operation smoke slice"
+expected_cards = 0
+
+[[cases]]
+fixture = "assume_init_safe_method_no_cards"
+kind = "false_positive_control"
+claim = "a safe inherent assume_init() method called outside any unsafe scope is not carded as MaybeUninit::assume_init"
+support_tier = "Core operation smoke slice"
+expected_cards = 0
+
+[[cases]]
 fixture = "vec_set_len"
 kind = "positive"
 claim = "Vec::set_len reports missing initialized-range and capacity evidence"
@@ -1876,6 +2051,50 @@ expected_operation_family = "vec_set_len"
 expected_hazard = "initialized_memory"
 
 [[cases]]
+fixture = "vec_set_len_cap_not_len_not_guard"
+kind = "false_positive_control"
+claim = "Vec::set_len guarded only by new_len <= capacity discharges the capacity obligation but not initialized; card stays guard_missing"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_len_read_cap_guard_not_guard"
+kind = "false_positive_control"
+claim = "Vec::set_len with a benign .len() read plus a capacity-only guard must not be credited as shrink evidence; initialized_memory card stays guard_missing"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "vec_set_len_len_and_cap_guard"
+kind = "positive"
+claim = "Vec::set_len guarded by both new_len <= len and new_len <= capacity discharges both obligations and yields guarded_unwitnessed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "vec_set_len"
+expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "set_len_definition_no_cards"
+kind = "false_positive_control"
+claim = "a safe fn set_len() definition header is not carded as a Vec::set_len call"
+support_tier = "Core operation smoke slice"
+expected_cards = 0
+
+[[cases]]
+fixture = "set_len_safe_method_no_cards"
+kind = "false_positive_control"
+claim = "a safe inherent set_len() method called outside any unsafe scope is not carded as Vec::set_len"
+support_tier = "Core operation smoke slice"
+expected_cards = 0
+
+[[cases]]
 fixture = "drop_in_place_deallocation"
 kind = "positive"
 claim = "ptr::drop_in_place reports drop/deallocation obligations instead of unknown unsafe syntax"
@@ -1924,6 +2143,20 @@ expected_cards = 3
 expected_class = "requires_loom"
 expected_operation_family = "atomic_pointer_state"
 expected_hazard = "atomic_ordering"
+
+[[cases]]
+fixture = "atomic_pointer_state_swap_not_same_call"
+kind = "false_positive_control"
+claim = "swap + ptr::null_mut + Ordering:: co-occurring on a line but in different sub-expressions does not produce an atomic_pointer_state card (F3-1 same-call binding)"
+support_tier = "Core operation smoke slice"
+expected_cards = 0
+
+[[cases]]
+fixture = "atomic_pointer_state_fetch_not_same_call"
+kind = "false_positive_control"
+claim = "from_ptr( and fetch_or( co-occurring on a line but as separate sub-expressions does not produce an atomic_pointer_state card (F3-2 same-call binding)"
+support_tier = "Core operation smoke slice"
+expected_cards = 0
 
 [[cases]]
 fixture = "unwrap_unchecked_result"
@@ -3796,6 +4029,16 @@ expected_operation_family = "ptr_copy"
 expected_hazard = "bounds"
 
 [[cases]]
+fixture = "multiline_ptr_copy"
+kind = "positive"
+claim = "multi-line ptr::copy call split across lines yields the full call snippet; syntax site wins over the truncated fallback opener line so the card snippet is complete"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "ptr_copy"
+expected_hazard = "bounds"
+
+[[cases]]
 fixture = "ptr_replace_value"
 kind = "positive"
 claim = "ptr::replace reports read-write pointer and drop-ownership obligations instead of a generic unsafe function call"
@@ -4266,6 +4509,20 @@ expected_operation_family = "str_from_utf8_unchecked"
 expected_hazard = "invalid_value"
 
 [[cases]]
+fixture = "from_utf8_unchecked_definition_no_cards"
+kind = "false_positive_control"
+claim = "a safe fn from_utf8_unchecked() definition header is not carded as a str::from_utf8_unchecked call"
+support_tier = "Core operation smoke slice"
+expected_cards = 0
+
+[[cases]]
+fixture = "from_utf8_unchecked_safe_wrapper_no_cards"
+kind = "false_positive_control"
+claim = "a safe inherent from_utf8_unchecked() method called outside any unsafe scope is not carded as str::from_utf8_unchecked"
+support_tier = "Core operation smoke slice"
+expected_cards = 0
+
+[[cases]]
 fixture = "zeroed_invalid_value"
 kind = "positive"
 claim = "mem::zeroed reports valid-zero obligations instead of a generic unsafe function call"
@@ -4286,6 +4543,30 @@ expected_operation_family = "zeroed"
 expected_hazard = "invalid_value"
 
 [[cases]]
+fixture = "zeroed_definition_no_cards"
+kind = "false_positive_control"
+claim = "a safe fn zeroed() definition is not carded as a mem::zeroed call"
+support_tier = "Core operation smoke slice"
+expected_cards = 0
+
+[[cases]]
+fixture = "zeroed_safe_wrapper_no_cards"
+kind = "false_positive_control"
+claim = "a safe inherent zeroed() method called outside any unsafe scope is not carded as mem::zeroed"
+support_tier = "Core operation smoke slice"
+expected_cards = 0
+
+[[cases]]
+fixture = "zeroed_call_still_cards"
+kind = "positive"
+claim = "mem::zeroed call inside a function body still produces a review card after definition-header fix"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "unsafe_unreached"
+expected_operation_family = "zeroed"
+expected_hazard = "invalid_value"
+
+[[cases]]
 fixture = "inline_asm_human_review"
 kind = "positive"
 claim = "inline asm reports assembly/target hazards and routes to human review instead of a generic unsafe function call"
@@ -4297,8 +4578,8 @@ expected_hazard = "inline_asm"
 
 [[cases]]
 fixture = "raw_pointer_read_len_capacity_assert"
-kind = "positive"
-claim = "raw pointer read recognizes len/capacity equality assertions as bounds evidence"
+kind = "false_positive_control"
+claim = "raw pointer read does not credit debug_assert_eq! for bounds; debug_assert_eq!(values.len(), values.capacity()) is compiled out in release builds and cannot satisfy the bounds obligation"
 support_tier = "Raw pointer card slice"
 expected_cards = 1
 expected_class = "guard_missing"
@@ -4416,6 +4697,66 @@ expected_operation_family = "raw_pointer_read"
 expected_hazard = "pointer_validity"
 
 [[cases]]
+fixture = "raw_pointer_read_unaligned_other_len_not_guard"
+kind = "false_positive_control"
+claim = "an unrelated slice length guard must not discharge the bounds obligation for read_unaligned from a different pointer (F3-7)"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_read_unaligned"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "raw_pointer_write_other_len_not_guard"
+kind = "false_positive_control"
+claim = "an unrelated slice length guard must not discharge the bounds obligation for a raw pointer write (F3-6)"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_write"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "raw_pointer_write_same_origin_bounds_guard"
+kind = "positive"
+claim = "a same-origin size assertion discharges the bounds obligation for a raw pointer write when the pointer traces back to the guarded slice"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_write"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "raw_pointer_read_unrelated_is_null_not_guard"
+kind = "false_positive_control"
+claim = "an unrelated b.is_null() check does not discharge the pointer-live obligation for a.read()"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_read"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "raw_pointer_read_same_receiver_is_null_guard"
+kind = "positive"
+claim = "a same-receiver !a.is_null() open-branch guard discharges the pointer-live obligation for a.read()"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_read"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "raw_pointer_bounds_debug_assert_only_not_guard"
+kind = "false_positive_control"
+claim = "raw pointer write does not credit debug_assert!(!buf.is_empty()) as a runtime bounds guard; debug_assert! is compiled out in release builds, so the bounds obligation stays missing"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_write"
+expected_hazard = "pointer_validity"
+
+[[cases]]
 fixture = "raw_pointer_read_volatile"
 kind = "positive"
 claim = "method-form read_volatile reports raw pointer read obligations instead of a generic unsafe function call"
@@ -4426,12 +4767,19 @@ expected_operation_family = "raw_pointer_read"
 expected_hazard = "pointer_validity"
 
 [[cases]]
+fixture = "ptr_read_path_segment_not_raw"
+kind = "false_positive_control"
+claim = "a call path whose alias segment ends in `ptr` (e.g. registry_ptr::read_entry) is not carded as a raw-pointer read"
+support_tier = "Raw pointer card slice"
+expected_cards = 0
+
+[[cases]]
 fixture = "pointer_arithmetic_num_ctrl_bytes_guard"
-kind = "positive"
-claim = "pointer arithmetic recognizes index < num_ctrl_bytes as bounds guard evidence"
+kind = "false_positive_control"
+claim = "pointer arithmetic does not credit debug_assert!(index < num_ctrl_bytes) as a runtime bounds guard; debug_assert! is compiled out in release builds"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
-expected_class = "guarded_unwitnessed"
+expected_class = "guard_missing"
 expected_operation_family = "pointer_arithmetic"
 expected_hazard = "bounds"
 
@@ -4516,6 +4864,23 @@ expected_operation_family = "pointer_arithmetic"
 expected_hazard = "bounds"
 
 [[cases]]
+fixture = "pointer_arithmetic_safe_method_add_no_cards"
+kind = "false_positive_control"
+claim = "pointer arithmetic does not card safe inherent .add() methods outside any unsafe scope"
+support_tier = "Core operation smoke slice"
+expected_cards = 0
+
+[[cases]]
+fixture = "pointer_arithmetic_unsafe_fn_offset"
+kind = "positive"
+claim = "pointer arithmetic cards .add() on a raw pointer inside an unsafe fn body"
+support_tier = "Core operation smoke slice"
+expected_cards = 2
+expected_class = "guard_missing"
+expected_operation_family = "pointer_arithmetic"
+expected_hazard = "bounds"
+
+[[cases]]
 fixture = "slice_from_raw_parts_mut"
 kind = "positive"
 claim = "slice::from_raw_parts_mut reports slice range obligations instead of a generic unsafe function call"
@@ -4544,6 +4909,20 @@ expected_cards = 1
 expected_class = "guard_missing"
 expected_operation_family = "slice_from_raw_parts"
 expected_hazard = "initialized_memory"
+
+[[cases]]
+fixture = "slice_from_raw_parts_definition_no_cards"
+kind = "false_positive_control"
+claim = "a safe fn from_raw_parts() definition header is not carded as a slice::from_raw_parts call"
+support_tier = "Core operation smoke slice"
+expected_cards = 0
+
+[[cases]]
+fixture = "from_raw_parts_safe_ctor_no_cards"
+kind = "false_positive_control"
+claim = "a safe inherent from_raw_parts() constructor called outside any unsafe scope is not carded as slice::from_raw_parts"
+support_tier = "Core operation smoke slice"
+expected_cards = 0
 
 [[cases]]
 fixture = "vec_from_raw_parts"
@@ -4702,6 +5081,36 @@ claim = "transmute::<u8, bool> recognizes explicit size_of layout evidence while
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_layout_only_not_guard"
+kind = "false_positive_control"
+claim = "transmute::<u8, bool> with size_of layout assertion but no valid-value assertion still reports guard_missing; partial obligation discharge does not upgrade the card"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "transmute_all_obligations_met"
+kind = "positive"
+claim = "transmute::<u8, bool> with both size_of layout and value <= 1 range assertions discharges both obligations and yields guarded_unwitnessed"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
+expected_operation_family = "transmute"
+expected_hazard = "invalid_value"
+
+[[cases]]
+fixture = "multiline_transmute_all_obligations_met"
+kind = "positive"
+claim = "multi-line transmute::<u8, bool> with both size_of layout and value <= 1 range assertions yields guarded_unwitnessed; syntax site wins over incomplete fallback line so guards are credited"
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guarded_unwitnessed"
 expected_operation_family = "transmute"
 expected_hazard = "invalid_value"
 
@@ -4937,8 +5346,8 @@ expected_hazard = "invalid_value"
 
 [[cases]]
 fixture = "transmute_copy_layout_size_guard"
-kind = "positive"
-claim = "transmute_copy::<u8, bool> recognizes explicit size_of layout evidence while keeping valid-value evidence missing"
+kind = "false_positive_control"
+claim = "transmute_copy::<u8, bool> does not credit debug_assert_eq! for layout; debug_assert_eq!(size_of::<u8>(), size_of::<bool>()) is compiled out in release builds, so layout obligation remains missing"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
 expected_class = "guard_missing"
@@ -4997,11 +5406,11 @@ expected_hazard = "invalid_value"
 
 [[cases]]
 fixture = "transmute_copy_bool_valid_value_guard"
-kind = "positive"
-claim = "transmute_copy::<u8, bool> recognizes explicit size_of layout evidence and referenced u8 bool-domain evidence while keeping witness evidence missing"
+kind = "false_positive_control"
+claim = "transmute_copy::<u8, bool> does not credit debug_assert_eq! for layout even when valid-value assert! is present; debug_assert_eq! is compiled out in release builds, so layout obligation stays missing"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
-expected_class = "guarded_unwitnessed"
+expected_class = "guard_missing"
 expected_operation_family = "transmute"
 expected_hazard = "invalid_value"
 
@@ -5057,11 +5466,11 @@ expected_hazard = "invalid_value"
 
 [[cases]]
 fixture = "transmute_copy_bool_invalid_return_guard"
-kind = "positive"
-claim = "transmute_copy::<u8, bool> recognizes explicit size_of layout evidence and referenced u8 invalid-byte early-return evidence while keeping witness evidence missing"
+kind = "false_positive_control"
+claim = "transmute_copy::<u8, bool> does not credit debug_assert_eq! for layout even when a valid-value early-return guard is present; debug_assert_eq! is compiled out in release builds, so layout obligation stays missing"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
-expected_class = "guarded_unwitnessed"
+expected_class = "guard_missing"
 expected_operation_family = "transmute"
 expected_hazard = "invalid_value"
 
@@ -5186,10 +5595,70 @@ expected_operation_family = "unsafe_impl_send_sync"
 expected_hazard = "send_sync_invariant"
 
 [[cases]]
+fixture = "unsafe_impl_send_owner_substring_not_reached"
+kind = "false_positive_control"
+claim = "substring match of owner name in a longer identifier does not credit test reach for unsafe impl Send"
+support_tier = "Witness routing"
+expected_cards = 1
+expected_class = "requires_loom"
+expected_operation_family = "unsafe_impl_send_sync"
+expected_hazard = "send_sync_invariant"
+
+[[cases]]
+fixture = "reach_production_ref_in_test_file_not_reached"
+kind = "false_positive_control"
+claim = "owner mentioned only in production code above an inline test module must NOT credit test reach"
+support_tier = "Witness routing"
+expected_cards = 1
+expected_class = "contract_missing"
+expected_operation_family = "unknown"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "reach_owner_called_in_cfg_test_reached"
+kind = "positive"
+claim = "owner mentioned inside a #[cfg(test)] mod tests block credits test reach"
+support_tier = "Witness routing"
+expected_cards = 1
+expected_class = "requires_loom"
+expected_operation_family = "unsafe_impl_send_sync"
+expected_hazard = "send_sync_invariant"
+
+[[cases]]
+fixture = "reach_bare_mention_no_call_not_reach"
+kind = "false_positive_control"
+claim = "a bare identifier mention of the owner inside test scope with no call/constructor shape must NOT credit test reach"
+support_tier = "Witness routing"
+expected_cards = 1
+expected_class = "requires_loom"
+expected_operation_family = "unsafe_impl_send_sync"
+expected_hazard = "send_sync_invariant"
+
+[[cases]]
+fixture = "reach_self_named_test_not_reach"
+kind = "false_positive_control"
+claim = "a test function whose name matches the owner (fn owner()) must NOT self-credit reach"
+support_tier = "Witness routing"
+expected_cards = 1
+expected_class = "contract_missing"
+expected_operation_family = "unknown"
+expected_hazard = "unknown"
+
+[[cases]]
 fixture = "unsafe_impl_custom_trait_not_send_sync"
 kind = "false_positive_control"
 claim = "custom unsafe trait impls do not receive Send/Sync concurrency witness routing"
 support_tier = "Witness routing"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unknown"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "unsafe_impl_custom_trait_contract_not_guard"
+kind = "false_positive_control"
+claim = "custom unsafe impl WITH a SAFETY comment provides contract but the unknown obligation still has no discharge path for impl sites; card stays guard_missing"
+support_tier = "Contract evidence mining"
 expected_cards = 1
 expected_class = "guard_missing"
 expected_operation_family = "unknown"
@@ -5286,6 +5755,35 @@ expected_operation_family = "unsafe_fn_call"
 expected_hazard = "unknown"
 
 [[cases]]
+fixture = "ffi_same_named_method_not_route"
+kind = "false_positive_control"
+claim = "inherent method calls via a method-receiver dot are not routed to FFI even when an extern declaration of the same name exists in the same file"
+support_tier = "Witness routing"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unsafe_fn_call"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "ffi_inner_libc_path_not_route"
+kind = "false_positive_control"
+claim = "a qualified path where libc is an inner segment (something::libc::call) is not routed to the foreign-libc FFI boundary"
+support_tier = "Witness routing"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "unsafe_fn_call"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "ffi_token_in_string_not_route"
+kind = "false_positive_control"
+claim = "a libc:: token inside a string literal within an unsafe block does not route to the FFI boundary"
+support_tier = "Witness routing"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_hazard = "unknown"
+
+[[cases]]
 fixture = "safe_code_no_cards"
 kind = "negative"
 claim = "safe Rust changes emit no review cards"
@@ -5319,7 +5817,7 @@ kind = "positive"
 claim = "documented target-feature declarations are caller-contract sites and do not require local attribute guard evidence"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
-expected_class = "guarded_unwitnessed"
+expected_class = "unsafe_unreached"
 expected_operation_family = "target_feature"
 expected_hazard = "target_feature"
 
@@ -5336,12 +5834,12 @@ expected_hazard = "target_feature"
 [[cases]]
 fixture = "attributed_unsafe_fn_no_duplicate"
 kind = "false_positive_control"
-claim = "attributed unsafe fn declarations are not duplicated by fallback line scanning"
+claim = "attributed unsafe fn declarations are not duplicated by fallback line scanning; emits owner card plus one operation card"
 support_tier = "Diff unsafe site inventory"
 expected_cards = 2
 expected_class = "contract_missing"
-expected_operation_family = "unknown"
-expected_hazard = "unknown"
+expected_operation_family = "raw_pointer_write"
+expected_hazard = "pointer_validity"
 
 [[cases]]
 fixture = "inline_unsafe_raw_pointer_deref_no_duplicate"
@@ -5459,7 +5957,7 @@ kind = "positive"
 claim = "NonNull::new guard evidence discharges the non-null obligation for NonNull::new_unchecked"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
-expected_class = "guarded_unwitnessed"
+expected_class = "unsafe_unreached"
 expected_operation_family = "nonnull_unchecked"
 expected_hazard = "pointer_validity"
 
@@ -5519,7 +6017,7 @@ kind = "positive"
 claim = "if-let NonNull::new evidence discharges the non-null obligation for NonNull::new_unchecked"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
-expected_class = "guarded_unwitnessed"
+expected_class = "unsafe_unreached"
 expected_operation_family = "nonnull_unchecked"
 expected_hazard = "pointer_validity"
 
@@ -5539,7 +6037,7 @@ kind = "positive"
 claim = "let-else NonNull::new evidence discharges the non-null obligation for NonNull::new_unchecked"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
-expected_class = "guarded_unwitnessed"
+expected_class = "unsafe_unreached"
 expected_operation_family = "nonnull_unchecked"
 expected_hazard = "pointer_validity"
 
@@ -5549,7 +6047,7 @@ kind = "positive"
 claim = "match NonNull::new Some-arm evidence discharges the non-null obligation for NonNull::new_unchecked"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
-expected_class = "guarded_unwitnessed"
+expected_class = "unsafe_unreached"
 expected_operation_family = "nonnull_unchecked"
 expected_hazard = "pointer_validity"
 
@@ -5589,7 +6087,7 @@ kind = "positive"
 claim = "same-pointer is_null evidence in a top-level disjunction with an early return discharges the non-null obligation after the guard"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
-expected_class = "guarded_unwitnessed"
+expected_class = "unsafe_unreached"
 expected_operation_family = "nonnull_unchecked"
 expected_hazard = "pointer_validity"
 
@@ -5629,7 +6127,7 @@ kind = "positive"
 claim = "same-pointer non-null open-branch evidence discharges the non-null obligation for NonNull::new_unchecked"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
-expected_class = "guarded_unwitnessed"
+expected_class = "unsafe_unreached"
 expected_operation_family = "nonnull_unchecked"
 expected_hazard = "pointer_validity"
 
@@ -5639,7 +6137,7 @@ kind = "positive"
 claim = "same-pointer non-null evidence in a top-level conjunction discharges the non-null obligation inside the open branch"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
-expected_class = "guarded_unwitnessed"
+expected_class = "unsafe_unreached"
 expected_operation_family = "nonnull_unchecked"
 expected_hazard = "pointer_validity"
 
@@ -5756,7 +6254,7 @@ expected_hazard = "unknown"
 [[cases]]
 fixture = "long_unsafe_fn_owner_inference"
 kind = "positive"
-claim = "operations deep inside long unsafe functions preserve the enclosing function owner"
+claim = "operations deep inside long unsafe functions preserve the enclosing function owner; emits owner card plus one operation card"
 support_tier = "Diff unsafe site inventory"
 expected_cards = 2
 expected_class = "contract_missing"
@@ -5787,6 +6285,13 @@ expected_hazard = "pointer_validity"
 fixture = "adjacent_unchanged_unsafe_fn_no_card"
 kind = "false_positive_control"
 claim = "adjacent unchanged unsafe declarations do not emit cards when a neighboring safe function changes"
+support_tier = "Diff unsafe site inventory"
+expected_cards = 0
+
+[[cases]]
+fixture = "unsafe_fn_pointer_field_no_cards"
+kind = "false_positive_control"
+claim = "an unsafe fn-pointer type in a struct field position does not produce a ReviewCard"
 support_tier = "Diff unsafe site inventory"
 expected_cards = 0
 
@@ -6099,3 +6604,43 @@ expected_cards = 1
 expected_class = "guard_missing"
 expected_operation_family = "raw_pointer_read"
 expected_hazard = "alignment"
+
+[[cases]]
+fixture = "unsafe_fn_unknown_family_no_card"
+kind = "positive"
+claim = "unknown-family unsafe fn missing safety docs emits a contract_missing card in diff scope; unknown family is still actionable"
+support_tier = "Diff unsafe site inventory"
+expected_cards = 1
+expected_class = "contract_missing"
+expected_operation_family = "unknown"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "raw_pointer_deref_through_unsafecell_get"
+kind = "positive"
+claim = "UnsafeCell::get() raw pointer deref wrapped in &mut / & is classified as raw_pointer_deref, not unsafe_fn_call"
+support_tier = "Raw pointer card slice"
+expected_cards = 2
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_deref"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "raw_pointer_deref_ref_wrapped_cast"
+kind = "positive"
+claim = "cast-then-deref wrapped in &mut (e.g. &mut *(p as *mut T)) is classified as raw_pointer_deref, not unsafe_fn_call"
+support_tier = "Raw pointer card slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "raw_pointer_deref"
+expected_hazard = "pointer_validity"
+
+[[cases]]
+fixture = "unsafe_fn_call_ref_borrow_not_deref"
+kind = "false_positive_control"
+claim = "unsafe block calling an unsafe fn (no raw pointer dereference) stays unsafe_fn_call; the ref-wrapped-deref fix does not fire"
+support_tier = "Core operation smoke slice"
+expected_cards = 2
+expected_class = "guard_missing"
+expected_operation_family = "unsafe_fn_call"
+expected_hazard = "unknown"

@@ -81,9 +81,11 @@ sensors uniformly instead of special-casing each:
   stdout/markdown.
 - **Ledger evidence taxonomy and dialect marker**: typed evidence prefixes
   (`test:`, `doc:`, `spec:`, `adr:`, `ripr:`, `unsafe-review:`, `coverage:`,
-  `issue:`, `pr:`), a `policy = "<tool>"` dialect marker, owner/classification/
-  lifecycle discipline, and one settled `schema_version` form (integer vs
-  string).
+  `issue:`, `pr:`, `baseline-init:`), a `policy = "<tool>"` dialect marker,
+  owner/classification/lifecycle discipline, and one settled `schema_version`
+  form (integer vs string). The `baseline-init:` prefix is unsafe-review-specific
+  and marks entries generated automatically by `baseline init` for pre-existing
+  debt capture.
 - **Coverage-movement vocabulary**: `new` / `worsened` / `resolved` /
   `inherited` reported as posture against a baseline, with diff-scoped
   attribution; the orchestrator decides blocking.
@@ -93,6 +95,23 @@ sensors uniformly instead of special-casing each:
   precision-recall / policy-readiness).
 - **Spec lifecycle dashboard + wording-contract verifier**: machine-checked
   spec status with proof commands, and a verifier that rejects overclaim drift.
+
+## Manifest envelope constants
+
+The following fixed values are the schema-routing anchor for `unsafe-review-gate.json`
+(SPEC-0034). Consumers MUST route by `schema_version` and `dialect`; they MUST NOT
+infer tool identity from filenames or stdout format.
+
+| Field | Fixed value | Notes |
+|---|---|---|
+| `schema_version` | `"unsafe-review-gate/v1"` | String form; agreed with ripr envelope |
+| `dialect` | `"unsafe-review"` | Sensor identity marker for shared router dispatch |
+| `status` | `"advisory"` | Always advisory; manifest carries posture, not a block verdict |
+| `trust_boundary` | `"static unsafe-review coverage evidence; not proof, not a merge verdict"` | Fixed advisory string; no proof / UB-free / Miri-clean / site-execution claim |
+
+These constants are verified by `cargo test -p unsafe-review-core gate_manifest` and
+enforced in `check-pr`. See SPEC-0034 for the full envelope shape including the
+`summary`, `artifacts`, `tool`, and `tool_version` fields.
 
 ## Bidirectional learning ledger
 
@@ -104,14 +123,14 @@ owns the tracking issue. Keep this table current as items land.
 | Versioned gate manifest + baseline-debt-delta schema | ripr | unsafe-review | unsafe-review-swarm #1522 | open |
 | Multi-mode gate (visible-only → calibrated) | ripr | unsafe-review | unsafe-review-swarm #1522 | open |
 | Canonical `new_unsuppressed` counter for threshold consumers | ripr | (consumer contract) | ripr-swarm #1038 | open |
-| Exception-ledger rigor: typed evidence, classification, structural selectors, ownership, dialect marker | cargo-allow | unsafe-review | unsafe-review-swarm #1523 | open |
+| Exception-ledger rigor: typed evidence, classification, structural selectors, ownership, dialect marker | cargo-allow | unsafe-review | unsafe-review-swarm #1523 | partial (typed-evidence prefix gate landed; structural selectors and dialect marker open) |
 | `schema_version` integer-vs-string convergence | — | family-wide | cargo-allow #1465, tokmd-swarm #224 | open |
 | Machine-checked spec-status dashboard | unsafe-review | ripr | ripr-swarm #1040 | open |
 | No-finding wording-contract verifier | unsafe-review | ripr | ripr-swarm #1040 | open |
 | Diff-first consumer contract alignment | unsafe-review | ripr | ripr-swarm #1041 | open |
 | Coverage-movement vocabulary (new/worsened/resolved/inherited) | unsafe-review | cargo-allow | cargo-allow #1471 | open |
 | tokmd-packets input-schema ownership + `--from-packets` consumer | unsafe-review (producer) ↔ tokmd (consumer) | tokmd | tokmd-swarm #222 | open |
-| `check-local-context` / limited-runtime vocabulary | ripr | unsafe-review | unsafe-review-swarm #1520 | open |
+| `check-local-context` / limited-runtime vocabulary — `downstream_consumable` operator field shipped; `has_unix_absolute_machine_path` / `has_session_state_marker` predicates shipped | ripr | unsafe-review | unsafe-review-swarm #1520 | closed |
 | Pre-guard scratch GC for shared CI runners | ripr | unsafe-review | unsafe-review-swarm #1519 | open |
 
 ## Standing process

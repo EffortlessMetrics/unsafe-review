@@ -187,6 +187,7 @@ fixtures = [
   "raw_pointer_read_typed_shadowed_origin_not_guard",
   "raw_pointer_read_other_len_not_guard",
   "raw_pointer_read_reassigned_origin_not_guard",
+  "raw_pointer_read_unaligned_other_len_not_guard",
 ]
 dogfood_targets = []
 label_ledgers = [
@@ -196,11 +197,46 @@ labeled_reports = []
 allowed_public_claim = """
 Fixture-pinned raw pointer read bounds evidence distinguishes same-origin
 len/capacity assertions, typed casts, and open length branches from observed
-branches, shadowed origins, unrelated lengths, and reassigned origins in the
-listed fixtures.
+branches, shadowed origins, unrelated lengths, reassigned origins, and
+unrelated-length read_unaligned/read_volatile controls in the listed fixtures.
 """
 forbidden_claims = [
   "broad raw pointer read soundness",
+  "pointer liveness proof",
+  "alignment proof",
+  "initialized-memory proof",
+  "same-allocation proof",
+  "witness execution proof",
+  "Miri-clean",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "raw-pointer-write-bounds-evidence"
+status = "fixture_pinned"
+kind = "evidence_precision"
+owner = "calibration"
+operation_family = "raw_pointer_write"
+hazard = "pointer_validity"
+support_tier = "Raw pointer card slice"
+fixtures = [
+  "raw_pointer_write_same_origin_bounds_guard",
+  "raw_pointer_write_other_len_not_guard",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/raw-pointer-write-bounds-evidence.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned raw pointer write bounds evidence distinguishes same-origin
+size assertions (which discharge the obligation) from unrelated-slice length
+guards (which must not discharge) in the listed fixtures.
+"""
+forbidden_claims = [
+  "broad raw pointer write soundness",
   "pointer liveness proof",
   "alignment proof",
   "initialized-memory proof",
@@ -312,6 +348,39 @@ forbidden_claims = [
   "guard proof from comments",
   "witness execution proof",
   "Miri-clean",
+  "global precision",
+  "global recall",
+  "memory-safety proof",
+]
+
+[[claim]]
+id = "restricted-visibility-unsafe-fn-framing"
+status = "fixture_pinned"
+kind = "evidence_precision"
+owner = "calibration"
+operation_family = "unknown"
+hazard = "unknown"
+support_tier = "Contract evidence mining"
+fixtures = [
+  "pub_crate_unsafe_fn_missing_safety",
+]
+dogfood_targets = []
+label_ledgers = [
+  "docs/accuracy/labels/restricted-visibility-unsafe-fn-framing.toml",
+]
+labeled_reports = []
+allowed_public_claim = """
+Fixture-pinned restricted-visibility framing: pub(crate)/pub(super)/pub(in …)
+unsafe fns are reported with public_api_surface=false and a next-action that
+names in-crate callers rather than the public API surface. The contract gap is
+still flagged; only the public-API framing is corrected. Whether pub(crate)
+unsafe fns require a weaker or no safety-doc obligation is a model question
+outside this fixture scope.
+"""
+forbidden_claims = [
+  "public API surface proof",
+  "Clippy missing_safety_doc equivalence",
+  "pub(crate) unsafe fns are safe without # Safety docs",
   "global precision",
   "global recall",
   "memory-safety proof",
@@ -636,6 +705,7 @@ fixtures = [
   "ptr_copy_slice_range_shadowed_dst_path_not_guard",
   "ptr_copy_slice_range_shadowed_dst_not_guard",
   "ptr_copy_other_len_not_guard",
+  "multiline_ptr_copy",
 ]
 dogfood_targets = []
 label_ledgers = [
@@ -647,7 +717,8 @@ Fixture-pinned ptr::copy valid-range evidence distinguishes same-call source and
 destination length evidence from stale, partial, closed-branch, comment-only,
 compound-stale-count, shadowed-count, shadowed-receiver, stale-receiver-path, shadowed-receiver-path, and unrelated-length
 controls in the listed fixtures, while initialized-memory remains a separate
-missing obligation.
+missing obligation. Includes a multiline ptr::copy control that verifies the
+snippet is not truncated to the call opener when arguments span multiple lines.
 """
 forbidden_claims = [
   "broad ptr::copy soundness",
@@ -1168,6 +1239,8 @@ fixtures = [
   "unsafe_fn_call_encode_utf8_remaining_cap",
   "ffi_non_libc_wrapper_call_not_route",
   "ffi_local_libc_module_call_not_route",
+  "ffi_same_named_method_not_route",
+  "ffi_inner_libc_path_not_route",
   "unchecked_constructor_availability_guard",
   "unchecked_constructor_availability_assert_guard",
   "unchecked_constructor_unavailable_return_guard",
@@ -1185,7 +1258,8 @@ allowed_public_claim = """
 Fixture-pinned generic unsafe function call callee-contract evidence
 distinguishes remaining-capacity and availability guards from missing,
 wrong-receiver, observed-only, closed-branch, comment-only return, and
-FFI-looking local-wrapper controls in the listed fixtures.
+FFI-looking local-wrapper and method-receiver-dot controls in the listed
+fixtures.
 """
 forbidden_claims = [
   "callee contract soundness proof",
@@ -1523,6 +1597,7 @@ fixtures = [
   "pointer_arithmetic_disjunct_bounds_not_guard",
   "pointer_arithmetic_closed_branch_not_guard",
   "pointer_arithmetic_slice_end",
+  "pointer_arithmetic_unsafe_fn_offset",
 ]
 dogfood_targets = []
 label_ledgers = [
@@ -1560,6 +1635,14 @@ fixtures = [
   "cfg_target_feature_not_operation",
   "static_lifetime_mut_ref_not_static_mut",
   "adjacent_unchanged_unsafe_fn_no_card",
+  "unsafe_fn_pointer_field_no_cards",
+  "pointer_arithmetic_safe_method_add_no_cards",
+  "set_len_safe_method_no_cards",
+  "from_raw_parts_safe_ctor_no_cards",
+  "assume_init_safe_method_no_cards",
+  "from_utf8_unchecked_safe_wrapper_no_cards",
+  "zeroed_safe_wrapper_no_cards",
+  "ptr_read_path_segment_not_raw",
 ]
 dogfood_targets = []
 label_ledgers = [
@@ -1568,8 +1651,8 @@ label_ledgers = [
 labeled_reports = []
 allowed_public_claim = """
 Fixture-pinned no-card behavior for the listed safe, import-only, cfg-only,
-reference-type, and unchanged-adjacent fixtures emits zero ReviewCards without
-saying the repo is safe.
+reference-type, unchanged-adjacent, fn-pointer-type, and safe-method-call
+fixtures emits zero ReviewCards without saying the repo is safe.
 """
 forbidden_claims = [
   "all clear",

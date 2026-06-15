@@ -85,7 +85,7 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
         "| ID | Class | Proof path | Operation | Hazard | Missing | Route | Next action |"
     ));
     assert!(markdown.contains("unsafe { ptr.cast::<Header>().read() }"));
-    assert!(markdown.contains("Add or expose the local guard"));
+    assert!(markdown.contains("Add or expose local guards"));
 
     let root_relative_diff = run_success([
         os("check"),
@@ -340,7 +340,7 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
         lsp["diagnostics"][0]["next_action"]
             .as_str()
             .unwrap_or("")
-            .contains("Add or expose the local guard")
+            .contains("Add or expose local guards")
     );
     assert_eq!(lsp["diagnostics"][0]["witness_routes"][0]["kind"], "miri");
     assert!(
@@ -430,8 +430,8 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
                 && action["payload"]["kind"] == "unsafe-review.related_test"
                 && action["payload"]["card_id"].as_str() == Some(card_id)
                 && action["payload"]["file"] == "src/lib.rs"
-                && action["payload"]["line"] == 3
-                && action["payload"]["name"] == "read_header"
+                && action["payload"]["line"] == 16
+                && action["payload"]["name"] == "reads_header"
         })
     }));
     assert!(lsp["code_actions"].as_array().is_some_and(|actions| {
@@ -532,7 +532,7 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
     );
     assert_eq!(
         packet["source_context"]["related_tests"][0]["name"],
-        "read_header"
+        "reads_header"
     );
     assert!(packet["witness_routes"].is_array());
     assert_eq!(packet["agent_readiness"]["ready"], true);
@@ -581,13 +581,17 @@ fn check_artifact_formats_context_and_explain_work_end_to_end() -> Result<(), Bo
         "- `cargo-careful`: cargo-careful is a cheaper compatibility-oriented runtime check"
     ));
     assert!(explain.contains("cargo +nightly careful test read_header"));
-    assert!(explain.contains(
-        "Add or expose the local guard that discharges the `raw_pointer_read` safety obligation."
-    ));
+    assert!(
+        explain.contains(
+            "Add or expose local guards for these `raw_pointer_read` safety obligations:"
+        )
+    );
     assert!(explain.contains("## What would resolve this"));
-    assert!(explain.contains(
-        "- Add or expose the local guard that discharges the `raw_pointer_read` safety obligation."
-    ));
+    assert!(
+        explain.contains(
+            "- Add or expose local guards for these `raw_pointer_read` safety obligations:"
+        )
+    );
     assert!(explain.contains("Then attach a matching witness receipt only after running"));
     assert!(explain.contains("## What would not resolve this"));
     assert!(
@@ -709,6 +713,34 @@ fn context_packet_queues_contract_gaps_for_public_safety_docs() -> Result<(), Bo
             .unwrap_or("")
             .contains("not UB-free status")
     );
+
+    Ok(())
+}
+
+/// Pin: an unsafe fn with no classified operation family emits a contract_missing card
+/// in diff scope. The card is advisory-only with operation_family = "unknown".
+#[test]
+fn unknown_family_unsafe_fn_emits_contract_missing_card_in_diff_scope() -> Result<(), Box<dyn Error>>
+{
+    let fixture = fixture_root("unsafe_fn_unknown_family_no_card");
+
+    let json = run_success([
+        os("check"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        fixture.join("change.diff").into_os_string(),
+        os("--format"),
+        os("json"),
+    ])?;
+    let value = parse_json(&stdout_text(&json)?)?;
+    assert_eq!(
+        value["summary"]["cards"], 1,
+        "unknown-family unsafe fn must emit a card in diff scope"
+    );
+    assert_eq!(value["cards"][0]["class"], "contract_missing");
+    assert_eq!(value["cards"][0]["operation_family"], "unknown");
+    assert_eq!(value["cards"][0]["site"]["kind"], "unsafe_fn");
 
     Ok(())
 }
@@ -1974,6 +2006,7 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
     assert!(stdout.contains("comment-plan.json"));
     assert!(stdout.contains("witness-plan.md"));
     assert!(stdout.contains("receipt-audit.md"));
+    assert!(stdout.contains("receipt-audit.json"));
     assert!(stdout.contains("manual-candidates.json"));
     assert!(stdout.contains("manual-repair-queue.json"));
     assert!(stdout.contains("tokmd-packets.json"));
@@ -2500,6 +2533,7 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
         "comment-plan.json",
         "witness-plan.md",
         "receipt-audit.md",
+        "receipt-audit.json",
         "policy-report.json",
         "policy-report.md",
         "manual-candidates.json",
@@ -2530,7 +2564,7 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
                 assert_eq!(entry["schema_version"], "0.2")
             }
             "review-kit.json" | "comment-plan.json" | "lsp.json" | "repair-queue.json"
-            | "policy-report.json" => {
+            | "policy-report.json" | "receipt-audit.json" => {
                 assert_eq!(entry["schema_version"], "0.1")
             }
             "unsafe-review-gate.json" => {
@@ -2568,6 +2602,30 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
     assert_eq!(
         gate_manifest["artifacts"]["repair_queue"],
         "repair-queue.json"
+    );
+    assert_eq!(
+        gate_manifest["artifacts"]["receipt_audit"], "receipt-audit.json",
+        "gate manifest receipt_audit pointer must resolve to the structured JSON artifact"
+    );
+    // receipt-audit.json must exist on disk and parse as JSON.
+    let receipt_audit_json_path = out_dir.join("receipt-audit.json");
+    assert!(
+        receipt_audit_json_path.is_file(),
+        "receipt-audit.json must be written alongside receipt-audit.md"
+    );
+    let receipt_audit_json = parse_json(&fs::read_to_string(&receipt_audit_json_path)?)?;
+    assert_eq!(
+        receipt_audit_json["schema_version"], "0.1",
+        "receipt-audit.json must carry schema_version 0.1"
+    );
+    assert_eq!(
+        receipt_audit_json["mode"], "receipt-audit",
+        "receipt-audit.json must carry mode receipt-audit"
+    );
+    // receipt-audit.md must still exist for human consumers (ADDITIVE).
+    assert!(
+        out_dir.join("receipt-audit.md").is_file(),
+        "receipt-audit.md must still be written for human consumers"
     );
     assert_eq!(
         gate_manifest["summary"]["new_gaps"],
@@ -3432,6 +3490,136 @@ fn first_pr_writes_standard_advisory_review_bundle() -> Result<(), Box<dyn Error
 }
 
 #[test]
+fn first_pr_emits_usefulness_telemetry_artifact() -> Result<(), Box<dyn Error>> {
+    // Verifies that first-pr emits usefulness-telemetry.json and that it
+    // correctly projects from the same cards as cards.json (SPEC-0038).
+    let fixture = fixture_root("raw_pointer_alignment");
+    let temp = TempDir::new("unsafe-review-usefulness-telemetry-e2e")?;
+    let out_dir = temp.path().join("out");
+
+    run_success([
+        os("first-pr"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        fixture.join("change.diff").into_os_string(),
+        os("--out-dir"),
+        out_dir.as_os_str().to_os_string(),
+    ])?;
+
+    let telemetry_path = out_dir.join("usefulness-telemetry.json");
+    assert!(
+        telemetry_path.exists(),
+        "usefulness-telemetry.json must be emitted"
+    );
+
+    let telemetry: serde_json::Value = parse_json(&fs::read_to_string(&telemetry_path)?)?;
+
+    // Schema version
+    assert_eq!(telemetry["schema_version"], "usefulness-telemetry/v1");
+
+    // Trust boundary present and contains correct text
+    let boundary = telemetry["trust_boundary"].as_str().unwrap_or("");
+    assert!(!boundary.is_empty(), "trust_boundary must be present");
+    assert!(
+        boundary.contains("not calibrated"),
+        "trust_boundary must say 'not calibrated'"
+    );
+    assert!(
+        !boundary.to_ascii_lowercase().contains("precision"),
+        "trust_boundary must not claim precision"
+    );
+    assert!(
+        !boundary.to_ascii_lowercase().contains("recall"),
+        "trust_boundary must not claim recall"
+    );
+
+    // Card inventory projects from cards.json
+    let cards = parse_json(&fs::read_to_string(out_dir.join("cards.json"))?)?;
+    let expected_total = cards["summary"]["cards"].as_u64().unwrap_or(0);
+    assert_eq!(
+        telemetry["card_inventory"]["total_cards"]
+            .as_u64()
+            .unwrap_or(999),
+        expected_total,
+        "total_cards must match cards.json summary.cards"
+    );
+
+    // Agent readiness sums to total_cards
+    let ready = telemetry["agent_readiness"]["ready"].as_u64().unwrap_or(0);
+    let needs_human = telemetry["agent_readiness"]["needs_human"]
+        .as_u64()
+        .unwrap_or(0);
+    let unsupported = telemetry["agent_readiness"]["unsupported"]
+        .as_u64()
+        .unwrap_or(0);
+    assert_eq!(
+        ready + needs_human + unsupported,
+        expected_total,
+        "agent_readiness histogram must sum to total_cards"
+    );
+
+    // Gate manifest pointer present
+    let gate = parse_json(&fs::read_to_string(
+        out_dir.join("unsafe-review-gate.json"),
+    )?)?;
+    assert_eq!(
+        gate["artifacts"]["usefulness_telemetry"], "usefulness-telemetry.json",
+        "gate manifest must point to usefulness-telemetry.json"
+    );
+
+    // --- Finding #2: scan_cost must be present and non-zero ---
+    let scan_cost = &telemetry["scan_cost"];
+    assert!(
+        !scan_cost.is_null(),
+        "scan_cost must be present in first-pr telemetry (injected by CLI)"
+    );
+    let elapsed_ms = scan_cost["elapsed_ms"].as_u64().unwrap_or(0);
+    assert!(
+        elapsed_ms > 0,
+        "scan_cost.elapsed_ms must be > 0 for a real first-pr run; got {elapsed_ms}"
+    );
+    let output_bytes_total = scan_cost["output_bytes_total"].as_u64().unwrap_or(0);
+    assert!(
+        output_bytes_total > 0,
+        "scan_cost.output_bytes_total must be > 0; got {output_bytes_total}"
+    );
+
+    // --- Finding #3: not_selected_class_histogram must be present ---
+    let class_histogram = telemetry["comment_selection"]["not_selected_class_histogram"]
+        .as_object()
+        .ok_or("not_selected_class_histogram must be an object")?;
+    // Every key must be in "reason_code/class" form
+    for key in class_histogram.keys() {
+        assert!(
+            key.contains('/'),
+            "not_selected_class_histogram key must contain '/'; got: {key}"
+        );
+    }
+    // Sum must equal sum of reason histogram
+    let reason_total: u64 = telemetry["comment_selection"]["not_selected_reason_histogram"]
+        .as_object()
+        .map(|m| m.values().filter_map(|v| v.as_u64()).sum())
+        .unwrap_or(0);
+    let class_total: u64 = class_histogram.values().filter_map(|v| v.as_u64()).sum();
+    assert_eq!(
+        reason_total, class_total,
+        "not_selected_class_histogram sum ({class_total}) must equal reason_histogram sum ({reason_total})"
+    );
+
+    // --- Finding #4: unfulfilled_obligation_count must be present and >= 1 ---
+    let unfulfilled = telemetry["unfulfilled_obligation_count"]
+        .as_u64()
+        .ok_or("unfulfilled_obligation_count must be a non-negative integer")?;
+    assert!(
+        unfulfilled >= 1,
+        "raw_pointer_alignment has unmet obligations; unfulfilled_obligation_count must be >= 1, got {unfulfilled}"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn first_pr_clean_output_stays_advisory_not_all_clear() -> Result<(), Box<dyn Error>> {
     let fixture = fixture_root("safe_code_no_cards");
     let temp = TempDir::new("unsafe-review-first-pr-clean-e2e")?;
@@ -3895,6 +4083,52 @@ fn check_reports_missing_diff_file_as_cli_failure() -> Result<(), Box<dyn Error>
     assert!(
         stderr.contains("missing.diff"),
         "stderr should include the missing diff path: {stderr}"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn check_bad_base_ref_emits_actionable_hint() -> Result<(), Box<dyn Error>> {
+    // When --base names a ref that does not exist in the repository git returns
+    // a non-zero exit code with an "unknown revision" message.  The CLI must
+    // surface an actionable error (naming the bad ref and suggesting alternatives)
+    // rather than dumping the raw git stderr without context.
+    //
+    // The fixture lives inside the repository worktree so HEAD is resolvable;
+    // only the invented ref is unknown, which is what we want to exercise.
+    let fixture = fixture_root("raw_pointer_alignment");
+
+    let output = run_failure([
+        os("check"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--base"),
+        os("this-ref-does-not-exist-zzzz"),
+    ])?;
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "exit code must be 2 for input error"
+    );
+    assert_eq!(
+        stdout_text(&output)?.trim(),
+        "",
+        "stdout must be empty on ref error"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("this-ref-does-not-exist-zzzz"),
+        "stderr should name the bad ref: {stderr}"
+    );
+    assert!(
+        stderr.contains("could not be resolved by git"),
+        "stderr should describe the resolution failure: {stderr}"
+    );
+    assert!(
+        stderr.contains("--base origin/main") || stderr.contains("--diff"),
+        "stderr should suggest a valid alternative: {stderr}"
     );
 
     Ok(())
@@ -4390,7 +4624,7 @@ fn repo_inventory_and_badges_count_open_gaps_without_safety_claim() -> Result<()
     assert!(repo_markdown.contains("src/lib.rs:8"));
     assert!(repo_markdown.contains("unsafe { ptr.cast::<Header>().read() }"));
     assert!(repo_markdown.contains("## Trust boundary"));
-    assert!(repo_markdown.contains("Add or expose the local guard"));
+    assert!(repo_markdown.contains("Add or expose local guards"));
     assert!(repo_markdown.contains("not raw unsafe usage"));
     assert!(repo_markdown.contains("not UB-free status"));
 
@@ -4700,6 +4934,279 @@ fn repo_timeout_keeps_completed_file_partial_snapshot() -> Result<(), Box<dyn Er
     Ok(())
 }
 
+/// Drift-lock: if per-file timing emission is dropped from the complete scan
+/// path, `file_timings` will be null here and the assertions below go RED.
+#[test]
+fn repo_status_sidecar_includes_per_file_timings_for_small_scan() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_alignment");
+    let temp = TempDir::new("unsafe-review-repo-timings-e2e")?;
+    let report_path = temp.path().join("repo.json");
+    let status_path = temp.path().join("repo.json.status.json");
+
+    run_success([
+        os("repo"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--format"),
+        os("json"),
+        os("--out"),
+        report_path.as_os_str().to_os_string(),
+    ])?;
+
+    let status = parse_json(&fs::read_to_string(&status_path)?)?;
+    assert_eq!(status["schema_version"], "repo-scan-status/v1");
+    assert_eq!(status["phase"], "complete");
+    assert_eq!(status["completed"], true);
+
+    // file_timings must be a non-null array for a small fixture scan.
+    // Diagnostic only — not a proof, coverage claim, or performance guarantee.
+    let timings = status["file_timings"].as_array().ok_or_else(|| {
+        format!(
+            "file_timings must be a JSON array; got: {}",
+            status["file_timings"]
+        )
+    })?;
+    assert!(
+        !timings.is_empty(),
+        "file_timings must be non-empty for a scan that scanned files"
+    );
+    // Each entry must have 'file' (string) and 'scan_ms' (number).
+    for entry in timings {
+        assert!(
+            entry["file"].as_str().is_some(),
+            "each file_timings entry must have a string 'file' field; got: {entry}"
+        );
+        assert!(
+            entry["scan_ms"].as_u64().is_some(),
+            "each file_timings entry must have a numeric 'scan_ms' field; got: {entry}"
+        );
+    }
+    // The number of entries must match files_scanned.
+    let files_scanned = status["files_scanned"]
+        .as_u64()
+        .ok_or_else(|| "files_scanned must be numeric".to_string())?;
+    assert_eq!(
+        timings.len() as u64,
+        files_scanned,
+        "file_timings entry count must equal files_scanned"
+    );
+
+    Ok(())
+}
+
+/// Drift-lock: if file_timings is emitted even for the incomplete/timeout path
+/// (which would be a partial list without announcement), this test goes RED by
+/// confirming the field is null in the timeout sidecar.
+#[test]
+fn repo_status_sidecar_file_timings_null_for_timeout_path() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_alignment");
+    let temp = TempDir::new("unsafe-review-repo-timings-timeout-e2e")?;
+    let scan_root = temp.path().join("fixture");
+    copy_dir_all(&fixture, &scan_root)?;
+    fs::write(scan_root.join("src/z_safe.rs"), "pub fn safe() {}\n")?;
+    let report_path = temp.path().join("repo.json");
+    let status_path = temp.path().join("repo.json.status.json");
+
+    // Run with a tight timeout so the scan stops mid-way.
+    let output = Command::new(env!("CARGO_BIN_EXE_unsafe-review"))
+        .args([
+            os("repo"),
+            os("--root"),
+            scan_root.as_os_str().to_os_string(),
+            os("--format"),
+            os("json"),
+            os("--out"),
+            report_path.as_os_str().to_os_string(),
+            os("--timeout-seconds"),
+            os("1"),
+        ])
+        .env(
+            "UNSAFE_REVIEW_INTERNAL_REPO_SIGNAL_TEST_PAUSE_AFTER_SCANNED",
+            "1",
+        )
+        .env(
+            "UNSAFE_REVIEW_INTERNAL_REPO_SIGNAL_TEST_PAUSE_AFTER_SCAN_MS",
+            "1100",
+        )
+        .output()?;
+    assert!(!output.status.success(), "timeout scan must exit non-zero");
+
+    let status = parse_json(&fs::read_to_string(&status_path)?)?;
+    assert_eq!(status["stop_reason"], "timeout");
+    // Timeout incomplete status must have file_timings: null — truncation
+    // honesty: we never emit a partial list without announcement.
+    assert!(
+        status["file_timings"].is_null(),
+        "file_timings must be null in timeout incomplete status; got: {}",
+        status["file_timings"]
+    );
+
+    Ok(())
+}
+
+/// Drift-lock: a completed repo scan with `--out` must report `output_bytes > 0`
+/// in the status sidecar, matching the on-disk size of the final report.
+/// If the field is dropped or stays null for a completed scan, this goes RED.
+#[test]
+fn repo_status_sidecar_output_bytes_present_for_completed_scan() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_alignment");
+    let temp = TempDir::new("unsafe-review-repo-output-bytes-e2e")?;
+    let report_path = temp.path().join("repo.json");
+    let status_path = temp.path().join("repo.json.status.json");
+
+    run_success([
+        os("repo"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--format"),
+        os("json"),
+        os("--out"),
+        report_path.as_os_str().to_os_string(),
+    ])?;
+
+    let status = parse_json(&fs::read_to_string(&status_path)?)?;
+    assert_eq!(status["schema_version"], "repo-scan-status/v1");
+    assert_eq!(status["phase"], "complete");
+    assert_eq!(status["completed"], true);
+
+    // output_bytes must be a positive integer matching the final report size.
+    // Diagnostic only — not a coverage claim, proof, UB-free, Miri-clean,
+    // site-execution, or performance guarantee.
+    let output_bytes = status["output_bytes"].as_u64().ok_or_else(|| {
+        format!(
+            "output_bytes must be a non-null number in a completed sidecar; got: {}",
+            status["output_bytes"]
+        )
+    })?;
+    assert!(
+        output_bytes > 0,
+        "output_bytes must be positive for a completed scan that wrote a report"
+    );
+    // The sidecar's output_bytes must match the actual file size on disk.
+    let actual_size = fs::metadata(&report_path)?.len();
+    assert_eq!(
+        output_bytes, actual_size,
+        "output_bytes in sidecar must match on-disk report file size"
+    );
+
+    Ok(())
+}
+
+/// Drift-lock: a timeout-incomplete scan must have `output_bytes: null` in its
+/// status sidecar — no final report was written, so no byte count is available.
+/// If output_bytes is accidentally populated for an incomplete scan, this goes RED.
+#[test]
+fn repo_status_sidecar_output_bytes_null_for_timeout_path() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_alignment");
+    let temp = TempDir::new("unsafe-review-repo-output-bytes-timeout-e2e")?;
+    let scan_root = temp.path().join("fixture");
+    copy_dir_all(&fixture, &scan_root)?;
+    fs::write(scan_root.join("src/z_safe.rs"), "pub fn safe() {}\n")?;
+    let report_path = temp.path().join("repo.json");
+    let status_path = temp.path().join("repo.json.status.json");
+
+    // Run with a tight timeout so the scan stops mid-way.
+    let output = Command::new(env!("CARGO_BIN_EXE_unsafe-review"))
+        .args([
+            os("repo"),
+            os("--root"),
+            scan_root.as_os_str().to_os_string(),
+            os("--format"),
+            os("json"),
+            os("--out"),
+            report_path.as_os_str().to_os_string(),
+            os("--timeout-seconds"),
+            os("1"),
+        ])
+        .env(
+            "UNSAFE_REVIEW_INTERNAL_REPO_SIGNAL_TEST_PAUSE_AFTER_SCANNED",
+            "1",
+        )
+        .env(
+            "UNSAFE_REVIEW_INTERNAL_REPO_SIGNAL_TEST_PAUSE_AFTER_SCAN_MS",
+            "1100",
+        )
+        .output()?;
+    assert!(!output.status.success(), "timeout scan must exit non-zero");
+
+    let status = parse_json(&fs::read_to_string(&status_path)?)?;
+    assert_eq!(status["stop_reason"], "timeout");
+    // Timeout incomplete status must have output_bytes: null — no final
+    // report was produced so no byte count is available.
+    assert!(
+        status["output_bytes"].is_null(),
+        "output_bytes must be null in timeout incomplete status; got: {}",
+        status["output_bytes"]
+    );
+
+    Ok(())
+}
+
+/// Drift-lock: a first-pr run must report output_bytes > 0 in its terminal
+/// output, matching the total size of all artifacts written to --out-dir.
+/// If the field is dropped or output_bytes is 0, this goes RED.
+#[test]
+fn first_pr_reports_output_bytes_in_terminal_output() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_alignment");
+    let temp = TempDir::new("unsafe-review-first-pr-output-bytes-e2e")?;
+    let out_dir = temp.path().join("unsafe-review");
+
+    let output = run_success([
+        os("first-pr"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        fixture.join("change.diff").into_os_string(),
+        os("--out-dir"),
+        out_dir.as_os_str().to_os_string(),
+    ])?;
+    let stdout = stdout_text(&output)?;
+
+    // The terminal summary must include the output bundle byte count.
+    // Diagnostic only — not a coverage claim, proof, UB-free, Miri-clean,
+    // site-execution, or performance guarantee.
+    assert!(
+        stdout.contains("- Output bundle:"),
+        "stdout must contain '- Output bundle:' line; got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains(" bytes"),
+        "stdout must contain ' bytes' in the output bundle line; got:\n{stdout}"
+    );
+
+    // Extract the byte count and verify it is > 0 and matches on-disk total.
+    let bundle_line = stdout
+        .lines()
+        .find(|line| line.contains("- Output bundle:"))
+        .ok_or("could not find '- Output bundle:' line")?;
+    let bytes_str = bundle_line
+        .split_whitespace()
+        .find(|tok| tok.chars().all(|c| c.is_ascii_digit()))
+        .ok_or_else(|| format!("could not extract byte count from line: {bundle_line}"))?;
+    let reported_bytes: u64 = bytes_str
+        .parse()
+        .map_err(|err| format!("byte count parse failed: {err}"))?;
+    assert!(
+        reported_bytes > 0,
+        "output_bytes must be positive for a run that wrote artifacts"
+    );
+
+    // Verify that the reported total matches the actual sum of artifact sizes.
+    let mut actual_total: u64 = 0;
+    for entry in fs::read_dir(&out_dir)? {
+        let entry = entry?;
+        if entry.file_type()?.is_file() {
+            actual_total += entry.metadata()?.len();
+        }
+    }
+    assert_eq!(
+        reported_bytes, actual_total,
+        "reported output_bytes must equal the sum of all artifact file sizes in --out-dir"
+    );
+
+    Ok(())
+}
+
 #[cfg(unix)]
 #[test]
 fn repo_sigterm_writes_interrupted_status_sidecar() -> Result<(), Box<dyn Error>> {
@@ -4966,6 +5473,152 @@ fn repo_scan_start_stub_written_before_pipeline() -> Result<(), Box<dyn Error>> 
     assert!(
         boundary.contains("Operational scan status only"),
         "stub operator claim_boundary must carry trust boundary: {boundary}"
+    );
+
+    Ok(())
+}
+
+/// SPEC-0034 parity: `unsafe-review repo` must emit `unsafe-review-gate.json`
+/// alongside its `--out` report, matching the same envelope as `first-pr`.
+///
+/// The gate manifest is advisory posture only — `status` must be `"advisory"`,
+/// `trust_boundary` must disclaim proof and merge verdict, and no volatile
+/// timestamp or wall-time fields may appear.  The `artifacts.cards` pointer
+/// must resolve to the basename of the `--out` file.
+#[test]
+fn repo_emits_gate_manifest_alongside_out_report() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_alignment");
+    let temp = TempDir::new("unsafe-review-repo-gate-manifest-e2e")?;
+    let report_path = temp.path().join("repo.json");
+    let gate_manifest_path = temp.path().join("unsafe-review-gate.json");
+
+    run_success([
+        os("repo"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--include"),
+        os("src/lib.rs"),
+        os("--format"),
+        os("json"),
+        os("--out"),
+        report_path.as_os_str().to_os_string(),
+    ])?;
+
+    // The main report must exist.
+    assert!(
+        report_path.exists(),
+        "repo report must be written to --out path"
+    );
+
+    // The gate manifest must exist alongside the report.
+    assert!(
+        gate_manifest_path.exists(),
+        "unsafe-review-gate.json must be written alongside the --out report (SPEC-0034 parity)"
+    );
+
+    let gate_manifest = parse_json(&fs::read_to_string(&gate_manifest_path)?)?;
+
+    // Envelope fields must match the first-pr gate manifest contract.
+    assert_eq!(
+        gate_manifest["schema_version"], "unsafe-review-gate/v1",
+        "schema_version must be 'unsafe-review-gate/v1'"
+    );
+    assert_eq!(
+        gate_manifest["dialect"], "unsafe-review",
+        "dialect must be 'unsafe-review'"
+    );
+    assert_eq!(
+        gate_manifest["status"], "advisory",
+        "status must be 'advisory' — not a merge verdict (SPEC-0034 trust boundary)"
+    );
+    assert_eq!(gate_manifest["tool"], "unsafe-review");
+    assert!(
+        gate_manifest["tool_version"]
+            .as_str()
+            .is_some_and(|v| !v.is_empty()),
+        "tool_version must be a non-empty string"
+    );
+
+    // Trust boundary must disclaim proof and merge verdict.
+    let boundary = gate_manifest["trust_boundary"]
+        .as_str()
+        .ok_or("trust_boundary must be a string")?;
+    assert!(
+        boundary.contains("not proof"),
+        "trust_boundary must include 'not proof'; got: {boundary}"
+    );
+    assert!(
+        boundary.contains("not a merge verdict"),
+        "trust_boundary must include 'not a merge verdict'; got: {boundary}"
+    );
+
+    // Summary must be the SPEC-0030 movement block.
+    let summary = &gate_manifest["summary"];
+    assert!(
+        summary["new_gaps"].is_number(),
+        "summary.new_gaps must be a number"
+    );
+    assert!(
+        summary["worsened_gaps"].is_number(),
+        "summary.worsened_gaps must be a number"
+    );
+    assert!(
+        summary["resolved_gaps"].is_number(),
+        "summary.resolved_gaps must be a number"
+    );
+    assert!(
+        summary["inherited_gaps"].is_number(),
+        "summary.inherited_gaps must be a number"
+    );
+
+    // The cards artifact pointer must be the basename of the --out file.
+    assert_eq!(
+        gate_manifest["artifacts"]["cards"], "repo.json",
+        "artifacts.cards must be the basename of the --out file"
+    );
+
+    // No volatile timestamp or wall-time fields.
+    let obj = gate_manifest
+        .as_object()
+        .ok_or("gate manifest must be a JSON object")?;
+    for volatile_key in ["generated_at", "timestamp", "wall_seconds", "elapsed_ms"] {
+        assert!(
+            !obj.contains_key(volatile_key),
+            "gate manifest must not contain volatile field `{volatile_key}` (breaks determinism)"
+        );
+    }
+
+    // The manifest must be valid JSON ending with a newline.
+    let raw = fs::read_to_string(&gate_manifest_path)?;
+    assert!(raw.ends_with('\n'), "gate manifest must end with a newline");
+
+    Ok(())
+}
+
+/// SPEC-0034: gate manifest must NOT be emitted when `--out` is not supplied
+/// (stdout-only repo runs have no artifact directory to put the manifest in).
+#[test]
+fn repo_does_not_emit_gate_manifest_for_stdout_run() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_alignment");
+    let temp = TempDir::new("unsafe-review-repo-no-gate-manifest-e2e")?;
+    let stray_manifest = temp.path().join("unsafe-review-gate.json");
+
+    // Run repo to stdout only (no --out).
+    run_success([
+        os("repo"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--include"),
+        os("src/lib.rs"),
+        os("--format"),
+        os("json"),
+    ])?;
+
+    // No manifest should appear in the temp dir (we did not set cwd to temp,
+    // but this guards against accidental writes relative to cwd).
+    assert!(
+        !stray_manifest.exists(),
+        "gate manifest must not be written for a stdout-only repo run"
     );
 
     Ok(())
@@ -5958,6 +6611,190 @@ fn no_new_debt_policy_fails_only_for_unbaselined_actionable_gaps() -> Result<(),
     Ok(())
 }
 
+// Brownfield / inherited-debt corpus case (Doc-5 adoption criterion):
+// A repo with pre-existing unsafe gaps baselined before the PR shows the
+// inherited shape: inherited_gaps > 0, new_gaps == 0, no-new-debt passes,
+// and inherited cards are NOT selected for inline PR comments.
+#[test]
+fn brownfield_inherited_baseline_shows_no_new_debt_with_inherited_shape()
+-> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_deref_brownfield_inherited");
+
+    // The fixture ships with a committed baseline ledger that captures the
+    // pre-existing raw_pointer_deref card.  Running without --policy should
+    // exit 0 (advisory) and report inherited_gaps=1, new_gaps=0.
+    let advisory = run_success([
+        os("check"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        fixture.join("change.diff").into_os_string(),
+        os("--format"),
+        os("json"),
+    ])?;
+    let advisory = parse_json(&stdout_text(&advisory)?)?;
+    assert_eq!(advisory["summary"]["new_gaps"], 0, "no new gaps expected");
+    assert_eq!(
+        advisory["summary"]["inherited_gaps"], 1,
+        "one inherited gap expected"
+    );
+    assert_eq!(advisory["summary"]["worsened_gaps"], 0);
+    assert_eq!(advisory["summary"]["open_actionable_gaps"], 0);
+    assert_eq!(advisory["cards"][0]["class"], "baseline_known");
+    assert_eq!(
+        advisory["cards"][0]["coverage"]["baseline_state"],
+        "inherited"
+    );
+
+    // The comment-plan must NOT select the inherited card for inline PR
+    // comments — it is not actionable and should be downgraded/summarised.
+    let out_dir = TempDir::new("unsafe-review-brownfield-e2e")?;
+    run_success([
+        os("first-pr"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        fixture.join("change.diff").into_os_string(),
+        os("--out-dir"),
+        out_dir.path().as_os_str().to_os_string(),
+    ])?;
+    let comment_plan_path = out_dir.path().join("comment-plan.json");
+    let comment_plan = parse_json(&fs::read_to_string(&comment_plan_path)?)?;
+    assert_eq!(
+        comment_plan["summary"]["selected_count"], 0,
+        "inherited card must not be selected for inline PR comment"
+    );
+    assert_eq!(comment_plan["summary"]["not_selected_count"], 1);
+    let not_selected = &comment_plan["not_selected"][0];
+    assert_eq!(not_selected["class"], "baseline_known");
+    assert_eq!(not_selected["actionability"], "not_actionable");
+
+    // Usefulness telemetry must record inherited_cards=1.
+    let telemetry_path = out_dir.path().join("usefulness-telemetry.json");
+    let telemetry = parse_json(&fs::read_to_string(&telemetry_path)?)?;
+    assert_eq!(
+        telemetry["card_inventory"]["inherited_cards"], 1,
+        "telemetry must record the inherited card shape"
+    );
+    assert_eq!(telemetry["card_inventory"]["new_cards"], 0);
+
+    // no-new-debt policy must pass (exit 0) because the diff adds no new gap.
+    let passing = run_success([
+        os("check"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        fixture.join("change.diff").into_os_string(),
+        os("--format"),
+        os("json"),
+        os("--policy"),
+        os("no-new-debt"),
+    ])?;
+    let passing = parse_json(&stdout_text(&passing)?)?;
+    assert_eq!(passing["policy"], "no-new-debt");
+    assert_eq!(
+        passing["summary"]["new_gaps"], 0,
+        "no-new-debt must pass with new_gaps=0"
+    );
+    assert_eq!(passing["summary"]["inherited_gaps"], 1);
+
+    Ok(())
+}
+
+// Resolved corpus case (Doc-5 adoption criterion, inverse of brownfield):
+// A PR that adds a `# Safety` contract to a `pub unsafe fn` (unsafe retained)
+// shows the resolved shape: resolved_gaps=1, new_gaps=0, worsened_gaps=0.
+// The improvement is recorded in usefulness telemetry as resolved_cards=1.
+//
+// Trust boundary: "resolved" means the baseline-captured coverage gap is absent
+// from the AFTER output because the caller obligations are now documented.  It
+// does not prove the code is memory-safe, UB-free, or Miri-clean.
+#[test]
+fn resolved_corpus_case_shows_resolved_gap_and_no_new_debt() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_deref_resolved");
+
+    // The fixture ships with a committed baseline ledger that captures the
+    // pre-existing contract_missing card for `pub unsafe fn read_config`.
+    // The PR diff adds a `# Safety` section (unsafe retained).  Running check
+    // must report resolved_gaps=1, new_gaps=0, worsened_gaps=0,
+    // open_actionable_gaps=0.
+    let advisory = run_success([
+        os("check"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        fixture.join("change.diff").into_os_string(),
+        os("--format"),
+        os("json"),
+    ])?;
+    let advisory = parse_json(&stdout_text(&advisory)?)?;
+    assert_eq!(
+        advisory["summary"]["resolved_gaps"], 1,
+        "one resolved gap expected: the baseline card is gone after the # Safety contract was added"
+    );
+    assert_eq!(
+        advisory["summary"]["new_gaps"], 0,
+        "no new gaps expected: the PR only adds a # Safety contract"
+    );
+    assert_eq!(advisory["summary"]["worsened_gaps"], 0);
+    assert_eq!(advisory["summary"]["inherited_gaps"], 0);
+    assert_eq!(advisory["summary"]["open_actionable_gaps"], 0);
+    assert_eq!(
+        advisory["cards"].as_array().map(|a| a.len()).unwrap_or(1),
+        0
+    );
+
+    // The no-new-debt policy must pass (exit 0) because the diff adds no new
+    // gap — it only resolves the existing baseline gap via a # Safety contract.
+    let passing = run_success([
+        os("check"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        fixture.join("change.diff").into_os_string(),
+        os("--format"),
+        os("json"),
+        os("--policy"),
+        os("no-new-debt"),
+    ])?;
+    let passing = parse_json(&stdout_text(&passing)?)?;
+    assert_eq!(passing["policy"], "no-new-debt");
+    assert_eq!(
+        passing["summary"]["new_gaps"], 0,
+        "no-new-debt must pass with new_gaps=0"
+    );
+    assert_eq!(passing["summary"]["resolved_gaps"], 1);
+
+    // Usefulness telemetry must record resolved_cards=1 and new_cards=0.
+    let out_dir = TempDir::new("unsafe-review-resolved-e2e")?;
+    run_success([
+        os("first-pr"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        fixture.join("change.diff").into_os_string(),
+        os("--out-dir"),
+        out_dir.path().as_os_str().to_os_string(),
+    ])?;
+    let telemetry_path = out_dir.path().join("usefulness-telemetry.json");
+    let telemetry = parse_json(&fs::read_to_string(&telemetry_path)?)?;
+    assert_eq!(
+        telemetry["card_inventory"]["resolved_cards"], 1,
+        "telemetry must record the resolved card shape"
+    );
+    assert_eq!(telemetry["card_inventory"]["new_cards"], 0);
+    assert_eq!(telemetry["card_inventory"]["inherited_cards"], 0);
+
+    // Gate manifest must also surface resolved_gaps=1.
+    let gate_path = out_dir.path().join("unsafe-review-gate.json");
+    let gate = parse_json(&fs::read_to_string(&gate_path)?)?;
+    assert_eq!(gate["summary"]["resolved_gaps"], 1);
+    assert_eq!(gate["summary"]["new_gaps"], 0);
+    assert_eq!(gate["summary"]["worsened_gaps"], 0);
+
+    Ok(())
+}
+
 // Exit-code taxonomy tests (issue #1518):
 //   0 = ran to completion (clean or advisory findings)
 //   1 = ran to completion: policy violation
@@ -6023,6 +6860,105 @@ fn first_pr_unknown_flag_out_exits_2_without_writing_bundle() -> Result<(), Box<
         !default_out_dir.exists(),
         "no review bundle must be written to default out-dir on a bad invocation: {default_out_dir:?}"
     );
+    Ok(())
+}
+
+#[test]
+fn first_pr_format_flag_exits_2_without_writing_bundle() -> Result<(), Box<dyn Error>> {
+    // Generalizes EffortlessMetrics/unsafe-review#531 to --format/--json/--markdown:
+    // these flags belong to `check`/`repo`. `first-pr` always writes a full
+    // advisory artifact bundle to `--out-dir` and never honors a format flag.
+    // Each form must exit 2 (usage/input error) and must NOT write a bundle.
+    let source_fixture = fixture_root("raw_pointer_alignment");
+
+    for (label, flag_args) in [
+        ("--format json (space)", vec![os("--format"), os("json")]),
+        ("--format=json (equals)", vec![os("--format=json")]),
+        ("--json shorthand", vec![os("--json")]),
+        ("--markdown shorthand", vec![os("--markdown")]),
+    ] {
+        let temp = TempDir::new("unsafe-review-first-pr-format-flag-e2e")?;
+        let fixture = temp.path().join("fixture");
+        copy_dir_all(&source_fixture, &fixture)?;
+        let default_out_dir = fixture.join("target").join("unsafe-review");
+
+        let mut cmd_args = vec![
+            os("first-pr"),
+            os("--root"),
+            fixture.as_os_str().to_os_string(),
+            os("--diff"),
+            fixture.join("change.diff").into_os_string(),
+        ];
+        cmd_args.extend(flag_args);
+
+        let output = run_failure(cmd_args)?;
+
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "{label}: --format/--json/--markdown on first-pr must exit 2"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("check") || stderr.contains("repo"),
+            "{label}: diagnostic must mention `check`/`repo` subcommands: {stderr}"
+        );
+        assert!(
+            !default_out_dir.exists(),
+            "{label}: no review bundle must be written on a bad invocation: {default_out_dir:?}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn first_pr_policy_flag_exits_2_without_writing_bundle() -> Result<(), Box<dyn Error>> {
+    // Generalizes EffortlessMetrics/unsafe-review#531 to --policy:
+    // this flag belongs to `check`/`repo`. `first-pr` is always advisory-only
+    // and never honors a policy flag. Must exit 2 and must NOT write a bundle.
+    let source_fixture = fixture_root("raw_pointer_alignment");
+
+    for (label, flag_args) in [
+        (
+            "--policy no-new-debt (space)",
+            vec![os("--policy"), os("no-new-debt")],
+        ),
+        (
+            "--policy=no-new-debt (equals)",
+            vec![os("--policy=no-new-debt")],
+        ),
+    ] {
+        let temp = TempDir::new("unsafe-review-first-pr-policy-flag-e2e")?;
+        let fixture = temp.path().join("fixture");
+        copy_dir_all(&source_fixture, &fixture)?;
+        let default_out_dir = fixture.join("target").join("unsafe-review");
+
+        let mut cmd_args = vec![
+            os("first-pr"),
+            os("--root"),
+            fixture.as_os_str().to_os_string(),
+            os("--diff"),
+            fixture.join("change.diff").into_os_string(),
+        ];
+        cmd_args.extend(flag_args);
+
+        let output = run_failure(cmd_args)?;
+
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "{label}: --policy on first-pr must exit 2"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("check") || stderr.contains("repo"),
+            "{label}: diagnostic must mention `check`/`repo` subcommands: {stderr}"
+        );
+        assert!(
+            !default_out_dir.exists(),
+            "{label}: no review bundle must be written on a bad invocation: {default_out_dir:?}"
+        );
+    }
     Ok(())
 }
 
@@ -6101,6 +7037,59 @@ fn baseline_init_out_override_never_writes_into_root() -> Result<(), Box<dyn Err
     // The scanned root stays read-only: no ledger, snapshot, or policy directory
     // is created inside --root when --out points elsewhere.
     assert!(!copied.join("policy").exists());
+
+    Ok(())
+}
+
+#[test]
+fn baseline_init_stdout_lists_debt_scope() -> Result<(), Box<dyn Error>> {
+    // The atomic_pointer_state_fetch_ops fixture has 3 actionable cards
+    // (class: requires_loom). Verify that baseline init outputs a debt scope
+    // listing with card ids and location information.
+    let fixture = fixture_root("atomic_pointer_state_fetch_ops");
+    let temp = TempDir::new("unsafe-review-baseline-debt-scope-e2e")?;
+    let out_dir = temp.path().join("out");
+    fs::create_dir_all(&out_dir)?;
+    let out_ledger = out_dir.join("debt-scope-baseline.toml");
+
+    let output = run_success([
+        os("baseline"),
+        os("init"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--out"),
+        out_ledger.as_os_str().to_os_string(),
+    ])?;
+    let stdout = stdout_text(&output)?;
+
+    // The debt scope heading must appear.
+    assert!(
+        stdout.contains("debt scope:"),
+        "expected 'debt scope:' in stdout:\n{stdout}"
+    );
+
+    // At least one UR- card id must appear in the debt scope listing.
+    assert!(
+        stdout.contains("UR-"),
+        "expected at least one UR- card id in stdout:\n{stdout}"
+    );
+
+    // Extract the debt scope block lines (lines beginning with "  UR-") and
+    // verify none of them contain forbidden trust-boundary overclaims.
+    let debt_scope_lines: Vec<&str> = stdout.lines().filter(|l| l.starts_with("  UR-")).collect();
+    assert!(
+        !debt_scope_lines.is_empty(),
+        "expected at least one '  UR-' debt scope line in stdout:\n{stdout}"
+    );
+    for line in &debt_scope_lines {
+        assert!(
+            !line.contains("memory-safe")
+                && !line.contains("UB-free")
+                && !line.contains("Miri-clean")
+                && !line.contains("site-execution"),
+            "debt scope line must not contain forbidden trust-boundary claims: {line}"
+        );
+    }
 
     Ok(())
 }
@@ -6220,7 +7209,7 @@ fn policy_report_is_advisory_and_counts_baseline_state() -> Result<(), Box<dyn E
     assert!(markdown.contains("# unsafe-review policy report"));
     assert!(markdown.contains("## Reviewer front panel"));
     // SPEC-0030: reviewer front panel shows movement counts.
-    assert!(markdown.contains("- Movement: 0 new gap(s), 0 worsened, 1 resolved, 1 inherited"));
+    assert!(markdown.contains("- Movement: 0 new gap(s), 0 worsened, 0 improved (evidence coverage improved; still advisory), 1 resolved, 1 inherited"));
     assert!(markdown.contains("- Current ledger-covered cards: 1 baseline-known, 0 suppressed"));
     assert!(markdown.contains("- Ledger cleanup: 1 resolved baseline entries"));
     assert!(markdown.contains("consider pruning or updating resolved baseline entries"));
@@ -6231,7 +7220,7 @@ fn policy_report_is_advisory_and_counts_baseline_state() -> Result<(), Box<dyn E
     assert!(markdown.contains("| Status | Baseline | Changed |"));
     assert!(markdown.contains("raw_pointer_read"));
     assert!(markdown.contains("unsafe { ptr.cast::<Header>().read() }"));
-    assert!(markdown.contains("Known baseline card"));
+    assert!(markdown.contains("Keep the baseline ledger"));
     assert!(markdown.contains("| Card | Owner | Review after | Expires | Reason | Evidence |"));
     assert!(markdown.contains("resolved fixture card"));
     assert!(markdown.contains("## Limitations"));
@@ -6688,6 +7677,10 @@ fn repo_max_cards_cap_emits_partial_status_sidecar() -> Result<(), Box<dyn Error
         .get("operator")
         .ok_or("repo status missing operator")?;
     assert_eq!(operator["state"], "capped");
+    assert_eq!(
+        operator["downstream_consumable"], true,
+        "a capped scan is downstream-consumable (it produced a valid bounded report)"
+    );
     assert_eq!(operator["partial_report_available"], false);
     let next_action = operator["next_action"].as_str().unwrap_or("");
     assert!(
@@ -6695,9 +7688,15 @@ fn repo_max_cards_cap_emits_partial_status_sidecar() -> Result<(), Box<dyn Error
         "operator next_action should guide narrowing scope or raising cap: {next_action}"
     );
     let limitation = operator["partial_report_limitation"].as_str().unwrap_or("");
+    // Bug B fix: capped scans use card-level wording (all files scanned,
+    // card list truncated) instead of the old file-level snapshot wording.
     assert!(
-        limitation.contains("Completed-file snapshot only"),
-        "operator limitation should say partial snapshot scope: {limitation}"
+        limitation.contains("All files scanned"),
+        "operator limitation must say all files were scanned (card-level wording): {limitation}"
+    );
+    assert!(
+        limitation.contains("card list truncated") || limitation.contains("--max-cards"),
+        "operator limitation must describe card-list truncation: {limitation}"
     );
     let boundary = operator["claim_boundary"].as_str().unwrap_or("");
     assert!(
@@ -6739,6 +7738,13 @@ fn assert_repo_status_operator(
         .get("operator")
         .ok_or("repo status is missing operator diagnostics")?;
     assert_eq!(operator["state"], state);
+    // downstream_consumable is true only for complete and capped scans; all other
+    // states (in_progress, failed, terminated) are not safe to consume.
+    let expected_consumable = state == "complete" || state == "capped";
+    assert_eq!(
+        operator["downstream_consumable"], expected_consumable,
+        "operator downstream_consumable should be {expected_consumable} for state={state}"
+    );
     assert_eq!(
         operator["partial_report_available"],
         partial_report_available
@@ -6894,6 +7900,324 @@ fn empty_review_card_snapshot_json() -> &'static str {
 }"#
 }
 
+#[test]
+fn candidate_list_nonexistent_root_exits_2() -> Result<(), Box<dyn Error>> {
+    let output = run_failure([
+        os("candidate"),
+        os("list"),
+        os("--root"),
+        os("/nonexistent/path/that/does/not/exist"),
+    ])?;
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "exit code must be 2 for nonexistent root"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("is not a directory"),
+        "stderr should mention 'is not a directory': {stderr}"
+    );
+    Ok(())
+}
+
+#[test]
+fn candidate_list_valid_root_no_candidates_exits_0() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_alignment");
+
+    let output = run_success([
+        os("candidate"),
+        os("list"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+    ])?;
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "valid root with no candidates subdir must still exit 0"
+    );
+    Ok(())
+}
+
+#[test]
+fn receipt_validate_nonexistent_root_exits_2() -> Result<(), Box<dyn Error>> {
+    let output = run_failure([
+        os("receipt"),
+        os("validate"),
+        os("--root"),
+        os("/nonexistent/path/that/does/not/exist"),
+    ])?;
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "exit code must be 2 for nonexistent root"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("is not a directory"),
+        "stderr should mention 'is not a directory': {stderr}"
+    );
+    Ok(())
+}
+
+#[test]
+fn receipt_validate_valid_root_no_receipts_exits_0() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_alignment");
+
+    let output = run_success([
+        os("receipt"),
+        os("validate"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+    ])?;
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "valid root with no receipts subdir must still exit 0"
+    );
+    Ok(())
+}
+
+// Coverage-improved movement case (SPEC-0030 symmetric to worsened):
+// A PR that adds a `# Safety` contract to a private (non-unsafe) fn owning
+// a raw pointer deref — whose contract slot was `missing` in the baseline
+// snapshot — shows improved_gaps=1, worsened_gaps=0, resolved_gaps=0.
+//
+// The card is still `baseline_known`, still advisory, still open.  This is NOT
+// a resolution, NOT safety proof, NOT UB-free, NOT Miri-clean.  The signal is
+// "evidence coverage improved for a retained baseline site."
+#[test]
+fn coverage_improved_baseline_shows_improved_gap_shape() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_deref_coverage_improved");
+
+    // The fixture ships with a baseline ledger (card is baseline_known) and a
+    // baseline snapshot recording contract_coverage="missing".  The current
+    // source has a `# Safety` doc → contract_coverage is now "present".
+    let advisory = run_success([
+        os("check"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        fixture.join("change.diff").into_os_string(),
+        os("--format"),
+        os("json"),
+    ])?;
+    let advisory = parse_json(&stdout_text(&advisory)?)?;
+    assert_eq!(
+        advisory["summary"]["improved_gaps"], 1,
+        "improved_gaps must be 1: contract slot advanced from missing to present"
+    );
+    assert_eq!(
+        advisory["summary"]["worsened_gaps"], 0,
+        "worsened_gaps must be 0: no slot regressed"
+    );
+    assert_eq!(
+        advisory["summary"]["resolved_gaps"], 0,
+        "resolved_gaps must be 0: card is still present (site not removed)"
+    );
+    assert_eq!(
+        advisory["summary"]["new_gaps"], 0,
+        "new_gaps must be 0: site is baseline_known"
+    );
+    assert_eq!(
+        advisory["summary"]["inherited_gaps"], 1,
+        "inherited_gaps must be 1: baseline_known card still open"
+    );
+    assert_eq!(
+        advisory["summary"]["open_actionable_gaps"], 0,
+        "open_actionable_gaps must be 0: baseline_known is not actionable"
+    );
+    // Card must still be baseline_known — NOT resolved.
+    assert_eq!(advisory["cards"][0]["class"], "baseline_known");
+
+    // Usefulness telemetry must record improved_cards=1.
+    let out_dir = TempDir::new("unsafe-review-coverage-improved-e2e")?;
+    run_success([
+        os("first-pr"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        fixture.join("change.diff").into_os_string(),
+        os("--out-dir"),
+        out_dir.path().as_os_str().to_os_string(),
+    ])?;
+    let telemetry_path = out_dir.path().join("usefulness-telemetry.json");
+    let telemetry = parse_json(&fs::read_to_string(&telemetry_path)?)?;
+    assert_eq!(
+        telemetry["card_inventory"]["improved_cards"], 1,
+        "telemetry must record improved_cards=1"
+    );
+    assert_eq!(telemetry["card_inventory"]["worsened_cards"], 0);
+    assert_eq!(telemetry["card_inventory"]["new_cards"], 0);
+    assert_eq!(telemetry["card_inventory"]["resolved_cards"], 0);
+
+    // PR summary must surface the positive movement signal.
+    let pr_summary = fs::read_to_string(out_dir.path().join("pr-summary.md"))?;
+    assert!(
+        pr_summary.contains("1 improved"),
+        "pr-summary must surface improved_gaps=1 as positive movement; got: {}",
+        &pr_summary[..pr_summary.len().min(600)]
+    );
+    assert!(
+        pr_summary.contains("still advisory"),
+        "pr-summary improved wording must say 'still advisory' (trust boundary); got: {}",
+        &pr_summary[..pr_summary.len().min(600)]
+    );
+
+    // Policy report must also surface improved_gaps=1 in the summary table.
+    let policy_report = fs::read_to_string(out_dir.path().join("policy-report.md"))?;
+    assert!(
+        policy_report.contains("1 improved"),
+        "policy-report must surface improved_gaps=1; got: {}",
+        &policy_report[..policy_report.len().min(800)]
+    );
+
+    // no-new-debt must still pass (exit 0): an improved card is still
+    // baseline_known; no new gap was added.
+    let passing = run_success([
+        os("check"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        fixture.join("change.diff").into_os_string(),
+        os("--format"),
+        os("json"),
+        os("--policy"),
+        os("no-new-debt"),
+    ])?;
+    let passing = parse_json(&stdout_text(&passing)?)?;
+    assert_eq!(passing["policy"], "no-new-debt");
+    assert_eq!(
+        passing["summary"]["new_gaps"], 0,
+        "no-new-debt must pass: improved card does not count as a new gap"
+    );
+    assert_eq!(passing["summary"]["improved_gaps"], 1);
+
+    Ok(())
+}
+
+// SPEC-0030: per-card coverage.baseline_state/outcome_movement must agree with
+// summary.worsened_gaps.  This fixture ships a baseline ledger + snapshot recording
+// contract_coverage="present"; the current source has no # Safety doc →
+// contract_coverage is now "missing".  The card must report baseline_state="worsened"
+// and outcome_movement="regressed", and the summary must count worsened_gaps=1.
+//
+// The card is still `baseline_known`, still advisory, still open.  This is NOT
+// a resolution, NOT safety proof, NOT UB-free, NOT Miri-clean.  The signal is
+// "evidence coverage worsened for a retained baseline site."
+#[test]
+fn coverage_worsened_baseline_shows_worsened_gap_shape() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_deref_coverage_worsened");
+
+    // The fixture ships with a baseline ledger (card is baseline_known) and a
+    // baseline snapshot recording contract_coverage="present".  The current
+    // source removed the `# Safety` doc → contract_coverage is now "missing".
+    let advisory = run_success([
+        os("check"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        fixture.join("change.diff").into_os_string(),
+        os("--format"),
+        os("json"),
+    ])?;
+    let advisory = parse_json(&stdout_text(&advisory)?)?;
+    assert_eq!(
+        advisory["summary"]["worsened_gaps"], 1,
+        "worsened_gaps must be 1: contract slot regressed from present to missing"
+    );
+    assert_eq!(
+        advisory["summary"]["improved_gaps"], 0,
+        "improved_gaps must be 0: no slot advanced"
+    );
+    assert_eq!(
+        advisory["summary"]["resolved_gaps"], 0,
+        "resolved_gaps must be 0: card is still present (site not removed)"
+    );
+    assert_eq!(
+        advisory["summary"]["new_gaps"], 0,
+        "new_gaps must be 0: site is baseline_known"
+    );
+    assert_eq!(
+        advisory["summary"]["inherited_gaps"], 1,
+        "inherited_gaps must be 1: baseline_known card still open"
+    );
+    assert_eq!(
+        advisory["summary"]["open_actionable_gaps"], 0,
+        "open_actionable_gaps must be 0: baseline_known is not actionable"
+    );
+    // Card must still be baseline_known — NOT a new gap, NOT resolved.
+    assert_eq!(advisory["cards"][0]["class"], "baseline_known");
+
+    // SPEC-0030 single-truth: per-card coverage must agree with summary.
+    // baseline_state must be "worsened" (contract slot regressed present→missing).
+    assert_eq!(
+        advisory["cards"][0]["coverage"]["baseline_state"], "worsened",
+        "per-card baseline_state must be 'worsened' to agree with summary.worsened_gaps=1"
+    );
+    assert_eq!(
+        advisory["cards"][0]["coverage"]["outcome_movement"], "regressed",
+        "per-card outcome_movement must be 'regressed' when contract slot worsened"
+    );
+
+    // Usefulness telemetry must record worsened_cards=1.
+    let out_dir = TempDir::new("unsafe-review-coverage-worsened-e2e")?;
+    run_success([
+        os("first-pr"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        fixture.join("change.diff").into_os_string(),
+        os("--out-dir"),
+        out_dir.path().as_os_str().to_os_string(),
+    ])?;
+    let telemetry_path = out_dir.path().join("usefulness-telemetry.json");
+    let telemetry = parse_json(&fs::read_to_string(&telemetry_path)?)?;
+    assert_eq!(
+        telemetry["card_inventory"]["worsened_cards"], 1,
+        "telemetry must record worsened_cards=1"
+    );
+    assert_eq!(telemetry["card_inventory"]["improved_cards"], 0);
+    assert_eq!(telemetry["card_inventory"]["new_cards"], 0);
+    assert_eq!(telemetry["card_inventory"]["resolved_cards"], 0);
+
+    // PR summary must surface the negative movement signal.
+    let pr_summary = fs::read_to_string(out_dir.path().join("pr-summary.md"))?;
+    assert!(
+        pr_summary.contains("1 worsened"),
+        "pr-summary must surface worsened_gaps=1 as negative movement; got: {}",
+        &pr_summary[..pr_summary.len().min(600)]
+    );
+
+    // no-new-debt exits 1 for worsened gaps (same as new gaps): a worsened
+    // card means evidence coverage regressed on a baseline site, which is a
+    // policy signal worth surfacing as an advisory failure.
+    let violation = run_failure([
+        os("check"),
+        os("--root"),
+        fixture.as_os_str().to_os_string(),
+        os("--diff"),
+        fixture.join("change.diff").into_os_string(),
+        os("--format"),
+        os("json"),
+        os("--policy"),
+        os("no-new-debt"),
+    ])?;
+    let violation_json = parse_json(&stdout_text(&violation)?)?;
+    assert_eq!(violation_json["policy"], "no-new-debt");
+    assert_eq!(
+        violation_json["summary"]["new_gaps"], 0,
+        "new_gaps must be 0: worsened card is not a new gap"
+    );
+    assert_eq!(violation_json["summary"]["worsened_gaps"], 1);
+
+    Ok(())
+}
+
 struct TempDir {
     path: PathBuf,
 }
@@ -6915,4 +8239,101 @@ impl Drop for TempDir {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.path);
     }
+}
+
+// SPEC-0030 §diff-scope: on a diff-scoped run, baseline cards whose file was NOT in the
+// candidate set must be counted as `inherited`, not `resolved`.
+//
+// This test builds a two-file repo, captures a full baseline (both files), then runs a
+// diff-scoped check where only `src/a.rs` is in the diff.  The `src/b.rs` card must NOT
+// appear as `resolved_gaps=1` — it was never scanned, so the PR cannot claim it was fixed.
+//
+// Expected shape: resolved_gaps=0, inherited_gaps=4 (2 per file, 2 files), new_gaps=0.
+#[test]
+fn diff_scoped_run_does_not_count_unscanned_baseline_cards_as_resolved()
+-> Result<(), Box<dyn Error>> {
+    let temp = TempDir::new("unsafe-review-scope-guard-e2e")?;
+    let root = temp.path().join("two-file-repo");
+    fs::create_dir_all(root.join("src"))?;
+    fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"two-file-repo\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+    )?;
+    // Two files each with a raw pointer deref — both will generate cards on a full scan.
+    fs::write(
+        root.join("src/a.rs"),
+        "pub unsafe fn op_a(ptr: *const u32) -> u32 {\n    // Safety: caller guarantees ptr is valid\n    unsafe { *ptr }\n}\n",
+    )?;
+    fs::write(
+        root.join("src/b.rs"),
+        "pub unsafe fn op_b(ptr: *const u64) -> u64 {\n    // Safety: caller guarantees ptr is valid\n    unsafe { *ptr }\n}\n",
+    )?;
+
+    // Capture a full-repo baseline so both cards are tracked.
+    let out_dir = TempDir::new("unsafe-review-scope-guard-baseline")?;
+    let out_ledger = out_dir.path().join("baseline.toml");
+    run_success([
+        os("baseline"),
+        os("init"),
+        os("--root"),
+        root.as_os_str().to_os_string(),
+        os("--out"),
+        out_ledger.as_os_str().to_os_string(),
+    ])?;
+
+    // Copy the generated baseline into the repo's policy directory.
+    let policy_dir = root.join("policy");
+    fs::create_dir_all(&policy_dir)?;
+    fs::copy(&out_ledger, policy_dir.join("unsafe-review-baseline.toml"))?;
+
+    // A diff that touches only src/a.rs (adding an innocuous comment — no unsafe change,
+    // so the file is in scope but the card stays BaselineKnown, not new).
+    let diff_text = "\
+diff --git a/src/a.rs b/src/a.rs\n\
+--- a/src/a.rs\n\
++++ b/src/a.rs\n\
+@@ -1,4 +1,5 @@\n\
++// reviewed in this PR\n\
+ pub unsafe fn op_a(ptr: *const u32) -> u32 {\n\
+     // Safety: caller guarantees ptr is valid\n\
+     unsafe { *ptr }\n\
+ }\n";
+
+    // Diff-scoped check: only src/a.rs is a candidate file.
+    let out = run_success_with_stdin(
+        [
+            os("check"),
+            os("--root"),
+            root.as_os_str().to_os_string(),
+            os("--diff"),
+            os("-"),
+            os("--format"),
+            os("json"),
+        ],
+        diff_text,
+    )?;
+    let value = parse_json(&stdout_text(&out)?)?;
+
+    // SPEC-0030 scope guard: the b.rs card was not scanned and must NOT be resolved.
+    assert_eq!(
+        value["summary"]["resolved_gaps"], 0,
+        "b.rs card must not be counted as resolved — its file was out of diff scope; got: {}",
+        value["summary"]
+    );
+    // Each file has 2 cards (one `unsafe_fn` context + one `raw_pointer_deref` operation).
+    // All 4 baseline IDs are inherited:
+    //   - 2 from a.rs: appeared as BaselineKnown in the scan (file was in scope, still present)
+    //   - 2 from b.rs: out-of-scope (file not in diff); counted as inherited, NOT resolved
+    assert_eq!(
+        value["summary"]["inherited_gaps"], 4,
+        "all 4 baseline cards must be inherited (2 from a.rs scan + 2 from b.rs out-of-scope); got: {}",
+        value["summary"]
+    );
+    assert_eq!(
+        value["summary"]["new_gaps"], 0,
+        "no new gaps expected: the diff only adds a comment to an already-baselined file; got: {}",
+        value["summary"]
+    );
+
+    Ok(())
 }

@@ -1,11 +1,11 @@
 use crate::api::AnalyzeOutput;
 use crate::api::Scope;
-use crate::domain::ReviewCard;
+use crate::domain::{OperationFamily, ReviewCard};
 use crate::output::confirmation::{
     build_this_first, confirmation_step, hypothesis_to_confirm, minimal_repro,
 };
 use crate::output::{
-    NO_CHANGED_GAPS_LIMITATION, NO_CHANGED_GAPS_MESSAGE, REVIEWCARD_TRUST_BOUNDARY,
+    NO_CHANGED_GAPS_LIMITATION, NO_CHANGED_GAPS_MESSAGE, REVIEWCARD_TRUST_BOUNDARY, UNKNOWN_OWNER,
 };
 use crate::output::{agent, repair_queue};
 use crate::util::path_display;
@@ -213,7 +213,7 @@ fn related_sink_clusters(output: &AnalyzeOutput) -> Vec<RelatedSinkCluster> {
             .site
             .owner
             .as_deref()
-            .unwrap_or("(unknown owner)")
+            .unwrap_or(UNKNOWN_OWNER)
             .to_string();
         grouped.entry((file, owner)).or_default().push(card);
     }
@@ -299,7 +299,7 @@ fn render_backtick_string_list(values: &[String], limit: usize) -> String {
 fn diff_primary_route(card: &ReviewCard) -> &str {
     card.routes
         .first()
-        .map_or("human", |route| route.kind.as_str())
+        .map_or(DEFAULT_REVIEW_ROUTE, |route| route.kind.as_str())
 }
 
 fn repo_primary_route(card: &ReviewCard) -> &str {
@@ -425,11 +425,15 @@ fn render_pr_summary_build_this_first_lead(out: &mut String, card: Option<&Revie
 /// witness plan, drops the inner H1 since the fragment is embedded under
 /// another heading, and points reviewers at the full advisory bundle
 /// uploaded as a workflow artifact.
+///
+/// The top-card selection uses the same `confirmation_ranked_cards` ordering as
+/// `render_pr_summary` so both surfaces always name the same headline card.
 pub(crate) fn render_github_summary(output: &AnalyzeOutput) -> String {
+    let ranked = confirmation_ranked_cards(output);
     let mut out = String::new();
     out.push_str("## unsafe-review advisory summary\n\n");
     render_pr_summary_header_bullets(&mut out, output);
-    render_pr_summary_top_card(&mut out, output);
+    render_pr_summary_top_card(&mut out, ranked.first().copied());
     render_github_summary_open_next(&mut out);
     out.push_str("---\n\n");
     out.push_str(
@@ -476,6 +480,19 @@ fn render_pr_summary_header_bullets(out: &mut String, output: &AnalyzeOutput) {
         "- Open actionable gaps: {}\n",
         output.summary.open_actionable_gaps
     ));
+    // Render coverage movement when any movement signal is present.
+    let s = &output.summary;
+    let has_movement = s.new_gaps > 0
+        || s.worsened_gaps > 0
+        || s.improved_gaps > 0
+        || s.resolved_gaps > 0
+        || s.inherited_gaps > 0;
+    if has_movement {
+        out.push_str(&format!(
+            "- Coverage movement: {} new, {} worsened, {} improved (evidence coverage improved; still advisory), {} resolved, {} inherited\n",
+            s.new_gaps, s.worsened_gaps, s.improved_gaps, s.resolved_gaps, s.inherited_gaps
+        ));
+    }
     out.push_str(&format!("- Policy mode: `{}`\n\n", output.policy.as_str()));
 }
 
@@ -591,9 +608,9 @@ fn render_pr_summary_reviewer_cockpit(out: &mut String, top_card: Option<&Review
     }
 }
 
-fn render_pr_summary_top_card(out: &mut String, output: &AnalyzeOutput) {
+fn render_pr_summary_top_card(out: &mut String, top_card: Option<&ReviewCard>) {
     out.push_str("## Top card\n\n");
-    if let Some(card) = output.cards.first() {
+    if let Some(card) = top_card {
         out.push_str(&format!("- ID: `{}`\n", card.id));
         out.push_str(&format!("- Class: `{}`\n", card.class.as_str()));
         out.push_str(&format!(
@@ -683,11 +700,29 @@ fn render_minimal_repro_cue(out: &mut String, card: &ReviewCard, label: &str, in
 
 fn render_pr_summary_card_table(out: &mut String, ranked_cards: &[&ReviewCard]) {
     out.push_str("## Card table\n\n");
+
+    // Split into specific-operation cards and owner-contract (Unknown-family) cards.
+    // Owner cards are grouped into a summary line to keep the table focused on
+    // actionable operation cards. All cards remain in cards.json and in evidence
+    // counts; this is a presentation-only grouping.
+    let specific_cards: Vec<&&ReviewCard> = ranked_cards
+        .iter()
+        .filter(|card| !matches!(card.operation.family, OperationFamily::Unknown))
+        .collect();
+    let owner_cards: Vec<&&ReviewCard> = ranked_cards
+        .iter()
+        .filter(|card| matches!(card.operation.family, OperationFamily::Unknown))
+        .collect();
+
+    if specific_cards.is_empty() && owner_cards.is_empty() {
+        return;
+    }
+
     out.push_str(
         "| ID | Class | Proof path | Location | Operation family | Operation | Missing evidence | Route | Next action | Confirmation state |\n",
     );
     out.push_str("|---|---|---|---|---|---|---|---|---|---|\n");
-    for card in ranked_cards {
+    for card in &specific_cards {
         let route = repo_primary_route(card);
         out.push_str(&format!(
             "| `{}` | `{}` | `{}` | {} | `{}` | `{}` | {} | `{}` | {} | {} |\n",
@@ -707,6 +742,39 @@ fn render_pr_summary_card_table(out: &mut String, ranked_cards: &[&ReviewCard]) 
             confirmation_state_label(card)
         ));
     }
+
+    // Render owner-contract cards as a grouped summary row so the table stays
+    // focused on the actionable operation cards. The full list is in cards.json.
+    if !owner_cards.is_empty() {
+        let unsafe_fn_count = owner_cards.len();
+        let location_list: Vec<String> = owner_cards
+            .iter()
+            .map(|card| {
+                format!(
+                    "{}:{}",
+                    path_display(&card.site.location.file),
+                    card.site.location.line
+                )
+            })
+            .collect();
+        let location_summary = if location_list.len() <= 3 {
+            location_list.join(", ")
+        } else {
+            format!(
+                "{} and {} more",
+                location_list[..3].join(", "),
+                location_list.len() - 3
+            )
+        };
+        out.push_str(&format!(
+            "| (grouped) | owner_contract | — | {} | `unknown` | {} owner-contract obligation{} across {} `unsafe fn` {} — see `cards.json` for full list | — | — | — | — |\n",
+            md_cell(&location_summary),
+            unsafe_fn_count,
+            if unsafe_fn_count == 1 { "" } else { "s" },
+            unsafe_fn_count,
+            if unsafe_fn_count == 1 { "site" } else { "sites" },
+        ));
+    }
 }
 
 fn render_pr_summary_witness_plan(out: &mut String, ranked_cards: &[&ReviewCard]) {
@@ -715,7 +783,19 @@ fn render_pr_summary_witness_plan(out: &mut String, ranked_cards: &[&ReviewCard]
         out.push_str("No witness route is recommended because no review cards were emitted.\n\n");
         return;
     }
-    for card in ranked_cards {
+
+    // Split into specific-operation cards and owner-contract (Unknown-family) cards.
+    // Owner cards are grouped into a summary entry. Their full details are in cards.json.
+    let specific_cards: Vec<&&ReviewCard> = ranked_cards
+        .iter()
+        .filter(|card| !matches!(card.operation.family, OperationFamily::Unknown))
+        .collect();
+    let owner_cards: Vec<&&ReviewCard> = ranked_cards
+        .iter()
+        .filter(|card| matches!(card.operation.family, OperationFamily::Unknown))
+        .collect();
+
+    for card in &specific_cards {
         out.push_str(&format!(
             "- `{}` hypothesis: {}\n",
             card.id,
@@ -753,6 +833,22 @@ fn render_pr_summary_witness_plan(out: &mut String, ranked_cards: &[&ReviewCard]
             out.push_str("  - Route: no witness route was selected; route this to human review.\n");
         }
     }
+
+    // Group owner-contract cards into a single summary entry so the witness plan
+    // stays focused on executable witness routes. Full details are in cards.json.
+    if !owner_cards.is_empty() {
+        out.push_str(&format!(
+            "- (grouped) {} owner-contract obligation{} across {} `unsafe fn` {} — see `cards.json` for full list\n",
+            owner_cards.len(),
+            if owner_cards.len() == 1 { "" } else { "s" },
+            owner_cards.len(),
+            if owner_cards.len() == 1 { "site" } else { "sites" },
+        ));
+        out.push_str(
+            "  - Route: `human-deep-review` — add a `# Safety` section naming caller obligations for each site.\n",
+        );
+    }
+
     out.push('\n');
 }
 
@@ -946,7 +1042,7 @@ mod tests {
         ));
         assert!(rendered.contains("`source_route_only`"));
         assert!(rendered.contains("unsafe { ptr.cast::<Header>().read() }"));
-        assert!(rendered.contains("Add or expose the local guard"));
+        assert!(rendered.contains("Add or expose local guards"));
         assert!(rendered.contains("not memory-safety proof"));
         Ok(())
     }
@@ -986,7 +1082,7 @@ mod tests {
         assert!(rendered.contains("cargo +nightly miri test read_header"));
         assert!(rendered.contains("## What would resolve this"));
         assert!(rendered.contains(
-            "Add or expose the local guard that discharges the `raw_pointer_read` safety obligation."
+            "Add or expose local guards for these `raw_pointer_read` safety obligations:"
         ));
         assert!(rendered.contains("## What would not resolve this"));
         assert!(
@@ -1048,7 +1144,7 @@ mod tests {
         assert!(rendered.contains("- Evidence found:"));
         assert!(rendered.contains("  - Guard/discharge:"));
         assert!(rendered.contains("- Missing/weak evidence: Missing visible local guard"));
-        assert!(rendered.contains("- Next reviewer action: Add or expose the local guard"));
+        assert!(rendered.contains("- Next reviewer action: Add or expose local guards"));
         assert!(rendered.contains(
             "- Confirmation step: build/run `cargo +nightly miri test read_header` first"
         ));
@@ -1194,6 +1290,43 @@ mod tests {
     }
 
     #[test]
+    fn github_summary_uses_ranked_top_card_matching_pr_summary() -> Result<(), String> {
+        use crate::domain::WitnessEvidence;
+
+        let mut output = fixture_output("duplicate_raw_pointer_reads")?;
+        if output.cards.len() < 2 {
+            return Err("duplicate fixture should emit at least two cards".to_string());
+        }
+        // Give cards[0] a runtime receipt verdict so the still-pending cards[1]
+        // ranks first under confirmation_ranked_cards.  Both render_pr_summary
+        // and render_github_summary must name the same ranked headline card.
+        output.cards[0].witness = WitnessEvidence::present("miri receipt imported")
+            .with_runtime_executed(true)
+            .with_verdict(Some("not_reproduced".to_string()));
+        let ranked_id = output.cards[1].id.to_string();
+        let unranked_id = output.cards[0].id.to_string();
+
+        let github = render_github_summary(&output);
+        let pr = render_pr_summary(&output);
+
+        // github-summary must name the ranked card in its Top card section.
+        assert!(
+            github.contains(&format!("- ID: `{ranked_id}`")),
+            "github-summary Top card must name ranked card `{ranked_id}`, got:\n{github}"
+        );
+        assert!(
+            !github.contains(&format!("- ID: `{unranked_id}`")),
+            "github-summary must not name unranked card `{unranked_id}` as top card"
+        );
+        // pr-summary Reviewer cockpit names the same ranked card.
+        assert!(
+            pr.contains(&format!("- Top card: `{ranked_id}`")),
+            "pr-summary cockpit must also name ranked card `{ranked_id}`"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn repo_posture_markdown_counts_open_gaps_without_safety_claim() -> Result<(), String> {
         let output = repo_fixture_output("raw_pointer_alignment")?;
         let rendered = render(&output);
@@ -1214,7 +1347,7 @@ mod tests {
         assert!(rendered.contains("| `source_route_only` |"));
         assert!(rendered.contains("src/lib.rs:8"));
         assert!(rendered.contains("unsafe { ptr.cast::<Header>().read() }"));
-        assert!(rendered.contains("Add or expose the local guard"));
+        assert!(rendered.contains("Add or expose local guards"));
         assert!(rendered.contains("## Trust boundary"));
         assert!(rendered.contains("not raw unsafe usage"));
         assert!(rendered.contains("not UB-free status"));
@@ -1268,6 +1401,159 @@ mod tests {
                 );
             }
         }
+
+        Ok(())
+    }
+
+    /// Drift-lock: a routeless card renders the same fallback route label on both the
+    /// diff markdown table (`diff_primary_route`) and the repo-posture table
+    /// (`repo_primary_route`).  Previously diff fell back to `"human"` while repo used
+    /// the shared `DEFAULT_REVIEW_ROUTE` const (`"human-deep-review"`).
+    #[test]
+    fn diff_and_repo_route_fallback_are_identical_for_routeless_card() -> Result<(), String> {
+        let mut output = fixture_output("raw_pointer_alignment")?;
+        let card = output
+            .cards
+            .first_mut()
+            .ok_or_else(|| "fixture should emit one card".to_string())?;
+        // Strip all routes so both helpers reach their fallback branch.
+        card.routes.clear();
+
+        // Diff table — look for the Route column entry in the card row.
+        let diff_rendered = render(&output);
+        // Repo table — same card rendered in repo scope.
+        let mut repo_output = output.clone();
+        repo_output.scope = Scope::Repo;
+        let repo_rendered = render(&repo_output);
+
+        // Both should contain DEFAULT_REVIEW_ROUTE ("human-deep-review") as the route.
+        assert!(
+            diff_rendered.contains(DEFAULT_REVIEW_ROUTE),
+            "diff markdown route column must fall back to DEFAULT_REVIEW_ROUTE ({DEFAULT_REVIEW_ROUTE:?}) for a routeless card; rendered:\n{diff_rendered}"
+        );
+        assert!(
+            repo_rendered.contains(DEFAULT_REVIEW_ROUTE),
+            "repo-posture markdown route column must fall back to DEFAULT_REVIEW_ROUTE ({DEFAULT_REVIEW_ROUTE:?}) for a routeless card"
+        );
+        // Explicitly verify neither surface falls back to the old "human" string
+        // (which would be a regression to the pre-fix behavior).
+        assert!(
+            !diff_rendered.contains("| `human` |"),
+            "diff markdown must not use bare 'human' fallback for routeless card"
+        );
+        Ok(())
+    }
+
+    /// PR summary groups owner cards (Unknown-family) into a summary line in the
+    /// card table and witness plan, rather than listing each one individually.
+    /// The operation cards are still listed individually. cards.json is untouched.
+    ///
+    /// The `attributed_unsafe_fn_no_duplicate` fixture produces both an owner card
+    /// (Unknown-family) and a specific operation card (RawPointerWrite) so both
+    /// grouping and individual listing can be validated in the same render.
+    #[test]
+    fn pr_summary_groups_owner_cards_in_card_table_and_witness_plan() -> Result<(), String> {
+        let output = fixture_output("attributed_unsafe_fn_no_duplicate")?;
+        let rendered = render_pr_summary(&output);
+
+        // Operation card is listed individually in the card table.
+        assert!(
+            rendered.contains("| `raw_pointer_write` |"),
+            "operation card must be listed individually in the card table; rendered:\n{rendered}"
+        );
+
+        // Owner card is NOT listed individually — it is grouped. The owner card's
+        // card ID must not appear as a standalone table row (it appears in the
+        // grouped summary row instead). We check the owner card ID is absent as
+        // an individual row entry rather than checking for the family name, which
+        // legitimately appears in the grouped row.
+        let owner_card_id = output
+            .cards
+            .iter()
+            .find(|c| matches!(c.operation.family, OperationFamily::Unknown))
+            .map(|c| c.id.to_string())
+            .ok_or_else(|| "fixture must have an owner card".to_string())?;
+        assert!(
+            !rendered.contains(&format!("| `{owner_card_id}` |")),
+            "owner card must not appear as an individual table row; rendered:\n{rendered}"
+        );
+
+        // The grouped summary line must be present in the card table.
+        assert!(
+            rendered.contains("owner-contract obligation"),
+            "card table must contain grouped owner-contract summary line; rendered:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("see `cards.json` for full list"),
+            "grouped row must reference cards.json; rendered:\n{rendered}"
+        );
+
+        // The witness plan must show the grouped owner-contract entry.
+        assert!(
+            rendered.contains("(grouped)"),
+            "witness plan must contain grouped owner card entry; rendered:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("human-deep-review"),
+            "grouped owner entry must reference human-deep-review route; rendered:\n{rendered}"
+        );
+
+        // The count of cards in the summary header is unchanged (all cards still counted).
+        let owner_count = output
+            .cards
+            .iter()
+            .filter(|c| matches!(c.operation.family, OperationFamily::Unknown))
+            .count();
+        assert!(
+            owner_count > 0,
+            "fixture must produce at least one owner card for this test to be meaningful"
+        );
+
+        Ok(())
+    }
+
+    /// Guardrail: owner cards are still present in cards.json and in the evidence
+    /// count — they are not deleted by the grouping. Only the pr-summary card table
+    /// and witness plan presentation changes.
+    #[test]
+    fn pr_summary_grouping_does_not_delete_owner_cards_from_output() -> Result<(), String> {
+        let output = fixture_output("attributed_unsafe_fn_no_duplicate")?;
+
+        let owner_cards: Vec<_> = output
+            .cards
+            .iter()
+            .filter(|c| matches!(c.operation.family, OperationFamily::Unknown))
+            .collect();
+        let operation_cards: Vec<_> = output
+            .cards
+            .iter()
+            .filter(|c| !matches!(c.operation.family, OperationFamily::Unknown))
+            .collect();
+
+        assert!(
+            !owner_cards.is_empty(),
+            "fixture must produce at least one owner card"
+        );
+        assert!(
+            !operation_cards.is_empty(),
+            "fixture must produce at least one specific operation card"
+        );
+
+        // All cards are still present in output.cards (the structured artifact source).
+        assert_eq!(
+            output.cards.len(),
+            owner_cards.len() + operation_cards.len(),
+            "all cards must remain in output.cards; none deleted by grouping"
+        );
+
+        // The pr-summary is presentation-only: it groups the human display but
+        // does not remove cards from the structured output.
+        let rendered = render_pr_summary(&output);
+        // The operation card is still individually described in the cockpit (top card).
+        assert!(
+            rendered.contains("raw_pointer_write"),
+            "operation card family must appear in pr-summary cockpit; rendered:\n{rendered}"
+        );
 
         Ok(())
     }

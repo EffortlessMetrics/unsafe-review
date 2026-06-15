@@ -1,0 +1,21 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -4,7 +4,16 @@
+
+ /// Read the config from a raw pointer.
+ ///
+-/// Caller must ensure the pointer is valid and properly aligned.
++/// # Safety
++///
++/// The caller must ensure `ptr` is non-null, properly aligned for
++/// `Config`, and points to an initialized `Config` value that remains
++/// live for the duration of this call.
++///
++/// This diff adds the safety contract above.  The `pub unsafe fn` and the
++/// `*ptr` expression inside are unchanged: the coverage gap resolves
++/// because the caller obligations are now documented, not because the
++/// unsafe code was removed.
+ pub unsafe fn read_config(ptr: *const Config) -> Config {
+     *ptr
+ }

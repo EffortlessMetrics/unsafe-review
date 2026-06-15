@@ -48,7 +48,7 @@ manual_context           present | absent             (manual-candidate overlay 
 baseline_state           new | worsened | inherited | resolved | unknown   (per SPEC-0030)
 outcome_movement         improved | regressed | unchanged | unknown        (per saved snapshot)
 comment_plan_status      selected | not_selected | not_eligible
-agent_lsp_readiness      ready | needs_human | unsupported
+agent_lsp_readiness      ready | requires_witness_receipt | needs_human | unsupported
 ```
 
 These reuse existing analyzer evidence (UNSAFE-REVIEW-SPEC-0006 contract and
@@ -91,6 +91,22 @@ worth_comment: true
 ```
 
 Not "UB confirmed." The same block drives every consumer.
+
+## `unknown` operation-family volume is owner-card arithmetic
+
+On real unsafe-heavy crates the `unknown` operation family is dominated by
+per-declaration `unsafe fn` owner cards — each represents the caller's contract
+obligation for a function body, not a contained operation. This is by design:
+an owner card is the correct coverage unit for a declaration whose body has not
+been further classified into a specific operation family.
+
+High `unknown` volume is therefore **not** a classifier gap to close by
+extending the operation-family detector. The volume reflects how many unsafe fn
+declarations are in scope without a more-specific contained-operation card.
+
+The lever to reduce `unknown` volume, when desired, is a **suppression policy**
+(suppress owner cards that are already fully covered by their contained
+operation cards) — an owner/policy decision, not a classifier change.
 
 ## Non-goals
 

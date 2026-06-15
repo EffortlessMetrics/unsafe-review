@@ -2,7 +2,7 @@ use crate::command::{
     BaselineAddOptions, BaselineCommand, BaselineInitOptions, CandidateCommand,
     CandidateImportOptions, CandidateLintOptions, CandidateListOptions, CandidateNewOptions,
     CandidateWitnessPlanOptions, CheckOptions, Command, ContextQuery, DiffInput, FirstPrOptions,
-    Format, OutcomeOptions, RepoOptions,
+    Format, OutcomeOptions, RepoOptions, SubcommandHelpTarget,
 };
 use std::path::PathBuf;
 use unsafe_review_core::{MANUAL_CANDIDATE_STABLE_BYTE_CLASSES, PolicyMode};
@@ -39,7 +39,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, S
         return Ok(Command::BaselineHelp);
     }
     if has_help_flag(&rest) {
-        return Ok(Command::Help);
+        return Ok(subcommand_help_for(&command));
     }
     match command.as_str() {
         "--version" | "-V" => Ok(Command::Version),
@@ -47,6 +47,15 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, S
         "doctor" => parse_doctor(rest),
         "check" => parse_check(rest).map(Command::Check),
         "first-pr" | "review" => parse_first_pr(rest).map(Command::FirstPr),
+        "pr" => parse_first_pr(rest).map(|mut options| {
+            // `pr` is a pure alias for `first-pr`; the only difference is that
+            // execute auto-detects the git root and base ref when the user did
+            // not supply explicit --root/--base/--diff arguments.
+            options.auto_detect = options.check.root == std::path::Path::new(".")
+                && options.check.base.as_deref() == Some("origin/main")
+                && options.check.diff.is_none();
+            Command::FirstPr(options)
+        }),
         "repo" => parse_repo(rest).map(Command::Repo),
         "pilot" => parse_check(rest).map(|mut options| {
             options.max_cards = Some(options.max_cards.unwrap_or(5));
@@ -404,6 +413,26 @@ fn validate_iso_date(raw: &str, flag: &str) -> Result<(), String> {
     }
 }
 
+fn subcommand_help_for(command: &str) -> Command {
+    let target = match command {
+        "check" => SubcommandHelpTarget::Check,
+        "first-pr" | "review" | "pr" => SubcommandHelpTarget::FirstPr,
+        "pilot" => SubcommandHelpTarget::Pilot,
+        "explain" => SubcommandHelpTarget::Explain,
+        "context" => SubcommandHelpTarget::Context,
+        "confirm" => SubcommandHelpTarget::Confirm,
+        "receipt" | "receipt-template" => SubcommandHelpTarget::Receipt,
+        "outcome" => SubcommandHelpTarget::Outcome,
+        "policy" => SubcommandHelpTarget::Policy,
+        "doctor" => SubcommandHelpTarget::Doctor,
+        "badges" => SubcommandHelpTarget::Badges,
+        "lsp" => SubcommandHelpTarget::Lsp,
+        "support" => SubcommandHelpTarget::Support,
+        _ => return Command::Help,
+    };
+    Command::SubcommandHelp(target)
+}
+
 fn has_help_flag(args: &[String]) -> bool {
     args.iter()
         .any(|arg| matches!(arg.as_str(), "--help" | "-h"))
@@ -453,6 +482,23 @@ fn parse_first_pr(args: Vec<String>) -> Result<FirstPrOptions, String> {
         if arg == "--out" || arg.starts_with("--out=") {
             return Err(format!(
                 "unknown first-pr argument `{arg}`; did you mean `--out-dir`?"
+            ));
+        }
+        // `--format`, `--policy`, `--json`, `--markdown` belong to `check`/`repo`.
+        // `first-pr` always writes a full advisory artifact bundle to `--out-dir`
+        // and is advisory-only; none of these flags are honored.
+        // Intercept before try_apply_check_arg silently consumes them.
+        if arg == "--format"
+            || arg.starts_with("--format=")
+            || arg == "--policy"
+            || arg.starts_with("--policy=")
+            || arg == "--json"
+            || arg == "--markdown"
+        {
+            return Err(format!(
+                "unknown first-pr argument `{arg}`; `--format` and `--policy` belong to the \
+                 `check`/`repo` subcommands — `first-pr` always writes a full advisory artifact \
+                 bundle to `--out-dir`"
             ));
         }
         if let Some(consumed) = check_parse::try_apply_check_arg(&args, idx, &mut options.check)? {
@@ -882,6 +928,11 @@ pub(super) fn parse_receipt_audit_format(format: Format) -> Result<Format, Strin
     json_or_markdown_format(format, "receipt audit")
 }
 
+pub(super) fn has_explicit_format_arg(args: &[String]) -> bool {
+    args.iter()
+        .any(|arg| arg == "--format" || arg.starts_with("--format="))
+}
+
 fn set_card_id(id: &mut Option<String>, value: &str) -> Result<(), String> {
     if id.replace(value.to_string()).is_some() {
         return Err("expected exactly one card id".to_string());
@@ -927,7 +978,11 @@ fn parse_format(raw: &str) -> Result<Format, String> {
         "comment-plan" | "comments" => Ok(Format::CommentPlan),
         "lsp" | "lsp-json" | "editor-json" => Ok(Format::Lsp),
         "witness-plan" | "witness" | "route-plan" => Ok(Format::WitnessPlan),
-        other => Err(format!("unknown format `{other}`")),
+        other => Err(format!(
+            "unknown format `{other}`; valid values: \
+             `human`, `json`, `markdown`, `pr-summary`, `github-summary`, \
+             `sarif`, `comment-plan`, `lsp`, `witness-plan`"
+        )),
     }
 }
 
@@ -936,7 +991,9 @@ fn parse_policy(raw: &str) -> Result<PolicyMode, String> {
         "advisory" => Ok(PolicyMode::Advisory),
         "no-new-debt" | "no_new_debt" => Ok(PolicyMode::NoNewDebt),
         "blocking" => Err("blocking policy is not implemented".to_string()),
-        other => Err(format!("unknown policy `{other}`")),
+        other => Err(format!(
+            "unknown policy `{other}`; valid values: `advisory`, `no-new-debt`"
+        )),
     }
 }
 
@@ -1001,14 +1058,70 @@ mod tests {
     }
 
     #[test]
-    fn parses_help_flag_after_subcommand_as_help() -> Result<(), String> {
+    fn parses_help_flag_after_subcommand_as_subcommand_help() -> Result<(), String> {
         assert_eq!(
             parse(args(["unsafe-review", "check", "--help"]))?,
-            Command::Help
+            Command::SubcommandHelp(SubcommandHelpTarget::Check)
+        );
+        assert_eq!(
+            parse(args(["unsafe-review", "check", "-h"]))?,
+            Command::SubcommandHelp(SubcommandHelpTarget::Check)
+        );
+        assert_eq!(
+            parse(args(["unsafe-review", "first-pr", "--help"]))?,
+            Command::SubcommandHelp(SubcommandHelpTarget::FirstPr)
+        );
+        assert_eq!(
+            parse(args(["unsafe-review", "review", "--help"]))?,
+            Command::SubcommandHelp(SubcommandHelpTarget::FirstPr)
+        );
+        assert_eq!(
+            parse(args(["unsafe-review", "pilot", "--help"]))?,
+            Command::SubcommandHelp(SubcommandHelpTarget::Pilot)
+        );
+        assert_eq!(
+            parse(args(["unsafe-review", "explain", "--help"]))?,
+            Command::SubcommandHelp(SubcommandHelpTarget::Explain)
+        );
+        assert_eq!(
+            parse(args(["unsafe-review", "context", "--help"]))?,
+            Command::SubcommandHelp(SubcommandHelpTarget::Context)
+        );
+        assert_eq!(
+            parse(args(["unsafe-review", "confirm", "--help"]))?,
+            Command::SubcommandHelp(SubcommandHelpTarget::Confirm)
+        );
+        assert_eq!(
+            parse(args(["unsafe-review", "receipt", "--help"]))?,
+            Command::SubcommandHelp(SubcommandHelpTarget::Receipt)
         );
         assert_eq!(
             parse(args(["unsafe-review", "receipt", "audit", "-h"]))?,
-            Command::Help
+            Command::SubcommandHelp(SubcommandHelpTarget::Receipt)
+        );
+        assert_eq!(
+            parse(args(["unsafe-review", "outcome", "--help"]))?,
+            Command::SubcommandHelp(SubcommandHelpTarget::Outcome)
+        );
+        assert_eq!(
+            parse(args(["unsafe-review", "policy", "--help"]))?,
+            Command::SubcommandHelp(SubcommandHelpTarget::Policy)
+        );
+        assert_eq!(
+            parse(args(["unsafe-review", "doctor", "--help"]))?,
+            Command::SubcommandHelp(SubcommandHelpTarget::Doctor)
+        );
+        assert_eq!(
+            parse(args(["unsafe-review", "badges", "--help"]))?,
+            Command::SubcommandHelp(SubcommandHelpTarget::Badges)
+        );
+        assert_eq!(
+            parse(args(["unsafe-review", "lsp", "--help"]))?,
+            Command::SubcommandHelp(SubcommandHelpTarget::Lsp)
+        );
+        assert_eq!(
+            parse(args(["unsafe-review", "support", "--help"]))?,
+            Command::SubcommandHelp(SubcommandHelpTarget::Support)
         );
         Ok(())
     }
@@ -1509,6 +1622,71 @@ mod tests {
     }
 
     #[test]
+    fn parse_pr_alias_maps_to_first_pr() -> Result<(), String> {
+        // `pr` is a pure parse-time alias for `first-pr`; it must map to
+        // Command::FirstPr with the same defaults as `first-pr`.
+        let command = parse(args(["unsafe-review", "pr"]))?;
+        let Command::FirstPr(options) = command else {
+            return Err("expected first-pr command from `pr` alias".to_string());
+        };
+        assert_eq!(options.check.root, PathBuf::from("."));
+        assert_eq!(
+            options.check.base,
+            Some("origin/main".to_string()),
+            "`pr` with no args must default base to origin/main"
+        );
+        assert_eq!(options.check.diff, None);
+        assert_eq!(options.out_dir, PathBuf::from("target/unsafe-review"));
+        // With no explicit args, auto-detection is requested at execute time.
+        assert!(
+            options.auto_detect,
+            "`pr` with no args must set auto_detect = true"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn parse_pr_alias_accepts_all_first_pr_flags() -> Result<(), String> {
+        // `pr` accepts the same flags as `first-pr`; with explicit flags,
+        // auto_detect is false (user supplied explicit args).
+        let command = parse(args([
+            "unsafe-review",
+            "pr",
+            "--root=fixtures/raw_pointer_alignment",
+            "--diff=change.diff",
+            "--out-dir=target/pr-review",
+        ]))?;
+        let Command::FirstPr(options) = command else {
+            return Err("expected first-pr command from `pr` alias".to_string());
+        };
+        assert_eq!(
+            options.check.root,
+            PathBuf::from("fixtures/raw_pointer_alignment")
+        );
+        assert_eq!(
+            options.check.diff,
+            Some(DiffInput::File(PathBuf::from("change.diff")))
+        );
+        assert_eq!(options.out_dir, PathBuf::from("target/pr-review"));
+        // Explicit flags disable auto-detection.
+        assert!(
+            !options.auto_detect,
+            "`pr` with explicit --diff must not set auto_detect"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn parse_pr_alias_help_routes_to_first_pr_help() {
+        // `pr --help` must show the first-pr subcommand help, not the generic help.
+        let result = parse(args(["unsafe-review", "pr", "--help"]));
+        assert_eq!(
+            result,
+            Ok(Command::SubcommandHelp(SubcommandHelpTarget::FirstPr))
+        );
+    }
+
+    #[test]
     fn first_pr_rejects_out_and_suggests_out_dir() {
         // Regression test for EffortlessMetrics/unsafe-review#531: `--out` is
         // a `check`/`repo` flag; `first-pr` uses `--out-dir`. The parser must
@@ -1536,6 +1714,77 @@ mod tests {
             assert!(
                 err.contains("--out-dir"),
                 "error must suggest --out-dir: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn first_pr_rejects_format_flag() {
+        // Generalizes #531: `--format` belongs to `check`/`repo`; `first-pr`
+        // always writes a full advisory artifact bundle and never honors it.
+        let space_form = parse(args([
+            "unsafe-review",
+            "first-pr",
+            "--diff=change.diff",
+            "--format",
+            "json",
+        ]));
+        let equals_form = parse(args([
+            "unsafe-review",
+            "first-pr",
+            "--diff=change.diff",
+            "--format=json",
+        ]));
+        let json_shorthand = parse(args([
+            "unsafe-review",
+            "first-pr",
+            "--diff=change.diff",
+            "--json",
+        ]));
+        let markdown_shorthand = parse(args([
+            "unsafe-review",
+            "first-pr",
+            "--diff=change.diff",
+            "--markdown",
+        ]));
+
+        for result in [space_form, equals_form, json_shorthand, markdown_shorthand] {
+            let err = result.err().unwrap_or_default();
+            assert!(
+                !err.is_empty(),
+                "first-pr must reject --format/--json/--markdown"
+            );
+            assert!(
+                err.contains("check") || err.contains("repo"),
+                "error must mention `check`/`repo` subcommands: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn first_pr_rejects_policy_flag() {
+        // Generalizes #531: `--policy` belongs to `check`/`repo`; `first-pr`
+        // is always advisory-only and never honors the --policy flag.
+        let space_form = parse(args([
+            "unsafe-review",
+            "first-pr",
+            "--diff=change.diff",
+            "--policy",
+            "no-new-debt",
+        ]));
+        let equals_form = parse(args([
+            "unsafe-review",
+            "first-pr",
+            "--diff=change.diff",
+            "--policy=no-new-debt",
+        ]));
+
+        for result in [space_form, equals_form] {
+            let err = result.err().unwrap_or_default();
+            assert!(!err.is_empty(), "first-pr must reject --policy");
+            assert!(
+                err.contains("check") || err.contains("repo"),
+                "error must mention `check`/`repo` subcommands: {err}"
             );
         }
     }
@@ -2556,6 +2805,75 @@ mod tests {
     }
 
     #[test]
+    fn receipt_audit_rejects_explicit_human_format() {
+        // Regression test: explicit `--format human` must error, not silently convert to json.
+        // Matches the behaviour of `policy report`, which also rejects explicit human.
+        let equals_form = parse(args([
+            "unsafe-review",
+            "receipt",
+            "audit",
+            "--format=human",
+        ]));
+        let space_form = parse(args([
+            "unsafe-review",
+            "receipt",
+            "audit",
+            "--format",
+            "human",
+        ]));
+
+        for result in [equals_form, space_form] {
+            let err = result.err().unwrap_or_default();
+            assert!(
+                err.contains("receipt audit only supports json or markdown output"),
+                "error must name the command and supported formats: {err}"
+            );
+            assert!(
+                err.contains("human"),
+                "error must name the rejected value: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn receipt_audit_defaults_to_json_without_explicit_format() -> Result<(), String> {
+        // Default (no --format flag) must stay json, not error.
+        let command = parse(args(["unsafe-review", "receipt", "audit"]))?;
+
+        let Command::ReceiptAudit(options) = command else {
+            return Err("expected receipt audit command".to_string());
+        };
+        assert_eq!(
+            options.format,
+            Format::Json,
+            "default format must be json when --format is omitted"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn receipt_audit_accepts_explicit_supported_formats() -> Result<(), String> {
+        // Explicit --format json and --format markdown must both succeed.
+        let json_form = parse(args(["unsafe-review", "receipt", "audit", "--format=json"]))?;
+        let markdown_form = parse(args([
+            "unsafe-review",
+            "receipt",
+            "audit",
+            "--format=markdown",
+        ]))?;
+
+        let Command::ReceiptAudit(json_options) = json_form else {
+            return Err("expected receipt audit command".to_string());
+        };
+        let Command::ReceiptAudit(md_options) = markdown_form else {
+            return Err("expected receipt audit command".to_string());
+        };
+        assert_eq!(json_options.format, Format::Json);
+        assert_eq!(md_options.format, Format::Markdown);
+        Ok(())
+    }
+
+    #[test]
     fn parses_policy_report_command() -> Result<(), String> {
         let command = parse(args([
             "unsafe-review",
@@ -2648,6 +2966,34 @@ mod tests {
         ]));
 
         assert_eq!(command, Err("policy report is advisory-only".to_string()));
+    }
+
+    #[test]
+    fn parse_format_unknown_value_lists_valid_values() {
+        let err = parse_format("bogus").err().unwrap_or_default();
+        assert!(err.contains("unknown format `bogus`"), "{err}");
+        for value in &[
+            "human",
+            "json",
+            "markdown",
+            "pr-summary",
+            "github-summary",
+            "sarif",
+            "comment-plan",
+            "lsp",
+            "witness-plan",
+        ] {
+            assert!(err.contains(value), "missing `{value}` in error: {err}");
+        }
+    }
+
+    #[test]
+    fn parse_policy_unknown_value_lists_valid_values() {
+        let err = parse_policy("bogus").err().unwrap_or_default();
+        assert!(err.contains("unknown policy `bogus`"), "{err}");
+        for value in &["advisory", "no-new-debt"] {
+            assert!(err.contains(value), "missing `{value}` in error: {err}");
+        }
     }
 
     fn args<const N: usize>(values: [&str; N]) -> Vec<String> {

@@ -2,7 +2,9 @@
 
 | Layer | Owns | Path |
 |---|---|---|
+| Adoption front door | one-page newcomer routing to all five delivery surfaces | `docs/START-HERE.md` |
 | Mission / vision | product purpose and end state | `docs/MISSION.md`, `docs/VISION.md` |
+| Product principles | settled design values: restraint, advisory-by-design, evidence not proof, single truth, group-not-delete, naming-vs-doing, detector-discipline symmetry | `docs/PRINCIPLES.md` |
 | Roadmap | release direction | `docs/ROADMAP.md` |
 | Find/fix workflow | end-to-end UB-risk review seam workflow from first-pr through explain, agent packet, witness receipt, and outcome comparison | `docs/FIND_AND_FIX_UB.md` |
 | First-use guide | install and first useful local run from crates.io | `docs/FIRST_USE.md` |
@@ -25,9 +27,12 @@
 | Contribution process | swarm-to-main routing, PR disposition, source PR requirements, and source history catch-up | `docs/contributing/SWARM_TO_MAIN.md`, `docs/contributing/SOURCE_HISTORY_CATCHUP.md` |
 | Spec style | durable source-of-truth ownership boundaries and artifact role split | `docs/spec-style.md` |
 | Spec rails guide | contributor workflow for source-of-truth rails and tool-state boundaries | `docs/contributing/spec-rails.md` |
+| Agent orchestration | portable multi-agent build doctrine: spine, model tiers, two orchestration modes, issue routing, hygiene, and adopt-in-your-lane template | `docs/contributing/AGENT-ORCHESTRATION.md` |
 | Implementation plans | PR-sized sequence and proof commands | `plans/` |
 | Active lane | current dogfood-calibrated evidence loop | `docs/status/DOGFOOD_CALIBRATED_EVIDENCE_LANE.md` |
 | Dogfood index | selected real-crate dogfood targets, usefulness notes, and recorded outcome movement | `docs/dogfood/index.md`, `docs/dogfood/index.json`, `docs/dogfood/usefulness-notes.md` |
+| Dogfood narrative | narrative summary of real-world findings across the seven dogfood crates: what fired, what did not, corrections, and open gaps | `docs/dogfood/REAL_WORLD_FINDINGS.md` |
+| Agent integration guide | using unsafe-review with a coding agent: bounded-card model, packet fields, readiness routing, do-not-do rules, and receipt discipline | `docs/explanation/using-unsafe-review-with-agents.md` |
 | Fuzzing | manual analyzer robustness harness and input contract | `docs/FUZZING.md` |
 | Support summary | concise support posture front panel | `docs/status/SUPPORT_SUMMARY.md` |
 | Support tiers | detailed product claim to proof ledger | `docs/status/SUPPORT_TIERS.md` |

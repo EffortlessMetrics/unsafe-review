@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      UNSAFE_REVIEW_VERSION: "0.3.1"
+      UNSAFE_REVIEW_VERSION: "0.3.6"
       BASE_REF: ${{ github.base_ref || github.event.repository.default_branch }}
       BUNDLE_DIR: target/unsafe-review
     steps:
@@ -66,6 +66,7 @@ jobs:
       - name: Verify bundle file shape
         run: |
           set -euo pipefail
+          # Required core: emitted by every supported unsafe-review release.
           for required in \
             review-kit.json \
             cards.json \
@@ -79,10 +80,20 @@ jobs:
             manual-repair-queue.json \
             tokmd-packets.json \
             lsp.json \
-            repair-queue.json
+            repair-queue.json \
+            unsafe-review-gate.json
           do
             if [ ! -s "${BUNDLE_DIR}/${required}" ]; then
               echo "::error::unsafe-review bundle is missing ${required}"
+              exit 1
+            fi
+          done
+          # Optional: added in newer releases — verified only if present.
+          for optional in \
+            usefulness-telemetry.json
+          do
+            if [ -e "${BUNDLE_DIR}/${optional}" ] && [ ! -s "${BUNDLE_DIR}/${optional}" ]; then
+              echo "::error::unsafe-review bundle has present-but-empty ${optional}"
               exit 1
             fi
           done
@@ -107,6 +118,8 @@ jobs:
             target/unsafe-review/manual-candidates.json
             target/unsafe-review/manual-repair-queue.json
             target/unsafe-review/tokmd-packets.json
+            target/unsafe-review/usefulness-telemetry.json
             target/unsafe-review/lsp.json
             target/unsafe-review/repair-queue.json
+            target/unsafe-review/unsafe-review-gate.json
           if-no-files-found: error

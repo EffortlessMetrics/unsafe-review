@@ -1,0 +1,183 @@
+schema_version = "1.0"
+
+id = "unsafe-review-source-of-truth-stack"
+title = "unsafe-review coverage-instrument ease-of-use build-out"
+status = "active"
+owner = "repo-infra"
+created = "2026-05-20"
+
+objective = """
+Ship the ease-of-use / coverage-instrument lane (UNSAFE-REVIEW-SPEC-0028 through
+0035): unsafe-review is the deterministic coverage instrument behind an
+LLM-orchestrated single CI gate (ub-review), with baseline-aware coverage
+movement and the projection surfaces (badge, comment-plan, LLM context packet,
+gate manifest) that make the five delivery surfaces adoptable. Deterministic
+decides the merge; the LLM layer is advisory. Releases run history-preserving
+through shipper. North star: docs/interop/north-star.md.
+"""
+
+end_state = [
+  "Coverage-slot model (SPEC-0029) is the single source every surface projects.",
+  "Baseline coverage movement (SPEC-0030: new/worsened/resolved/inherited) replaces the zero-debt gate so brownfield repos are adoptable.",
+  "Projection surfaces shipped: baseline-aware badge (0031), comment-plan coverage hardening (0032), LLM context packet (0033), and the unsafe-review-gate.json manifest (0034).",
+  "Repo-scan diagnosability (0035) is codified and acceptance-smoked.",
+  "The single tight CI gate (deterministic floor + advisory ub-review) is the gate; the release ceremony runs through shipper.",
+  "Every surface stays advisory: no proof, UB-free, Miri-clean, site-execution, calibrated-precision, or policy-ready claim.",
+]
+
+[[work_item]]
+id = "docs/source-of-truth-scaffold"
+status = "active"
+proposal = "UNSAFE-REVIEW-PROP-0002"
+spec = "UNSAFE-REVIEW-SPEC-0020"
+plan = "plans/0.2.0/implementation-plan.md"
+commands = [
+  "cargo run --locked -p xtask -- check-doc-artifacts",
+  "cargo run --locked -p xtask -- check-goals",
+  "cargo run --locked -p xtask -- check-package-boundary",
+  "cargo run --locked -p xtask -- check-ci-lanes",
+  "cargo run --locked -p xtask -- source-divergence",
+  "git diff --check",
+]
+
+[[work_item]]
+id = "ci-design-rail"
+status = "active"
+proposal = "UNSAFE-REVIEW-PROP-0002"
+spec = "UNSAFE-REVIEW-SPEC-0024"
+plan = "plans/0.2.0/implementation-plan.md"
+commands = [
+  "cargo run --locked -p xtask -- check-docs",
+  "cargo run --locked -p xtask -- check-doc-artifacts",
+  "cargo run --locked -p xtask -- check-goals",
+  "cargo run --locked -p xtask -- check-ci-lanes",
+  "cargo run --locked -p xtask -- check-pr",
+  "cargo run --locked -p xtask -- source-divergence",
+  "git diff --check",
+]
+
+[[work_item]]
+id = "docs-automation-control-plane"
+status = "active"
+proposal = "UNSAFE-REVIEW-PROP-0002"
+spec = "UNSAFE-REVIEW-SPEC-0025"
+plan = "plans/0.2.0/implementation-plan.md"
+commands = [
+  "cargo run --locked -p xtask -- check-docs-automation",
+  "cargo run --locked -p xtask -- check-spec-status",
+  "cargo run --locked -p xtask -- check-doc-artifacts",
+  "cargo run --locked -p xtask -- check-goals",
+  "cargo run --locked -p xtask -- check-docs",
+  "cargo run --locked -p xtask -- source-divergence",
+  "git diff --check",
+]
+
+[[work_item]]
+id = "accuracy-calibration-rail"
+status = "active"
+proposal = "UNSAFE-REVIEW-PROP-0002"
+spec = "UNSAFE-REVIEW-SPEC-0026"
+plan = ".rails/lanes/accuracy-calibration/implementation-plan.md"
+commands = [
+  "cargo run --locked -p xtask -- check-calibration",
+  "cargo run --locked -p xtask -- check-dogfood",
+  "cargo run --locked -p xtask -- check-doc-artifacts",
+  "cargo run --locked -p xtask -- check-goals",
+  "cargo run --locked -p xtask -- check-pr",
+  "cargo run --locked -p xtask -- source-divergence",
+  "git diff --check",
+]
+
+[[work_item]]
+id = "manual-candidate-bun-cockpit"
+status = "active"
+proposal = "UNSAFE-REVIEW-PROP-0002"
+spec = "UNSAFE-REVIEW-SPEC-0027"
+plan = ".rails/lanes/bun-stable-byte-cockpit/implementation-plan.md"
+commands = [
+  "cargo test -p unsafe-review-core manual_candidate",
+  "cargo test -p unsafe-review-core receipt",
+  "cargo test -p unsafe-review-cli candidate",
+  "cargo test -p unsafe-review first_pr",
+  "cargo test -p xtask manual_candidate",
+  "cargo run --locked -p xtask -- check-manual-candidate-examples",
+  "cargo run --locked -p xtask -- check-dogfood",
+  "cargo run --locked -p xtask -- check-pr",
+  "cargo run --locked -p xtask -- source-divergence",
+  "git diff --check",
+]
+
+[[work_item]]
+id = "validation-residue"
+status = "active"
+proposal = "UNSAFE-REVIEW-PROP-0002"
+plan = ".rails/lanes/validation-residue/implementation-plan.md"
+commands = [
+  "cargo test --workspace --locked",
+  "cargo run --locked -p xtask -- check-pr",
+  "cargo run --locked -p xtask -- check-goals",
+  "cargo run --locked -p xtask -- source-divergence",
+  "git diff --check",
+]
+
+[[work_item]]
+id = "usefulness-telemetry-projection"
+status = "active"
+spec = "UNSAFE-REVIEW-SPEC-0038"
+plan = ".rails/lanes/usefulness-telemetry/implementation-plan.md"
+commands = [
+  "cargo test -p unsafe-review-core usefulness_telemetry",
+  "cargo test -p unsafe-review --test e2e first_pr_emits_usefulness_telemetry_artifact",
+  "cargo run --locked -p xtask -- check-pr",
+]
+
+[[work_item]]
+id = "pr-alias-zero-config-entry-point"
+status = "active"
+spec = "UNSAFE-REVIEW-SPEC-0023"
+plan = ".rails/goals/active.toml"
+issue = "https://github.com/EffortlessMetrics/unsafe-review-swarm/issues/1622"
+commands = [
+  "cargo fmt --all --check",
+  "cargo clippy --workspace --all-targets --locked -- -D warnings",
+  "cargo test --workspace --locked",
+  "cargo run --locked -p xtask -- check-pr",
+]
+
+[[work_item]]
+id = "scheduled-corpus-backstop"
+status = "active"
+spec = "UNSAFE-REVIEW-SPEC-0039"
+plan = ".rails/goals/active.toml"
+issue = "https://github.com/EffortlessMetrics/unsafe-review-swarm/issues/1625"
+commands = [
+  "cargo fmt --all --check",
+  "cargo clippy --workspace --all-targets --locked -- -D warnings",
+  "cargo test --workspace --locked",
+  "cargo run --locked -p xtask -- check-pr",
+]
+
+[[work_item]]
+id = "corpus-usefulness-rollup"
+status = "active"
+spec = "UNSAFE-REVIEW-SPEC-0039"
+plan = ".rails/goals/active.toml"
+commands = [
+  "cargo fmt --all --check",
+  "cargo clippy --workspace --all-targets --locked -- -D warnings",
+  "cargo test --workspace --locked",
+  "cargo run --locked -p xtask -- corpus-usefulness",
+  "cargo run --locked -p xtask -- check-pr",
+]
+
+[[work_item]]
+id = "adoption-readiness"
+status = "active"
+spec = "UNSAFE-REVIEW-SPEC-0037"
+plan = ".rails/goals/active.toml"
+issue = "https://github.com/EffortlessMetrics/unsafe-review-swarm/issues/1648"
+commands = [
+  "cargo fmt --all --check",
+  "cargo clippy --workspace --all-targets --locked -- -D warnings",
+  "cargo run --locked -p xtask -- check-pr",
+]

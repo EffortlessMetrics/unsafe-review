@@ -64,9 +64,9 @@
           "summary": "Nearby `SAFETY:` comment was detected"
         },
         "discharge": {
-          "present": true,
-          "state": "present",
-          "summary": "Length or bounds guard code was detected"
+          "present": false,
+          "state": "missing",
+          "summary": "`debug_assert!` documents the intended invariant in debug builds, but it is not release-runtime guard evidence. Add an executable guard, witness receipt, or focused test reach."
         },
         "reach": {
           "present": true,
@@ -90,7 +90,7 @@
         "discharge": {
           "present": false,
           "state": "missing",
-          "summary": "No alignment guard code was detected"
+          "summary": "`debug_assert!` documents the intended invariant in debug builds, but it is not release-runtime guard evidence. Add an executable guard, witness receipt, or focused test reach."
         },
         "reach": {
           "present": true,
@@ -153,7 +153,7 @@
       }
     ],
     "contract": "Nearby `SAFETY:` comment was detected",
-    "discharge": "Some inferred safety obligations are missing local guard evidence",
+    "discharge": "No visible local guard detected",
     "reach": "1 related test file(s) mention owner `read_full_array`",
     "witness": "No imported witness receipt was found",
     "witness_routes": [
@@ -174,7 +174,7 @@
       "Missing visible local guard for inferred safety obligations",
       "No witness receipt imported for this card"
     ],
-    "next_action": "Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.",
+    "next_action": "Add or expose local guards for these `raw_pointer_read` safety obligations: (1) pointer is live and dereferenceable for the accessed type, (2) buffer has enough bytes for the accessed type, (3) pointer is aligned for the accessed type, (4) memory is initialized for the accessed type, (5) access remains inside one live allocation.",
     "verify_commands": [
       "cargo +nightly miri test read_full_array",
       "cargo +nightly careful test read_full_array"
@@ -211,7 +211,7 @@
       "manual_context": "absent",
       "baseline_state": "new",
       "outcome_movement": "regressed",
-      "comment_plan_status": "not_eligible",
+      "comment_plan_status": "selected",
       "agent_lsp_readiness": "ready"
     }
   }

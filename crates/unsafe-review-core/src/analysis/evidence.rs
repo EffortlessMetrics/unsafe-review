@@ -64,8 +64,8 @@ use self::call_syntax::{
 use self::callee_contract_discharge::callee_contract_discharge_state;
 use self::capacity_discharge::capacity_discharge_state;
 use self::code_text::{
-    compact_code, compact_contains_identifier, contains_executable_return,
-    strip_block_comments_and_literals,
+    compact_code, compact_contains_identifier, contains_executable_return, is_runtime_assert_at,
+    strip_block_comments_and_literals, text_contains_runtime_assert,
 };
 use self::contract_discharge::{
     DOCUMENTED_PRIVATE_UNSAFE_CONTRACT_DISCHARGE, PUBLIC_UNSAFE_API_CONTRACT_DISCHARGE,
@@ -80,7 +80,8 @@ pub(crate) use self::evidence_state::summarize_discharge;
 use self::evidence_state::{contract_state, reach_state};
 use self::freshness::{
     has_assignment_to_any_identifier, has_assignment_to_identifier, has_fresh_guard_pattern,
-    has_fresh_guard_pattern_for_identifiers, has_open_positive_branch_guard_for_identifiers,
+    has_fresh_runtime_assert_pattern, has_fresh_runtime_assert_pattern_for_identifiers,
+    has_open_positive_branch_guard_for_identifiers,
 };
 use self::generic_bounds::has_length_or_bounds_guard;
 use self::get_unchecked::{get_unchecked_receiver_and_index, has_get_unchecked_bounds_guard};
@@ -93,7 +94,9 @@ use self::option_state::{ends_with_some_pattern, is_some_binding, match_some_bra
 use self::ownership_discharge::ownership_discharge_state;
 use self::pointer_arithmetic::has_pointer_arithmetic_bounds_guard;
 use self::pointer_live_discharge::pointer_live_discharge_state;
-use self::raw_pointer_bounds::has_raw_pointer_read_bounds_evidence;
+use self::raw_pointer_bounds::{
+    has_raw_pointer_read_bounds_evidence, has_raw_pointer_write_bounds_evidence,
+};
 pub(crate) use self::reach_scan::reach_evidence;
 use self::receiver_path::{
     contains_receiver_fragment, contains_receiver_path, is_receiver_path_char,
@@ -2848,9 +2851,17 @@ mod tests {
             state: "owner_reached".to_string(),
             summary: "reached".to_string(),
         };
-        let raw_read = site_with_family(
+        // `debug_assert_eq!` is compiled out in release builds and must NOT discharge.
+        let debug_assert_eq_read = site_with_family(
             OperationFamily::RawPointerRead,
             vec!["debug_assert_eq!(self.len(), self.capacity());"],
+            "ptr::read(self.as_ptr() as *const [T; CAP])",
+            vec![],
+        );
+        // `assert_eq!` is a release-runtime guard and MUST discharge.
+        let raw_read = site_with_family(
+            OperationFamily::RawPointerRead,
+            vec!["assert_eq!(self.len(), self.capacity());"],
             "ptr::read(self.as_ptr() as *const [T; CAP])",
             vec![],
         );
@@ -2900,6 +2911,8 @@ mod tests {
             vec![],
         );
 
+        let debug_assert_eq_evidence =
+            obligation_evidence(&debug_assert_eq_read, &obligations, &contract, &reach);
         let evidence = obligation_evidence(&raw_read, &obligations, &contract, &reach);
         let nested_guard_evidence =
             obligation_evidence(&nested_short_buffer_guard, &obligations, &contract, &reach);
@@ -2920,6 +2933,9 @@ mod tests {
             &reach,
         );
 
+        // `debug_assert_eq!` is compiled out in release and must NOT discharge the obligation.
+        assert!(!debug_assert_eq_evidence[0].discharge.present);
+        // `assert_eq!` is a release-runtime guard and MUST discharge.
         assert!(evidence[0].discharge.present);
         assert!(nested_guard_evidence[0].discharge.present);
         assert!(!comment_return_evidence[0].discharge.present);
@@ -5037,9 +5053,18 @@ mod tests {
             state: "owner_reached".to_string(),
             summary: "reached".to_string(),
         };
-        let transmute = site_with_family(
+        // `debug_assert_eq!` is compiled out in release builds and cannot satisfy a runtime layout
+        // obligation; it must NOT be credited as a runtime guard.
+        let debug_assert_eq_transmute = site_with_family(
             OperationFamily::Transmute,
             vec!["debug_assert_eq!(core::mem::size_of::<u8>(), core::mem::size_of::<bool>());"],
+            "unsafe { core::mem::transmute_copy::<u8, bool>(&value) }",
+            vec![],
+        );
+        // Only `assert_eq!` (release-runtime) discharges the layout obligation.
+        let transmute = site_with_family(
+            OperationFamily::Transmute,
+            vec!["assert_eq!(core::mem::size_of::<u8>(), core::mem::size_of::<bool>());"],
             "unsafe { core::mem::transmute_copy::<u8, bool>(&value) }",
             vec![],
         );
@@ -5047,17 +5072,22 @@ mod tests {
             OperationFamily::Transmute,
             vec![
                 "if value == 0 {",
-                "debug_assert_eq!(core::mem::size_of::<u8>(), core::mem::size_of::<bool>());",
+                "assert_eq!(core::mem::size_of::<u8>(), core::mem::size_of::<bool>());",
                 "}",
             ],
             "unsafe { core::mem::transmute_copy::<u8, bool>(&value) }",
             vec![],
         );
 
+        let debug_assert_eq_evidence =
+            obligation_evidence(&debug_assert_eq_transmute, &obligations, &contract, &reach);
         let evidence = obligation_evidence(&transmute, &obligations, &contract, &reach);
         let closed_branch_evidence =
             obligation_evidence(&closed_branch_transmute, &obligations, &contract, &reach);
 
+        // `debug_assert_eq!` must NOT discharge the layout obligation.
+        assert!(!debug_assert_eq_evidence[0].discharge.present);
+        // `assert_eq!` DOES discharge the layout obligation.
         assert!(evidence[0].discharge.present);
         assert!(!closed_branch_evidence[0].discharge.present);
         assert!(!evidence[1].discharge.present);
@@ -5724,6 +5754,108 @@ fn reaches_read_one_in_integration_test() {
 
         assert_eq!(reach.state, "unknown");
         assert!(related_tests.is_empty());
+    }
+
+    #[test]
+    fn reach_evidence_bare_comment_mention_in_cfg_test_not_credited() -> Result<(), String> {
+        // Negative-control: owner mentioned only in a comment inside #[cfg(test)]
+        // block must NOT credit test reach (call-shape requirement).
+        let root = unique_temp_dir()?;
+        fs::create_dir_all(root.join("src")).map_err(|err| err.to_string())?;
+        fs::write(
+            root.join("src/lib.rs"),
+            r#"
+pub struct Collector { ptr: *mut u8 }
+unsafe impl Send for Collector {}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn check_zero() {
+        // Collector would be useful here, but it is never called.
+        assert_eq!(0, 0);
+    }
+}
+"#,
+        )
+        .map_err(|err| err.to_string())?;
+        let owner = "Collector".to_string();
+
+        let (reach, related_tests) = reach_evidence(&root, Some(&owner));
+
+        fs::remove_dir_all(&root).map_err(|err| err.to_string())?;
+        assert_eq!(
+            reach.state, "unreached",
+            "bare comment mention must NOT credit reach"
+        );
+        assert!(related_tests.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn reach_evidence_self_named_test_fn_not_credited() -> Result<(), String> {
+        // Negative-control: a #[test] fn whose name equals the owner must NOT
+        // self-credit reach (self-reach exclusion).
+        let root = unique_temp_dir()?;
+        fs::create_dir_all(root.join("src")).map_err(|err| err.to_string())?;
+        fs::write(
+            root.join("src/lib.rs"),
+            r#"
+pub unsafe fn collector(ptr: *mut u8) -> *mut u8 { ptr }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn collector() {
+        assert_eq!(1 + 1, 2);
+    }
+}
+"#,
+        )
+        .map_err(|err| err.to_string())?;
+        let owner = "collector".to_string();
+
+        let (reach, related_tests) = reach_evidence(&root, Some(&owner));
+
+        fs::remove_dir_all(&root).map_err(|err| err.to_string())?;
+        assert_eq!(
+            reach.state, "unreached",
+            "self-named test fn must NOT self-credit reach"
+        );
+        assert!(related_tests.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn reach_evidence_call_in_cfg_test_credited() -> Result<(), String> {
+        // Positive-control: owner called as a function inside #[cfg(test)] block
+        // must credit test reach.
+        let root = unique_temp_dir()?;
+        fs::create_dir_all(root.join("src")).map_err(|err| err.to_string())?;
+        fs::write(
+            root.join("src/lib.rs"),
+            r#"
+pub fn compute(x: u32) -> u32 { x }
+
+#[cfg(test)]
+mod tests {
+    use super::compute;
+    #[test]
+    fn calls_compute() {
+        let _ = compute(42);
+    }
+}
+"#,
+        )
+        .map_err(|err| err.to_string())?;
+        let owner = "compute".to_string();
+
+        let (reach, related_tests) = reach_evidence(&root, Some(&owner));
+
+        fs::remove_dir_all(&root).map_err(|err| err.to_string())?;
+        assert_eq!(reach.state, "owner_reached", "call must credit reach");
+        assert!(!related_tests.is_empty());
+        Ok(())
     }
 
     fn unique_temp_dir() -> Result<PathBuf, String> {
