@@ -241,7 +241,7 @@ jobs:
         # change unsafe-review's gate. Bump deliberately; keep the allowlist in sync.
         # SHA 4053bc0df7cd5918f8c6f80ceb3f714a572789d7 — #363 structured gate.json ingestion
         # (routes by schema, no markdown scraping) + #365 inline path:line review comments.
-        uses: EffortlessMetrics/ub-review@4053bc0df7cd5918f8c6f80ceb3f714a572789d7
+        uses: EffortlessMetrics/ub-review@1cea262a1329a2daf03611b0b905678afa3cab79
         with:
           preset: bun-ub
           mode: intelligent-ci
