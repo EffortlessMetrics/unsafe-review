@@ -4,6 +4,7 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 
 use calibration_constants::{
     CALIBRATION_CASE_FIELDS, CALIBRATION_REQUIRED_KINDS, HAZARD_KIND_SOURCE,
@@ -22,11 +23,13 @@ mod commands;
 mod corpus_backstop;
 mod corpus_usefulness;
 mod docs_automation_paths;
+mod dogfood_exec;
 mod dogfood_usefulness;
 mod first_hour;
 mod markdown;
 mod public_badges;
 mod public_surfaces;
+mod real_pr_corpus;
 mod source_sync;
 mod spec_status;
 mod support_tiers;
@@ -71,6 +74,8 @@ const FIX_RECIPE_DOC: &str = "docs/explanation/fix-recipes.md";
 const FIX_RECIPE_WORKFLOW_DOC: &str = "docs/FIND_AND_FIX_UB.md";
 const AGENT_PACKET_SPEC_DOC: &str = "docs/specs/UNSAFE-REVIEW-SPEC-0013-agent-packets.md";
 const UB_RISK_REVIEW_CI_DOC: &str = "docs/ci/UB_RISK_REVIEW_CI.md";
+const WORKSPACE_ROOT_ENV: &str = "UNSAFE_REVIEW_WORKSPACE_ROOT";
+static RUNTIME_WORKSPACE_ROOT: OnceLock<PathBuf> = OnceLock::new();
 const FIX_RECIPE_REQUIRED_GLOBAL_TEXT: &[&str] = &[
     "`unsafe-review` does not prove UB",
     "A suggested witness route is not evidence",
@@ -450,7 +455,14 @@ const POLICY_FILES: &[&str] = &[
     "policy/docs-automation.toml",
     "policy/accuracy-calibration.toml",
     "policy/public-surfaces.toml",
+    "policy/detector-contracts.toml",
+    "policy/stance-decisions.toml",
+    "policy/spec-coverage.toml",
+    "policy/pr-corpus.toml",
 ];
+const DETECTOR_CONTRACTS_LEDGER: &str = "policy/detector-contracts.toml";
+const STANCE_DECISIONS_LEDGER: &str = "policy/stance-decisions.toml";
+const SPEC_COVERAGE_LEDGER: &str = "policy/spec-coverage.toml";
 const WORKFLOW_ALLOWLIST: &str = "policy/workflow-allowlist.toml";
 const WORKFLOW_DIR: &str = ".github/workflows";
 const CORPUS_BACKSTOP_SAMPLE_REPORT: &str = "policy/corpus-backstop-sample-report.json";
@@ -833,17 +845,24 @@ fn main() {
 }
 
 fn run(args: Vec<String>) -> Result<(), String> {
-    let root = workspace_root()?;
-    std::env::set_current_dir(&root)
-        .map_err(|err| format!("failed to enter workspace root {}: {err}", root.display()))?;
+    let runtime_args = parse_runtime_args(args)?;
+    let command = commands::XtaskCommand::parse(&runtime_args.command_args)?;
+    if !command_requires_workspace_root(&command) {
+        print_help();
+        return Ok(());
+    }
 
-    match commands::XtaskCommand::parse(&args)? {
-        commands::XtaskCommand::Help => {
-            println!(
-                "xtask commands: check-pr, check-docs, check-policy, check-support-tiers, check-fixtures, check-calibration, check-dogfood, check-fuzz, check-doc-artifacts, check-docs-automation, check-spec-status, check-public-surfaces, check-goals, check-package-boundary, check-ci-lanes, check-advisory-artifacts <dir>, check-first-pr-artifacts <dir>, check-manual-candidate-examples, check-first-hour, dogfood-usefulness, sync-calibration-snapshot, source-divergence, check-source-sync, bless-goldens [fixture ...], corpus-backstop [--out <path>], check-corpus-backstop-schema <path>, corpus-usefulness [--out <path>], check-corpus-usefulness-schema <path>"
-            );
-            Ok(())
-        }
+    let root = workspace_root(runtime_args.workspace_root.as_deref())?;
+    remember_runtime_workspace_root(&root)?;
+    std::env::set_current_dir(&root).map_err(|err| {
+        format!(
+            "failed to enter resolved workspace root {}: {err}",
+            root.display()
+        )
+    })?;
+
+    match command {
+        commands::XtaskCommand::Help => Ok(()),
         commands::XtaskCommand::CheckPr => {
             check_docs()?;
             public_badges::check_generated_projection()?;
@@ -851,6 +870,9 @@ fn run(args: Vec<String>) -> Result<(), String> {
             check_support_tiers()?;
             check_fixtures()?;
             check_calibration()?;
+            check_fixture_surface_parity()?;
+            check_surface_determinism()?;
+            real_pr_corpus::check()?;
             check_dogfood()?;
             check_manual_fuzz_harness()?;
             check_tracked_generated_artifacts()?;
@@ -887,14 +909,193 @@ fn run(args: Vec<String>) -> Result<(), String> {
         commands::XtaskCommand::CheckCorpusUsefulnessSchema(path) => {
             corpus_usefulness::check_schema(&path)
         }
+        commands::XtaskCommand::CheckDetectorContracts => check_detector_contracts(),
+        commands::XtaskCommand::CheckStanceDecisions => check_stance_decisions(),
+        commands::XtaskCommand::CheckStanceCoverage => check_stance_coverage(),
+        commands::XtaskCommand::CheckSpecCoverage => check_spec_coverage(),
+        commands::XtaskCommand::CheckFixtureSurfaceParity => check_fixture_surface_parity(),
+        commands::XtaskCommand::CheckSurfaceDeterminism => check_surface_determinism(),
+        commands::XtaskCommand::CheckRealPrCorpus => real_pr_corpus::check(),
+        commands::XtaskCommand::DogfoodExec(raw_args) => {
+            let exec_args = dogfood_exec::DogfoodExecArgs::parse(&raw_args)?;
+            dogfood_exec::run(&exec_args)
+        }
     }
 }
 
-fn workspace_root() -> Result<PathBuf, String> {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
+fn command_requires_workspace_root(command: &commands::XtaskCommand) -> bool {
+    !matches!(command, commands::XtaskCommand::Help)
+}
+
+fn print_help() {
+    println!(
+        "xtask options before command: [--workspace-root <path>] (or {WORKSPACE_ROOT_ENV})\nxtask commands: check-pr, check-docs, check-policy, check-support-tiers, check-fixtures, check-calibration, check-dogfood, check-fuzz, check-doc-artifacts, check-docs-automation, check-spec-status, check-public-surfaces, check-goals, check-package-boundary, check-ci-lanes, check-advisory-artifacts <dir>, check-first-pr-artifacts <dir>, check-manual-candidate-examples, check-first-hour, dogfood-usefulness, sync-calibration-snapshot, source-divergence, check-source-sync, bless-goldens [fixture ...], corpus-backstop [--out <path>], check-corpus-backstop-schema <path>, corpus-usefulness [--out <path>], check-corpus-usefulness-schema <path>, check-detector-contracts, check-stance-decisions, check-stance-coverage, check-spec-coverage, check-fixture-surface-parity, check-surface-determinism, check-real-pr-corpus, dogfood-exec [--target <id>] [--work-dir <path>] [--max-cards <N>] [--strict] [--clean] [--timeout <secs>]"
+    );
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct RuntimeArgs {
+    workspace_root: Option<PathBuf>,
+    command_args: Vec<String>,
+}
+
+fn parse_runtime_args(args: Vec<String>) -> Result<RuntimeArgs, String> {
+    let mut iter = args.into_iter();
+    let program = iter.next().unwrap_or_else(|| "xtask".to_string());
+    let mut command_args = vec![program];
+    let mut workspace_root = None;
+
+    while let Some(arg) = iter.next() {
+        if arg == "--workspace-root" {
+            let value = iter
+                .next()
+                .ok_or_else(|| "--workspace-root requires a path argument".to_string())?;
+            set_runtime_workspace_root(&mut workspace_root, PathBuf::from(value))?;
+            continue;
+        }
+
+        if let Some(value) = arg.strip_prefix("--workspace-root=") {
+            if value.is_empty() {
+                return Err("--workspace-root requires a non-empty path".to_string());
+            }
+            set_runtime_workspace_root(&mut workspace_root, PathBuf::from(value))?;
+            continue;
+        }
+
+        command_args.push(arg);
+        command_args.extend(iter);
+        break;
+    }
+
+    Ok(RuntimeArgs {
+        workspace_root,
+        command_args,
+    })
+}
+
+fn set_runtime_workspace_root(
+    workspace_root: &mut Option<PathBuf>,
+    value: PathBuf,
+) -> Result<(), String> {
+    if value.as_os_str().is_empty() {
+        return Err("--workspace-root requires a non-empty path".to_string());
+    }
+    if workspace_root.replace(value).is_some() {
+        return Err("duplicate --workspace-root option".to_string());
+    }
+    Ok(())
+}
+
+fn workspace_root(cli_root: Option<&Path>) -> Result<PathBuf, String> {
+    let env_root = std::env::var_os(WORKSPACE_ROOT_ENV).map(PathBuf::from);
+    let current_dir = std::env::current_dir()
+        .map_err(|err| format!("failed to read current directory: {err}"))?;
+    resolve_workspace_root_from(cli_root, env_root.as_deref(), &current_dir)
+}
+
+fn resolve_workspace_root_from(
+    cli_root: Option<&Path>,
+    env_root: Option<&Path>,
+    start_dir: &Path,
+) -> Result<PathBuf, String> {
+    if let Some(root) = cli_root {
+        return validate_workspace_root("--workspace-root", root, start_dir);
+    }
+
+    if let Some(root) = env_root {
+        return validate_workspace_root(WORKSPACE_ROOT_ENV, root, start_dir);
+    }
+
+    if let Some(root) = git_workspace_root(start_dir)? {
+        return validate_workspace_root("git rev-parse --show-toplevel", &root, start_dir);
+    }
+
+    if let Some(root) = ancestor_workspace_root(start_dir) {
+        return validate_workspace_root("current directory ancestors", &root, start_dir);
+    }
+
+    Err(format!(
+        "failed to resolve workspace root from --workspace-root, {WORKSPACE_ROOT_ENV}, git rev-parse, or current directory ancestors; run xtask from the repository or pass --workspace-root <path>"
+    ))
+}
+
+fn git_workspace_root(start_dir: &Path) -> Result<Option<PathBuf>, String> {
+    let output = match Command::new("git")
+        .arg("-C")
+        .arg(start_dir)
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+    {
+        Ok(output) => output,
+        Err(_) => return Ok(None),
+    };
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let root = String::from_utf8(output.stdout)
+        .map_err(|err| format!("git rev-parse returned non-UTF-8 workspace root: {err}"))?;
+    let trimmed = root.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(PathBuf::from(trimmed)))
+}
+
+fn ancestor_workspace_root(start_dir: &Path) -> Option<PathBuf> {
+    start_dir
+        .ancestors()
+        .find(|candidate| has_workspace_root_markers(candidate))
         .map(Path::to_path_buf)
-        .ok_or_else(|| "failed to resolve workspace root from xtask manifest path".to_string())
+}
+
+fn validate_workspace_root(source: &str, root: &Path, start_dir: &Path) -> Result<PathBuf, String> {
+    if root.as_os_str().is_empty() {
+        return Err(format!("{source} resolved workspace root is empty"));
+    }
+    let candidate = if root.is_absolute() {
+        root.to_path_buf()
+    } else {
+        start_dir.join(root)
+    };
+    let resolved = fs::canonicalize(&candidate).map_err(|err| {
+        format!(
+            "{source} resolved workspace root {} is not usable: {err}",
+            candidate.display()
+        )
+    })?;
+    if !resolved.is_dir() {
+        return Err(format!(
+            "{source} resolved workspace root {} is not a directory",
+            resolved.display()
+        ));
+    }
+    if !has_workspace_root_markers(&resolved) {
+        return Err(format!(
+            "{source} resolved workspace root {} is missing required markers Cargo.toml and xtask/Cargo.toml",
+            resolved.display()
+        ));
+    }
+    Ok(resolved)
+}
+
+fn has_workspace_root_markers(candidate: &Path) -> bool {
+    candidate.join("Cargo.toml").is_file() && candidate.join("xtask").join("Cargo.toml").is_file()
+}
+
+fn remember_runtime_workspace_root(root: &Path) -> Result<(), String> {
+    if let Some(existing) = RUNTIME_WORKSPACE_ROOT.get() {
+        if existing == root {
+            return Ok(());
+        }
+        return Err(format!(
+            "runtime workspace root already set to {}, cannot reset to {}",
+            existing.display(),
+            root.display()
+        ));
+    }
+    RUNTIME_WORKSPACE_ROOT
+        .set(root.to_path_buf())
+        .map_err(|root| format!("failed to store runtime workspace root {}", root.display()))
 }
 
 fn check_docs() -> Result<(), String> {
@@ -970,8 +1171,649 @@ fn check_policy() -> Result<(), String> {
     check_ci_routing_contract()?;
     corpus_backstop::check_schema(Path::new(CORPUS_BACKSTOP_SAMPLE_REPORT))?;
     corpus_usefulness::check_schema(Path::new(CORPUS_USEFULNESS_SAMPLE_ROLLUP))?;
+    check_detector_contracts()?;
+    check_stance_decisions()?;
+    check_stance_coverage()?;
+    check_spec_coverage()?;
     println!("check-policy: ok");
     Ok(())
+}
+
+/// Report from a pure gate-evaluation function.
+///
+/// Tracked findings are documented gaps (owner + review_after present) that pass with a warning.
+/// Blocking findings are structural errors or undocumented gaps that fail the gate.
+struct GateReport {
+    tracked: Vec<String>,
+    blocking: Vec<String>,
+}
+
+/// Pure (no file I/O) evaluation of a parsed detector-contracts ledger value.
+///
+/// Blocking findings: malformed schema, missing/empty identity, duplicate id, empty required
+/// arrays (obligations/surfaces), non-array where array required, missing required scalars.
+/// The negative_fixtures gap is blocking unless the contract carries non-empty `proof_gap` AND
+/// non-empty `owner` AND non-empty `review_after` — in that case it is a tracked exception.
+fn evaluate_detector_contracts(value: &toml::Value, path: &str) -> Result<GateReport, String> {
+    let mut report = GateReport {
+        tracked: Vec::new(),
+        blocking: Vec::new(),
+    };
+
+    // [[contract]] key is absent in the empty scaffold — treat as zero entries.
+    let Some(contracts_val) = value.get("contract") else {
+        return Ok(report);
+    };
+    let contracts = contracts_val
+        .as_array()
+        .ok_or_else(|| format!("{path} `contract` must be an array"))?;
+
+    let mut seen_ids: Vec<String> = Vec::new();
+
+    for (idx, entry) in contracts.iter().enumerate() {
+        let table = entry
+            .as_table()
+            .ok_or_else(|| format!("{path} contract[{idx}] must be a table"))?;
+
+        // Hard-require identity field; use operation_family as the identity per spec.
+        let id = match table.get("operation_family").and_then(toml::Value::as_str) {
+            Some(s) if !s.trim().is_empty() => s.to_string(),
+            _ => {
+                report.blocking.push(format!(
+                    "{path} contract[{idx}]: missing or empty `operation_family`"
+                ));
+                format!("<contract[{idx}]>")
+            }
+        };
+
+        // Duplicate id check — blocking.
+        if seen_ids.contains(&id) {
+            report.blocking.push(format!(
+                "{path} contract `{id}`: duplicate operation_family"
+            ));
+        } else {
+            seen_ids.push(id.clone());
+        }
+
+        // obligations: required non-empty array — blocking.
+        match entry.get("obligations") {
+            None => {
+                report
+                    .blocking
+                    .push(format!("contract `{id}`: no obligations declared"));
+            }
+            Some(arr_val) => match arr_val.as_array() {
+                None => report
+                    .blocking
+                    .push(format!("contract `{id}`: `obligations` must be an array")),
+                Some(arr) if arr.is_empty() => {
+                    report
+                        .blocking
+                        .push(format!("contract `{id}`: obligations array is empty"));
+                }
+                _ => {}
+            },
+        }
+
+        // negative_fixtures: empty/absent is blocking UNLESS proof_gap + owner + review_after
+        // are all non-empty — then it is a tracked exception.
+        let neg_gap = match entry.get("negative_fixtures") {
+            None => true,
+            Some(arr_val) => match arr_val.as_array() {
+                None => {
+                    report.blocking.push(format!(
+                        "contract `{id}`: `negative_fixtures` must be an array"
+                    ));
+                    false // already reported as blocking (wrong type)
+                }
+                Some(arr) => arr.is_empty(),
+            },
+        };
+        if neg_gap {
+            let proof_gap = table
+                .get("proof_gap")
+                .and_then(toml::Value::as_str)
+                .map(|s| s.trim())
+                .unwrap_or("")
+                .to_string();
+            let owner = table
+                .get("owner")
+                .and_then(toml::Value::as_str)
+                .map(|s| s.trim())
+                .unwrap_or("")
+                .to_string();
+            let review_after = table
+                .get("review_after")
+                .and_then(toml::Value::as_str)
+                .map(|s| s.trim())
+                .unwrap_or("")
+                .to_string();
+            if !proof_gap.is_empty() && !owner.is_empty() && !review_after.is_empty() {
+                report.tracked.push(format!(
+                    "contract `{id}`: no negative_fixtures (tracked exception — owner: {owner}, review_after: {review_after})"
+                ));
+            } else {
+                report.blocking.push(format!(
+                    "contract `{id}`: no negative_fixtures (add fixtures or document gap with proof_gap + owner + review_after)"
+                ));
+            }
+        }
+
+        // surfaces: required non-empty array — blocking.
+        match entry.get("surfaces") {
+            None => {
+                report
+                    .blocking
+                    .push(format!("contract `{id}`: no surfaces declared"));
+            }
+            Some(arr_val) => match arr_val.as_array() {
+                None => {
+                    report
+                        .blocking
+                        .push(format!("contract `{id}`: `surfaces` must be an array"));
+                }
+                Some(arr) if arr.is_empty() => {
+                    report
+                        .blocking
+                        .push(format!("contract `{id}`: surfaces array is empty"));
+                }
+                _ => {}
+            },
+        }
+    }
+
+    // Handle optional [[exception]] entries — structural errors are blocking.
+    if let Some(exceptions_val) = value.get("exception") {
+        let exceptions = exceptions_val
+            .as_array()
+            .ok_or_else(|| format!("{path} `exception` must be an array"))?;
+        let mut seen_exc_ids: Vec<String> = Vec::new();
+        for (idx, exc) in exceptions.iter().enumerate() {
+            let table = exc
+                .as_table()
+                .ok_or_else(|| format!("{path} exception[{idx}] must be a table"))?;
+            let exc_id = match table.get("id").and_then(toml::Value::as_str) {
+                Some(s) if !s.trim().is_empty() => s.to_string(),
+                _ => {
+                    report
+                        .blocking
+                        .push(format!("{path} exception[{idx}]: missing or empty `id`"));
+                    format!("<exception[{idx}]>")
+                }
+            };
+            if seen_exc_ids.contains(&exc_id) {
+                report
+                    .blocking
+                    .push(format!("{path} exception `{exc_id}`: duplicate id"));
+            } else {
+                seen_exc_ids.push(exc_id);
+            }
+        }
+    }
+
+    Ok(report)
+}
+
+/// Enforcing gate: validates ledger shape of `policy/detector-contracts.toml`.
+///
+/// Structural violations (malformed TOML, missing identity, duplicate id, empty required arrays)
+/// and undocumented negative-fixture gaps are blocking — they fail check-pr. A contract that
+/// lacks negative_fixtures passes only when it carries a non-empty `proof_gap`, `owner`, and
+/// `review_after` (the documented-gap path), which is printed as a tracked exception.
+fn check_detector_contracts() -> Result<(), String> {
+    let path = DETECTOR_CONTRACTS_LEDGER;
+    let value = parse_toml_file(Path::new(path))?;
+    require_toml_string(&value, "schema_version", path)?;
+
+    let num_contracts = value
+        .get("contract")
+        .and_then(toml::Value::as_array)
+        .map(|v| v.len())
+        .unwrap_or(0);
+
+    let report = evaluate_detector_contracts(&value, path)?;
+
+    for f in &report.tracked {
+        println!("{f} (tracked exception)");
+    }
+    for f in &report.blocking {
+        println!("{f}");
+    }
+
+    if report.blocking.is_empty() {
+        println!(
+            "check-detector-contracts: ok ({num_contracts} contracts, {} tracked exception(s))",
+            report.tracked.len()
+        );
+        Ok(())
+    } else {
+        Err(format!(
+            "check-detector-contracts: {} blocking finding(s)",
+            report.blocking.len()
+        ))
+    }
+}
+
+/// Pure (no file I/O) evaluation of a parsed stance-decisions ledger value.
+///
+/// Blocking findings: malformed schema, missing/empty identity, duplicate id, missing required
+/// scalars (summary/rationale/owner/linked_spec), missing or empty linked_tests array.
+/// A non-empty `proof_gap` is a tracked exception iff the stance also carries non-empty `owner`
+/// AND non-empty `review_after`; otherwise it is a blocking finding.
+fn evaluate_stance_decisions(value: &toml::Value, path: &str) -> Result<GateReport, String> {
+    let mut report = GateReport {
+        tracked: Vec::new(),
+        blocking: Vec::new(),
+    };
+
+    let stances: &[toml::Value] = match value.get("stance") {
+        None => &[],
+        Some(v) => v
+            .as_array()
+            .ok_or_else(|| format!("{path} `stance` must be an array"))?,
+    };
+
+    let mut seen_ids: Vec<String> = Vec::new();
+
+    for (idx, entry) in stances.iter().enumerate() {
+        let table = entry
+            .as_table()
+            .ok_or_else(|| format!("{path} stance[{idx}] must be a table"))?;
+
+        // Hard-require identity field `id` — blocking.
+        let id = match table.get("id").and_then(toml::Value::as_str) {
+            Some(s) if !s.trim().is_empty() => s.to_string(),
+            _ => {
+                report
+                    .blocking
+                    .push(format!("{path} stance[{idx}]: missing or empty `id`"));
+                format!("<stance[{idx}]>")
+            }
+        };
+
+        // Duplicate id — blocking.
+        if seen_ids.contains(&id) {
+            report.blocking.push(format!("stance `{id}`: duplicate id"));
+        } else {
+            seen_ids.push(id.clone());
+        }
+
+        // Required descriptive fields — blocking.
+        for key in &["summary", "rationale", "owner", "linked_spec"] {
+            match table.get(*key).and_then(toml::Value::as_str) {
+                None => report
+                    .blocking
+                    .push(format!("stance `{id}`: missing `{key}`")),
+                Some(s) if s.trim().is_empty() => {
+                    report
+                        .blocking
+                        .push(format!("stance `{id}`: `{key}` is empty"));
+                }
+                _ => {}
+            }
+        }
+
+        // linked_tests: required non-empty array — blocking.
+        match table.get("linked_tests") {
+            None => {
+                report
+                    .blocking
+                    .push(format!("stance `{id}`: missing `linked_tests`"));
+            }
+            Some(arr_val) => match arr_val.as_array() {
+                None => report
+                    .blocking
+                    .push(format!("stance `{id}`: `linked_tests` must be an array")),
+                Some(arr) if arr.is_empty() => {
+                    report
+                        .blocking
+                        .push(format!("stance `{id}`: `linked_tests` is empty"));
+                }
+                _ => {}
+            },
+        }
+
+        // proof_gap: tracked exception iff owner + review_after are also non-empty; else blocking.
+        if let Some(gap_str) = table
+            .get("proof_gap")
+            .and_then(toml::Value::as_str)
+            .filter(|s| !s.trim().is_empty())
+        {
+            let owner = table
+                .get("owner")
+                .and_then(toml::Value::as_str)
+                .map(|s| s.trim())
+                .unwrap_or("")
+                .to_string();
+            let review_after = table
+                .get("review_after")
+                .and_then(toml::Value::as_str)
+                .map(|s| s.trim())
+                .unwrap_or("")
+                .to_string();
+            if !owner.is_empty() && !review_after.is_empty() {
+                report.tracked.push(format!(
+                    "stance `{id}`: proof_gap — {gap_str} (owner: {owner}, review_after: {review_after})"
+                ));
+            } else {
+                report.blocking.push(format!(
+                    "stance `{id}`: proof_gap requires non-empty owner + review_after to be a tracked exception"
+                ));
+            }
+        }
+    }
+
+    Ok(report)
+}
+
+/// Enforcing gate: validates ledger shape of `policy/stance-decisions.toml`.
+///
+/// Structural violations and undocumented proof gaps are blocking. A stance with a non-empty
+/// `proof_gap` passes only when it also carries non-empty `owner` and `review_after` (the
+/// documented-gap path), which is printed as a tracked exception. There is no tracked-exception
+/// path for stances that are missing required fields.
+fn check_stance_decisions() -> Result<(), String> {
+    let path = STANCE_DECISIONS_LEDGER;
+    let value = parse_toml_file(Path::new(path))?;
+    require_toml_string(&value, "schema_version", path)?;
+
+    let num_stances = value
+        .get("stance")
+        .and_then(toml::Value::as_array)
+        .map(|v| v.len())
+        .unwrap_or(0);
+
+    let report = evaluate_stance_decisions(&value, path)?;
+
+    for f in &report.tracked {
+        println!("{f} (tracked exception)");
+    }
+    for f in &report.blocking {
+        println!("{f}");
+    }
+
+    if report.blocking.is_empty() {
+        println!(
+            "check-stance-decisions: ok ({num_stances} stances, {} tracked exception(s))",
+            report.tracked.len()
+        );
+        Ok(())
+    } else {
+        Err(format!(
+            "check-stance-decisions: {} blocking finding(s)",
+            report.blocking.len()
+        ))
+    }
+}
+
+/// Pure (no file I/O) evaluation of the stance-coverage index in a parsed stance-decisions ledger.
+///
+/// For each stance, a PASS requires at least one non-empty corpus-evidence link: a non-empty
+/// `fixtures` array, a non-empty `dogfood_targets` array, a non-empty `pr_corpus_cases` array,
+/// or a non-empty `surfaces` array.  If none of those are present, the stance is blocking UNLESS
+/// it carries a non-empty `coverage_gap` AND non-empty `owner` AND non-empty `review_after` —
+/// in which case it is a tracked coverage gap (warn, pass).  Malformed entries are always blocking.
+fn evaluate_stance_coverage(value: &toml::Value, path: &str) -> Result<GateReport, String> {
+    let mut report = GateReport {
+        tracked: Vec::new(),
+        blocking: Vec::new(),
+    };
+
+    let stances: &[toml::Value] = match value.get("stance") {
+        None => &[],
+        Some(v) => v
+            .as_array()
+            .ok_or_else(|| format!("{path} `stance` must be an array"))?,
+    };
+
+    for (idx, entry) in stances.iter().enumerate() {
+        let table = match entry.as_table() {
+            Some(t) => t,
+            None => {
+                report
+                    .blocking
+                    .push(format!("{path} stance[{idx}]: must be a table"));
+                continue;
+            }
+        };
+
+        // Resolve the stance id for diagnostic messages; missing id is itself a structural error
+        // but we still need a label for subsequent messages.
+        let id = table
+            .get("id")
+            .and_then(toml::Value::as_str)
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("<stance[{idx}]>"));
+
+        // Helper: does the table contain a non-empty string array under `key`?
+        let has_non_empty_array = |key: &str| -> bool {
+            table
+                .get(key)
+                .and_then(toml::Value::as_array)
+                .map(|arr| !arr.is_empty())
+                .unwrap_or(false)
+        };
+
+        let has_coverage = has_non_empty_array("fixtures")
+            || has_non_empty_array("dogfood_targets")
+            || has_non_empty_array("pr_corpus_cases")
+            || has_non_empty_array("surfaces");
+
+        if has_coverage {
+            // Stance is covered — nothing to record.
+            continue;
+        }
+
+        // No corpus evidence link present; check for a tracked coverage_gap exception.
+        let gap = table
+            .get("coverage_gap")
+            .and_then(toml::Value::as_str)
+            .map(|s| s.trim())
+            .unwrap_or("")
+            .to_string();
+
+        if gap.is_empty() {
+            report.blocking.push(format!(
+                "stance `{id}`: no corpus evidence (fixtures / dogfood_targets / pr_corpus_cases / surfaces) \
+                 and no coverage_gap; add real evidence or a tracked gap with owner + review_after"
+            ));
+            continue;
+        }
+
+        // Has a non-empty coverage_gap — valid only with owner + review_after.
+        let owner = table
+            .get("owner")
+            .and_then(toml::Value::as_str)
+            .map(|s| s.trim())
+            .unwrap_or("")
+            .to_string();
+        let review_after = table
+            .get("review_after")
+            .and_then(toml::Value::as_str)
+            .map(|s| s.trim())
+            .unwrap_or("")
+            .to_string();
+
+        if !owner.is_empty() && !review_after.is_empty() {
+            report.tracked.push(format!(
+                "stance `{id}`: coverage_gap — {gap} (owner: {owner}, review_after: {review_after})"
+            ));
+        } else {
+            report.blocking.push(format!(
+                "stance `{id}`: coverage_gap requires non-empty owner + review_after to be a tracked exception"
+            ));
+        }
+    }
+
+    Ok(report)
+}
+
+/// Informational-then-enforcing gate: validates that every stance in
+/// `policy/stance-decisions.toml` has at least one corpus-evidence link.
+///
+/// A stance with no evidence link is blocking unless it carries a `coverage_gap` with
+/// non-empty `owner` and `review_after`, in which case it is a tracked coverage gap and
+/// printed as "(tracked coverage gap)".  Structural errors are always blocking.
+fn check_stance_coverage() -> Result<(), String> {
+    let path = STANCE_DECISIONS_LEDGER;
+    let value = parse_toml_file(Path::new(path))?;
+    require_toml_string(&value, "schema_version", path)?;
+
+    let num_stances = value
+        .get("stance")
+        .and_then(toml::Value::as_array)
+        .map(|v| v.len())
+        .unwrap_or(0);
+
+    let report = evaluate_stance_coverage(&value, path)?;
+
+    for f in &report.tracked {
+        println!("{f} (tracked coverage gap)");
+    }
+    for f in &report.blocking {
+        println!("{f}");
+    }
+
+    if report.blocking.is_empty() {
+        println!(
+            "check-stance-coverage: ok ({num_stances} stances, {} tracked coverage gap(s))",
+            report.tracked.len()
+        );
+        Ok(())
+    } else {
+        Err(format!(
+            "check-stance-coverage: {} blocking finding(s)",
+            report.blocking.len()
+        ))
+    }
+}
+
+/// Pure (no file I/O) evaluation of a parsed spec-coverage ledger value.
+///
+/// Blocking findings: malformed schema, missing/empty identity, duplicate name, missing required
+/// scalars (canonical_source), missing or empty surfaces array, and single_truth=false (always
+/// blocking — a single-truth violation is a defect to fix, not a gap to ledger; there is no
+/// tracked-exception path for spec-coverage).
+fn evaluate_spec_coverage(value: &toml::Value, path: &str) -> Result<GateReport, String> {
+    let mut report = GateReport {
+        tracked: Vec::new(),
+        blocking: Vec::new(),
+    };
+
+    let fields: &[toml::Value] = match value.get("field") {
+        None => &[],
+        Some(v) => v
+            .as_array()
+            .ok_or_else(|| format!("{path} `field` must be an array"))?,
+    };
+
+    let mut seen_names: Vec<String> = Vec::new();
+
+    for (idx, entry) in fields.iter().enumerate() {
+        let table = entry
+            .as_table()
+            .ok_or_else(|| format!("{path} field[{idx}] must be a table"))?;
+
+        // Hard-require identity field `name` — blocking.
+        let name = match table.get("name").and_then(toml::Value::as_str) {
+            Some(s) if !s.trim().is_empty() => s.to_string(),
+            _ => {
+                report
+                    .blocking
+                    .push(format!("{path} field[{idx}]: missing or empty `name`"));
+                format!("<field[{idx}]>")
+            }
+        };
+
+        // Duplicate name — blocking.
+        if seen_names.contains(&name) {
+            report
+                .blocking
+                .push(format!("field `{name}`: duplicate name"));
+        } else {
+            seen_names.push(name.clone());
+        }
+
+        // canonical_source: required non-empty scalar — blocking.
+        match table.get("canonical_source").and_then(toml::Value::as_str) {
+            None => report
+                .blocking
+                .push(format!("field `{name}`: missing `canonical_source`")),
+            Some(s) if s.trim().is_empty() => {
+                report
+                    .blocking
+                    .push(format!("field `{name}`: `canonical_source` is empty"));
+            }
+            _ => {}
+        }
+
+        // surfaces: required non-empty array — blocking.
+        match table.get("surfaces") {
+            None => {
+                report
+                    .blocking
+                    .push(format!("field `{name}`: missing `surfaces`"));
+            }
+            Some(arr_val) => match arr_val.as_array() {
+                None => report
+                    .blocking
+                    .push(format!("field `{name}`: `surfaces` must be an array")),
+                Some(arr) if arr.is_empty() => {
+                    report
+                        .blocking
+                        .push(format!("field `{name}`: `surfaces` is empty"));
+                }
+                _ => {}
+            },
+        }
+
+        // single_truth=false is always blocking — a single-truth violation is a defect, not a gap.
+        // There is no tracked-exception path for spec-coverage.
+        if let Some(false) = table.get("single_truth").and_then(toml::Value::as_bool) {
+            let note = table
+                .get("note")
+                .and_then(toml::Value::as_str)
+                .unwrap_or("");
+            report
+                .blocking
+                .push(format!("field `{name}`: single_truth=false ({note})"));
+        }
+    }
+
+    Ok(report)
+}
+
+/// Enforcing gate: validates ledger shape of `policy/spec-coverage.toml`.
+///
+/// Structural violations and single_truth=false fields are always blocking — a single-truth
+/// violation is a defect to fix, not a gap to ledger. There is no tracked-exception path
+/// for spec-coverage findings.
+fn check_spec_coverage() -> Result<(), String> {
+    let path = SPEC_COVERAGE_LEDGER;
+    let value = parse_toml_file(Path::new(path))?;
+    require_toml_string(&value, "schema_version", path)?;
+
+    let num_fields = value
+        .get("field")
+        .and_then(toml::Value::as_array)
+        .map(|v| v.len())
+        .unwrap_or(0);
+
+    let report = evaluate_spec_coverage(&value, path)?;
+
+    for f in &report.blocking {
+        println!("{f}");
+    }
+
+    if report.blocking.is_empty() {
+        println!("check-spec-coverage: ok ({num_fields} fields, 0 blocking finding(s))");
+        Ok(())
+    } else {
+        Err(format!(
+            "check-spec-coverage: {} blocking finding(s)",
+            report.blocking.len()
+        ))
+    }
 }
 
 fn check_ci_routing_contract() -> Result<(), String> {
@@ -2967,6 +3809,148 @@ fn check_fixtures() -> Result<(), String> {
     Ok(())
 }
 
+/// Verify that committed surface goldens (`expected.lsp.json`,
+/// `expected.repair-queue.json`) are byte-identical to a fresh rendering of
+/// each calibration fixture that has `surface_goldens` set.
+///
+/// The gate is deterministic: both surfaces contain no `tool_version`,
+/// `generated_at`, or wall-clock timestamp, so re-rendering produces the same
+/// bytes on every run.
+fn check_fixture_surface_parity() -> Result<(), String> {
+    let manifest = calibration_manifest::validate()?;
+    let mut checked = 0usize;
+    let mut mismatches: Vec<String> = Vec::new();
+
+    for (fixture, case) in &manifest.fixture_cases {
+        if case.surface_goldens.is_empty() {
+            continue;
+        }
+        for surface in &case.surface_goldens {
+            let filename = surface_golden_filename(surface);
+            let committed_path = workspace_path(&format!("fixtures/{fixture}/{filename}"));
+            let committed = read_to_string(&committed_path).map_err(|err| {
+                format!(
+                    "check-fixture-surface-parity: fixture `{fixture}` surface `{surface}`: \
+                     committed golden `{filename}` missing or unreadable: {err}. \
+                     Run `cargo run -p xtask -- bless-goldens` to generate it."
+                )
+            })?;
+
+            let rendered =
+                unsafe_review_core::render_fixture_surface(fixture, surface).map_err(|err| {
+                    format!(
+                        "check-fixture-surface-parity: fixture `{fixture}` surface `{surface}`: \
+                         render failed: {err}"
+                    )
+                })?;
+
+            if committed != rendered {
+                let first_diff = first_differing_line(&committed, &rendered);
+                mismatches.push(format!(
+                    "  fixture `{fixture}` surface `{surface}` ({filename}): {first_diff}"
+                ));
+            }
+            checked += 1;
+        }
+    }
+
+    if !mismatches.is_empty() {
+        return Err(format!(
+            "check-fixture-surface-parity: {} surface golden(s) do not match rendered output \
+             (run `cargo run -p xtask -- bless-goldens` to regenerate):\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        ));
+    }
+
+    println!("check-fixture-surface-parity: ok ({checked} surface goldens verified)");
+    Ok(())
+}
+
+const SURFACE_DETERMINISM_RUNS: usize = 3;
+
+/// Verify that canonical fixture surfaces render to byte-identical output across
+/// repeated generation in one process.
+fn check_surface_determinism() -> Result<(), String> {
+    let manifest = calibration_manifest::validate()?;
+    let mut checked = 0usize;
+    let mut mismatches: Vec<String> = Vec::new();
+
+    for (fixture, case) in &manifest.fixture_cases {
+        if case.surface_goldens.is_empty() {
+            continue;
+        }
+        for surface in &case.surface_goldens {
+            let baseline =
+                unsafe_review_core::render_fixture_surface(fixture, surface).map_err(|err| {
+                    format!(
+                        "check-surface-determinism: fixture `{fixture}` surface `{surface}`: \
+                         initial render failed: {err}"
+                    )
+                })?;
+
+            for run_idx in 2..=SURFACE_DETERMINISM_RUNS {
+                let candidate = unsafe_review_core::render_fixture_surface(fixture, surface)
+                    .map_err(|err| {
+                        format!(
+                            "check-surface-determinism: fixture `{fixture}` surface `{surface}`: \
+                             render {run_idx} failed: {err}"
+                        )
+                    })?;
+                if baseline != candidate {
+                    let first_diff = first_differing_line(&baseline, &candidate);
+                    mismatches.push(format!(
+                        "  fixture `{fixture}` surface `{surface}` render {run_idx}: {first_diff}"
+                    ));
+                    break;
+                }
+            }
+            checked += 1;
+        }
+    }
+
+    if !mismatches.is_empty() {
+        return Err(format!(
+            "check-surface-determinism: {} surface render(s) drifted across repeated generation:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        ));
+    }
+
+    println!(
+        "check-surface-determinism: ok ({checked} surface render(s), {SURFACE_DETERMINISM_RUNS} passes each)"
+    );
+    Ok(())
+}
+
+/// Return the committed golden filename for a surface name.
+fn surface_golden_filename(surface: &str) -> &'static str {
+    match surface {
+        "lsp" => "expected.lsp.json",
+        "repair-queue" => "expected.repair-queue.json",
+        "comment-plan" => "expected.comment-plan.json",
+        _ => "expected.unknown.json",
+    }
+}
+
+/// Describe the first line where two multi-line strings differ.
+fn first_differing_line(committed: &str, rendered: &str) -> String {
+    let committed_lines: Vec<&str> = committed.lines().collect();
+    let rendered_lines: Vec<&str> = rendered.lines().collect();
+    let len = committed_lines.len().max(rendered_lines.len());
+    for i in 0..len {
+        let a = committed_lines.get(i).copied().unwrap_or("<missing>");
+        let b = rendered_lines.get(i).copied().unwrap_or("<missing>");
+        if a != b {
+            return format!(
+                "first diff at line {}: committed={a:?} rendered={b:?}",
+                i + 1
+            );
+        }
+    }
+    "content differs but all lines appear equal (trailing newline difference?)".to_string()
+}
+
 fn check_fixture_exception_ledgers(dirs: &[PathBuf]) -> Result<(), String> {
     let mut fixture_paths = BTreeMap::new();
     for dir in dirs {
@@ -3034,8 +4018,27 @@ fn sync_calibration_snapshot() -> Result<(), String> {
 
 fn bless_goldens(names: &[String]) -> Result<(), String> {
     let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
-    let written = unsafe_review_core::bless_fixture_card_goldens(&refs)?;
-    println!("bless-goldens: updated {} fixture(s)", written.len());
+    let mut written = unsafe_review_core::bless_fixture_card_goldens(&refs)?;
+
+    // Also bless surface goldens for fixtures that declare `surface_goldens`
+    // in calibration.toml. When specific fixtures are named, only bless those;
+    // when no names are given, bless all fixtures that have surface_goldens.
+    let manifest = calibration_manifest::validate()?;
+    for (fixture, case) in &manifest.fixture_cases {
+        if case.surface_goldens.is_empty() {
+            continue;
+        }
+        // If caller named specific fixtures, skip fixtures not in the list.
+        if !names.is_empty() && !names.iter().any(|n| n == fixture) {
+            continue;
+        }
+        let surfaces: Vec<&str> = case.surface_goldens.iter().map(|s| s.as_str()).collect();
+        let surface_written =
+            unsafe_review_core::bless_fixture_surface_goldens(fixture, &surfaces)?;
+        written.extend(surface_written);
+    }
+
+    println!("bless-goldens: updated {} file(s)", written.len());
     for path in &written {
         println!("  {}", path.display());
     }
@@ -6381,6 +7384,7 @@ fn fixture_known_operation_family(operation_family: &str) -> bool {
             | "stable_byte_source_rab_async"
             | "stable_byte_source_sab_race"
             | "stable_byte_source_native_ffi_read"
+            | "unsafe_declaration"
             | "unknown"
     )
 }
@@ -7818,7 +8822,7 @@ fn fixture_card_operation_path(
             require_non_empty_json_str(card, "operation", &format!("{path} card[{idx}]"))?;
         return Ok(unsafe_call_identity_path(operation));
     }
-    if operation_family == "unknown" {
+    if matches!(operation_family, "unsafe_declaration" | "unknown") {
         return Ok(site
             .get("owner")
             .and_then(serde_json::Value::as_str)
@@ -9478,20 +10482,33 @@ pub(crate) fn read_to_string(path: &Path) -> Result<String, String> {
 }
 
 pub(crate) fn workspace_path(relative: &str) -> PathBuf {
-    let current_dir_path = PathBuf::from(relative);
-    if current_dir_path.exists() {
-        current_dir_path
+    let root = runtime_workspace_root_for_paths();
+    workspace_path_from_root(&root, relative)
+}
+
+fn runtime_workspace_root_for_paths() -> PathBuf {
+    if let Some(root) = RUNTIME_WORKSPACE_ROOT.get() {
+        return root.clone();
+    }
+
+    // Historical tests call path helpers directly. Normal xtask execution stores
+    // the validated root before subcommands run, so this fallback is not the
+    // runtime source of truth.
+    let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    ancestor_workspace_root(&current_dir).unwrap_or(current_dir)
+}
+
+fn workspace_path_from_root(root: &Path, relative: &str) -> PathBuf {
+    let path = PathBuf::from(relative);
+    if path.is_absolute() {
+        path
     } else {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join(relative)
+        root.join(path)
     }
 }
 
 pub(crate) fn repo_path(relative: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join(relative)
+    workspace_path(relative)
 }
 
 fn fixture_dirs(dir: &Path) -> Result<Vec<PathBuf>, String> {
@@ -9692,6 +10709,165 @@ mod tests {
         }
     }
 
+    fn write_fake_workspace_root(root: &Path) -> Result<(), String> {
+        fs::create_dir_all(root.join("xtask"))
+            .map_err(|err| format!("create fake xtask dir failed: {err}"))?;
+        fs::write(root.join("Cargo.toml"), "[workspace]\n")
+            .map_err(|err| format!("write fake workspace manifest failed: {err}"))?;
+        fs::write(
+            root.join("xtask").join("Cargo.toml"),
+            "[package]\nname = \"xtask\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+        )
+        .map_err(|err| format!("write fake xtask manifest failed: {err}"))?;
+        Ok(())
+    }
+
+    #[test]
+    fn runtime_args_strip_workspace_root_before_command_parse() -> Result<(), String> {
+        let args = parse_runtime_args(vec![
+            "xtask".to_string(),
+            "--workspace-root".to_string(),
+            "repo-b".to_string(),
+            "check-stance-decisions".to_string(),
+        ])?;
+        assert_eq!(args.workspace_root, Some(PathBuf::from("repo-b")));
+        assert_eq!(
+            args.command_args,
+            vec!["xtask".to_string(), "check-stance-decisions".to_string()]
+        );
+
+        let equals_args = parse_runtime_args(vec![
+            "xtask".to_string(),
+            "--workspace-root=repo-b".to_string(),
+            "check-pr".to_string(),
+        ])?;
+        assert_eq!(equals_args.workspace_root, Some(PathBuf::from("repo-b")));
+        assert_eq!(
+            equals_args.command_args,
+            vec!["xtask".to_string(), "check-pr".to_string()]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn runtime_args_reject_duplicate_workspace_root() -> Result<(), String> {
+        let err = err_text(parse_runtime_args(vec![
+            "xtask".to_string(),
+            "--workspace-root".to_string(),
+            "repo-a".to_string(),
+            "--workspace-root=repo-b".to_string(),
+            "check-pr".to_string(),
+        ]))?;
+        assert!(err.contains("duplicate --workspace-root option"));
+        Ok(())
+    }
+
+    #[test]
+    fn help_command_does_not_require_workspace_root() -> Result<(), String> {
+        let help_args = parse_runtime_args(vec!["xtask".to_string(), "--help".to_string()])?;
+        let help_command = commands::XtaskCommand::parse(&help_args.command_args)?;
+        assert!(!command_requires_workspace_root(&help_command));
+
+        let no_arg_help = parse_runtime_args(vec!["xtask".to_string()])?;
+        let no_arg_command = commands::XtaskCommand::parse(&no_arg_help.command_args)?;
+        assert!(!command_requires_workspace_root(&no_arg_command));
+
+        let check_pr_args = parse_runtime_args(vec!["xtask".to_string(), "check-pr".to_string()])?;
+        let check_pr_command = commands::XtaskCommand::parse(&check_pr_args.command_args)?;
+        assert!(command_requires_workspace_root(&check_pr_command));
+        Ok(())
+    }
+
+    #[test]
+    fn workspace_root_cli_override_wins_over_env_and_current_checkout() -> Result<(), String> {
+        let base = unique_temp_dir("xtask-root-cli")?;
+        let cli_root = base.join("cli-root");
+        let env_root = base.join("env-root");
+        let current_root = base.join("current-root");
+        write_fake_workspace_root(&cli_root)?;
+        write_fake_workspace_root(&env_root)?;
+        write_fake_workspace_root(&current_root)?;
+
+        let resolved =
+            resolve_workspace_root_from(Some(&cli_root), Some(&env_root), &current_root)?;
+        assert_eq!(
+            resolved,
+            fs::canonicalize(&cli_root).map_err(|err| err.to_string())?
+        );
+
+        fs::remove_dir_all(&base).map_err(|err| format!("cleanup fake roots failed: {err}"))?;
+        Ok(())
+    }
+
+    #[test]
+    fn workspace_root_env_override_wins_over_current_checkout() -> Result<(), String> {
+        let base = unique_temp_dir("xtask-root-env")?;
+        let env_root = base.join("env-root");
+        let current_root = base.join("current-root");
+        write_fake_workspace_root(&env_root)?;
+        write_fake_workspace_root(&current_root)?;
+
+        let resolved = resolve_workspace_root_from(None, Some(&env_root), &current_root)?;
+        assert_eq!(
+            resolved,
+            fs::canonicalize(&env_root).map_err(|err| err.to_string())?
+        );
+
+        fs::remove_dir_all(&base).map_err(|err| format!("cleanup fake roots failed: {err}"))?;
+        Ok(())
+    }
+
+    #[test]
+    fn workspace_root_uses_runtime_checkout_when_no_override_is_set() -> Result<(), String> {
+        let base = unique_temp_dir("xtask-root-current")?;
+        let runtime_root = base.join("runtime-root");
+        let nested_dir = runtime_root.join("crates").join("demo");
+        fs::create_dir_all(&nested_dir)
+            .map_err(|err| format!("create nested dir failed: {err}"))?;
+        write_fake_workspace_root(&runtime_root)?;
+
+        let resolved = resolve_workspace_root_from(None, None, &nested_dir)?;
+        assert_eq!(
+            resolved,
+            fs::canonicalize(&runtime_root).map_err(|err| err.to_string())?
+        );
+
+        fs::remove_dir_all(&base).map_err(|err| format!("cleanup fake root failed: {err}"))?;
+        Ok(())
+    }
+
+    #[test]
+    fn workspace_root_invalid_explicit_root_reports_resolved_path() -> Result<(), String> {
+        let base = unique_temp_dir("xtask-root-invalid")?;
+        fs::create_dir_all(&base).map_err(|err| format!("create fake base failed: {err}"))?;
+        let invalid_root = base.join("not-a-workspace");
+        fs::create_dir_all(&invalid_root)
+            .map_err(|err| format!("create invalid root failed: {err}"))?;
+
+        let err = err_text(resolve_workspace_root_from(
+            Some(&invalid_root),
+            None,
+            &base,
+        ))?;
+        assert!(err.contains("--workspace-root resolved workspace root"));
+        assert!(err.contains("not-a-workspace"));
+        assert!(err.contains("Cargo.toml"));
+        assert!(err.contains("xtask/Cargo.toml"));
+
+        fs::remove_dir_all(&base).map_err(|err| format!("cleanup fake root failed: {err}"))?;
+        Ok(())
+    }
+
+    #[test]
+    fn workspace_path_joins_missing_relative_paths_to_runtime_root() -> Result<(), String> {
+        let root = PathBuf::from("runtime-root");
+        assert_eq!(
+            workspace_path_from_root(&root, "missing/generated.json"),
+            root.join("missing/generated.json")
+        );
+        Ok(())
+    }
+
     #[test]
     fn xtask_rejects_unexpected_trailing_args() -> Result<(), String> {
         let args = vec![
@@ -9725,6 +10901,15 @@ mod tests {
         assert!(err.contains("extra"));
         require_max_args(&args[..3], "check-advisory-artifacts", 3)?;
         Ok(())
+    }
+
+    #[test]
+    fn xtask_accepts_surface_determinism_command() -> Result<(), String> {
+        let args = vec!["xtask".to_string(), "check-surface-determinism".to_string()];
+        match commands::XtaskCommand::parse(&args)? {
+            commands::XtaskCommand::CheckSurfaceDeterminism => Ok(()),
+            _ => Err("check-surface-determinism parsed as the wrong command".to_string()),
+        }
     }
 
     #[test]
@@ -20685,14 +21870,11 @@ Snapshot reports:
     -> Result<(), String> {
         let dir = unique_temp_dir("unsafe-review-artifacts-comment-unchanged-reason")?;
         fs::create_dir_all(&dir).map_err(|err| format!("create temp dir failed: {err}"))?;
-        write_two_card_artifacts(&dir)?;
-        let path = dir.join("comment-plan.json");
-        let mut comment_plan: serde_json::Value = serde_json::from_str(
-            &fs::read_to_string(&path).map_err(|err| format!("read comment plan failed: {err}"))?,
+        write_valid_artifacts(&dir)?;
+        fs::write(
+            dir.join("comment-plan.json"),
+            r#"{"schema_version":"0.1","mode":"plan_only","policy":"advisory","comments":[],"not_selected":[{"card_id":"card-1","path":"src/lib.rs","line":7,"changed_line":false,"class":"guard_missing","priority":"high","confidence":"medium","proof_path":"source_route_only","operation":"unsafe { ptr.cast::<Header>().read() }","operation_family":"raw_pointer_read","next_action":"Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.","actionability":"specific_guard_missing","relevance":"medium","reason":"not selected by current inline comment policy","reason_code":"not_selected_by_policy"}],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}"#,
         )
-        .map_err(|err| format!("parse comment plan failed: {err}"))?;
-        comment_plan["not_selected"][0]["changed_line"] = serde_json::json!(false);
-        fs::write(&path, comment_plan.to_string())
             .map_err(|err| format!("write comment plan failed: {err}"))?;
 
         let result = check_advisory_artifacts(&dir);
@@ -20822,11 +22004,10 @@ Snapshot reports:
         let result = check_advisory_artifacts(&dir);
 
         fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        let err = result.err().unwrap_or_default();
         assert!(
-            result
-                .err()
-                .unwrap_or_default()
-                .contains("comment-plan.json not_selected agent_readiness.state")
+            err.contains("comment-plan.json not_selected agent_readiness.state"),
+            "{err}"
         );
         Ok(())
     }
@@ -20875,11 +22056,10 @@ Snapshot reports:
         let result = check_advisory_artifacts(&dir);
 
         fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        let err = result.err().unwrap_or_default();
         assert!(
-            result
-                .err()
-                .unwrap_or_default()
-                .contains("comment-plan.json not_selected reason_code")
+            err.contains("comment-plan.json not_selected reason_code"),
+            "{err}"
         );
         Ok(())
     }
@@ -23310,7 +24490,7 @@ review_after = "2026-08-01"
                             "ready": false,
                             "state": "requires_human_review",
                             "reasons": [
-                                "operation family `unknown` is not safe for automatic repair delegation",
+                                "operation family `unsafe_declaration` is not safe for automatic repair delegation",
                             ],
                         });
                         entry["repair_queue_buckets"] = serde_json::json!([
@@ -23672,7 +24852,7 @@ review_after = "2026-08-01"
     fn write_valid_artifacts(dir: &Path) -> Result<(), String> {
         fs::write(
             dir.join("cards.json"),
-            r#"{"schema_version":"0.2","tool":"unsafe-review","policy":"advisory","scope":"diff","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result","summary":{"changed_files":1,"changed_rust_files":1,"changed_non_rust_files":0,"cards":1,"open_actionable_gaps":1},"cards":[{"id":"card-1","class":"guard_missing","priority":"high","confidence":"medium","proof_path":"source_route_only","hazards":["alignment"],"site":{"file":"src/lib.rs","line":7,"column":5},"operation":"unsafe { ptr.cast::<Header>().read() }","operation_family":"raw_pointer_read","next_action":"Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.","obligation_evidence":[{"key":"alignment","description":"pointer aligned","contract":{"present":true,"state":"present","summary":"safety contract"},"discharge":{"present":false,"state":"missing","summary":"No visible local guard"},"reach":{"present":true,"state":"present","summary":"related test mention"},"witness":{"present":false,"state":"missing","summary":"No imported witness receipt"}}],"contract":"safety contract","discharge":"No visible local guard","reach":"related test mention","witness":"No imported witness receipt","verify_commands":["cargo +nightly miri test card"],"witness_routes":[{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}]}]}"#,
+            r#"{"schema_version":"0.2","tool":"unsafe-review","policy":"advisory","scope":"diff","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result","summary":{"changed_files":1,"changed_rust_files":1,"changed_non_rust_files":0,"cards":1,"open_actionable_gaps":1},"cards":[{"id":"card-1","class":"guard_missing","priority":"high","confidence":"medium","proof_path":"source_route_only","hazards":["alignment"],"site":{"file":"src/lib.rs","line":7,"column":5,"kind":"operation"},"operation":"unsafe { ptr.cast::<Header>().read() }","operation_family":"raw_pointer_read","next_action":"Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.","obligation_evidence":[{"key":"alignment","description":"pointer aligned","contract":{"present":true,"state":"present","summary":"safety contract"},"discharge":{"present":false,"state":"missing","summary":"No visible local guard"},"reach":{"present":true,"state":"present","summary":"related test mention"},"witness":{"present":false,"state":"missing","summary":"No imported witness receipt"}}],"contract":"safety contract","discharge":"No visible local guard","reach":"related test mention","witness":"No imported witness receipt","verify_commands":["cargo +nightly miri test card"],"witness_routes":[{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}]}]}"#,
         )
         .map_err(|err| format!("write cards failed: {err}"))?;
         add_confirmation_cues_to_cards(&dir.join("cards.json"))?;
@@ -23793,7 +24973,7 @@ review_after = "2026-08-01"
         write_valid_artifacts(dir)?;
         fs::write(
             dir.join("cards.json"),
-            r#"{"schema_version":"0.2","tool":"unsafe-review","policy":"advisory","scope":"diff","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result","summary":{"changed_files":1,"changed_rust_files":1,"changed_non_rust_files":0,"cards":2,"open_actionable_gaps":2},"cards":[{"id":"card-1","class":"guard_missing","priority":"high","confidence":"medium","proof_path":"source_route_only","hazards":["alignment"],"site":{"file":"src/lib.rs","line":7,"column":5},"operation":"unsafe { ptr.cast::<Header>().read() }","operation_family":"raw_pointer_read","next_action":"Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.","verify_commands":["cargo +nightly miri test card"],"witness_routes":[{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}]},{"id":"card-2","class":"contract_missing","priority":"high","confidence":"high","proof_path":"human_review_only","hazards":["unknown"],"site":{"file":"src/lib.rs","line":7,"column":1},"operation":"unsafe fn read_header(ptr: *const u8)","operation_family":"unknown","next_action":"Add a precise public `# Safety` section that names the required caller obligations.","verify_commands":[],"witness_routes":[{"kind":"human-deep-review","reason":"route","command":null,"required":false}]}]}"#,
+            r#"{"schema_version":"0.2","tool":"unsafe-review","policy":"advisory","scope":"diff","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result","summary":{"changed_files":1,"changed_rust_files":1,"changed_non_rust_files":0,"cards":2,"open_actionable_gaps":2},"cards":[{"id":"card-1","class":"guard_missing","priority":"high","confidence":"medium","proof_path":"source_route_only","hazards":["alignment"],"site":{"file":"src/lib.rs","line":7,"column":5,"kind":"operation"},"operation":"unsafe { ptr.cast::<Header>().read() }","operation_family":"raw_pointer_read","next_action":"Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.","verify_commands":["cargo +nightly miri test card"],"witness_routes":[{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}]},{"id":"card-2","class":"contract_missing","priority":"high","confidence":"high","proof_path":"human_review_only","hazards":["unknown"],"site":{"file":"src/lib.rs","line":7,"column":1,"kind":"unsafe_fn"},"operation":"unsafe fn read_header(ptr: *const u8)","operation_family":"unsafe_declaration","next_action":"Add a precise public `# Safety` section that names the required caller obligations.","verify_commands":[],"witness_routes":[{"kind":"human-deep-review","reason":"route","command":null,"required":false}]}]}"#,
         )
         .map_err(|err| format!("write cards failed: {err}"))?;
         add_confirmation_cues_to_cards(&dir.join("cards.json"))?;
@@ -23804,12 +24984,12 @@ review_after = "2026-08-01"
         .map_err(|err| format!("write pr summary failed: {err}"))?;
         fs::write(
             dir.join("cards.sarif"),
-            r#"{"version":"2.1.0","runs":[{"tool":{"driver":{"rules":[{"id":"guard_missing"},{"id":"contract_missing"}]}},"results":[{"ruleId":"guard_missing","locations":[{"physicalLocation":{"artifactLocation":{"uri":"src/lib.rs"},"region":{"startLine":7,"startColumn":5}}}],"properties":{"cardId":"card-1","class":"guard_missing","priority":"high","confidence":"medium","proofPath":"source_route_only","operationFamily":"raw_pointer_read","operation":"unsafe { ptr.cast::<Header>().read() }","hazards":["alignment"],"missingEvidence":[],"nextAction":"Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.","witnessRoutes":["miri: route"],"witnessRouteDetails":[{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}],"verifyCommands":["cargo +nightly miri test card"],"trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}},{"ruleId":"contract_missing","locations":[{"physicalLocation":{"artifactLocation":{"uri":"src/lib.rs"},"region":{"startLine":7,"startColumn":1}}}],"properties":{"cardId":"card-2","class":"contract_missing","priority":"high","confidence":"high","proofPath":"human_review_only","operationFamily":"unknown","operation":"unsafe fn read_header(ptr: *const u8)","hazards":["unknown"],"missingEvidence":[],"nextAction":"Add a precise public `# Safety` section that names the required caller obligations.","witnessRoutes":["human-deep-review: route"],"witnessRouteDetails":[{"kind":"human-deep-review","reason":"route","command":null,"required":false}],"verifyCommands":[],"trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}],"properties":{"scope":"diff","trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}]}"#,
+            r#"{"version":"2.1.0","runs":[{"tool":{"driver":{"rules":[{"id":"guard_missing"},{"id":"contract_missing"}]}},"results":[{"ruleId":"guard_missing","locations":[{"physicalLocation":{"artifactLocation":{"uri":"src/lib.rs"},"region":{"startLine":7,"startColumn":5}}}],"properties":{"cardId":"card-1","class":"guard_missing","priority":"high","confidence":"medium","proofPath":"source_route_only","operationFamily":"raw_pointer_read","operation":"unsafe { ptr.cast::<Header>().read() }","hazards":["alignment"],"missingEvidence":[],"nextAction":"Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.","witnessRoutes":["miri: route"],"witnessRouteDetails":[{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}],"verifyCommands":["cargo +nightly miri test card"],"trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}},{"ruleId":"contract_missing","locations":[{"physicalLocation":{"artifactLocation":{"uri":"src/lib.rs"},"region":{"startLine":7,"startColumn":1}}}],"properties":{"cardId":"card-2","class":"contract_missing","priority":"high","confidence":"high","proofPath":"human_review_only","operationFamily":"unsafe_declaration","operation":"unsafe fn read_header(ptr: *const u8)","hazards":["unknown"],"missingEvidence":[],"nextAction":"Add a precise public `# Safety` section that names the required caller obligations.","witnessRoutes":["human-deep-review: route"],"witnessRouteDetails":[{"kind":"human-deep-review","reason":"route","command":null,"required":false}],"verifyCommands":[],"trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}],"properties":{"scope":"diff","trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}]}"#,
         )
         .map_err(|err| format!("write sarif failed: {err}"))?;
         fs::write(
             dir.join("comment-plan.json"),
-            r##"{"schema_version":"0.1","mode":"plan_only","policy":"advisory","summary":{"selected_count":1,"not_selected_count":1,"budget":3,"reason":"bounded reviewer noise","reason_code":"bounded_reviewer_noise"},"comments":[{"card_id":"card-1","path":"src/lib.rs","line":7,"changed_line":true,"class":"guard_missing","priority":"high","confidence":"medium","proof_path":"source_route_only","hypothesis_to_confirm":"static `guard_missing` ReviewCard for `unsafe { ptr.cast::<Header>().read() }`; confirm with external evidence before treating it as observed runtime behavior","operation":"unsafe { ptr.cast::<Header>().read() }","operation_family":"raw_pointer_read","witness_routes":[{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}],"next_action":"Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.","verify_commands":["cargo +nightly miri test card"],"build_this_first":{"kind":"verify_command","command":"cargo +nightly miri test card","route_kind":"miri","summary":"Build/run `cargo +nightly miri test card` first for this card; attach a matching receipt only if it confirms the route"},"confirmation_step":"build/run `cargo +nightly miri test card` first, then attach a matching receipt if it confirms the route","selection_reason":"actionable high-priority review card","selection_reason_code":"top_actionable_card","actionability":"specific_guard_missing","relevance":"medium","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result","body":"`unsafe-review` found `guard_missing` for `unsafe { ptr.cast::<Header>().read() }` (`raw_pointer_read`).\n\nMissing evidence: No missing evidence recorded\n\nProof path: `source_route_only`.\n\nHypothesis to confirm: static `guard_missing` ReviewCard for `unsafe { ptr.cast::<Header>().read() }`; confirm with external evidence before treating it as observed runtime behavior.\n\nNext action: Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.\n\nBuild/run this first: Build/run `cargo +nightly miri test card` first for this card; attach a matching receipt only if it confirms the route\n\nConfirmation step: build/run `cargo +nightly miri test card` first, then attach a matching receipt if it confirms the route.\n\nWitness route: `miri` because route.\n\nVerify command: `cargo +nightly miri test card`\n\nPlan boundary: artifact-only inline comment candidate; unsafe-review did not post this comment, run witnesses, or make a policy decision.\n\nTrust boundary: static unsafe contract review only; not memory-safety proof, not UB-free status, and not a Miri result unless a witness receipt is attached."}],"not_selected":[{"card_id":"card-2","path":"src/lib.rs","line":7,"changed_line":true,"class":"contract_missing","priority":"high","confidence":"high","proof_path":"human_review_only","hypothesis_to_confirm":"static `contract_missing` ReviewCard for `unsafe fn read_header(ptr: *const u8)`; confirm with external evidence before treating it as observed runtime behavior","operation":"unsafe fn read_header(ptr: *const u8)","operation_family":"unknown","next_action":"Add a precise public `# Safety` section that names the required caller obligations.","actionability":"specific_contract_missing","relevance":"high","reason":"operation family unknown","reason_code":"human_deep_review_only"}],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}"##,
+            r##"{"schema_version":"0.1","mode":"plan_only","policy":"advisory","summary":{"selected_count":1,"not_selected_count":1,"budget":3,"reason":"bounded reviewer noise","reason_code":"bounded_reviewer_noise"},"comments":[{"card_id":"card-1","path":"src/lib.rs","line":7,"changed_line":true,"class":"guard_missing","priority":"high","confidence":"medium","proof_path":"source_route_only","hypothesis_to_confirm":"static `guard_missing` ReviewCard for `unsafe { ptr.cast::<Header>().read() }`; confirm with external evidence before treating it as observed runtime behavior","operation":"unsafe { ptr.cast::<Header>().read() }","operation_family":"raw_pointer_read","witness_routes":[{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}],"next_action":"Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.","verify_commands":["cargo +nightly miri test card"],"build_this_first":{"kind":"verify_command","command":"cargo +nightly miri test card","route_kind":"miri","summary":"Build/run `cargo +nightly miri test card` first for this card; attach a matching receipt only if it confirms the route"},"confirmation_step":"build/run `cargo +nightly miri test card` first, then attach a matching receipt if it confirms the route","selection_reason":"actionable high-priority review card","selection_reason_code":"top_actionable_card","actionability":"specific_guard_missing","relevance":"medium","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result","body":"`unsafe-review` found `guard_missing` for `unsafe { ptr.cast::<Header>().read() }` (`raw_pointer_read`).\n\nMissing evidence: No missing evidence recorded\n\nProof path: `source_route_only`.\n\nHypothesis to confirm: static `guard_missing` ReviewCard for `unsafe { ptr.cast::<Header>().read() }`; confirm with external evidence before treating it as observed runtime behavior.\n\nNext action: Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.\n\nBuild/run this first: Build/run `cargo +nightly miri test card` first for this card; attach a matching receipt only if it confirms the route\n\nConfirmation step: build/run `cargo +nightly miri test card` first, then attach a matching receipt if it confirms the route.\n\nWitness route: `miri` because route.\n\nVerify command: `cargo +nightly miri test card`\n\nPlan boundary: artifact-only inline comment candidate; unsafe-review did not post this comment, run witnesses, or make a policy decision.\n\nTrust boundary: static unsafe contract review only; not memory-safety proof, not UB-free status, and not a Miri result unless a witness receipt is attached."}],"not_selected":[{"card_id":"card-2","path":"src/lib.rs","line":7,"changed_line":true,"class":"contract_missing","priority":"high","confidence":"high","proof_path":"human_review_only","hypothesis_to_confirm":"static `contract_missing` ReviewCard for `unsafe fn read_header(ptr: *const u8)`; confirm with external evidence before treating it as observed runtime behavior","operation":"unsafe fn read_header(ptr: *const u8)","operation_family":"unsafe_declaration","next_action":"Add a precise public `# Safety` section that names the required caller obligations.","actionability":"specific_contract_missing","relevance":"high","reason":"owner-contract obligation covered by a more-specific operation card at the same region","reason_code":"covered_by_specific_operation_card"}],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}"##,
         )
         .map_err(|err| format!("write comment plan failed: {err}"))?;
         add_comment_plan_repair_metadata(&dir.join("comment-plan.json"))?;
@@ -23817,7 +24997,7 @@ review_after = "2026-08-01"
         add_spec_0032_fields_to_comment_plan(&dir.join("comment-plan.json"))?;
         fs::write(
             dir.join("repair-queue.json"),
-            add_repair_queue_boundaries(r#"{"schema_version":"0.1","tool":"unsafe-review","mode":"aggregate_repair_queue","source":"review_card","policy":"advisory","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, not a Miri result, and not an automatic repair queue","summary":{"changed_files":1,"changed_rust_files":1,"changed_non_rust_files":0,"cards":2,"repairable_by_guard":1,"repairable_by_safety_docs":1,"repairable_by_test":0,"requires_witness_receipt":1,"requires_human_review":1,"do_not_auto_repair":1},"buckets":{"repairable_by_guard":[{"card_id":"card-1","class":"guard_missing","priority":"high","confidence":"medium","proof_path":"source_route_only","operation_family":"raw_pointer_read","operation":"unsafe { ptr.cast::<Header>().read() }","path":"src/lib.rs","line":7,"missing_evidence":[],"agent_readiness":{"ready":true,"state":"ready_for_agent","reasons":["specific operation family"]},"bucket_reason":"guard_evidence_missing","context_command":"unsafe-review context card-1 --json","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, not a Miri result, and not an automatic repair queue"}],"repairable_by_safety_docs":[{"card_id":"card-2","class":"contract_missing","priority":"high","confidence":"high","proof_path":"human_review_only","operation_family":"unknown","operation":"unsafe fn read_header(ptr: *const u8)","path":"src/lib.rs","line":7,"missing_evidence":[],"agent_readiness":{"ready":false,"state":"requires_human_review","reasons":["operation family `unknown` is not safe for automatic repair delegation"]},"bucket_reason":"safety_docs_evidence_missing","context_command":"unsafe-review context card-2 --json","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, not a Miri result, and not an automatic repair queue"}],"repairable_by_test":[],"requires_witness_receipt":[{"card_id":"card-1","class":"guard_missing","priority":"high","confidence":"medium","proof_path":"source_route_only","operation_family":"raw_pointer_read","operation":"unsafe { ptr.cast::<Header>().read() }","path":"src/lib.rs","line":7,"missing_evidence":[],"agent_readiness":{"ready":true,"state":"ready_for_agent","reasons":["specific operation family"]},"bucket_reason":"witness_receipt_missing","context_command":"unsafe-review context card-1 --json","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, not a Miri result, and not an automatic repair queue"}],"requires_human_review":[{"card_id":"card-2","class":"contract_missing","priority":"high","confidence":"high","proof_path":"human_review_only","operation_family":"unknown","operation":"unsafe fn read_header(ptr: *const u8)","path":"src/lib.rs","line":7,"missing_evidence":[],"agent_readiness":{"ready":false,"state":"requires_human_review","reasons":["operation family `unknown` is not safe for automatic repair delegation"]},"bucket_reason":"human_review_required","context_command":"unsafe-review context card-2 --json","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, not a Miri result, and not an automatic repair queue"}],"do_not_auto_repair":[{"card_id":"card-2","class":"contract_missing","priority":"high","confidence":"high","proof_path":"human_review_only","operation_family":"unknown","operation":"unsafe fn read_header(ptr: *const u8)","path":"src/lib.rs","line":7,"missing_evidence":[],"agent_readiness":{"ready":false,"state":"requires_human_review","reasons":["operation family `unknown` is not safe for automatic repair delegation"]},"bucket_reason":"not_ready_for_automatic_repair","context_command":"unsafe-review context card-2 --json","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, not a Miri result, and not an automatic repair queue"}]}}"#),
+            add_repair_queue_boundaries(r#"{"schema_version":"0.1","tool":"unsafe-review","mode":"aggregate_repair_queue","source":"review_card","policy":"advisory","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, not a Miri result, and not an automatic repair queue","summary":{"changed_files":1,"changed_rust_files":1,"changed_non_rust_files":0,"cards":2,"repairable_by_guard":1,"repairable_by_safety_docs":1,"repairable_by_test":0,"requires_witness_receipt":1,"requires_human_review":1,"do_not_auto_repair":1},"buckets":{"repairable_by_guard":[{"card_id":"card-1","class":"guard_missing","priority":"high","confidence":"medium","proof_path":"source_route_only","operation_family":"raw_pointer_read","operation":"unsafe { ptr.cast::<Header>().read() }","path":"src/lib.rs","line":7,"missing_evidence":[],"agent_readiness":{"ready":true,"state":"ready_for_agent","reasons":["specific operation family"]},"bucket_reason":"guard_evidence_missing","context_command":"unsafe-review context card-1 --json","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, not a Miri result, and not an automatic repair queue"}],"repairable_by_safety_docs":[{"card_id":"card-2","class":"contract_missing","priority":"high","confidence":"high","proof_path":"human_review_only","operation_family":"unsafe_declaration","operation":"unsafe fn read_header(ptr: *const u8)","path":"src/lib.rs","line":7,"missing_evidence":[],"agent_readiness":{"ready":false,"state":"requires_human_review","reasons":["operation family `unsafe_declaration` is not safe for automatic repair delegation"]},"bucket_reason":"safety_docs_evidence_missing","context_command":"unsafe-review context card-2 --json","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, not a Miri result, and not an automatic repair queue"}],"repairable_by_test":[],"requires_witness_receipt":[{"card_id":"card-1","class":"guard_missing","priority":"high","confidence":"medium","proof_path":"source_route_only","operation_family":"raw_pointer_read","operation":"unsafe { ptr.cast::<Header>().read() }","path":"src/lib.rs","line":7,"missing_evidence":[],"agent_readiness":{"ready":true,"state":"ready_for_agent","reasons":["specific operation family"]},"bucket_reason":"witness_receipt_missing","context_command":"unsafe-review context card-1 --json","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, not a Miri result, and not an automatic repair queue"}],"requires_human_review":[{"card_id":"card-2","class":"contract_missing","priority":"high","confidence":"high","proof_path":"human_review_only","operation_family":"unsafe_declaration","operation":"unsafe fn read_header(ptr: *const u8)","path":"src/lib.rs","line":7,"missing_evidence":[],"agent_readiness":{"ready":false,"state":"requires_human_review","reasons":["operation family `unsafe_declaration` is not safe for automatic repair delegation"]},"bucket_reason":"human_review_required","context_command":"unsafe-review context card-2 --json","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, not a Miri result, and not an automatic repair queue"}],"do_not_auto_repair":[{"card_id":"card-2","class":"contract_missing","priority":"high","confidence":"high","proof_path":"human_review_only","operation_family":"unsafe_declaration","operation":"unsafe fn read_header(ptr: *const u8)","path":"src/lib.rs","line":7,"missing_evidence":[],"agent_readiness":{"ready":false,"state":"requires_human_review","reasons":["operation family `unsafe_declaration` is not safe for automatic repair delegation"]},"bucket_reason":"not_ready_for_automatic_repair","context_command":"unsafe-review context card-2 --json","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, not a Miri result, and not an automatic repair queue"}]}}"#),
         )
         .map_err(|err| format!("write repair queue failed: {err}"))?;
         fs::write(dir.join("receipt-audit.md"), receipt_audit_markdown())
@@ -24055,5 +25235,299 @@ This artifact is static unsafe contract review. It routes reviewers to credible 
         ));
         assert!(!has_session_state_marker("rescued data is advisory"));
         assert!(!has_session_state_marker("no markers here"));
+    }
+
+    // --- evaluate_detector_contracts ---
+
+    #[test]
+    fn detector_contracts_clean_contract_passes() -> Result<(), String> {
+        let toml: toml::Value = r#"
+schema_version = "1.0"
+[[contract]]
+operation_family = "transmute"
+obligations = ["D1", "D2"]
+positive_fixtures = ["transmute_basic"]
+negative_fixtures = ["transmute_safe_no_card"]
+surfaces = ["json"]
+evidence = "fixture coverage"
+review_after = "2027-01-01"
+"#
+        .parse::<toml::Table>()
+        .map_err(|e| e.to_string())
+        .map(toml::Value::Table)?;
+
+        let report = evaluate_detector_contracts(&toml, "test")?;
+        assert!(
+            report.blocking.is_empty(),
+            "expected no blocking findings, got: {:?}",
+            report.blocking
+        );
+        assert!(report.tracked.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn detector_contracts_empty_negative_fixtures_no_proof_gap_is_blocking() -> Result<(), String> {
+        let toml: toml::Value = r#"
+schema_version = "1.0"
+[[contract]]
+operation_family = "transmute"
+obligations = ["D1"]
+positive_fixtures = ["transmute_basic"]
+negative_fixtures = []
+surfaces = ["json"]
+evidence = "fixture coverage"
+review_after = "2027-01-01"
+"#
+        .parse::<toml::Table>()
+        .map_err(|e| e.to_string())
+        .map(toml::Value::Table)?;
+
+        let report = evaluate_detector_contracts(&toml, "test")?;
+        assert!(
+            !report.blocking.is_empty(),
+            "expected blocking finding for empty negative_fixtures without proof_gap"
+        );
+        assert!(report.tracked.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn detector_contracts_empty_negative_fixtures_with_documented_gap_is_tracked()
+    -> Result<(), String> {
+        let toml: toml::Value = r#"
+schema_version = "1.0"
+[[contract]]
+operation_family = "new_family"
+obligations = ["D1"]
+positive_fixtures = ["new_family_basic"]
+negative_fixtures = []
+surfaces = ["json"]
+evidence = "positive only"
+review_after = "2027-01-01"
+proof_gap = "negative controls not yet written"
+owner = "core / analysis"
+"#
+        .parse::<toml::Table>()
+        .map_err(|e| e.to_string())
+        .map(toml::Value::Table)?;
+
+        let report = evaluate_detector_contracts(&toml, "test")?;
+        assert!(
+            report.blocking.is_empty(),
+            "expected no blocking findings with documented gap, got: {:?}",
+            report.blocking
+        );
+        assert!(
+            !report.tracked.is_empty(),
+            "expected tracked exception for documented gap"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn detector_contracts_empty_negative_fixtures_partial_gap_fields_is_blocking()
+    -> Result<(), String> {
+        // proof_gap present but owner is missing — must block
+        let toml: toml::Value = r#"
+schema_version = "1.0"
+[[contract]]
+operation_family = "new_family"
+obligations = ["D1"]
+positive_fixtures = ["new_family_basic"]
+negative_fixtures = []
+surfaces = ["json"]
+evidence = "positive only"
+review_after = "2027-01-01"
+proof_gap = "negative controls not yet written"
+"#
+        .parse::<toml::Table>()
+        .map_err(|e| e.to_string())
+        .map(toml::Value::Table)?;
+
+        let report = evaluate_detector_contracts(&toml, "test")?;
+        assert!(
+            !report.blocking.is_empty(),
+            "expected blocking finding when proof_gap present but owner missing"
+        );
+        Ok(())
+    }
+
+    // --- evaluate_stance_decisions ---
+
+    #[test]
+    fn stance_decisions_clean_stance_passes() -> Result<(), String> {
+        let toml: toml::Value = r#"
+schema_version = "1.0"
+[[stance]]
+id = "debug-assert-not-guard"
+summary = "debug_assert does not discharge a guard obligation"
+rationale = "compiled out in release"
+owner = "core / analysis"
+linked_spec = "UNSAFE-REVIEW-SPEC-0006"
+linked_tests = ["some::module::test_fn"]
+review_after = "2027-01-01"
+"#
+        .parse::<toml::Table>()
+        .map_err(|e| e.to_string())
+        .map(toml::Value::Table)?;
+
+        let report = evaluate_stance_decisions(&toml, "test")?;
+        assert!(
+            report.blocking.is_empty(),
+            "expected no blocking findings, got: {:?}",
+            report.blocking
+        );
+        assert!(report.tracked.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn stance_decisions_proof_gap_with_owner_and_review_after_is_tracked() -> Result<(), String> {
+        let toml: toml::Value = r#"
+schema_version = "1.0"
+[[stance]]
+id = "some-stance"
+summary = "summary text"
+rationale = "rationale text"
+owner = "core / analysis"
+linked_spec = "UNSAFE-REVIEW-SPEC-0006"
+linked_tests = ["some::test"]
+proof_gap = "no dedicated unit test yet"
+review_after = "2026-09-15"
+"#
+        .parse::<toml::Table>()
+        .map_err(|e| e.to_string())
+        .map(toml::Value::Table)?;
+
+        let report = evaluate_stance_decisions(&toml, "test")?;
+        assert!(
+            report.blocking.is_empty(),
+            "expected no blocking findings with documented proof_gap, got: {:?}",
+            report.blocking
+        );
+        assert!(
+            !report.tracked.is_empty(),
+            "expected tracked exception for proof_gap with owner + review_after"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn stance_decisions_proof_gap_without_owner_is_blocking() -> Result<(), String> {
+        let toml: toml::Value = r#"
+schema_version = "1.0"
+[[stance]]
+id = "some-stance"
+summary = "summary text"
+rationale = "rationale text"
+owner = "core / analysis"
+linked_spec = "UNSAFE-REVIEW-SPEC-0006"
+linked_tests = ["some::test"]
+proof_gap = "no dedicated unit test yet"
+"#
+        .parse::<toml::Table>()
+        .map_err(|e| e.to_string())
+        .map(toml::Value::Table)?;
+
+        let report = evaluate_stance_decisions(&toml, "test")?;
+        assert!(
+            !report.blocking.is_empty(),
+            "expected blocking finding for proof_gap without review_after"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn stance_decisions_missing_required_field_is_blocking() -> Result<(), String> {
+        // missing `owner` field
+        let toml: toml::Value = r#"
+schema_version = "1.0"
+[[stance]]
+id = "incomplete-stance"
+summary = "summary text"
+rationale = "rationale text"
+linked_spec = "UNSAFE-REVIEW-SPEC-0006"
+linked_tests = ["some::test"]
+"#
+        .parse::<toml::Table>()
+        .map_err(|e| e.to_string())
+        .map(toml::Value::Table)?;
+
+        let report = evaluate_stance_decisions(&toml, "test")?;
+        assert!(
+            !report.blocking.is_empty(),
+            "expected blocking finding for missing required field"
+        );
+        Ok(())
+    }
+
+    // --- evaluate_spec_coverage ---
+
+    #[test]
+    fn spec_coverage_clean_field_passes() -> Result<(), String> {
+        let toml: toml::Value = r#"
+schema_version = "1.0"
+[[field]]
+name = "severity"
+canonical_source = "domain/classification.rs"
+surfaces = ["json", "sarif"]
+single_truth = true
+"#
+        .parse::<toml::Table>()
+        .map_err(|e| e.to_string())
+        .map(toml::Value::Table)?;
+
+        let report = evaluate_spec_coverage(&toml, "test")?;
+        assert!(
+            report.blocking.is_empty(),
+            "expected no blocking findings, got: {:?}",
+            report.blocking
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn spec_coverage_single_truth_false_is_blocking() -> Result<(), String> {
+        let toml: toml::Value = r#"
+schema_version = "1.0"
+[[field]]
+name = "severity"
+canonical_source = "domain/classification.rs"
+surfaces = ["json"]
+single_truth = false
+note = "two places compute it"
+"#
+        .parse::<toml::Table>()
+        .map_err(|e| e.to_string())
+        .map(toml::Value::Table)?;
+
+        let report = evaluate_spec_coverage(&toml, "test")?;
+        assert!(
+            !report.blocking.is_empty(),
+            "expected blocking finding for single_truth=false"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn spec_coverage_missing_canonical_source_is_blocking() -> Result<(), String> {
+        let toml: toml::Value = r#"
+schema_version = "1.0"
+[[field]]
+name = "severity"
+surfaces = ["json"]
+single_truth = true
+"#
+        .parse::<toml::Table>()
+        .map_err(|e| e.to_string())
+        .map(toml::Value::Table)?;
+
+        let report = evaluate_spec_coverage(&toml, "test")?;
+        assert!(
+            !report.blocking.is_empty(),
+            "expected blocking finding for missing canonical_source"
+        );
+        Ok(())
     }
 }

@@ -30,6 +30,14 @@ pub(crate) enum XtaskCommand {
     CheckCorpusBackstopSchema(PathBuf),
     CorpusUsefulness(Option<PathBuf>),
     CheckCorpusUsefulnessSchema(PathBuf),
+    CheckDetectorContracts,
+    CheckStanceDecisions,
+    CheckStanceCoverage,
+    CheckSpecCoverage,
+    CheckFixtureSurfaceParity,
+    CheckSurfaceDeterminism,
+    CheckRealPrCorpus,
+    DogfoodExec(Vec<String>),
 }
 
 impl XtaskCommand {
@@ -105,6 +113,37 @@ impl XtaskCommand {
             Some("check-corpus-usefulness-schema") => Ok(Self::CheckCorpusUsefulnessSchema(
                 command_args::require_subcommand_dir_arg(args, "check-corpus-usefulness-schema")?,
             )),
+            Some("check-detector-contracts") => parse_no_extra(
+                args,
+                "check-detector-contracts",
+                Self::CheckDetectorContracts,
+            ),
+            Some("check-stance-decisions") => {
+                parse_no_extra(args, "check-stance-decisions", Self::CheckStanceDecisions)
+            }
+            Some("check-stance-coverage") => {
+                parse_no_extra(args, "check-stance-coverage", Self::CheckStanceCoverage)
+            }
+            Some("check-spec-coverage") => {
+                parse_no_extra(args, "check-spec-coverage", Self::CheckSpecCoverage)
+            }
+            Some("check-fixture-surface-parity") => parse_no_extra(
+                args,
+                "check-fixture-surface-parity",
+                Self::CheckFixtureSurfaceParity,
+            ),
+            Some("check-surface-determinism") => parse_no_extra(
+                args,
+                "check-surface-determinism",
+                Self::CheckSurfaceDeterminism,
+            ),
+            Some("check-real-pr-corpus") => {
+                parse_no_extra(args, "check-real-pr-corpus", Self::CheckRealPrCorpus)
+            }
+            Some("dogfood-exec") => {
+                // All trailing args are forwarded to the DogfoodExec arg parser.
+                Ok(Self::DogfoodExec(args.to_vec()))
+            }
             Some(other) => Err(format!("unknown xtask command `{other}`")),
         }
     }
