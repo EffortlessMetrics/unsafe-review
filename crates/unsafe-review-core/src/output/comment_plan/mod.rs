@@ -20,8 +20,8 @@ use std::collections::HashMap;
 /// - `NotSelected` — the card was eligible but displaced by the budget cap or
 ///   family/obligation dedup.
 /// - `NotEligible` — the card failed the `should_plan_comment` eligibility
-///   gate (e.g. unchanged site, non-actionable class, unknown family, or low
-///   confidence).
+///   gate (e.g. unchanged site, non-actionable class, human-review-only
+///   surfacing disposition, or low confidence).
 ///
 /// This function is the single source of truth for `comment_plan_status` in the
 /// coverage block (SPEC-0029 / SPEC-0032).  `json::render` and
@@ -47,7 +47,11 @@ pub(crate) fn card_statuses(output: &AnalyzeOutput) -> HashMap<CardId, CommentPl
         .cards
         .iter()
         .partition(|card| should_plan_comment(card));
-    eligible.sort_by(|a, b| importance_rank(a).cmp(&importance_rank(b)));
+    eligible.sort_by(|a, b| {
+        importance_rank(a)
+            .cmp(&importance_rank(b))
+            .then_with(|| a.id.0.cmp(&b.id.0))
+    });
 
     let mut selected_budget_keys: BTreeSet<String> = BTreeSet::new();
     let mut selected_count = 0usize;
@@ -563,7 +567,7 @@ mod tests {
     }
 
     #[test]
-    fn comment_plan_skips_unknown_operation_family_cards() -> Result<(), String> {
+    fn comment_plan_skips_unsafe_declaration_surfacing_disposition_cards() -> Result<(), String> {
         let output = fixture_output("public_unsafe_fn_missing_safety")?;
         let value = parse_json(&render(&output))?;
 
@@ -575,14 +579,17 @@ mod tests {
             value["not_selected"][0]["operation"],
             "pub unsafe fn caller_must_uphold_contract() {"
         );
-        assert_eq!(value["not_selected"][0]["operation_family"], "unknown");
+        assert_eq!(
+            value["not_selected"][0]["operation_family"],
+            "unsafe_declaration"
+        );
         assert_eq!(
             value["not_selected"][0]["next_action"],
             "Add a precise public `# Safety` section that names the required caller obligations."
         );
         assert_eq!(
             value["not_selected"][0]["reason"],
-            "operation family unknown"
+            "unsafe declaration is not selected for inline comments"
         );
         assert_eq!(
             value["not_selected"][0]["reason_code"],
@@ -596,7 +603,7 @@ mod tests {
         assert!(
             serde_json::to_string(&value["not_selected"][0]["agent_readiness"]["reasons"])
                 .map_err(|err| format!("render readiness reasons failed: {err}"))?
-                .contains("operation family `unknown`")
+                .contains("operation family `unsafe_declaration`")
         );
         assert_eq!(
             value["not_selected"][0]["repair_queue_buckets"],
@@ -621,6 +628,56 @@ mod tests {
         assert_eq!(
             value["not_selected"][0]["context_command"],
             format!("unsafe-review context {} --json", output.cards[0].id)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn comment_plan_declaration_eligibility_does_not_depend_on_family_label() -> Result<(), String>
+    {
+        let mut output = fixture_output("public_unsafe_fn_missing_safety")?;
+        let card = output
+            .cards
+            .first_mut()
+            .ok_or_else(|| "fixture should emit a declaration card".to_string())?;
+        card.operation.family = OperationFamily::RawPointerRead;
+
+        let value = parse_json(&render(&output))?;
+
+        assert_eq!(value["comments"].as_array().map_or(1, Vec::len), 0);
+        assert_eq!(value["not_selected"].as_array().map_or(0, Vec::len), 1);
+        assert_review_budget_summary(&value, 0, 1)?;
+        assert_eq!(
+            value["not_selected"][0]["operation_family"],
+            "raw_pointer_read"
+        );
+        assert_eq!(
+            value["not_selected"][0]["reason"],
+            "unsafe declaration is not selected for inline comments"
+        );
+        assert_eq!(
+            value["not_selected"][0]["reason_code"],
+            "human_deep_review_only"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn comment_plan_unknown_fallback_site_keeps_human_review_only_reason() -> Result<(), String> {
+        let output = fixture_output("split_unsafe_block")?;
+        let value = parse_json(&render(&output))?;
+
+        assert_eq!(value["comments"].as_array().map_or(1, Vec::len), 0);
+        assert_eq!(value["not_selected"].as_array().map_or(0, Vec::len), 1);
+        assert_review_budget_summary(&value, 0, 1)?;
+        assert_eq!(value["not_selected"][0]["operation_family"], "unknown");
+        assert_eq!(
+            value["not_selected"][0]["reason"],
+            "operation family unknown"
+        );
+        assert_eq!(
+            value["not_selected"][0]["reason_code"],
+            "human_deep_review_only"
         );
         Ok(())
     }
@@ -840,7 +897,7 @@ mod tests {
     /// (and therefore in `cards.json` and evidence counts) — it is never deleted.
     ///
     /// The `attributed_unsafe_fn_no_duplicate` fixture produces both an owner card
-    /// (Unknown-family, `unsafe fn write_one`) and a specific operation card
+    /// (unsafe_declaration-family, `unsafe fn write_one`) and a specific operation card
     /// (RawPointerWrite, `core::ptr::write`) in the same file — the exact scenario
     /// where the richer reason should appear.
     #[test]
@@ -860,15 +917,17 @@ mod tests {
             "operation card (raw_pointer_write) must be selected; got: {value}"
         );
 
-        // The owner card (unknown family) must appear in not_selected.
+        // The owner card (unsafe_declaration family) must appear in not_selected.
         let not_selected = value["not_selected"]
             .as_array()
             .ok_or_else(|| "not_selected should be an array".to_string())?;
         let owner_entry = not_selected
             .iter()
-            .find(|c| c["operation_family"] == "unknown")
+            .find(|c| c["operation_family"] == "unsafe_declaration")
             .ok_or_else(|| {
-                format!("owner card (unknown family) must be in not_selected; got: {value}")
+                format!(
+                    "owner card (unsafe_declaration family) must be in not_selected; got: {value}"
+                )
             })?;
         assert_eq!(
             owner_entry["reason_code"], "covered_by_specific_operation_card",
@@ -883,11 +942,10 @@ mod tests {
     }
 
     /// Guardrail: owner card NOT covered by a specific operation card on the same
-    /// file still gets the generic `human_deep_review_only` / `operation family unknown`
+    /// file still gets the generic `human_deep_review_only` unsafe-declaration
     /// reason (not the new covered reason).
     #[test]
-    fn comment_plan_uncovered_owner_card_keeps_generic_unknown_family_reason() -> Result<(), String>
-    {
+    fn comment_plan_uncovered_owner_card_keeps_generic_declaration_reason() -> Result<(), String> {
         let output = fixture_output("public_unsafe_fn_missing_safety")?;
         let value = parse_json(&render(&output))?;
 
@@ -897,7 +955,7 @@ mod tests {
             .ok_or_else(|| "not_selected should be an array".to_string())?;
         let owner_entry = not_selected
             .iter()
-            .find(|c| c["operation_family"] == "unknown")
+            .find(|c| c["operation_family"] == "unsafe_declaration")
             .ok_or_else(|| {
                 "owner card must be in not_selected for public_unsafe_fn_missing_safety".to_string()
             })?;
@@ -906,7 +964,63 @@ mod tests {
             "owner card without a covering operation card must keep the generic reason; got: {}",
             owner_entry["reason_code"]
         );
-        assert_eq!(owner_entry["reason"], "operation family unknown");
+        assert_eq!(
+            owner_entry["reason"],
+            "unsafe declaration is not selected for inline comments"
+        );
+        Ok(())
+    }
+
+    /// Guardrail: an owner card is not considered covered merely because an
+    /// inline operation card exists elsewhere in the same file. The operation
+    /// must share the same inferred owner/declaration context.
+    #[test]
+    fn comment_plan_owner_card_requires_same_owner_context_for_covered_reason() -> Result<(), String>
+    {
+        let mut output = fixture_output("attributed_unsafe_fn_no_duplicate")?;
+        let mut owner_card = output
+            .cards
+            .iter()
+            .find(|card| card.operation.family == OperationFamily::UnsafeDeclaration)
+            .cloned()
+            .ok_or_else(|| "fixture should contain an unsafe declaration card".to_string())?;
+        let mut operation_card = output
+            .cards
+            .iter()
+            .find(|card| card.operation.family == OperationFamily::RawPointerWrite)
+            .cloned()
+            .ok_or_else(|| "fixture should contain a raw pointer write card".to_string())?;
+
+        owner_card.site.owner = Some("write_one".to_string());
+        operation_card.site.owner = Some("different_owner".to_string());
+        operation_card.site.location.file = owner_card.site.location.file.clone();
+        operation_card.site.changed = true;
+        operation_card.priority = Priority::High;
+        operation_card.confidence = Confidence::High;
+
+        output.cards = vec![owner_card, operation_card];
+        output.summary.cards = output.cards.len();
+        output.summary.open_actionable_gaps = output.cards.len();
+
+        let value = parse_json(&render(&output))?;
+        let not_selected = value["not_selected"]
+            .as_array()
+            .ok_or_else(|| "not_selected should be an array".to_string())?;
+        let owner_entry = not_selected
+            .iter()
+            .find(|card| card["operation_family"] == "unsafe_declaration")
+            .ok_or_else(|| {
+                "owner card must be in not_selected for mismatched-owner case".to_string()
+            })?;
+
+        assert_eq!(
+            owner_entry["reason_code"], "human_deep_review_only",
+            "same-file operation with a different owner must not cover the owner card"
+        );
+        assert_eq!(
+            owner_entry["reason"],
+            "unsafe declaration is not selected for inline comments"
+        );
         Ok(())
     }
 

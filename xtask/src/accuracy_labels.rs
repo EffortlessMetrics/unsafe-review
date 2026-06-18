@@ -70,6 +70,9 @@ pub(crate) struct CalibrationFixtureCase {
     pub(crate) expected_class: Option<String>,
     pub(crate) expected_operation_family: Option<String>,
     pub(crate) expected_hazard: Option<String>,
+    /// Surface names for which committed goldens are expected (e.g. "lsp", "repair-queue").
+    /// Empty for most fixtures; non-empty only for the exemplar fixtures.
+    pub(crate) surface_goldens: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -1000,6 +1003,7 @@ rationale = "The trust boundary must name the full accuracy-label no-overclaim p
                 expected_class: Some("guard_missing".to_string()),
                 expected_operation_family: Some("raw_pointer_read".to_string()),
                 expected_hazard: Some("alignment".to_string()),
+                surface_goldens: Vec::new(),
             },
         );
         let claim = PolicyClaim {
@@ -1060,6 +1064,7 @@ rationale = "Witness-route calibration claims must pin the route kinds projected
                 expected_class: Some("requires_loom".to_string()),
                 expected_operation_family: Some("unsafe_impl_send_sync".to_string()),
                 expected_hazard: Some("send_sync_invariant".to_string()),
+                surface_goldens: Vec::new(),
             },
         );
         let claim = PolicyClaim {
@@ -1121,6 +1126,7 @@ rationale = "The fixture routes Send/Sync invariants to Loom/Shuttle, so ASan sh
                 expected_class: Some("requires_loom".to_string()),
                 expected_operation_family: Some("unsafe_impl_send_sync".to_string()),
                 expected_hazard: Some("send_sync_invariant".to_string()),
+                surface_goldens: Vec::new(),
             },
         );
         let claim = PolicyClaim {
@@ -1153,7 +1159,7 @@ rationale = "The fixture routes Send/Sync invariants to Loom/Shuttle, so ASan sh
 schema_version = "0.1"
 status = "fixture_pinned"
 claim_id = "public-unsafe-api-safety-docs-contract-evidence"
-operation_family = "unknown"
+operation_family = "unsafe_declaration"
 hazard = "unknown"
 partition = "fixture"
 source_kind = "fixture_golden"
@@ -1165,9 +1171,9 @@ fixture = "public_unsafe_fn_missing_safety"
 kind = "positive"
 expected_cards = 1
 expected_class = "contract_missing"
-expected_operation_family = "unknown"
+expected_operation_family = "unsafe_declaration"
 expected_hazard = "unknown"
-expected_obligation_key = "unknown"
+expected_obligation_key = "caller-contract"
 expected_discharge_state = "present"
 label_source = "fixture_golden"
 rationale = "Public unsafe API contract evidence claims must pin the ReviewCard contract evidence state."
@@ -1182,12 +1188,13 @@ rationale = "Public unsafe API contract evidence claims must pin the ReviewCard 
                 kind: "positive".to_string(),
                 expected_cards: 1,
                 expected_class: Some("contract_missing".to_string()),
-                expected_operation_family: Some("unknown".to_string()),
+                expected_operation_family: Some("unsafe_declaration".to_string()),
                 expected_hazard: Some("unknown".to_string()),
+                surface_goldens: Vec::new(),
             },
         );
         let claim = PolicyClaim {
-            operation_family: Some("unknown".to_string()),
+            operation_family: Some("unsafe_declaration".to_string()),
             hazard: Some("unknown".to_string()),
             fixtures: BTreeSet::from(["public_unsafe_fn_missing_safety".to_string()]),
             label_ledgers: BTreeSet::new(),
@@ -1209,15 +1216,14 @@ rationale = "Public unsafe API contract evidence claims must pin the ReviewCard 
 
     #[test]
     fn label_ledger_rejects_wrong_obligation_contract_state() -> Result<(), String> {
-        // Uses public_unsafe_trait_missing_safety: still emits a card in diff scope
-        // (unsafe trait has no concrete operation family but is NOT an unsafe-fn/block owner,
-        // so the diff-scope filter does not apply to it). The golden has contract.state = "missing";
+        // Uses public_unsafe_trait_missing_safety: still emits a declaration card in diff scope.
+        // The golden has contract.state = "missing";
         // asserting "present" should be rejected by check_fixture_obligation_evidence_state.
         let ledger = r#"
 schema_version = "0.1"
 status = "fixture_pinned"
 claim_id = "public-unsafe-api-safety-docs-contract-evidence"
-operation_family = "unknown"
+operation_family = "unsafe_declaration"
 hazard = "unknown"
 partition = "fixture"
 source_kind = "fixture_golden"
@@ -1229,9 +1235,9 @@ fixture = "public_unsafe_trait_missing_safety"
 kind = "positive"
 expected_cards = 1
 expected_class = "contract_missing"
-expected_operation_family = "unknown"
+expected_operation_family = "unsafe_declaration"
 expected_hazard = "unknown"
-expected_obligation_key = "unknown"
+expected_obligation_key = "caller-contract"
 expected_contract_state = "present"
 expected_discharge_state = "present"
 label_source = "fixture_golden"
@@ -1247,12 +1253,13 @@ rationale = "The fixture intentionally lacks public safety docs, so present cont
                 kind: "positive".to_string(),
                 expected_cards: 1,
                 expected_class: Some("contract_missing".to_string()),
-                expected_operation_family: Some("unknown".to_string()),
+                expected_operation_family: Some("unsafe_declaration".to_string()),
                 expected_hazard: Some("unknown".to_string()),
+                surface_goldens: Vec::new(),
             },
         );
         let claim = PolicyClaim {
-            operation_family: Some("unknown".to_string()),
+            operation_family: Some("unsafe_declaration".to_string()),
             hazard: Some("unknown".to_string()),
             fixtures: BTreeSet::from(["public_unsafe_trait_missing_safety".to_string()]),
             label_ledgers: BTreeSet::new(),
@@ -1312,6 +1319,7 @@ rationale = "The fixture intentionally has alignment evidence, so missing should
                 expected_class: Some("guard_missing".to_string()),
                 expected_operation_family: Some("raw_pointer_read".to_string()),
                 expected_hazard: Some("alignment".to_string()),
+                surface_goldens: Vec::new(),
             },
         );
         let claim = PolicyClaim {
@@ -1375,6 +1383,7 @@ rationale = "Valid-range labels must stay tied to the bounds hazard, not a broad
                 expected_class: Some("guard_missing".to_string()),
                 expected_operation_family: Some("ptr_copy".to_string()),
                 expected_hazard: Some("pointer_validity".to_string()),
+                surface_goldens: Vec::new(),
             },
         );
         let claim = PolicyClaim {
@@ -1436,6 +1445,7 @@ rationale = "The fixture owner should be checked as part of ReviewCard identity 
                 expected_class: Some("guard_missing".to_string()),
                 expected_operation_family: Some("raw_pointer_read".to_string()),
                 expected_hazard: Some("alignment".to_string()),
+                surface_goldens: Vec::new(),
             },
         );
         let claim = PolicyClaim {
@@ -1494,6 +1504,7 @@ rationale = "The fixture is valid calibration data, but this claim did not list 
                 expected_class: Some("guard_missing".to_string()),
                 expected_operation_family: Some("raw_pointer_read".to_string()),
                 expected_hazard: Some("alignment".to_string()),
+                surface_goldens: Vec::new(),
             },
         );
         let claim = PolicyClaim {
@@ -1651,6 +1662,7 @@ rationale = "A second sample for the same fixture would overstate the claim samp
                 expected_class: Some("guard_missing".to_string()),
                 expected_operation_family: Some("raw_pointer_read".to_string()),
                 expected_hazard: Some("alignment".to_string()),
+                surface_goldens: Vec::new(),
             },
         );
         let claim = PolicyClaim {

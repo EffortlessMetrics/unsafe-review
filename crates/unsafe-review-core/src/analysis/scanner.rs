@@ -87,10 +87,13 @@ fn detect_site(line: &str) -> Option<(UnsafeSiteKind, OperationFamily)> {
         });
     }
     if line.contains("unsafe fn") && line_contains_unsafe_fn_declaration(line) {
-        return Some((UnsafeSiteKind::UnsafeFn, OperationFamily::Unknown));
+        return Some((UnsafeSiteKind::UnsafeFn, OperationFamily::UnsafeDeclaration));
     }
     if line.contains("unsafe trait") {
-        return Some((UnsafeSiteKind::UnsafeTrait, OperationFamily::Unknown));
+        return Some((
+            UnsafeSiteKind::UnsafeTrait,
+            OperationFamily::UnsafeDeclaration,
+        ));
     }
     if is_extern_boundary(line) {
         return Some((UnsafeSiteKind::ExternBlock, OperationFamily::Ffi));
@@ -752,11 +755,12 @@ fn detect_syntax_site(
     let masked_compact_for_ffi = || syntax_detection_text(&compact);
     match fact.kind.as_str() {
         "FN" if declaration.contains("unsafe fn") => {
-            Some((UnsafeSiteKind::UnsafeFn, OperationFamily::Unknown))
+            Some((UnsafeSiteKind::UnsafeFn, OperationFamily::UnsafeDeclaration))
         }
-        "TRAIT" if declaration.contains("unsafe trait") => {
-            Some((UnsafeSiteKind::UnsafeTrait, OperationFamily::Unknown))
-        }
+        "TRAIT" if declaration.contains("unsafe trait") => Some((
+            UnsafeSiteKind::UnsafeTrait,
+            OperationFamily::UnsafeDeclaration,
+        )),
         "IMPL"
             if declaration.contains("unsafe impl")
                 && parse_impl_trait_name(declaration).as_deref() == Some("Send") =>
@@ -1209,7 +1213,10 @@ fn is_public_api_surface(kind: &UnsafeSiteKind, snippet: &str) -> bool {
 mod tests {
     use super::*;
     use std::fs;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     #[test]
     fn duplicate_operation_pruning_removes_containing_parent_operation() {
@@ -2182,7 +2189,7 @@ impl<T> Tagged<T> {\n\
             .map(|site| site.operation.family.clone())
             .collect::<Vec<_>>();
         assert!(
-            families.contains(&OperationFamily::Unknown),
+            families.contains(&OperationFamily::UnsafeDeclaration),
             "unsafe function declaration should remain visible: {sites:#?}"
         );
         assert!(
@@ -2408,17 +2415,17 @@ impl<T> Tagged<T> {\n\
         // Named declarations: `unsafe fn foo(` — identifier after `fn`, MUST card.
         assert_eq!(
             detect_site("pub unsafe fn caller_must_uphold(ptr: *const u8) -> usize {"),
-            Some((UnsafeSiteKind::UnsafeFn, OperationFamily::Unknown)),
+            Some((UnsafeSiteKind::UnsafeFn, OperationFamily::UnsafeDeclaration)),
             "named unsafe fn declaration must still be detected"
         );
         assert_eq!(
             detect_site("unsafe fn internal_helper() {"),
-            Some((UnsafeSiteKind::UnsafeFn, OperationFamily::Unknown)),
+            Some((UnsafeSiteKind::UnsafeFn, OperationFamily::UnsafeDeclaration)),
             "private named unsafe fn declaration must still be detected"
         );
         assert_eq!(
             detect_site("pub(crate) unsafe fn restricted(ptr: *mut u8) {"),
-            Some((UnsafeSiteKind::UnsafeFn, OperationFamily::Unknown)),
+            Some((UnsafeSiteKind::UnsafeFn, OperationFamily::UnsafeDeclaration)),
             "restricted-visibility named unsafe fn declaration must still be detected"
         );
     }
@@ -2428,6 +2435,10 @@ impl<T> Tagged<T> {\n\
             .duration_since(UNIX_EPOCH)
             .map_err(|err| format!("system clock before UNIX_EPOCH: {err}"))?
             .as_nanos();
-        Ok(std::env::temp_dir().join(format!("unsafe-review-scanner-test-{nanos}")))
+        let counter = TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let process = std::process::id();
+        Ok(std::env::temp_dir().join(format!(
+            "unsafe-review-scanner-test-{process}-{nanos}-{counter}"
+        )))
     }
 }

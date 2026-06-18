@@ -166,9 +166,9 @@ Fixture: `public_unsafe_fn_missing_safety`
 
 When a changed `pub unsafe fn` lacks a precise public `# Safety` section,
 `unsafe-review` still emits a `contract_missing` card. The inline comment plan
-keeps it out of `comments[]` because the operation family is `unknown`, which
-is often an owner-contract or inventory-like surface rather than a precise
-changed unsafe operation. The card remains visible in the bundle.
+keeps it out of `comments[]` because explicit surfacing policy treats
+`unsafe_declaration` cards as owner-contract review surfaces rather than precise
+inline operation comments. The card remains visible in the bundle.
 
 ```json
 {
@@ -177,7 +177,7 @@ changed unsafe operation. The card remains visible in the bundle.
     {
       "class": "contract_missing",
       "operation": "pub unsafe fn caller_must_uphold_contract() {",
-      "operation_family": "unknown",
+      "operation_family": "unsafe_declaration",
       "changed_line": true,
       "next_action": "Add a precise public `# Safety` section that names the required caller obligations.",
       "actionability": "specific_contract_missing",
@@ -192,14 +192,14 @@ changed unsafe operation. The card remains visible in the bundle.
         "do_not_auto_repair"
       ],
       "context_command": "unsafe-review context UR-... --json",
-      "reason": "operation family unknown",
+      "reason": "unsafe declaration is not selected for inline comments",
       "reason_code": "human_deep_review_only"
     }
   ]
 }
 ```
 
-`operation_family` is `unknown` because the unsafe contract obligation lives
+`operation_family` is `unsafe_declaration` because the unsafe contract obligation lives
 on the `unsafe fn` declaration itself, not on a single unsafe operation. The
 bundle still asks for explicit caller obligations rather than for safety prose.
 
@@ -273,7 +273,7 @@ The verifier treats these as artifact contract rules:
 - one planned comment per `path`/`line`;
 - `changed_line = true`, renderable locations only;
 - no `static_unknown`, baseline-known, or suppressed planned comments;
-- no `operation_family: "unknown"` planned comments;
+- no `operation_family: "unknown"` or `operation_family: "unsafe_declaration"` planned comments;
 - every planned body stays at or below 220 words;
 - every ReviewCard appears in either `comments[]` or `not_selected[]`;
 - `not_selected` entries must reference known cards and cannot repeat planned

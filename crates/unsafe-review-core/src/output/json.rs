@@ -12,6 +12,7 @@ use crate::output::{REVIEWCARD_TRUST_BOUNDARY as TRUST_BOUNDARY, UNKNOWN_OWNER};
 use crate::policy::SnapshotCoverage;
 use crate::util::path_display;
 use serde::Serialize;
+use std::path::{Path, PathBuf};
 
 /// Schema version for the plain (no-provenance) JSON analyze artifact.
 const SCHEMA_VERSION_PLAIN: &str = "0.1";
@@ -1068,16 +1069,22 @@ const FIXTURE_GOLDENS: &[&str] = &[
 /// Does not execute witnesses or assess soundness; reviewing the diff after
 /// blessing is the developer's responsibility (same posture as `badges --out`).
 pub fn bless_fixture_card_goldens(names: &[&str]) -> Result<Vec<std::path::PathBuf>, String> {
+    let workspace = default_fixture_workspace();
+    bless_fixture_card_goldens_from_workspace(&workspace, names)
+}
+
+pub fn bless_fixture_card_goldens_from_workspace(
+    workspace: &Path,
+    names: &[&str],
+) -> Result<Vec<std::path::PathBuf>, String> {
     use crate::api::{AnalysisMode, AnalyzeInput, DiffSource, PolicyMode, Scope, analyze};
     use std::fs;
-    use std::path::PathBuf;
 
     let targets: &[&str] = if names.is_empty() {
         FIXTURE_GOLDENS
     } else {
         names
     };
-    let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut written = Vec::new();
     for &fixture in targets {
         let root = workspace.join("fixtures").join(fixture);
@@ -1114,6 +1121,174 @@ pub fn bless_fixture_card_goldens(names: &[&str]) -> Result<Vec<std::path::PathB
         written.push(path);
     }
     Ok(written)
+}
+
+/// Regenerate surface goldens (`expected.lsp.json`, `expected.repair-queue.json`,
+/// `expected.comment-plan.json`) for the given fixtures, writing LF line endings.
+///
+/// Called by `cargo run -p xtask -- bless-goldens` (for fixtures that have
+/// `surface_goldens` set in `fixtures/calibration.toml`) and also by
+/// `check-fixture-surface-parity` to produce the reference output for diffing.
+///
+/// `surfaces` must contain only `"lsp"`, `"repair-queue"`, or `"comment-plan"`.
+/// Paths inside the rendered JSON are normalised to relative (`fixtures/<name>/...`)
+/// so the goldens are byte-stable across checkout locations.
+pub fn bless_fixture_surface_goldens(
+    fixture: &str,
+    surfaces: &[&str],
+) -> Result<Vec<std::path::PathBuf>, String> {
+    let workspace = default_fixture_workspace();
+    bless_fixture_surface_goldens_from_workspace(&workspace, fixture, surfaces)
+}
+
+pub fn bless_fixture_surface_goldens_from_workspace(
+    workspace: &Path,
+    fixture: &str,
+    surfaces: &[&str],
+) -> Result<Vec<std::path::PathBuf>, String> {
+    use crate::api::{AnalysisMode, AnalyzeInput, DiffSource, PolicyMode, Scope, analyze};
+    use std::fs;
+
+    if surfaces.is_empty() {
+        return Ok(Vec::new());
+    }
+    let root = workspace.join("fixtures").join(fixture);
+    let output = analyze(AnalyzeInput {
+        root: root.clone(),
+        scope: Scope::Diff,
+        diff: DiffSource::File(root.join("change.diff")),
+        mode: AnalysisMode::Draft,
+        policy: PolicyMode::Advisory,
+        include_unchanged_tests: true,
+        max_cards: None,
+    })?;
+    let mut written = Vec::new();
+    for &surface in surfaces {
+        let (filename, rendered) = match surface {
+            "lsp" => {
+                let text = crate::output::lsp::render(&output);
+                (
+                    "expected.lsp.json",
+                    normalize_surface_json(text, &root, workspace),
+                )
+            }
+            "repair-queue" => {
+                let text = crate::output::repair_queue::render(&output);
+                (
+                    "expected.repair-queue.json",
+                    normalize_surface_json(text, &root, workspace),
+                )
+            }
+            "comment-plan" => {
+                let text = crate::output::comment_plan::render(&output);
+                (
+                    "expected.comment-plan.json",
+                    normalize_surface_json(text, &root, workspace),
+                )
+            }
+            other => {
+                return Err(format!(
+                    "bless_fixture_surface_goldens: unknown surface `{other}`; expected lsp, repair-queue, or comment-plan"
+                ));
+            }
+        };
+        let mut text = rendered;
+        text.push('\n');
+        // Ensure LF line endings (the repo is LF-only; guard against Windows writers).
+        let text = text.replace("\r\n", "\n");
+        let path = root.join(filename);
+        fs::write(&path, text.as_bytes())
+            .map_err(|err| format!("write {} failed: {err}", path.display()))?;
+        written.push(path);
+    }
+    Ok(written)
+}
+
+/// Render lsp, repair-queue, or comment-plan output for a fixture and return the normalised string.
+///
+/// Used by the surface-parity gate to produce the reference text for diffing
+/// against the committed golden without writing a file.
+pub fn render_fixture_surface(fixture: &str, surface: &str) -> Result<String, String> {
+    let workspace = default_fixture_workspace();
+    render_fixture_surface_from_workspace(&workspace, fixture, surface)
+}
+
+pub fn render_fixture_surface_from_workspace(
+    workspace: &Path,
+    fixture: &str,
+    surface: &str,
+) -> Result<String, String> {
+    use crate::api::{AnalysisMode, AnalyzeInput, DiffSource, PolicyMode, Scope, analyze};
+
+    let root = workspace.join("fixtures").join(fixture);
+    let output = analyze(AnalyzeInput {
+        root: root.clone(),
+        scope: Scope::Diff,
+        diff: DiffSource::File(root.join("change.diff")),
+        mode: AnalysisMode::Draft,
+        policy: PolicyMode::Advisory,
+        include_unchanged_tests: true,
+        max_cards: None,
+    })?;
+    let raw = match surface {
+        "lsp" => crate::output::lsp::render(&output),
+        "repair-queue" => crate::output::repair_queue::render(&output),
+        "comment-plan" => crate::output::comment_plan::render(&output),
+        other => {
+            return Err(format!(
+                "render_fixture_surface: unknown surface `{other}`; expected lsp, repair-queue, or comment-plan"
+            ));
+        }
+    };
+    let mut text = normalize_surface_json(raw, &root, workspace);
+    text.push('\n');
+    let text = text.replace("\r\n", "\n");
+    Ok(text)
+}
+
+/// Normalise absolute paths inside a rendered surface JSON to relative paths.
+///
+/// The `root` field and any `path` fields that embed the absolute fixture path
+/// are rewritten to `fixtures/<name>` relative form so committed goldens are
+/// byte-stable across checkout locations.
+fn normalize_surface_json(
+    text: String,
+    root: &std::path::Path,
+    workspace: &std::path::Path,
+) -> String {
+    // Build a replacement: convert the absolute root path to a forward-slash
+    // relative path of the form "fixtures/<name>".
+    let abs = match root.canonicalize() {
+        Ok(p) => p,
+        // If canonicalize fails (e.g. on CI with a non-existent path), return as-is.
+        Err(_) => return text,
+    };
+    let ws_abs = match workspace.canonicalize() {
+        Ok(p) => p,
+        Err(_) => return text,
+    };
+    // Compute the relative path from workspace to fixture root.
+    let rel = match abs.strip_prefix(&ws_abs) {
+        Ok(r) => r,
+        Err(_) => return text,
+    };
+    // Convert to forward-slash string (needed on Windows).
+    let rel_str = rel.to_string_lossy().replace('\\', "/");
+    // Replace any occurrence of the absolute path (forward- or backslash form)
+    // with the relative path. We normalise the input text's path separators first.
+    let abs_forward = abs.to_string_lossy().replace('\\', "/");
+    let abs_backward = json_escaped_backslash_path(&abs);
+    let result = text.replace(&*abs_forward, &rel_str);
+    // Also replace JSON-escaped backslash forms (Windows paths in JSON appear as \\).
+    result.replace(&*abs_backward, &rel_str)
+}
+
+fn default_fixture_workspace() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+fn json_escaped_backslash_path(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "\\\\")
 }
 
 #[cfg(test)]
@@ -1344,6 +1519,16 @@ mod tests {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
     }
 
+    #[test]
+    fn json_escaped_backslash_path_doubles_backslashes() {
+        let path = PathBuf::from(r"C:\repo\fixtures\case");
+
+        assert_eq!(
+            json_escaped_backslash_path(&path),
+            r"C:\\repo\\fixtures\\case"
+        );
+    }
+
     fn parse_json(text: &str) -> Result<serde_json::Value, String> {
         serde_json::from_str(text).map_err(|err| format!("JSON parse failed: {err}"))
     }
@@ -1439,6 +1624,48 @@ mod tests {
             ts.contains('T'),
             "generated_at must contain T separator: {ts}"
         );
+        Ok(())
+    }
+
+    /// Owner cards are kept in cards.json and the summary
+    /// card count includes them — they are never silently dropped or hidden from the JSON
+    /// output (stance: owner-cards-grouped-not-hidden).
+    #[test]
+    fn owner_card_is_present_in_cards_json_and_included_in_summary_count() -> Result<(), String> {
+        // `attributed_unsafe_fn_no_duplicate` produces an owner card
+        // (operation_family == "unsafe_declaration") alongside a more-specific operation card.
+        let output = fixture_output("attributed_unsafe_fn_no_duplicate")?;
+        let value = parse_json(&render(&output))?;
+
+        let cards = value["cards"]
+            .as_array()
+            .ok_or_else(|| "cards must be a JSON array".to_string())?;
+
+        let has_owner_card = cards
+            .iter()
+            .any(|card| card["operation_family"].as_str() == Some("unsafe_declaration"));
+        if !has_owner_card {
+            return Err(
+                "attributed_unsafe_fn_no_duplicate: expected a card with operation_family==\"unsafe_declaration\" \
+                 in cards.json but found none — owner card was silently dropped"
+                    .to_string(),
+            );
+        }
+
+        let summary_count = value["summary"]["cards"]
+            .as_u64()
+            .ok_or_else(|| "summary.cards must be a JSON integer".to_string())?
+            as usize;
+
+        if summary_count != cards.len() {
+            return Err(format!(
+                "summary.cards ({}) must equal cards.len() ({}) — owner card must not be \
+                 hidden from the summary count",
+                summary_count,
+                cards.len()
+            ));
+        }
+
         Ok(())
     }
 

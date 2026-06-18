@@ -108,6 +108,27 @@ status = "proposed"
 owner = "editor/extension"
 linked_spec = "UNSAFE-REVIEW-SPEC-0021"
 
+[[artifact]]
+id = "UNSAFE-REVIEW-SPEC-0040"
+kind = "spec"
+path = "docs/specs/UNSAFE-REVIEW-SPEC-0040-detector-contracts-ledger.md"
+status = "proposed"
+owner = "core / analysis"
+
+[[artifact]]
+id = "UNSAFE-REVIEW-SPEC-0041"
+kind = "spec"
+path = "docs/specs/UNSAFE-REVIEW-SPEC-0041-syntax-first-dispatch-architecture.md"
+status = "proposed"
+owner = "core / analysis"
+
+[[artifact]]
+id = "UNSAFE-REVIEW-SPEC-0042"
+kind = "spec"
+path = "docs/specs/UNSAFE-REVIEW-SPEC-0042-corpus-validation-taxonomy.md"
+status = "proposed"
+owner = "repo-infra"
+
 [[lane]]
 id = "docs/source-of-truth-scaffold"
 name = "source-of-truth scaffold"
@@ -205,3 +226,17 @@ name = "action surface correctness for adopters"
 path = ".rails/goals/active.toml"
 status = "active"
 owner = "repo-infra / ci"
+
+[[lane]]
+id = "detector-discipline-control-plane"
+name = "detector-discipline control plane"
+path = ".rails/lanes/control-plane/implementation-plan.md"
+status = "active"
+owner = "repo-infra"
+
+[[lane]]
+id = "corpus-validation-system"
+name = "layered corpus validation system"
+path = ".rails/lanes/corpus/implementation-plan.md"
+status = "active"
+owner = "repo-infra"

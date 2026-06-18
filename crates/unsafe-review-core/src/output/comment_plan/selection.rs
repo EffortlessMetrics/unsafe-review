@@ -1,5 +1,5 @@
 use crate::domain::coverage::{Coverage, WitnessReceiptCoverage};
-use crate::domain::{Confidence, OperationFamily, Priority, ReviewCard, ReviewClass};
+use crate::domain::{Confidence, Priority, ReviewCard, ReviewClass, UnsafeSiteKind};
 use crate::output::REVIEWCARD_TRUST_BOUNDARY;
 use crate::output::confirmation::{build_this_first, confirmation_step, hypothesis_to_confirm};
 
@@ -158,11 +158,15 @@ const NOT_SELECTED_UNKNOWN_FAMILY_REASON: ReviewBudgetReason = ReviewBudgetReaso
     code: "human_deep_review_only",
     message: "operation family unknown",
 };
-/// Applied to an owner/Unknown-family card when a more-specific operation card
-/// from the same changed region is already present. Replaces the generic
-/// `human_deep_review_only` reason for that sub-case so reviewers understand
-/// the owner card is grouped behind the operation card, not simply excluded for
-/// being unknown.
+const NOT_SELECTED_UNSAFE_DECLARATION_REASON: ReviewBudgetReason = ReviewBudgetReason {
+    code: "human_deep_review_only",
+    message: "unsafe declaration is not selected for inline comments",
+};
+/// Applied to an owner/declaration/fallback-family card when a more-specific
+/// operation card from the same changed region is already present. Replaces the
+/// generic `human_deep_review_only` reason for that sub-case so reviewers
+/// understand the owner card is grouped behind the operation card, not simply
+/// excluded for its broad review route.
 pub(super) const NOT_SELECTED_COVERED_BY_OPERATION_CARD_REASON: ReviewBudgetReason =
     ReviewBudgetReason {
         code: "covered_by_specific_operation_card",
@@ -181,20 +185,57 @@ const NOT_SELECTED_POLICY_FALLBACK_REASON: ReviewBudgetReason = ReviewBudgetReas
     message: "not selected by current inline comment policy",
 };
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CommentSurfacingDisposition {
+    InlineCandidate,
+    UnsafeDeclaration,
+    FallbackUnsafeSite,
+}
+
+impl CommentSurfacingDisposition {
+    fn allows_inline_comment(self) -> bool {
+        matches!(self, Self::InlineCandidate)
+    }
+
+    fn is_owner_or_fallback(self) -> bool {
+        matches!(self, Self::UnsafeDeclaration | Self::FallbackUnsafeSite)
+    }
+}
+
+fn comment_surfacing_disposition(card: &ReviewCard) -> CommentSurfacingDisposition {
+    match &card.site.kind {
+        UnsafeSiteKind::UnsafeFn | UnsafeSiteKind::UnsafeTrait => {
+            CommentSurfacingDisposition::UnsafeDeclaration
+        }
+        UnsafeSiteKind::UnsafeBlock | UnsafeSiteKind::UnsafeImpl => {
+            CommentSurfacingDisposition::FallbackUnsafeSite
+        }
+        UnsafeSiteKind::UnsafeImplSend
+        | UnsafeSiteKind::UnsafeImplSync
+        | UnsafeSiteKind::ExternBlock
+        | UnsafeSiteKind::FfiCall
+        | UnsafeSiteKind::StaticMut
+        | UnsafeSiteKind::Operation => CommentSurfacingDisposition::InlineCandidate,
+    }
+}
+
 pub(super) fn should_plan_comment(card: &ReviewCard) -> bool {
     card.site.changed
         && card.class.is_actionable()
-        && !matches!(card.operation.family, OperationFamily::Unknown)
+        && comment_surfacing_disposition(card).allows_inline_comment()
         && (matches!(card.priority, Priority::High) || matches!(card.confidence, Confidence::High))
         && !matches!(card.confidence, Confidence::Low | Confidence::Unknown)
 }
 
 pub(super) fn non_selection_reason(card: &ReviewCard) -> ReviewBudgetReason {
+    let surfacing = comment_surfacing_disposition(card);
     if !card.site.changed {
         NOT_SELECTED_OUTSIDE_CHANGED_HUNK_REASON
     } else if !card.class.is_actionable() {
         NOT_SELECTED_CLASS_INELIGIBLE_REASON
-    } else if matches!(card.operation.family, OperationFamily::Unknown) {
+    } else if matches!(surfacing, CommentSurfacingDisposition::UnsafeDeclaration) {
+        NOT_SELECTED_UNSAFE_DECLARATION_REASON
+    } else if matches!(surfacing, CommentSurfacingDisposition::FallbackUnsafeSite) {
         NOT_SELECTED_UNKNOWN_FAMILY_REASON
     } else if matches!(card.confidence, Confidence::Low | Confidence::Unknown) {
         NOT_SELECTED_CONFIDENCE_REASON
@@ -207,13 +248,14 @@ pub(super) fn non_selection_reason(card: &ReviewCard) -> ReviewBudgetReason {
     }
 }
 
-/// Determine whether an owner/Unknown-family card's changed region is already
-/// covered by at least one specific (non-Unknown-family) card in `all_cards`.
+/// Determine whether an owner/declaration/fallback-site card's changed region
+/// is already covered by at least one concrete operation card in `all_cards`.
 ///
-/// "Same region" is defined as the same file. Owner cards (`unsafe fn` sites)
-/// span an entire function body and the specific operation cards they generate
-/// are located inside that function, so file-level co-location is the right
-/// granularity for grouping.
+/// "Same region" is defined as the same file and inferred owner/declaration
+/// context. Owner cards (`unsafe fn` sites) span an entire function body and the
+/// specific operation cards they generate are located inside that function, so
+/// owner context prevents unrelated declarations in the same file from being
+/// marked as covered.
 ///
 /// This function is used only for the `not_selected` non-selection reason; it
 /// does not change card identity, evidence counts, or structured artifacts.
@@ -221,15 +263,21 @@ pub(super) fn owner_card_covered_by_specific_operation(
     owner_card: &ReviewCard,
     all_cards: &[ReviewCard],
 ) -> bool {
-    if !matches!(owner_card.operation.family, OperationFamily::Unknown) {
+    if !comment_surfacing_disposition(owner_card).is_owner_or_fallback() {
         return false;
     }
     let owner_file = &owner_card.site.location.file;
+    let owner_context = owner_card.site.owner.as_deref();
     all_cards.iter().any(|other| {
-        !matches!(other.operation.family, OperationFamily::Unknown)
+        comment_surfacing_disposition(other).allows_inline_comment()
             && other.site.changed
             && &other.site.location.file == owner_file
+            && same_owner_context(owner_context, other.site.owner.as_deref())
     })
+}
+
+fn same_owner_context(owner: Option<&str>, other: Option<&str>) -> bool {
+    matches!((owner, other), (Some(owner), Some(other)) if !owner.trim().is_empty() && owner == other)
 }
 
 /// Derive the primary coverage gap for a card (SPEC-0032).
