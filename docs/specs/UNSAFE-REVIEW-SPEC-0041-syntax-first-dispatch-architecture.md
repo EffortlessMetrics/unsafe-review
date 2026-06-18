@@ -1,6 +1,6 @@
 # UNSAFE-REVIEW-SPEC-0041: syntax-first dispatch architecture
 
-Status: proposed
+Status: accepted
 Owner: core / analysis
 Created: 2026-06-15
 
@@ -138,8 +138,10 @@ baselines — project from the same card. No second truth surface is permitted.
 Implementation of this architecture and the associated detector-discipline ledger
 and gate are tracked by the control-plane lane. The sequence is:
 
-- SPEC-0041 (this spec): document the dispatch architecture. Status: proposed.
-- SPEC-0040: detector-discipline ledger schema and scaffold. Status: planned.
-- PR-5 (control-plane lane): xtask gates for the ledger. Status: planned.
+- SPEC-0041 (this spec): document the dispatch architecture. Status: accepted.
+- SPEC-0040: detector-discipline ledger schema and scaffold. Status: accepted.
+- PR-5 (control-plane lane): xtask gates for the ledger. Status: merged.
+- PR-C (control-plane lane): enforcement flip for detector-contract structural
+  validation and documented gaps. Status: merged and enforcing.
 
 See `.rails/lanes/control-plane/implementation-plan.md` for the full sequence.
