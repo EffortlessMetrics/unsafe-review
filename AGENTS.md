@@ -1,18 +1,5 @@
 # Agent operating contract
 
-## Command style
-
-Prefix local commands with `rtk`. If a command in docs omits `rtk`, keep the
-documented command text intact, but run it locally with the `rtk` prefix.
-
-Examples:
-
-```bash
-rtk cargo run --locked -p xtask -- check-pr
-rtk git diff --check
-rtk gh pr view 123 --repo EffortlessMetrics/unsafe-review-swarm
-```
-
 ## Repository roles
 
 The operating model is:
@@ -53,7 +40,7 @@ explicitly changes the lane.
 Before routine swarm implementation, run the source sync guard:
 
 ```bash
-rtk cargo run --locked -p xtask -- source-divergence
+cargo run --locked -p xtask -- source-divergence
 ```
 
 If `new_source_commits` is nonzero, repair or acknowledge the source-to-swarm
@@ -71,8 +58,8 @@ from current `origin/main` for the PR-sized task instead of editing through the
 dirty tree:
 
 ```bash
-rtk git fetch origin
-rtk git worktree add -b <branch> <path> origin/main
+git fetch origin
+git worktree add -b <branch> <path> origin/main
 ```
 
 Do not reset, rebase, delete, or rewrite another worktree to make room for a
