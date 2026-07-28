@@ -99,11 +99,13 @@ cards, record it as a named limitation in the dogfood handoff or objective audit
 instead of counting it as an active corpus target. A zero-card result is not
 evidence that the PR is safe.
 
-When streaming a raw GitHub PR diff, pipe it directly into `unsafe-review pr`
-so the full `diff --git` headers reach the analyzer without shell-redirection
-rewriting:
+When streaming a raw GitHub PR diff, enable pipeline failure propagation and
+pass the checkout that matches the diff to `unsafe-review pr --diff -`:
 
 ```bash
+set -o pipefail
 gh pr diff 681 -R rust-lang/hashbrown --patch \
-  | cargo run --locked -p unsafe-review -- pr --diff -
+  | cargo run --locked -p unsafe-review -- pr \
+      --root target/dogfood-work/hashbrown-pr681-root \
+      --diff -
 ```
