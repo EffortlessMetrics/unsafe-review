@@ -99,10 +99,10 @@ cards, record it as a named limitation in the dogfood handoff or objective audit
 instead of counting it as an active corpus target. A zero-card result is not
 evidence that the PR is safe.
 
-When capturing a raw GitHub PR diff, use `rtk proxy` so the saved file keeps the
+When capturing a raw GitHub PR diff, use `proxy` so the saved file keeps the
 full patch shape:
 
 ```bash
-rtk proxy gh pr diff 681 -R rust-lang/hashbrown --patch \
+gh pr diff 681 -R rust-lang/hashbrown --patch \
   > target/dogfood-work/hashbrown-pr681.raw.diff
 ```
