@@ -145,7 +145,7 @@ jobs:
       # Needed only so the advisory ub-review step can post its grouped PR review.
       pull-requests: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           # Full history so ub-review can diff base..head; the core gate is happy with it too.
           fetch-depth: 0
