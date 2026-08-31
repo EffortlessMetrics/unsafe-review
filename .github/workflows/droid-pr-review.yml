@@ -20,7 +20,7 @@ jobs:
       id-token: write
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -50,7 +50,7 @@ jobs:
       - name: Run Droid Auto Review
         continue-on-error: true
         timeout-minutes: 40
-        uses: Factory-AI/droid-action@8ea31f351ee6636ebef918ccb64682f477af7184
+        uses: Factory-AI/droid-action@9547b0cf20a6357bfac0aa715fcfd0f47e5cf621
         env:
           ANTHROPIC_AUTH_TOKEN: ""
           ANTHROPIC_BASE_URL: ""
