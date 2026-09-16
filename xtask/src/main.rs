@@ -18,24 +18,52 @@ mod accuracy_labels;
 mod advisory_artifacts;
 mod calibration_constants;
 mod calibration_manifest;
+mod calibration_snapshot;
+mod check_dispatch;
+mod check_local;
+mod ci_lanes;
+mod ci_routing_contract;
+mod ci_test;
+mod cleanup_auditor;
 mod command_args;
 mod commands;
 mod corpus_backstop;
+mod corpus_partitions;
 mod corpus_usefulness;
+mod delegation;
+mod detector_contracts;
+mod docs_automation_check;
 mod docs_automation_paths;
+mod dogfood_density;
 mod dogfood_exec;
 mod dogfood_usefulness;
+mod evidence_loss_challenges;
+mod external_pilot_rollup;
+mod external_pilots;
 mod first_hour;
+mod fixture_surfaces;
+mod fuzz_artifact_checks;
+mod lsp_smoke;
 mod markdown;
 mod public_badges;
 mod public_surfaces;
 mod real_pr_corpus;
+mod self_unsafe;
 mod source_sync;
+mod source_truth_ledgers;
 mod spec_status;
+mod stance_checks;
+mod subagent_briefs;
+mod subagent_results;
 mod support_tiers;
+mod unsafe_review_ledger;
+mod work_specs;
 mod workflow_allowlist;
+mod workflow_pin_sync;
 
 use advisory_artifacts::{check_advisory_artifacts, check_first_pr_artifacts};
+use calibration_snapshot::sync_calibration_snapshot;
+use docs_automation_check::check_docs_automation;
 use first_hour::check_first_hour;
 use support_tiers::{SUPPORT_TIERS_DOC, check_support_tiers, support_tier_capabilities};
 
@@ -460,43 +488,43 @@ const POLICY_FILES: &[&str] = &[
     "policy/spec-coverage.toml",
     "policy/pr-corpus.toml",
 ];
-const DETECTOR_CONTRACTS_LEDGER: &str = "policy/detector-contracts.toml";
-const STANCE_DECISIONS_LEDGER: &str = "policy/stance-decisions.toml";
-const SPEC_COVERAGE_LEDGER: &str = "policy/spec-coverage.toml";
 const WORKFLOW_ALLOWLIST: &str = "policy/workflow-allowlist.toml";
 const WORKFLOW_DIR: &str = ".github/workflows";
 const CORPUS_BACKSTOP_SAMPLE_REPORT: &str = "policy/corpus-backstop-sample-report.json";
 const CORPUS_USEFULNESS_SAMPLE_ROLLUP: &str = "policy/corpus-usefulness-sample-rollup.json";
-const DOC_ARTIFACT_LEDGER: &str = "policy/doc-artifacts.toml";
-const DOCS_AUTOMATION_LEDGER: &str = "policy/docs-automation.toml";
+const DOC_ARTIFACT_LEDGER: &str = ".allow/artifacts/doc-artifacts.toml";
 const CI_LANE_LEDGER: &str = "policy/ci-lane-whitelist.toml";
 const PACKAGE_BOUNDARY_LEDGER: &str = "policy/package-boundary.toml";
 const SOURCE_OF_TRUTH_INDEX: &str = ".rails/index.toml";
 const ACTIVE_GOAL_MANIFEST: &str = ".rails/goals/active.toml";
-const DOC_ARTIFACT_KINDS: &[&str] = &["proposal", "spec", "adr", "plan", "goal"];
-const DOC_ARTIFACT_STATUSES: &[&str] = &["proposed", "accepted", "active", "done", "deferred"];
-const DOCS_AUTOMATION_KINDS: &[&str] = &[
-    "spec_status_dashboard",
-    "operator_front_door",
-    "agent_operating_contract",
-    "lane_plan",
-    "docs_map",
-    "published_surface",
-    "handoff_receipt",
+const DOC_ARTIFACT_KINDS: &[&str] = &[
+    "proposal",
+    "spec",
+    "adr",
+    "plan",
+    "plan_item",
+    "implementation_plan",
+    "goal",
+    "active_goal",
+    "project_charter",
+    "support_tier",
+    "closeout",
 ];
-const DOCS_AUTOMATION_MODES: &[&str] = &["check", "generate"];
+const DOC_ARTIFACT_STATUSES: &[&str] = &[
+    "proposed", "accepted", "active", "done", "deferred", "draft",
+];
 const GOAL_WORK_ITEM_STATUSES: &[&str] = &["ready", "active", "blocked", "done", "superseded"];
 const PACKAGE_CLASSIFICATIONS: &[&str] = &["published", "private", "internal", "deferred"];
 const CI_LANE_STATUSES: &[&str] = &["advisory", "required", "deferred", "retired"];
 
 const FIXTURE_REQUIRED_FILES: &[&str] = &["Cargo.toml", "change.diff", "src/lib.rs"];
 
-const FIXTURE_EXPECTED_CARDS_EXCEPTIONS: &[&str] = &[
+pub(crate) const FIXTURE_EXPECTED_CARDS_EXCEPTIONS: &[&str] = &[
     "duplicate_raw_pointer_reads",
     "raw_pointer_alignment_line_drift",
 ];
 
-const FIXTURE_PACKAGE_PREFIX_EXCEPTIONS: &[(&str, &str)] =
+pub(crate) const FIXTURE_PACKAGE_PREFIX_EXCEPTIONS: &[(&str, &str)] =
     &[("raw_pointer_alignment_line_drift", "raw-pointer-alignment")];
 const MANUAL_CANDIDATE_EXAMPLE_DIR: &str = "docs/examples/manual-candidates";
 const MANUAL_CANDIDATE_SMOKE_FIXTURE_DIR: &str =
@@ -821,22 +849,6 @@ const DOGFOOD_STABLE_BYTE_COVERAGE_HEADER: &[&str] = &[
     "Analyzer/support tier",
     "Boundary",
 ];
-const FUZZ_REQUIRED_FILES: &[&str] = &[
-    "docs/FUZZING.md",
-    "fuzz/.gitignore",
-    "fuzz/Cargo.lock",
-    "fuzz/Cargo.toml",
-    "fuzz/corpus/analyze/basic",
-    "fuzz/fuzz_targets/analyze.rs",
-];
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct DocArtifactEntry {
-    kind: String,
-    path: String,
-    status: String,
-    owner: String,
-}
-
 fn main() {
     if let Err(err) = run(std::env::args().collect()) {
         eprintln!("xtask: {err}");
@@ -865,34 +877,46 @@ fn run(args: Vec<String>) -> Result<(), String> {
         commands::XtaskCommand::Help => Ok(()),
         commands::XtaskCommand::CheckPr => {
             check_docs()?;
-            public_badges::check_generated_projection()?;
             check_policy()?;
             check_support_tiers()?;
-            check_fixtures()?;
+            fixture_surfaces::check_fixtures()?;
             check_calibration()?;
-            check_fixture_surface_parity()?;
-            check_surface_determinism()?;
+            fixture_surfaces::check_fixture_surface_parity()?;
+            fixture_surfaces::check_surface_determinism()?;
             real_pr_corpus::check()?;
+            corpus_partitions::check()?;
+            evidence_loss_challenges::check()?;
+            external_pilots::check()?;
             check_dogfood()?;
-            check_manual_fuzz_harness()?;
-            check_tracked_generated_artifacts()?;
+            fuzz_artifact_checks::check_manual_fuzz_harness()?;
+            fuzz_artifact_checks::check_tracked_generated_artifacts()?;
+            self_unsafe::check_self_unsafe()?;
+            lsp_smoke::run(&root)?;
             println!("check-pr: ok");
             Ok(())
         }
         commands::XtaskCommand::CheckDocs => check_docs(),
         commands::XtaskCommand::CheckPolicy => check_policy(),
         commands::XtaskCommand::CheckDocArtifacts => check_doc_artifacts(),
+        commands::XtaskCommand::CheckWorkSpecs => work_specs::check(),
+        commands::XtaskCommand::CheckSubagentBriefs => subagent_briefs::check(),
+        commands::XtaskCommand::CheckSubagentResults => subagent_results::check(),
         commands::XtaskCommand::CheckDocsAutomation => check_docs_automation(),
         commands::XtaskCommand::CheckSpecStatus => spec_status::check(),
         commands::XtaskCommand::CheckPublicSurfaces => public_surfaces::check(),
-        commands::XtaskCommand::CheckGoals => check_goals(),
-        commands::XtaskCommand::CheckPackageBoundary => check_package_boundary(),
-        commands::XtaskCommand::CheckCiLanes => check_ci_lanes(),
+        commands::XtaskCommand::CheckGoals => source_truth_ledgers::check_goals(),
+        commands::XtaskCommand::CheckPackageBoundary => {
+            source_truth_ledgers::check_package_boundary()
+        }
+        commands::XtaskCommand::CheckCiLanes => ci_lanes::check(),
+        commands::XtaskCommand::CiTest => ci_test::run(&root),
+        commands::XtaskCommand::CiTestValidate(path) => ci_test::validate_diagnostics(&path),
         commands::XtaskCommand::CheckSupportTiers => check_support_tiers(),
-        commands::XtaskCommand::CheckFixtures => check_fixtures(),
+        commands::XtaskCommand::CheckFixtures => fixture_surfaces::check_fixtures(),
         commands::XtaskCommand::CheckCalibration => check_calibration(),
         commands::XtaskCommand::CheckDogfood => check_dogfood(),
-        commands::XtaskCommand::CheckFuzz => check_manual_fuzz_harness(),
+        commands::XtaskCommand::CheckFuzz => fuzz_artifact_checks::check_manual_fuzz_harness(),
+        commands::XtaskCommand::CleanupAudit => cleanup_auditor::cleanup_audit(),
         commands::XtaskCommand::CheckAdvisoryArtifacts(dir) => check_advisory_artifacts(&dir),
         commands::XtaskCommand::CheckFirstPrArtifacts(dir) => check_first_pr_artifacts(&dir),
         commands::XtaskCommand::CheckManualCandidateExamples => check_manual_candidate_examples(),
@@ -909,17 +933,36 @@ fn run(args: Vec<String>) -> Result<(), String> {
         commands::XtaskCommand::CheckCorpusUsefulnessSchema(path) => {
             corpus_usefulness::check_schema(&path)
         }
-        commands::XtaskCommand::CheckDetectorContracts => check_detector_contracts(),
-        commands::XtaskCommand::CheckStanceDecisions => check_stance_decisions(),
-        commands::XtaskCommand::CheckStanceCoverage => check_stance_coverage(),
-        commands::XtaskCommand::CheckSpecCoverage => check_spec_coverage(),
-        commands::XtaskCommand::CheckFixtureSurfaceParity => check_fixture_surface_parity(),
-        commands::XtaskCommand::CheckSurfaceDeterminism => check_surface_determinism(),
+        commands::XtaskCommand::CheckDetectorContracts => {
+            detector_contracts::check_detector_contracts()
+        }
+        commands::XtaskCommand::CheckSelfUnsafe => self_unsafe::check_self_unsafe(),
+        commands::XtaskCommand::CheckStanceDecisions => stance_checks::check_stance_decisions(),
+        commands::XtaskCommand::CheckStanceCoverage => stance_checks::check_stance_coverage(),
+        commands::XtaskCommand::CheckSpecCoverage => stance_checks::check_spec_coverage(),
+        commands::XtaskCommand::CheckFixtureSurfaceParity => {
+            fixture_surfaces::check_fixture_surface_parity()
+        }
+        commands::XtaskCommand::CheckSurfaceDeterminism => {
+            fixture_surfaces::check_surface_determinism()
+        }
         commands::XtaskCommand::CheckRealPrCorpus => real_pr_corpus::check(),
+        commands::XtaskCommand::CheckCorpusPartitions => corpus_partitions::check(),
+        commands::XtaskCommand::CheckEvidenceLossChallenges => evidence_loss_challenges::check(),
+        commands::XtaskCommand::CheckExternalPilots => external_pilots::check(),
+        commands::XtaskCommand::ExternalPilotRollup => external_pilot_rollup::write(),
+        commands::XtaskCommand::CheckLocal(raw_args) => {
+            check_local::run(&raw_args, &|id, quiet| {
+                check_dispatch::run_named_check(id, quiet)
+            })
+        }
+        commands::XtaskCommand::CheckLocalRun(id) => check_dispatch::run_named_check(&id, false),
+        commands::XtaskCommand::LspSmoke => lsp_smoke::run(&root),
         commands::XtaskCommand::DogfoodExec(raw_args) => {
             let exec_args = dogfood_exec::DogfoodExecArgs::parse(&raw_args)?;
             dogfood_exec::run(&exec_args)
         }
+        commands::XtaskCommand::WorkflowPinSync(raw_args) => workflow_pin_sync::run(&raw_args),
     }
 }
 
@@ -928,9 +971,20 @@ fn command_requires_workspace_root(command: &commands::XtaskCommand) -> bool {
 }
 
 fn print_help() {
-    println!(
-        "xtask options before command: [--workspace-root <path>] (or {WORKSPACE_ROOT_ENV})\nxtask commands: check-pr, check-docs, check-policy, check-support-tiers, check-fixtures, check-calibration, check-dogfood, check-fuzz, check-doc-artifacts, check-docs-automation, check-spec-status, check-public-surfaces, check-goals, check-package-boundary, check-ci-lanes, check-advisory-artifacts <dir>, check-first-pr-artifacts <dir>, check-manual-candidate-examples, check-first-hour, dogfood-usefulness, sync-calibration-snapshot, source-divergence, check-source-sync, bless-goldens [fixture ...], corpus-backstop [--out <path>], check-corpus-backstop-schema <path>, corpus-usefulness [--out <path>], check-corpus-usefulness-schema <path>, check-detector-contracts, check-stance-decisions, check-stance-coverage, check-spec-coverage, check-fixture-surface-parity, check-surface-determinism, check-real-pr-corpus, dogfood-exec [--target <id>] [--work-dir <path>] [--max-cards <N>] [--strict] [--clean] [--timeout <secs>]"
-    );
+    println!("{}", help_text());
+}
+
+/// Production xtask help text.
+///
+/// This is the single source for the `--help` listing: tests exercise this
+/// function directly so advertised names cannot drift from the parser again.
+/// `check-goals` (deprecated compatibility) and `check-local-run` (internal
+/// subprocess plumbing) remain parseable but are intentionally omitted from the
+/// command list; the trailing note records that classification.
+fn help_text() -> String {
+    format!(
+        "xtask options before command: [--workspace-root <path>] (or {WORKSPACE_ROOT_ENV})\nxtask commands: check-pr, check-docs, check-policy, check-support-tiers, check-fixtures, check-calibration, check-dogfood, check-fuzz, cleanup-audit, check-doc-artifacts, check-work-specs, check-subagent-briefs, check-subagent-results, check-docs-automation, check-spec-status, check-public-surfaces, check-package-boundary, check-ci-lanes, ci-test (run structured tests), ci-test-validate <dir> (validate structured diagnostics), check-advisory-artifacts <dir>, check-first-pr-artifacts <dir>, check-manual-candidate-examples, check-first-hour, dogfood-usefulness, external-pilot-rollup, lsp-smoke, sync-calibration-snapshot, source-divergence, check-source-sync, bless-goldens [fixture ...], corpus-backstop [--out <path>], check-corpus-backstop-schema <path>, corpus-usefulness [--out <path>], check-corpus-usefulness-schema <path>, check-detector-contracts, check-self-unsafe, check-stance-decisions, check-stance-coverage, check-spec-coverage, check-fixture-surface-parity, check-surface-determinism, check-real-pr-corpus, check-corpus-partitions, check-evidence-loss-challenges, check-external-pilots, check-local [--base <ref>] [--format human|json] [--out <path>], dogfood-exec [--target <id>] [--include-holdout] [--work-dir <path>] [--max-cards <N>] [--strict] [--clean] [--timeout <secs>], workflow-pin-sync [--check] [--write] [--format human|json]\nnot listed: check-goals (deprecated compatibility) and check-local-run (internal subprocess plumbing); both remain parseable"
+    )
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1141,7 +1195,33 @@ fn check_docs() -> Result<(), String> {
         Path::new(".rails"),
         Path::new("policy"),
     ])?;
+    check_doc_claim_discipline()?;
     println!("check-docs: ok");
+    Ok(())
+}
+
+/// Scan the two highest-visibility public markdown surfaces for forbidden
+/// positive overclaims.
+///
+/// Reuses `reject_positive_overclaims` (the same rail that guards the first-pr
+/// artifact bundle) across the root README and CHANGELOG — the surfaces an
+/// adopter reads first. The rail exempts lines with negative-claim context
+/// (e.g. "not UB-free", "does not prove sound") so the canonical trust-boundary
+/// disclaimers pass. This partially closes #1804.
+///
+/// Scope note: `docs/**/*.md` is intentionally NOT scanned yet. Docs use
+/// richer multi-line negation forms (table "Not meaning" column headers,
+/// "never", "must not", "nor" lists) that the rail's line-local
+/// `has_negative_claim_context` does not recognize, producing false positives.
+/// Extending the rail to handle doc negation forms without weakening the
+/// artifact rail is tracked as follow-up in #1804. README.md and CHANGELOG.md
+/// were verified clean on 2026-06-21 and are the highest-value surfaces to
+/// guard first.
+fn check_doc_claim_discipline() -> Result<(), String> {
+    for path in [Path::new("README.md"), Path::new("CHANGELOG.md")] {
+        let text = read_to_string(path)?;
+        reject_positive_overclaims(path, &text)?;
+    }
     Ok(())
 }
 
@@ -1154,27 +1234,29 @@ fn check_policy() -> Result<(), String> {
         Path::new(WORKFLOW_ALLOWLIST),
         Path::new(WORKFLOW_DIR),
     )?;
-    check_unsafe_review_ledger(
+    unsafe_review_ledger::check_unsafe_review_ledger(
         Path::new("policy/unsafe-review-baseline.toml"),
-        LedgerKind::Baseline,
+        unsafe_review_ledger::LedgerKind::Baseline,
     )?;
-    check_unsafe_review_ledger(
+    unsafe_review_ledger::check_unsafe_review_ledger(
         Path::new("policy/unsafe-review-suppressions.toml"),
-        LedgerKind::Suppression,
+        unsafe_review_ledger::LedgerKind::Suppression,
     )?;
     check_doc_artifacts()?;
+    work_specs::check()?;
+    subagent_briefs::check()?;
+    subagent_results::check()?;
     check_docs_automation()?;
     public_surfaces::check()?;
-    check_goals()?;
-    check_package_boundary()?;
-    check_ci_lanes()?;
-    check_ci_routing_contract()?;
+    source_truth_ledgers::check_package_boundary()?;
+    ci_lanes::check()?;
+    ci_routing_contract::check_ci_routing_contract()?;
     corpus_backstop::check_schema(Path::new(CORPUS_BACKSTOP_SAMPLE_REPORT))?;
     corpus_usefulness::check_schema(Path::new(CORPUS_USEFULNESS_SAMPLE_ROLLUP))?;
-    check_detector_contracts()?;
-    check_stance_decisions()?;
-    check_stance_coverage()?;
-    check_spec_coverage()?;
+    detector_contracts::check_detector_contracts()?;
+    stance_checks::check_stance_decisions()?;
+    stance_checks::check_stance_coverage()?;
+    stance_checks::check_spec_coverage()?;
     println!("check-policy: ok");
     Ok(())
 }
@@ -1183,751 +1265,10 @@ fn check_policy() -> Result<(), String> {
 ///
 /// Tracked findings are documented gaps (owner + review_after present) that pass with a warning.
 /// Blocking findings are structural errors or undocumented gaps that fail the gate.
-struct GateReport {
-    tracked: Vec<String>,
-    blocking: Vec<String>,
+pub(crate) struct GateReport {
+    pub(crate) tracked: Vec<String>,
+    pub(crate) blocking: Vec<String>,
 }
-
-/// Pure (no file I/O) evaluation of a parsed detector-contracts ledger value.
-///
-/// Blocking findings: malformed schema, missing/empty identity, duplicate id, empty required
-/// arrays (obligations/positive_fixtures/surfaces), non-array where array required,
-/// missing required scalars.
-/// The negative_fixtures gap is blocking unless the contract carries non-empty `proof_gap` AND
-/// non-empty `owner` AND non-empty `review_after` — in that case it is a tracked exception.
-fn evaluate_detector_contracts(value: &toml::Value, path: &str) -> Result<GateReport, String> {
-    let mut report = GateReport {
-        tracked: Vec::new(),
-        blocking: Vec::new(),
-    };
-
-    // [[contract]] key is absent in the empty scaffold — treat as zero entries.
-    let Some(contracts_val) = value.get("contract") else {
-        return Ok(report);
-    };
-    let contracts = contracts_val
-        .as_array()
-        .ok_or_else(|| format!("{path} `contract` must be an array"))?;
-
-    let mut seen_ids: Vec<String> = Vec::new();
-
-    for (idx, entry) in contracts.iter().enumerate() {
-        let table = entry
-            .as_table()
-            .ok_or_else(|| format!("{path} contract[{idx}] must be a table"))?;
-
-        // Hard-require identity field; use operation_family as the identity per spec.
-        let id = match table.get("operation_family").and_then(toml::Value::as_str) {
-            Some(s) if !s.trim().is_empty() => s.to_string(),
-            _ => {
-                report.blocking.push(format!(
-                    "{path} contract[{idx}]: missing or empty `operation_family`"
-                ));
-                format!("<contract[{idx}]>")
-            }
-        };
-
-        // Duplicate id check — blocking.
-        if seen_ids.contains(&id) {
-            report.blocking.push(format!(
-                "{path} contract `{id}`: duplicate operation_family"
-            ));
-        } else {
-            seen_ids.push(id.clone());
-        }
-
-        validate_detector_contract_string_array(
-            table,
-            &id,
-            "obligations",
-            "no obligations declared",
-            "obligations array is empty",
-            &mut report,
-        );
-        validate_detector_contract_string_array(
-            table,
-            &id,
-            "positive_fixtures",
-            "no positive_fixtures declared",
-            "positive_fixtures array is empty",
-            &mut report,
-        );
-
-        // negative_fixtures: empty/absent is blocking UNLESS proof_gap + owner + review_after
-        // are all non-empty — then it is a tracked exception.
-        let neg_gap = match table.get("negative_fixtures") {
-            None => true,
-            Some(arr_val) => {
-                match toml_str_array(
-                    arr_val,
-                    path,
-                    &format!("contract `{id}` `negative_fixtures`"),
-                ) {
-                    Ok(values) => values.is_empty(),
-                    Err(err) => {
-                        report.blocking.push(err);
-                        false // already reported as blocking (wrong type or member)
-                    }
-                }
-            }
-        };
-        if neg_gap {
-            let proof_gap = table
-                .get("proof_gap")
-                .and_then(toml::Value::as_str)
-                .map(|s| s.trim())
-                .unwrap_or("")
-                .to_string();
-            let owner = table
-                .get("owner")
-                .and_then(toml::Value::as_str)
-                .map(|s| s.trim())
-                .unwrap_or("")
-                .to_string();
-            let review_after = table
-                .get("review_after")
-                .and_then(toml::Value::as_str)
-                .map(|s| s.trim())
-                .unwrap_or("")
-                .to_string();
-            if !proof_gap.is_empty() && !owner.is_empty() && !review_after.is_empty() {
-                report.tracked.push(format!(
-                    "contract `{id}`: no negative_fixtures (tracked exception — owner: {owner}, review_after: {review_after})"
-                ));
-            } else {
-                report.blocking.push(format!(
-                    "contract `{id}`: no negative_fixtures (add fixtures or document gap with proof_gap + owner + review_after)"
-                ));
-            }
-        }
-
-        validate_detector_contract_string_array(
-            table,
-            &id,
-            "surfaces",
-            "no surfaces declared",
-            "surfaces array is empty",
-            &mut report,
-        );
-    }
-
-    // Handle optional [[exception]] entries — structural errors are blocking.
-    if let Some(exceptions_val) = value.get("exception") {
-        let exceptions = exceptions_val
-            .as_array()
-            .ok_or_else(|| format!("{path} `exception` must be an array"))?;
-        let mut seen_exc_ids: Vec<String> = Vec::new();
-        for (idx, exc) in exceptions.iter().enumerate() {
-            let table = exc
-                .as_table()
-                .ok_or_else(|| format!("{path} exception[{idx}] must be a table"))?;
-            let exc_id = match table.get("id").and_then(toml::Value::as_str) {
-                Some(s) if !s.trim().is_empty() => s.to_string(),
-                _ => {
-                    report
-                        .blocking
-                        .push(format!("{path} exception[{idx}]: missing or empty `id`"));
-                    format!("<exception[{idx}]>")
-                }
-            };
-            if seen_exc_ids.contains(&exc_id) {
-                report
-                    .blocking
-                    .push(format!("{path} exception `{exc_id}`: duplicate id"));
-            } else {
-                seen_exc_ids.push(exc_id);
-            }
-        }
-    }
-
-    Ok(report)
-}
-
-fn validate_detector_contract_string_array(
-    table: &toml::map::Map<String, toml::Value>,
-    id: &str,
-    key: &str,
-    missing_message: &str,
-    empty_message: &str,
-    report: &mut GateReport,
-) {
-    let Some(value) = table.get(key) else {
-        report
-            .blocking
-            .push(format!("contract `{id}`: {missing_message}"));
-        return;
-    };
-
-    match toml_str_array(
-        value,
-        DETECTOR_CONTRACTS_LEDGER,
-        &format!("contract `{id}` `{key}`"),
-    ) {
-        Ok(values) if values.is_empty() => {
-            report
-                .blocking
-                .push(format!("contract `{id}`: {empty_message}"));
-        }
-        Ok(_) => {}
-        Err(err) => report.blocking.push(err),
-    }
-}
-
-/// Enforcing gate: validates ledger shape of `policy/detector-contracts.toml`.
-///
-/// Structural violations (malformed TOML, missing identity, duplicate id, empty required arrays)
-/// and undocumented negative-fixture gaps are blocking — they fail check-pr. A contract that
-/// lacks negative_fixtures passes only when it carries a non-empty `proof_gap`, `owner`, and
-/// `review_after` (the documented-gap path), which is printed as a tracked exception.
-fn check_detector_contracts() -> Result<(), String> {
-    let path = DETECTOR_CONTRACTS_LEDGER;
-    let value = parse_toml_file(Path::new(path))?;
-    require_toml_string(&value, "schema_version", path)?;
-
-    let num_contracts = value
-        .get("contract")
-        .and_then(toml::Value::as_array)
-        .map(|v| v.len())
-        .unwrap_or(0);
-
-    let report = evaluate_detector_contracts(&value, path)?;
-
-    for f in &report.tracked {
-        println!("{f} (tracked exception)");
-    }
-    for f in &report.blocking {
-        println!("{f}");
-    }
-
-    if report.blocking.is_empty() {
-        println!(
-            "check-detector-contracts: ok ({num_contracts} contracts, {} tracked exception(s))",
-            report.tracked.len()
-        );
-        Ok(())
-    } else {
-        Err(format!(
-            "check-detector-contracts: {} blocking finding(s)",
-            report.blocking.len()
-        ))
-    }
-}
-
-/// Pure (no file I/O) evaluation of a parsed stance-decisions ledger value.
-///
-/// Blocking findings: malformed schema, missing/empty identity, duplicate id, missing required
-/// scalars (summary/rationale/owner/linked_spec), missing or empty linked_tests array.
-/// A non-empty `proof_gap` is a tracked exception iff the stance also carries non-empty `owner`
-/// AND non-empty `review_after`; otherwise it is a blocking finding.
-fn evaluate_stance_decisions(value: &toml::Value, path: &str) -> Result<GateReport, String> {
-    let mut report = GateReport {
-        tracked: Vec::new(),
-        blocking: Vec::new(),
-    };
-
-    let stances: &[toml::Value] = match value.get("stance") {
-        None => &[],
-        Some(v) => v
-            .as_array()
-            .ok_or_else(|| format!("{path} `stance` must be an array"))?,
-    };
-
-    let mut seen_ids: Vec<String> = Vec::new();
-
-    for (idx, entry) in stances.iter().enumerate() {
-        let table = entry
-            .as_table()
-            .ok_or_else(|| format!("{path} stance[{idx}] must be a table"))?;
-
-        // Hard-require identity field `id` — blocking.
-        let id = match table.get("id").and_then(toml::Value::as_str) {
-            Some(s) if !s.trim().is_empty() => s.to_string(),
-            _ => {
-                report
-                    .blocking
-                    .push(format!("{path} stance[{idx}]: missing or empty `id`"));
-                format!("<stance[{idx}]>")
-            }
-        };
-
-        // Duplicate id — blocking.
-        if seen_ids.contains(&id) {
-            report.blocking.push(format!("stance `{id}`: duplicate id"));
-        } else {
-            seen_ids.push(id.clone());
-        }
-
-        // Required descriptive fields — blocking.
-        for key in &["summary", "rationale", "owner", "linked_spec"] {
-            match table.get(*key).and_then(toml::Value::as_str) {
-                None => report
-                    .blocking
-                    .push(format!("stance `{id}`: missing `{key}`")),
-                Some(s) if s.trim().is_empty() => {
-                    report
-                        .blocking
-                        .push(format!("stance `{id}`: `{key}` is empty"));
-                }
-                _ => {}
-            }
-        }
-
-        // linked_tests: required non-empty array — blocking.
-        match table.get("linked_tests") {
-            None => {
-                report
-                    .blocking
-                    .push(format!("stance `{id}`: missing `linked_tests`"));
-            }
-            Some(arr_val) => match arr_val.as_array() {
-                None => report
-                    .blocking
-                    .push(format!("stance `{id}`: `linked_tests` must be an array")),
-                Some(arr) if arr.is_empty() => {
-                    report
-                        .blocking
-                        .push(format!("stance `{id}`: `linked_tests` is empty"));
-                }
-                _ => {}
-            },
-        }
-
-        // proof_gap: tracked exception iff owner + review_after are also non-empty; else blocking.
-        if let Some(gap_str) = table
-            .get("proof_gap")
-            .and_then(toml::Value::as_str)
-            .filter(|s| !s.trim().is_empty())
-        {
-            let owner = table
-                .get("owner")
-                .and_then(toml::Value::as_str)
-                .map(|s| s.trim())
-                .unwrap_or("")
-                .to_string();
-            let review_after = table
-                .get("review_after")
-                .and_then(toml::Value::as_str)
-                .map(|s| s.trim())
-                .unwrap_or("")
-                .to_string();
-            if !owner.is_empty() && !review_after.is_empty() {
-                report.tracked.push(format!(
-                    "stance `{id}`: proof_gap — {gap_str} (owner: {owner}, review_after: {review_after})"
-                ));
-            } else {
-                report.blocking.push(format!(
-                    "stance `{id}`: proof_gap requires non-empty owner + review_after to be a tracked exception"
-                ));
-            }
-        }
-    }
-
-    Ok(report)
-}
-
-/// Enforcing gate: validates ledger shape of `policy/stance-decisions.toml`.
-///
-/// Structural violations and undocumented proof gaps are blocking. A stance with a non-empty
-/// `proof_gap` passes only when it also carries non-empty `owner` and `review_after` (the
-/// documented-gap path), which is printed as a tracked exception. There is no tracked-exception
-/// path for stances that are missing required fields.
-fn check_stance_decisions() -> Result<(), String> {
-    let path = STANCE_DECISIONS_LEDGER;
-    let value = parse_toml_file(Path::new(path))?;
-    require_toml_string(&value, "schema_version", path)?;
-
-    let num_stances = value
-        .get("stance")
-        .and_then(toml::Value::as_array)
-        .map(|v| v.len())
-        .unwrap_or(0);
-
-    let report = evaluate_stance_decisions(&value, path)?;
-
-    for f in &report.tracked {
-        println!("{f} (tracked exception)");
-    }
-    for f in &report.blocking {
-        println!("{f}");
-    }
-
-    if report.blocking.is_empty() {
-        println!(
-            "check-stance-decisions: ok ({num_stances} stances, {} tracked exception(s))",
-            report.tracked.len()
-        );
-        Ok(())
-    } else {
-        Err(format!(
-            "check-stance-decisions: {} blocking finding(s)",
-            report.blocking.len()
-        ))
-    }
-}
-
-/// Pure (no file I/O) evaluation of the stance-coverage index in a parsed stance-decisions ledger.
-///
-/// For each stance, a PASS requires at least one non-empty corpus-evidence link: a non-empty
-/// `fixtures` array, a non-empty `dogfood_targets` array, a non-empty `pr_corpus_cases` array,
-/// or a non-empty `surfaces` array.  If none of those are present, the stance is blocking UNLESS
-/// it carries a non-empty `coverage_gap` AND non-empty `owner` AND non-empty `review_after` —
-/// in which case it is a tracked coverage gap (warn, pass).  Malformed entries are always blocking.
-fn evaluate_stance_coverage(value: &toml::Value, path: &str) -> Result<GateReport, String> {
-    let mut report = GateReport {
-        tracked: Vec::new(),
-        blocking: Vec::new(),
-    };
-
-    let stances: &[toml::Value] = match value.get("stance") {
-        None => &[],
-        Some(v) => v
-            .as_array()
-            .ok_or_else(|| format!("{path} `stance` must be an array"))?,
-    };
-
-    for (idx, entry) in stances.iter().enumerate() {
-        let table = match entry.as_table() {
-            Some(t) => t,
-            None => {
-                report
-                    .blocking
-                    .push(format!("{path} stance[{idx}]: must be a table"));
-                continue;
-            }
-        };
-
-        // Resolve the stance id for diagnostic messages; missing id is itself a structural error
-        // but we still need a label for subsequent messages.
-        let id = table
-            .get("id")
-            .and_then(toml::Value::as_str)
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| format!("<stance[{idx}]>"));
-
-        // Helper: does the table contain a non-empty string array under `key`?
-        let has_non_empty_array = |key: &str| -> bool {
-            table
-                .get(key)
-                .and_then(toml::Value::as_array)
-                .map(|arr| !arr.is_empty())
-                .unwrap_or(false)
-        };
-
-        let has_coverage = has_non_empty_array("fixtures")
-            || has_non_empty_array("dogfood_targets")
-            || has_non_empty_array("pr_corpus_cases")
-            || has_non_empty_array("surfaces");
-
-        if has_coverage {
-            // Stance is covered — nothing to record.
-            continue;
-        }
-
-        // No corpus evidence link present; check for a tracked coverage_gap exception.
-        let gap = table
-            .get("coverage_gap")
-            .and_then(toml::Value::as_str)
-            .map(|s| s.trim())
-            .unwrap_or("")
-            .to_string();
-
-        if gap.is_empty() {
-            report.blocking.push(format!(
-                "stance `{id}`: no corpus evidence (fixtures / dogfood_targets / pr_corpus_cases / surfaces) \
-                 and no coverage_gap; add real evidence or a tracked gap with owner + review_after"
-            ));
-            continue;
-        }
-
-        // Has a non-empty coverage_gap — valid only with owner + review_after.
-        let owner = table
-            .get("owner")
-            .and_then(toml::Value::as_str)
-            .map(|s| s.trim())
-            .unwrap_or("")
-            .to_string();
-        let review_after = table
-            .get("review_after")
-            .and_then(toml::Value::as_str)
-            .map(|s| s.trim())
-            .unwrap_or("")
-            .to_string();
-
-        if !owner.is_empty() && !review_after.is_empty() {
-            report.tracked.push(format!(
-                "stance `{id}`: coverage_gap — {gap} (owner: {owner}, review_after: {review_after})"
-            ));
-        } else {
-            report.blocking.push(format!(
-                "stance `{id}`: coverage_gap requires non-empty owner + review_after to be a tracked exception"
-            ));
-        }
-    }
-
-    Ok(report)
-}
-
-/// Informational-then-enforcing gate: validates that every stance in
-/// `policy/stance-decisions.toml` has at least one corpus-evidence link.
-///
-/// A stance with no evidence link is blocking unless it carries a `coverage_gap` with
-/// non-empty `owner` and `review_after`, in which case it is a tracked coverage gap and
-/// printed as "(tracked coverage gap)".  Structural errors are always blocking.
-fn check_stance_coverage() -> Result<(), String> {
-    let path = STANCE_DECISIONS_LEDGER;
-    let value = parse_toml_file(Path::new(path))?;
-    require_toml_string(&value, "schema_version", path)?;
-
-    let num_stances = value
-        .get("stance")
-        .and_then(toml::Value::as_array)
-        .map(|v| v.len())
-        .unwrap_or(0);
-
-    let report = evaluate_stance_coverage(&value, path)?;
-
-    for f in &report.tracked {
-        println!("{f} (tracked coverage gap)");
-    }
-    for f in &report.blocking {
-        println!("{f}");
-    }
-
-    if report.blocking.is_empty() {
-        println!(
-            "check-stance-coverage: ok ({num_stances} stances, {} tracked coverage gap(s))",
-            report.tracked.len()
-        );
-        Ok(())
-    } else {
-        Err(format!(
-            "check-stance-coverage: {} blocking finding(s)",
-            report.blocking.len()
-        ))
-    }
-}
-
-/// Pure (no file I/O) evaluation of a parsed spec-coverage ledger value.
-///
-/// Blocking findings: malformed schema, missing/empty identity, duplicate name, missing required
-/// scalars (canonical_source), missing or empty surfaces array, and single_truth=false (always
-/// blocking — a single-truth violation is a defect to fix, not a gap to ledger; there is no
-/// tracked-exception path for spec-coverage).
-fn evaluate_spec_coverage(value: &toml::Value, path: &str) -> Result<GateReport, String> {
-    let mut report = GateReport {
-        tracked: Vec::new(),
-        blocking: Vec::new(),
-    };
-
-    let fields: &[toml::Value] = match value.get("field") {
-        None => &[],
-        Some(v) => v
-            .as_array()
-            .ok_or_else(|| format!("{path} `field` must be an array"))?,
-    };
-
-    let mut seen_names: Vec<String> = Vec::new();
-
-    for (idx, entry) in fields.iter().enumerate() {
-        let table = entry
-            .as_table()
-            .ok_or_else(|| format!("{path} field[{idx}] must be a table"))?;
-
-        // Hard-require identity field `name` — blocking.
-        let name = match table.get("name").and_then(toml::Value::as_str) {
-            Some(s) if !s.trim().is_empty() => s.to_string(),
-            _ => {
-                report
-                    .blocking
-                    .push(format!("{path} field[{idx}]: missing or empty `name`"));
-                format!("<field[{idx}]>")
-            }
-        };
-
-        // Duplicate name — blocking.
-        if seen_names.contains(&name) {
-            report
-                .blocking
-                .push(format!("field `{name}`: duplicate name"));
-        } else {
-            seen_names.push(name.clone());
-        }
-
-        // canonical_source: required non-empty scalar — blocking.
-        match table.get("canonical_source").and_then(toml::Value::as_str) {
-            None => report
-                .blocking
-                .push(format!("field `{name}`: missing `canonical_source`")),
-            Some(s) if s.trim().is_empty() => {
-                report
-                    .blocking
-                    .push(format!("field `{name}`: `canonical_source` is empty"));
-            }
-            _ => {}
-        }
-
-        // surfaces: required non-empty array — blocking.
-        match table.get("surfaces") {
-            None => {
-                report
-                    .blocking
-                    .push(format!("field `{name}`: missing `surfaces`"));
-            }
-            Some(arr_val) => match arr_val.as_array() {
-                None => report
-                    .blocking
-                    .push(format!("field `{name}`: `surfaces` must be an array")),
-                Some(arr) if arr.is_empty() => {
-                    report
-                        .blocking
-                        .push(format!("field `{name}`: `surfaces` is empty"));
-                }
-                _ => {}
-            },
-        }
-
-        // single_truth=false is always blocking — a single-truth violation is a defect, not a gap.
-        // There is no tracked-exception path for spec-coverage.
-        if let Some(false) = table.get("single_truth").and_then(toml::Value::as_bool) {
-            let note = table
-                .get("note")
-                .and_then(toml::Value::as_str)
-                .unwrap_or("");
-            report
-                .blocking
-                .push(format!("field `{name}`: single_truth=false ({note})"));
-        }
-    }
-
-    Ok(report)
-}
-
-/// Enforcing gate: validates ledger shape of `policy/spec-coverage.toml`.
-///
-/// Structural violations and single_truth=false fields are always blocking — a single-truth
-/// violation is a defect to fix, not a gap to ledger. There is no tracked-exception path
-/// for spec-coverage findings.
-fn check_spec_coverage() -> Result<(), String> {
-    let path = SPEC_COVERAGE_LEDGER;
-    let value = parse_toml_file(Path::new(path))?;
-    require_toml_string(&value, "schema_version", path)?;
-
-    let num_fields = value
-        .get("field")
-        .and_then(toml::Value::as_array)
-        .map(|v| v.len())
-        .unwrap_or(0);
-
-    let report = evaluate_spec_coverage(&value, path)?;
-
-    for f in &report.blocking {
-        println!("{f}");
-    }
-
-    if report.blocking.is_empty() {
-        println!("check-spec-coverage: ok ({num_fields} fields, 0 blocking finding(s))");
-        Ok(())
-    } else {
-        Err(format!(
-            "check-spec-coverage: {} blocking finding(s)",
-            report.blocking.len()
-        ))
-    }
-}
-
-fn check_ci_routing_contract() -> Result<(), String> {
-    let path = ".github/workflows/ci.yml";
-    let text =
-        std::fs::read_to_string(path).map_err(|err| format!("failed to read {path}: {err}"))?;
-    // Single tight CI gate, self-hosted-primary with gh-hosted overflow: a minimal
-    // `route` job (not a required check) picks the gate runner — an idle trusted
-    // self-hosted em-ci runner when the owned fleet has capacity, else
-    // `ubuntu-latest` overflow (bursts, capacity gaps, fork PRs). The gate stays a
-    // SINGLE job whose mandatory deterministic core floor (`xtask check-pr` plus the
-    // full suite) is the only hard blocker and the only required status check, with
-    // ub-review riding along as an advisory LLM layer that consumes the core results
-    // as grounding context. The router never blocks the merge and never size-routes.
-    for needle in [
-        // One required check, stable name for branch protection.
-        "name: Unsafe Review Rust Result",
-        // Capacity router: self-hosted primary, gh-hosted overflow.
-        "Route CI runner",
-        "EM_RUNNER_READ_TOKEN",
-        "gh api \"orgs/EffortlessMetrics/actions/runners",
-        "runner_kind",
-        // Trusted self-hosted label set (shared em-ci group, any idle size).
-        "self-hosted",
-        "em-ci",
-        "trusted-pr",
-        // The gate consumes the router's runs-on value; gh-hosted is the overflow.
-        "fromJSON(needs.route.outputs.runner)",
-        "runs-on: ubuntu-latest",
-        // Shared warmed setup, runner-kind agnostic.
-        "dtolnay/rust-toolchain@1.95.0",
-        "Swatinem/rust-cache@v2",
-        // Fast precontext launches the LLM lanes off cheap signal, the deterministic
-        // core gate runs concurrently in the background (guarded by a disk-headroom
-        // check), and the final assert decides the merge on the core verdict.
-        "Fast precontext and launch core gate",
-        "cargo run --locked -p xtask -- check-pr",
-        "df -h",
-        "core_exit",
-        "Assert core gate verdict",
-        // Advisory ub-review layer in the same job, fed the fast precontext, with a
-        // concise advisory-failure status note.
-        "UB Review (advisory)",
-        "UB Review advisory status",
-        "EffortlessMetrics/ub-review@",
-        "mode: intelligent-ci",
-        "posting: review",
-        "fail-on-gate: false",
-        "setup-rust: false",
-        "provider-policy: primary-with-fallback",
-        "minimax-model: MiniMax-M3",
-        "opencode-model: deepseek-v4-flash",
-        "pr-thread-context: target/ci-core/precontext.md",
-        // Advisory layer must stay non-blocking and fork-safe.
-        "continue-on-error: true",
-        "github.event.pull_request.head.repo.fork == false",
-    ] {
-        if !text.contains(needle) {
-            return Err(format!(
-                "{path} missing required single-gate CI contract marker: {needle}"
-            ));
-        }
-    }
-    // The capacity router is back, but ONLY in its minimal self-hosted-primary /
-    // gh-overflow shape. The OLD size-routed multi-lane pile-of-checks must not
-    // reappear: no per-size lanes (cpx42/cx43/cx53), no separate normalized "Rust
-    // Small Result" required check, no budget opt-out fallback modes, and no
-    // repository-level runner discovery or the broken Docker Rust Small image.
-    if text.contains("repos/${") && text.contains("/actions/runners") {
-        return Err(format!(
-            "{path} must not reintroduce repository runner discovery (org-level only)"
-        ));
-    }
-    for forbidden in [
-        "route-rust-small",
-        "router_target=",
-        "cpx42",
-        "cx43",
-        "cx53",
-        "Rust Small Fallback on GitHub Hosted",
-        "fallback_mode=full",
-        "no-github-fallback",
-        "Unsafe Review Rust Small Result",
-        "em-ci-rust:1.95",
-        "docker run --rm",
-    ] {
-        if text.contains(forbidden) {
-            return Err(format!(
-                "{path} must not reintroduce retired size-routed multi-lane marker: {forbidden}"
-            ));
-        }
-    }
-    Ok(())
-}
-
 struct ManualCandidateExample {
     path: PathBuf,
     id: String,
@@ -3050,8 +2391,6 @@ fn check_doc_artifacts() -> Result<(), String> {
 
 fn check_doc_artifacts_impl() -> Result<BTreeSet<String>, String> {
     let value = parse_toml_file(Path::new(DOC_ARTIFACT_LEDGER))?;
-    let source_index = parse_toml_file(Path::new(SOURCE_OF_TRUTH_INDEX))?;
-    let source_artifacts = source_truth_index_artifacts(&source_index)?;
     require_toml_string(&value, "schema_version", DOC_ARTIFACT_LEDGER)?;
     let artifacts = toml_array(&value, "artifact", DOC_ARTIFACT_LEDGER)?;
     if artifacts.is_empty() {
@@ -3061,7 +2400,6 @@ fn check_doc_artifacts_impl() -> Result<BTreeSet<String>, String> {
     }
 
     let mut ids = BTreeSet::new();
-    let mut ledger_artifacts = BTreeMap::new();
     let mut linked_ids = Vec::new();
     for (idx, artifact) in artifacts.iter().enumerate() {
         let table = toml_table(artifact, DOC_ARTIFACT_LEDGER, "artifact", idx)?;
@@ -3069,7 +2407,7 @@ fn check_doc_artifacts_impl() -> Result<BTreeSet<String>, String> {
         let kind = required_table_string(table, "kind", DOC_ARTIFACT_LEDGER, "artifact", idx)?;
         let path = required_table_string(table, "path", DOC_ARTIFACT_LEDGER, "artifact", idx)?;
         let status = required_table_string(table, "status", DOC_ARTIFACT_LEDGER, "artifact", idx)?;
-        let owner = required_table_string(table, "owner", DOC_ARTIFACT_LEDGER, "artifact", idx)?;
+        required_table_string(table, "owner", DOC_ARTIFACT_LEDGER, "artifact", idx)?;
 
         require_known(kind, DOC_ARTIFACT_KINDS, DOC_ARTIFACT_LEDGER, "kind")?;
         require_known(status, DOC_ARTIFACT_STATUSES, DOC_ARTIFACT_LEDGER, "status")?;
@@ -3078,15 +2416,6 @@ fn check_doc_artifacts_impl() -> Result<BTreeSet<String>, String> {
                 "{DOC_ARTIFACT_LEDGER} contains duplicate id `{id}`"
             ));
         }
-        ledger_artifacts.insert(
-            id.to_string(),
-            DocArtifactEntry {
-                kind: kind.to_string(),
-                path: path.to_string(),
-                status: status.to_string(),
-                owner: owner.to_string(),
-            },
-        );
         require_file(path)?;
         if let Some(linked_proposal) = table.get("linked_proposal").and_then(toml::Value::as_str) {
             linked_ids.push((
@@ -3113,906 +2442,7 @@ fn check_doc_artifacts_impl() -> Result<BTreeSet<String>, String> {
         }
     }
 
-    check_doc_artifacts_source_index_consistency(&ledger_artifacts, &source_artifacts)?;
-
     Ok(ids)
-}
-
-fn check_doc_artifacts_source_index_consistency(
-    ledger_artifacts: &BTreeMap<String, DocArtifactEntry>,
-    source_artifacts: &BTreeMap<String, DocArtifactEntry>,
-) -> Result<(), String> {
-    for (id, ledger) in ledger_artifacts {
-        let Some(indexed) = source_artifacts.get(id) else {
-            continue;
-        };
-        for (field, ledger_value, index_value) in [
-            ("kind", &ledger.kind, &indexed.kind),
-            ("path", &ledger.path, &indexed.path),
-            ("status", &ledger.status, &indexed.status),
-            ("owner", &ledger.owner, &indexed.owner),
-        ] {
-            if ledger_value != index_value {
-                return Err(format!(
-                    "{SOURCE_OF_TRUTH_INDEX} artifact `{id}` {field} `{index_value}` must match {DOC_ARTIFACT_LEDGER} `{ledger_value}`"
-                ));
-            }
-        }
-    }
-    Ok(())
-}
-
-fn check_docs_automation() -> Result<(), String> {
-    let surfaces = check_docs_automation_impl()?;
-    println!("check-docs-automation: ok ({surfaces} surfaces)");
-    Ok(())
-}
-
-fn check_docs_automation_impl() -> Result<usize, String> {
-    let value = parse_toml_file(Path::new(DOCS_AUTOMATION_LEDGER))?;
-    require_toml_string(&value, "schema_version", DOCS_AUTOMATION_LEDGER)?;
-
-    let scope = value
-        .get("scope")
-        .and_then(toml::Value::as_table)
-        .ok_or_else(|| format!("{DOCS_AUTOMATION_LEDGER} is missing table `scope`"))?;
-    let owned_roots = require_scope_paths(scope, "owned_roots", true)?;
-    let external_awareness_roots = require_scope_paths(scope, "external_awareness_only", false)?;
-    check_docs_automation_scope_boundaries(&owned_roots, &external_awareness_roots)?;
-
-    let surfaces = toml_array(&value, "generated_or_checked", DOCS_AUTOMATION_LEDGER)?;
-    if surfaces.is_empty() {
-        return Err(format!(
-            "{DOCS_AUTOMATION_LEDGER} must list at least one generated_or_checked entry"
-        ));
-    }
-
-    let mut ids = BTreeSet::new();
-    for (idx, surface) in surfaces.iter().enumerate() {
-        let table = toml_table(surface, DOCS_AUTOMATION_LEDGER, "generated_or_checked", idx)?;
-        let id = required_table_string(
-            table,
-            "id",
-            DOCS_AUTOMATION_LEDGER,
-            "generated_or_checked",
-            idx,
-        )?;
-        if !ids.insert(id.to_string()) {
-            return Err(format!(
-                "{DOCS_AUTOMATION_LEDGER} contains duplicate generated_or_checked id `{id}`"
-            ));
-        }
-
-        let kind = required_table_string(
-            table,
-            "kind",
-            DOCS_AUTOMATION_LEDGER,
-            "generated_or_checked",
-            idx,
-        )?;
-        let mode = required_table_string(
-            table,
-            "mode",
-            DOCS_AUTOMATION_LEDGER,
-            "generated_or_checked",
-            idx,
-        )?;
-        require_known(
-            kind,
-            DOCS_AUTOMATION_KINDS,
-            DOCS_AUTOMATION_LEDGER,
-            "generated_or_checked.kind",
-        )?;
-        require_known(
-            mode,
-            DOCS_AUTOMATION_MODES,
-            DOCS_AUTOMATION_LEDGER,
-            "generated_or_checked.mode",
-        )?;
-
-        if let Some(sources) = table.get("sources") {
-            for source in toml_str_array(sources, DOCS_AUTOMATION_LEDGER, "sources")? {
-                require_existing_repo_path(source, DOCS_AUTOMATION_LEDGER, "sources")?;
-                reject_docs_automation_external_path(
-                    id,
-                    "sources",
-                    source,
-                    &external_awareness_roots,
-                )?;
-            }
-        }
-
-        if let Some(path) = table.get("path").and_then(toml::Value::as_str) {
-            reject_docs_automation_external_path(id, "path", path, &external_awareness_roots)?;
-        }
-        if let Some(path_glob) = table.get("path_glob").and_then(toml::Value::as_str) {
-            reject_docs_automation_external_path(
-                id,
-                "path_glob",
-                path_glob,
-                &external_awareness_roots,
-            )?;
-        }
-        let paths = docs_automation_paths(table, idx)?;
-        for path in &paths {
-            let path = path.display().to_string();
-            reject_docs_automation_external_path(id, "path", &path, &external_awareness_roots)?;
-        }
-        if kind == "spec_status_dashboard" {
-            if !paths
-                .iter()
-                .any(|path| path == Path::new(spec_status::DASHBOARD))
-            {
-                return Err(format!(
-                    "{DOCS_AUTOMATION_LEDGER} generated_or_checked `{id}` must point at {}",
-                    spec_status::DASHBOARD
-                ));
-            }
-            spec_status::check_dashboard_impl()?;
-        }
-        if let Some(required_text) = table.get("must_include") {
-            let required_text =
-                toml_str_array(required_text, DOCS_AUTOMATION_LEDGER, "must_include")?;
-            require_docs_automation_text(id, &paths, &required_text)?;
-        }
-    }
-
-    Ok(ids.len())
-}
-
-fn require_scope_paths(
-    scope: &toml::map::Map<String, toml::Value>,
-    key: &str,
-    must_exist: bool,
-) -> Result<Vec<String>, String> {
-    let Some(values) = scope.get(key) else {
-        return Err(format!(
-            "{DOCS_AUTOMATION_LEDGER} scope is missing array `{key}`"
-        ));
-    };
-    let values = toml_str_array(values, DOCS_AUTOMATION_LEDGER, key)?;
-    if values.is_empty() {
-        return Err(format!(
-            "{DOCS_AUTOMATION_LEDGER} scope `{key}` must not be empty"
-        ));
-    }
-    if must_exist {
-        for value in &values {
-            require_existing_repo_path(value, DOCS_AUTOMATION_LEDGER, key)?;
-        }
-    }
-    Ok(values.into_iter().map(str::to_string).collect())
-}
-
-fn check_docs_automation_scope_boundaries(
-    owned_roots: &[String],
-    external_awareness_roots: &[String],
-) -> Result<(), String> {
-    for owned_root in owned_roots {
-        if let Some(external_root) = external_awareness_roots
-            .iter()
-            .find(|root| repo_path_is_under_scope_root(owned_root, root))
-        {
-            return Err(format!(
-                "{DOCS_AUTOMATION_LEDGER} scope owned_roots entry `{owned_root}` must not be under external_awareness_only root `{external_root}`"
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn reject_docs_automation_external_path(
-    id: &str,
-    field: &str,
-    path: &str,
-    external_awareness_roots: &[String],
-) -> Result<(), String> {
-    if let Some(external_root) = external_awareness_roots
-        .iter()
-        .find(|root| repo_path_is_under_scope_root(path, root))
-    {
-        return Err(format!(
-            "{DOCS_AUTOMATION_LEDGER} generated_or_checked `{id}` {field} `{path}` must not be under external_awareness_only root `{external_root}`"
-        ));
-    }
-    Ok(())
-}
-
-fn repo_path_is_under_scope_root(path: &str, root: &str) -> bool {
-    let path = normalize_repo_scope_path(path);
-    let root = normalize_repo_scope_path(root);
-    path == root || path.starts_with(&format!("{root}/"))
-}
-
-fn normalize_repo_scope_path(value: &str) -> String {
-    value
-        .trim()
-        .trim_start_matches("./")
-        .trim_end_matches('/')
-        .replace('\\', "/")
-        .to_ascii_lowercase()
-}
-
-fn docs_automation_paths(
-    table: &toml::map::Map<String, toml::Value>,
-    idx: usize,
-) -> Result<Vec<PathBuf>, String> {
-    let path = table.get("path").and_then(toml::Value::as_str);
-    let path_glob = table.get("path_glob").and_then(toml::Value::as_str);
-    match (path, path_glob) {
-        (Some(path), None) => {
-            require_file(path)?;
-            Ok(vec![PathBuf::from(path)])
-        }
-        (None, Some(path_glob)) => docs_automation_glob_paths(path_glob),
-        (Some(_), Some(_)) => Err(format!(
-            "{DOCS_AUTOMATION_LEDGER} generated_or_checked[{idx}] must not set both path and path_glob"
-        )),
-        (None, None) => Err(format!(
-            "{DOCS_AUTOMATION_LEDGER} generated_or_checked[{idx}] must set path or path_glob"
-        )),
-    }
-}
-
-fn docs_automation_glob_paths(path_glob: &str) -> Result<Vec<PathBuf>, String> {
-    let pattern_path = Path::new(path_glob);
-    let file_pattern = pattern_path.file_name().and_then(|value| value.to_str());
-    if file_pattern.is_some_and(|pattern| !pattern.contains('*')) {
-        require_file(path_glob)?;
-        return Ok(vec![PathBuf::from(path_glob)]);
-    }
-
-    let paths = docs_automation_paths::collect_paths(path_glob, DOCS_AUTOMATION_LEDGER)?;
-    if paths.is_empty() {
-        Err(format!(
-            "{DOCS_AUTOMATION_LEDGER} path_glob `{path_glob}` did not match any files"
-        ))
-    } else {
-        Ok(paths)
-    }
-}
-
-fn require_docs_automation_text(
-    id: &str,
-    paths: &[PathBuf],
-    required_text: &[&str],
-) -> Result<(), String> {
-    let mut documents = Vec::new();
-    for path in paths {
-        documents.push((path, read_to_string(path)?));
-    }
-    for needle in required_text {
-        if !documents.iter().any(|(_, text)| text.contains(needle)) {
-            let paths = paths
-                .iter()
-                .map(|path| path.display().to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
-            return Err(format!(
-                "{DOCS_AUTOMATION_LEDGER} generated_or_checked `{id}` requires text `{needle}` in one of: {paths}"
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn require_existing_repo_path(path: &str, ledger: &str, field: &str) -> Result<(), String> {
-    if Path::new(path).exists() {
-        Ok(())
-    } else {
-        Err(format!("{ledger} {field} path does not exist: {path}"))
-    }
-}
-
-fn check_goals() -> Result<(), String> {
-    let artifact_ids = check_doc_artifacts_impl()?;
-    let source_index = parse_toml_file(Path::new(SOURCE_OF_TRUTH_INDEX))?;
-    let indexed_artifact_ids = source_truth_index_ids(&source_index, "artifact")?;
-    let indexed_lane_ids = source_truth_index_ids(&source_index, "lane")?;
-    let value = parse_toml_file(Path::new(ACTIVE_GOAL_MANIFEST))?;
-    require_toml_string(&value, "schema_version", ACTIVE_GOAL_MANIFEST)?;
-    for key in ["id", "title", "status", "owner", "created", "objective"] {
-        required_toml_string(&value, key, ACTIVE_GOAL_MANIFEST)?;
-    }
-    require_known(
-        required_toml_string(&value, "status", ACTIVE_GOAL_MANIFEST)?,
-        GOAL_WORK_ITEM_STATUSES,
-        ACTIVE_GOAL_MANIFEST,
-        "status",
-    )?;
-    let end_state = toml_array(&value, "end_state", ACTIVE_GOAL_MANIFEST)?;
-    if end_state.is_empty() {
-        return Err(format!(
-            "{ACTIVE_GOAL_MANIFEST} end_state must not be empty"
-        ));
-    }
-    for item in end_state {
-        if item.as_str().is_none_or(|value| value.trim().is_empty()) {
-            return Err(format!(
-                "{ACTIVE_GOAL_MANIFEST} end_state entries must be non-empty strings"
-            ));
-        }
-    }
-
-    let work_items = toml_array(&value, "work_item", ACTIVE_GOAL_MANIFEST)?;
-    if work_items.is_empty() {
-        return Err(format!(
-            "{ACTIVE_GOAL_MANIFEST} must list at least one work_item"
-        ));
-    }
-    let mut ids = BTreeSet::new();
-    for (idx, item) in work_items.iter().enumerate() {
-        let table = toml_table(item, ACTIVE_GOAL_MANIFEST, "work_item", idx)?;
-        let id = required_table_string(table, "id", ACTIVE_GOAL_MANIFEST, "work_item", idx)?;
-        if !ids.insert(id.to_string()) {
-            return Err(format!(
-                "{ACTIVE_GOAL_MANIFEST} contains duplicate work_item `{id}`"
-            ));
-        }
-        let status =
-            required_table_string(table, "status", ACTIVE_GOAL_MANIFEST, "work_item", idx)?;
-        require_known(
-            status,
-            GOAL_WORK_ITEM_STATUSES,
-            ACTIVE_GOAL_MANIFEST,
-            "work_item.status",
-        )?;
-        for key in ["proposal", "spec"] {
-            if let Some(linked_id) = table.get(key).and_then(toml::Value::as_str)
-                && !artifact_ids.contains(linked_id)
-            {
-                return Err(format!(
-                    "{ACTIVE_GOAL_MANIFEST} work_item `{id}` references {key} `{linked_id}` not listed in {DOC_ARTIFACT_LEDGER}"
-                ));
-            }
-            if let Some(linked_id) = table.get(key).and_then(toml::Value::as_str)
-                && !indexed_artifact_ids.contains(linked_id)
-            {
-                return Err(format!(
-                    "{ACTIVE_GOAL_MANIFEST} work_item `{id}` references {key} `{linked_id}` not listed in {SOURCE_OF_TRUTH_INDEX}"
-                ));
-            }
-        }
-        if !indexed_lane_ids.contains(id) {
-            return Err(format!(
-                "{ACTIVE_GOAL_MANIFEST} work_item `{id}` is not listed as a lane in {SOURCE_OF_TRUTH_INDEX}"
-            ));
-        }
-        let plan = required_table_string(table, "plan", ACTIVE_GOAL_MANIFEST, "work_item", idx)?;
-        require_file(plan)?;
-        let commands = table.get("commands").ok_or_else(|| {
-            format!("{ACTIVE_GOAL_MANIFEST} work_item `{id}` is missing commands")
-        })?;
-        let commands = toml_str_array(commands, ACTIVE_GOAL_MANIFEST, "commands")?;
-        if commands.is_empty() {
-            return Err(format!(
-                "{ACTIVE_GOAL_MANIFEST} work_item `{id}` commands must not be empty"
-            ));
-        }
-    }
-    println!("check-goals: ok ({} work items)", ids.len());
-    Ok(())
-}
-
-pub(crate) fn source_truth_index_ids(
-    value: &toml::Value,
-    kind: &str,
-) -> Result<BTreeSet<String>, String> {
-    let entries = toml_array(value, kind, SOURCE_OF_TRUTH_INDEX)?;
-    let mut ids = BTreeSet::new();
-    for (idx, entry) in entries.iter().enumerate() {
-        let table = toml_table(entry, SOURCE_OF_TRUTH_INDEX, kind, idx)?;
-        let id = required_table_string(table, "id", SOURCE_OF_TRUTH_INDEX, kind, idx)?;
-        if !ids.insert(id.to_string()) {
-            return Err(format!(
-                "{SOURCE_OF_TRUTH_INDEX} contains duplicate {kind} id `{id}`"
-            ));
-        }
-        let path = required_table_string(table, "path", SOURCE_OF_TRUTH_INDEX, kind, idx)?;
-        require_file(path)?;
-        required_table_string(table, "status", SOURCE_OF_TRUTH_INDEX, kind, idx)?;
-        required_table_string(table, "owner", SOURCE_OF_TRUTH_INDEX, kind, idx)?;
-    }
-    Ok(ids)
-}
-
-fn source_truth_index_artifacts(
-    value: &toml::Value,
-) -> Result<BTreeMap<String, DocArtifactEntry>, String> {
-    let entries = toml_array(value, "artifact", SOURCE_OF_TRUTH_INDEX)?;
-    let mut artifacts = BTreeMap::new();
-    for (idx, entry) in entries.iter().enumerate() {
-        let table = toml_table(entry, SOURCE_OF_TRUTH_INDEX, "artifact", idx)?;
-        let id = required_table_string(table, "id", SOURCE_OF_TRUTH_INDEX, "artifact", idx)?;
-        if artifacts.contains_key(id) {
-            return Err(format!(
-                "{SOURCE_OF_TRUTH_INDEX} contains duplicate artifact id `{id}`"
-            ));
-        }
-        let kind = required_table_string(table, "kind", SOURCE_OF_TRUTH_INDEX, "artifact", idx)?;
-        let path = required_table_string(table, "path", SOURCE_OF_TRUTH_INDEX, "artifact", idx)?;
-        let status =
-            required_table_string(table, "status", SOURCE_OF_TRUTH_INDEX, "artifact", idx)?;
-        let owner = required_table_string(table, "owner", SOURCE_OF_TRUTH_INDEX, "artifact", idx)?;
-        require_file(path)?;
-        artifacts.insert(
-            id.to_string(),
-            DocArtifactEntry {
-                kind: kind.to_string(),
-                path: path.to_string(),
-                status: status.to_string(),
-                owner: owner.to_string(),
-            },
-        );
-    }
-    Ok(artifacts)
-}
-
-fn check_package_boundary() -> Result<(), String> {
-    let value = parse_toml_file(Path::new(PACKAGE_BOUNDARY_LEDGER))?;
-    require_toml_string(&value, "schema_version", PACKAGE_BOUNDARY_LEDGER)?;
-    let packages = toml_array(&value, "package", PACKAGE_BOUNDARY_LEDGER)?;
-    if packages.is_empty() {
-        return Err(format!(
-            "{PACKAGE_BOUNDARY_LEDGER} must list at least one package"
-        ));
-    }
-    let mut names = BTreeSet::new();
-    for (idx, package) in packages.iter().enumerate() {
-        let table = toml_table(package, PACKAGE_BOUNDARY_LEDGER, "package", idx)?;
-        let name = required_table_string(table, "name", PACKAGE_BOUNDARY_LEDGER, "package", idx)?;
-        if !names.insert(name.to_string()) {
-            return Err(format!(
-                "{PACKAGE_BOUNDARY_LEDGER} contains duplicate package `{name}`"
-            ));
-        }
-        let path = required_table_string(table, "path", PACKAGE_BOUNDARY_LEDGER, "package", idx)?;
-        let classification = required_table_string(
-            table,
-            "classification",
-            PACKAGE_BOUNDARY_LEDGER,
-            "package",
-            idx,
-        )?;
-        require_known(
-            classification,
-            PACKAGE_CLASSIFICATIONS,
-            PACKAGE_BOUNDARY_LEDGER,
-            "classification",
-        )?;
-        required_table_string(table, "owner", PACKAGE_BOUNDARY_LEDGER, "package", idx)?;
-        required_table_string(table, "reason", PACKAGE_BOUNDARY_LEDGER, "package", idx)?;
-        require_file(&format!("{path}/Cargo.toml"))?;
-    }
-    println!("check-package-boundary: ok ({} packages)", names.len());
-    Ok(())
-}
-
-fn check_ci_lanes() -> Result<(), String> {
-    ci_lanes::check()
-}
-
-mod ci_lanes {
-    use super::*;
-
-    const REQUIRED_LANE_KEYS: &[&str] = &[
-        "owner",
-        "intent",
-        "proof_obligation",
-        "cost_estimate",
-        "trigger_policy",
-        "review_after",
-    ];
-
-    pub(super) fn check() -> Result<(), String> {
-        let lanes = parse_lanes()?;
-        let lane_ids = collect_lane_ids(lanes)?;
-        println!("check-ci-lanes: ok ({} lanes)", lane_ids.len());
-        Ok(())
-    }
-
-    fn parse_lanes() -> Result<Vec<toml::Value>, String> {
-        let value = parse_toml_file(Path::new(CI_LANE_LEDGER))?;
-        require_toml_string(&value, "schema_version", CI_LANE_LEDGER)?;
-        let lanes = toml_array(&value, "lane", CI_LANE_LEDGER)?;
-        if lanes.is_empty() {
-            return Err(format!("{CI_LANE_LEDGER} must list at least one lane"));
-        }
-        Ok(lanes.to_vec())
-    }
-
-    fn collect_lane_ids(lanes: Vec<toml::Value>) -> Result<BTreeSet<String>, String> {
-        let mut ids = BTreeSet::new();
-        for (idx, lane) in lanes.iter().enumerate() {
-            let lane_id = validate_lane(lane, idx)?;
-            if !ids.insert(lane_id.to_string()) {
-                return Err(format!(
-                    "{CI_LANE_LEDGER} contains duplicate lane `{lane_id}`"
-                ));
-            }
-        }
-        Ok(ids)
-    }
-
-    fn validate_lane(lane: &toml::Value, idx: usize) -> Result<&str, String> {
-        let table = toml_table(lane, CI_LANE_LEDGER, "lane", idx)?;
-        let lane_id = required_table_string(table, "id", CI_LANE_LEDGER, "lane", idx)?;
-        for key in REQUIRED_LANE_KEYS {
-            required_table_string(table, key, CI_LANE_LEDGER, "lane", idx)?;
-        }
-        let status = required_table_string(table, "status", CI_LANE_LEDGER, "lane", idx)?;
-        require_known(status, CI_LANE_STATUSES, CI_LANE_LEDGER, "status")?;
-        if lane_id == "policy-contracts" {
-            require_file(".github/workflows/policy-contracts.yml")?;
-        }
-        Ok(lane_id)
-    }
-}
-
-#[derive(Clone, Copy)]
-enum LedgerKind {
-    Baseline,
-    Suppression,
-}
-
-impl LedgerKind {
-    fn name(self) -> &'static str {
-        match self {
-            Self::Baseline => "baseline",
-            Self::Suppression => "suppression",
-        }
-    }
-}
-
-fn check_unsafe_review_ledger(path: &Path, kind: LedgerKind) -> Result<(), String> {
-    let value = parse_toml_file(path)?;
-    let path_display = path.display().to_string();
-    let status = value
-        .get("status")
-        .and_then(toml::Value::as_str)
-        .unwrap_or("active");
-    let entries = value
-        .get("entries")
-        .and_then(toml::Value::as_array)
-        .map_or(&[][..], Vec::as_slice);
-
-    if status == "empty" {
-        if entries.is_empty() {
-            return Ok(());
-        }
-        return Err(format!(
-            "{path_display} status is empty but contains entries"
-        ));
-    }
-
-    for (idx, entry) in entries.iter().enumerate() {
-        let Some(entry) = entry.as_table() else {
-            return Err(format!(
-                "{path_display} entries[{idx}] must be a TOML table"
-            ));
-        };
-        for key in ["card_id", "owner", "reason", "evidence"] {
-            require_ledger_entry_string(entry, key, &path_display, idx)?;
-        }
-        let evidence = entry
-            .get("evidence")
-            .and_then(toml::Value::as_str)
-            .unwrap_or_default();
-        if !looks_like_typed_evidence(evidence) {
-            return Err(format!(
-                "{path_display} entries[{idx}] `evidence` must start with a typed prefix \
-                 (e.g. test:, doc:, spec:, adr:, ripr:, unsafe-review:, coverage:, \
-                 issue:, pr:, baseline-init:) followed by at least one non-whitespace character"
-            ));
-        }
-        let has_review_after = ledger_entry_date(entry, "review_after", &path_display, idx)?;
-        let has_expires = ledger_entry_date(entry, "expires", &path_display, idx)?;
-        match kind {
-            LedgerKind::Baseline if !has_review_after => {
-                return Err(format!(
-                    "{path_display} entries[{idx}] baseline entry is missing review_after"
-                ));
-            }
-            LedgerKind::Suppression if !has_review_after && !has_expires => {
-                return Err(format!(
-                    "{path_display} entries[{idx}] suppression entry must set review_after or expires"
-                ));
-            }
-            _ => {}
-        }
-        let card_id = entry
-            .get("card_id")
-            .and_then(toml::Value::as_str)
-            .unwrap_or_default();
-        if !looks_like_counted_card_id(card_id) {
-            return Err(format!(
-                "{path_display} entries[{idx}] {} card_id must be an exact counted UR-* identity ending in -cN",
-                kind.name()
-            ));
-        }
-    }
-
-    Ok(())
-}
-
-fn require_ledger_entry_string(
-    entry: &toml::map::Map<String, toml::Value>,
-    key: &str,
-    path: &str,
-    idx: usize,
-) -> Result<(), String> {
-    let Some(value) = entry.get(key).and_then(toml::Value::as_str) else {
-        return Err(format!("{path} entries[{idx}] is missing string `{key}`"));
-    };
-    if value.trim().is_empty() {
-        Err(format!("{path} entries[{idx}] string `{key}` is empty"))
-    } else {
-        Ok(())
-    }
-}
-
-fn ledger_entry_date(
-    entry: &toml::map::Map<String, toml::Value>,
-    key: &str,
-    path: &str,
-    idx: usize,
-) -> Result<bool, String> {
-    let Some(value) = entry.get(key) else {
-        return Ok(false);
-    };
-    let Some(value) = value.as_str() else {
-        return Err(format!("{path} entries[{idx}] `{key}` must be a string"));
-    };
-    if !looks_like_iso_date(value) {
-        return Err(format!("{path} entries[{idx}] `{key}` must use YYYY-MM-DD"));
-    }
-    Ok(true)
-}
-
-fn looks_like_iso_date(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    bytes.len() == 10
-        && bytes[0..4].iter().all(u8::is_ascii_digit)
-        && bytes[4] == b'-'
-        && bytes[5..7].iter().all(u8::is_ascii_digit)
-        && bytes[7] == b'-'
-        && bytes[8..10].iter().all(u8::is_ascii_digit)
-}
-
-fn looks_like_counted_card_id(value: &str) -> bool {
-    let Some((prefix, count)) = value.rsplit_once("-c") else {
-        return false;
-    };
-    value.starts_with("UR-")
-        && !prefix.is_empty()
-        && !count.is_empty()
-        && count.bytes().all(|byte| byte.is_ascii_digit())
-}
-
-/// Typed evidence prefixes accepted by the ledger gate.
-///
-/// Each prefix must be followed by at least one non-whitespace character.
-/// This list aligns with the cargo-allow interop contract documented in
-/// `docs/interop/sibling-tools.md`.
-const TYPED_EVIDENCE_PREFIXES: &[&str] = &[
-    "test:",
-    "doc:",
-    "spec:",
-    "adr:",
-    "ripr:",
-    "unsafe-review:",
-    "coverage:",
-    "issue:",
-    "pr:",
-    "baseline-init:",
-];
-
-fn looks_like_typed_evidence(value: &str) -> bool {
-    TYPED_EVIDENCE_PREFIXES.iter().any(|prefix| {
-        value
-            .strip_prefix(prefix)
-            .is_some_and(|rest| rest.chars().any(|c: char| !c.is_whitespace()))
-    })
-}
-
-fn check_fixtures() -> Result<(), String> {
-    let dirs = fixture_dirs(Path::new("fixtures"))?;
-    if dirs.is_empty() {
-        return Err("fixtures directory has no fixture cases".to_string());
-    }
-    check_fixture_exception_ledgers(&dirs)?;
-    for dir in &dirs {
-        check_fixture(dir)?;
-    }
-    println!("check-fixtures: ok ({} fixtures)", dirs.len());
-    Ok(())
-}
-
-/// Verify that committed surface goldens (`expected.lsp.json`,
-/// `expected.repair-queue.json`) are byte-identical to a fresh rendering of
-/// each calibration fixture that has `surface_goldens` set.
-///
-/// The gate is deterministic: both surfaces contain no `tool_version`,
-/// `generated_at`, or wall-clock timestamp, so re-rendering produces the same
-/// bytes on every run.
-fn check_fixture_surface_parity() -> Result<(), String> {
-    let manifest = calibration_manifest::validate()?;
-    let workspace_root = workspace_path("");
-    let mut checked = 0usize;
-    let mut mismatches: Vec<String> = Vec::new();
-
-    for (fixture, case) in &manifest.fixture_cases {
-        if case.surface_goldens.is_empty() {
-            continue;
-        }
-        for surface in &case.surface_goldens {
-            let filename = surface_golden_filename(surface);
-            let committed_path = workspace_path(&format!("fixtures/{fixture}/{filename}"));
-            let committed = read_to_string(&committed_path).map_err(|err| {
-                format!(
-                    "check-fixture-surface-parity: fixture `{fixture}` surface `{surface}`: \
-                     committed golden `{filename}` missing or unreadable: {err}. \
-                     Run `cargo run -p xtask -- bless-goldens` to generate it."
-                )
-            })?;
-
-            let rendered = unsafe_review_core::render_fixture_surface_from_workspace(
-                &workspace_root,
-                fixture,
-                surface,
-            )
-            .map_err(|err| {
-                format!(
-                    "check-fixture-surface-parity: fixture `{fixture}` surface `{surface}`: \
-                     render failed: {err}"
-                )
-            })?;
-
-            if committed != rendered {
-                let first_diff = first_differing_line(&committed, &rendered);
-                mismatches.push(format!(
-                    "  fixture `{fixture}` surface `{surface}` ({filename}): {first_diff}"
-                ));
-            }
-            checked += 1;
-        }
-    }
-
-    if !mismatches.is_empty() {
-        return Err(format!(
-            "check-fixture-surface-parity: {} surface golden(s) do not match rendered output \
-             (run `cargo run -p xtask -- bless-goldens` to regenerate):\n{}",
-            mismatches.len(),
-            mismatches.join("\n")
-        ));
-    }
-
-    println!("check-fixture-surface-parity: ok ({checked} surface goldens verified)");
-    Ok(())
-}
-
-const SURFACE_DETERMINISM_RUNS: usize = 3;
-
-/// Verify that canonical fixture surfaces render to byte-identical output across
-/// repeated generation in one process.
-fn check_surface_determinism() -> Result<(), String> {
-    let manifest = calibration_manifest::validate()?;
-    let workspace_root = workspace_path("");
-    let mut checked = 0usize;
-    let mut mismatches: Vec<String> = Vec::new();
-
-    for (fixture, case) in &manifest.fixture_cases {
-        if case.surface_goldens.is_empty() {
-            continue;
-        }
-        for surface in &case.surface_goldens {
-            let baseline = unsafe_review_core::render_fixture_surface_from_workspace(
-                &workspace_root,
-                fixture,
-                surface,
-            )
-            .map_err(|err| {
-                format!(
-                    "check-surface-determinism: fixture `{fixture}` surface `{surface}`: \
-                     initial render failed: {err}"
-                )
-            })?;
-
-            for run_idx in 2..=SURFACE_DETERMINISM_RUNS {
-                let candidate = unsafe_review_core::render_fixture_surface_from_workspace(
-                    &workspace_root,
-                    fixture,
-                    surface,
-                )
-                .map_err(|err| {
-                    format!(
-                        "check-surface-determinism: fixture `{fixture}` surface `{surface}`: \
-                             render {run_idx} failed: {err}"
-                    )
-                })?;
-                if baseline != candidate {
-                    let first_diff = first_differing_line(&baseline, &candidate);
-                    mismatches.push(format!(
-                        "  fixture `{fixture}` surface `{surface}` render {run_idx}: {first_diff}"
-                    ));
-                    break;
-                }
-            }
-            checked += 1;
-        }
-    }
-
-    if !mismatches.is_empty() {
-        return Err(format!(
-            "check-surface-determinism: {} surface render(s) drifted across repeated generation:\n{}",
-            mismatches.len(),
-            mismatches.join("\n")
-        ));
-    }
-
-    println!(
-        "check-surface-determinism: ok ({checked} surface render(s), {SURFACE_DETERMINISM_RUNS} passes each)"
-    );
-    Ok(())
-}
-
-/// Return the committed golden filename for a surface name.
-fn surface_golden_filename(surface: &str) -> &'static str {
-    match surface {
-        "lsp" => "expected.lsp.json",
-        "repair-queue" => "expected.repair-queue.json",
-        "comment-plan" => "expected.comment-plan.json",
-        _ => "expected.unknown.json",
-    }
-}
-
-/// Describe the first line where two multi-line strings differ.
-fn first_differing_line(committed: &str, rendered: &str) -> String {
-    let committed_lines: Vec<&str> = committed.lines().collect();
-    let rendered_lines: Vec<&str> = rendered.lines().collect();
-    let len = committed_lines.len().max(rendered_lines.len());
-    for i in 0..len {
-        let a = committed_lines.get(i).copied().unwrap_or("<missing>");
-        let b = rendered_lines.get(i).copied().unwrap_or("<missing>");
-        if a != b {
-            return format!(
-                "first diff at line {}: committed={a:?} rendered={b:?}",
-                i + 1
-            );
-        }
-    }
-    "content differs but all lines appear equal (trailing newline difference?)".to_string()
-}
-
-fn check_fixture_exception_ledgers(dirs: &[PathBuf]) -> Result<(), String> {
-    let mut fixture_paths = BTreeMap::new();
-    for dir in dirs {
-        let name = fixture_dir_name(dir)?.to_string();
-        fixture_paths.insert(name, dir);
-    }
-
-    for fixture in FIXTURE_EXPECTED_CARDS_EXCEPTIONS {
-        let Some(dir) = fixture_paths.get(*fixture) else {
-            return Err(format!(
-                "expected-card exception fixture `{fixture}` does not exist"
-            ));
-        };
-        if dir.join("expected.cards.json").is_file() {
-            return Err(format!(
-                "expected-card exception fixture `{fixture}` has expected.cards.json"
-            ));
-        }
-    }
-
-    for (fixture, _prefix) in FIXTURE_PACKAGE_PREFIX_EXCEPTIONS {
-        if !fixture_paths.contains_key(*fixture) {
-            return Err(format!(
-                "package-prefix exception fixture `{fixture}` does not exist"
-            ));
-        }
-    }
-
-    Ok(())
 }
 
 fn check_calibration() -> Result<(), String> {
@@ -4030,22 +2460,6 @@ fn check_calibration() -> Result<(), String> {
         "check-calibration: ok ({} cases, {label_count} labels)",
         manifest.case_count
     );
-    Ok(())
-}
-
-fn calibration_stats_for_sync() -> Result<AccuracyCalibrationReportStats, String> {
-    let manifest = calibration_manifest::validate()?;
-    let accuracy_policy = parse_toml_file(&workspace_path("policy/accuracy-calibration.toml"))?;
-    let label_count =
-        accuracy_labels::check_accuracy_label_ledgers(&accuracy_policy, &manifest.fixture_cases)?;
-    accuracy_calibration_report_stats(&accuracy_policy, manifest.case_count, label_count)
-}
-
-fn sync_calibration_snapshot() -> Result<(), String> {
-    let stats = calibration_stats_for_sync()?;
-    sync_calibration_report(&stats)?;
-    sync_objective_audit_snapshot(&stats)?;
-    println!("sync-calibration-snapshot: ok");
     Ok(())
 }
 
@@ -4081,148 +2495,6 @@ fn bless_goldens(names: &[String]) -> Result<(), String> {
         println!("  {}", path.display());
     }
     Ok(())
-}
-
-fn sync_calibration_report(stats: &AccuracyCalibrationReportStats) -> Result<(), String> {
-    let path = workspace_path(ACCURACY_CALIBRATION_REPORT);
-    let original = read_to_string(&path)?;
-    let updated = rewrite_calibration_report_counts(&original, stats)?;
-    if original == updated {
-        println!("{ACCURACY_CALIBRATION_REPORT}: counts already current, no change");
-    } else {
-        fs::write(&path, &updated)
-            .map_err(|err| format!("write {ACCURACY_CALIBRATION_REPORT} failed: {err}"))?;
-        println!("{ACCURACY_CALIBRATION_REPORT}: updated count lines");
-    }
-    Ok(())
-}
-
-fn rewrite_calibration_report_counts(
-    text: &str,
-    stats: &AccuracyCalibrationReportStats,
-) -> Result<String, String> {
-    let mut result = text.to_string();
-
-    // Update all nine count lines in the ## Counts block.
-    for (prefix, value) in [
-        ("- Claims: ", stats.claim_count),
-        ("- Fixture-pinned claims: ", stats.fixture_pinned_claims),
-        ("- Dogfood-measured claims: ", stats.dogfood_measured_claims),
-        (
-            "- Labeled-calibrated claims: ",
-            stats.labeled_calibrated_claims,
-        ),
-        ("- Policy-eligible claims: ", stats.policy_eligible_claims),
-        ("- Calibration cases: ", stats.calibration_case_count),
-        ("- Label ledgers: ", stats.label_ledger_count),
-        ("- Label samples: ", stats.label_sample_count),
-        ("- Labeled reports: ", stats.labeled_report_count),
-    ] {
-        result = replace_prefixed_count_line(
-            &result,
-            prefix,
-            &value.to_string(),
-            ACCURACY_CALIBRATION_REPORT,
-        )?;
-    }
-
-    Ok(result)
-}
-
-fn replace_prefixed_count_line(
-    text: &str,
-    prefix: &str,
-    new_value: &str,
-    path: &str,
-) -> Result<String, String> {
-    let start = text
-        .find(prefix)
-        .ok_or_else(|| format!("{path} is missing expected line prefix `{prefix}`"))?;
-    let after_prefix = start + prefix.len();
-    // Find the end of the value (rest of the line up to newline or end of string).
-    let end = text[after_prefix..]
-        .find('\n')
-        .map_or(text.len(), |rel| after_prefix + rel);
-    let mut result = text.to_string();
-    result.replace_range(after_prefix..end, new_value);
-    Ok(result)
-}
-
-fn sync_objective_audit_snapshot(stats: &AccuracyCalibrationReportStats) -> Result<(), String> {
-    let path = workspace_path(OBJECTIVE_AUDIT);
-    let original = read_to_string(&path)?;
-    let updated = rewrite_objective_audit_counts(&original, stats)?;
-    if original == updated {
-        println!("{OBJECTIVE_AUDIT}: counts already current, no change");
-    } else {
-        fs::write(&path, &updated)
-            .map_err(|err| format!("write {OBJECTIVE_AUDIT} failed: {err}"))?;
-        println!("{OBJECTIVE_AUDIT}: updated calibration snapshot counts");
-    }
-    Ok(())
-}
-
-fn rewrite_objective_audit_counts(
-    text: &str,
-    stats: &AccuracyCalibrationReportStats,
-) -> Result<String, String> {
-    // The checked sentence uses four `N <phrase>` patterns where N and the phrase
-    // may be separated by a line break due to wrapping. Each entry lists the
-    // search anchors in preference order (exact match first, then line-wrapped
-    // variant). We walk back over whitespace from the anchor to locate the digit
-    // run and replace it in place.
-    let anchors: &[(&[&str], usize)] = &[
-        (&["fixture-pinned claims"], stats.fixture_pinned_claims),
-        (&["calibration cases"], stats.calibration_case_count),
-        (&["label ledgers"], stats.label_ledger_count),
-        // "label samples" may be line-wrapped as "label\nsamples".
-        (
-            &["label samples", "label\nsamples"],
-            stats.label_sample_count,
-        ),
-    ];
-    let mut result = text.to_string();
-    for (candidates, new_value) in anchors {
-        result = replace_number_before_anchor(&result, candidates, *new_value, OBJECTIVE_AUDIT)?;
-    }
-    Ok(result)
-}
-
-fn replace_number_before_anchor(
-    text: &str,
-    anchors: &[&str],
-    new_value: usize,
-    path: &str,
-) -> Result<String, String> {
-    // Find the first occurrence of any of the anchor strings.
-    let anchor_pos = anchors
-        .iter()
-        .filter_map(|anchor| text.find(anchor))
-        .min()
-        .ok_or_else(|| {
-            format!(
-                "{path} is missing expected phrase `<N> {}`; cannot update count",
-                anchors[0]
-            )
-        })?;
-
-    // `before` is the text up to the anchor. Trim trailing whitespace to reach
-    // the end of the digit run, then trim digits to find the digit start.
-    let before = &text[..anchor_pos];
-    let trimmed = before.trim_end_matches(|c: char| c.is_ascii_whitespace());
-    let digit_end = trimmed.len();
-    let digit_start = trimmed
-        .rfind(|c: char| !c.is_ascii_digit())
-        .map_or(0, |pos| pos + 1);
-    if digit_start == digit_end {
-        return Err(format!(
-            "{path} has no digit before `{}`; expected `<N> {}`",
-            anchors[0], anchors[0]
-        ));
-    }
-    let mut result = text.to_string();
-    result.replace_range(digit_start..digit_end, &new_value.to_string());
-    Ok(result)
 }
 
 #[derive(Debug)]
@@ -4661,6 +2933,7 @@ fn check_dogfood() -> Result<(), String> {
     check_dogfood_judgment_schema_docs()?;
     let judgment_stats = check_dogfood_judgments(&ids, &target_kinds)?;
     check_dogfood_real_crate_judgment_sample_index(&judgment_stats)?;
+    dogfood_density::check(&value)?;
     dogfood_usefulness::check()?;
 
     println!(
@@ -6542,6 +4815,11 @@ mod dogfood_checks {
                 "{DOGFOOD_MANIFEST} targets[{idx}] uses unknown artifact_status `{artifact_status}`"
             ));
         }
+        if matches!(kind, "repo-snapshot" | "pr-diff") && artifact_status != "local_untracked" {
+            return Err(format!(
+                "{DOGFOOD_MANIFEST} targets[{idx}] kind `{kind}` must use artifact_status `local_untracked` so external snapshots and diffs are never checked into the swarm repo, got `{artifact_status}`"
+            ));
+        }
         validate_artifacts(target, idx, id, artifact_status)?;
         let (repo_snapshots, pr_diffs, fixture_controls) = validate_kind_fields(target, idx, kind)?;
         let fixture_control_id = (fixture_controls > 0).then(|| id.to_string());
@@ -7035,118 +5313,6 @@ fn check_dogfood_outcome_claim_boundary(context: &str, text: &str) -> Result<(),
     Ok(())
 }
 
-fn check_manual_fuzz_harness() -> Result<(), String> {
-    for path in FUZZ_REQUIRED_FILES {
-        require_repo_file(path)?;
-    }
-
-    let workspace = parse_toml_file(&repo_path("Cargo.toml"))?;
-    let excludes = workspace
-        .get("workspace")
-        .and_then(|workspace| workspace.get("exclude"))
-        .and_then(toml::Value::as_array)
-        .ok_or_else(|| "Cargo.toml workspace.exclude must list fuzz".to_string())?;
-    if !excludes
-        .iter()
-        .any(|entry| entry.as_str().is_some_and(|entry| entry == "fuzz"))
-    {
-        return Err("Cargo.toml workspace.exclude must list fuzz".to_string());
-    }
-
-    let fuzz_manifest = parse_toml_file(&repo_path("fuzz/Cargo.toml"))?;
-    if fuzz_manifest
-        .get("package")
-        .and_then(|package| package.get("publish"))
-        .and_then(toml::Value::as_bool)
-        .unwrap_or(true)
-    {
-        return Err("fuzz/Cargo.toml package.publish must be false".to_string());
-    }
-    let cargo_fuzz = fuzz_manifest
-        .get("package")
-        .and_then(|package| package.get("metadata"))
-        .and_then(|metadata| metadata.get("cargo-fuzz"))
-        .and_then(toml::Value::as_bool)
-        .unwrap_or(false);
-    if !cargo_fuzz {
-        return Err("fuzz/Cargo.toml package.metadata.cargo-fuzz must be true".to_string());
-    }
-    let bins = fuzz_manifest
-        .get("bin")
-        .and_then(toml::Value::as_array)
-        .ok_or_else(|| "fuzz/Cargo.toml must define an analyze fuzz target".to_string())?;
-    let has_analyze_target = bins.iter().any(|bin| {
-        bin.get("name").and_then(toml::Value::as_str) == Some("analyze")
-            && bin.get("path").and_then(toml::Value::as_str) == Some("fuzz_targets/analyze.rs")
-    });
-    if !has_analyze_target {
-        return Err("fuzz/Cargo.toml must define analyze at fuzz_targets/analyze.rs".to_string());
-    }
-
-    let fuzz_docs = read_to_string(&repo_path("docs/FUZZING.md"))?;
-    for phrase in [
-        "manual `cargo-fuzz` harness",
-        "not part of the default PR gate",
-        "does not prove soundness",
-    ] {
-        if !fuzz_docs.contains(phrase) {
-            return Err(format!("docs/FUZZING.md must include `{phrase}`"));
-        }
-    }
-
-    let target = read_to_string(&repo_path("fuzz/fuzz_targets/analyze.rs"))?;
-    for phrase in [
-        "fuzz_target!",
-        "DiffSource::Text",
-        "render_json",
-        "MAX_SOURCE_BYTES",
-        "MAX_DIFF_BYTES",
-    ] {
-        if !target.contains(phrase) {
-            return Err(format!(
-                "fuzz/fuzz_targets/analyze.rs must include `{phrase}`"
-            ));
-        }
-    }
-
-    let ignore = read_to_string(&repo_path("fuzz/.gitignore"))?;
-    for ignored in ["artifacts/", "target/"] {
-        if !ignore.lines().any(|line| line.trim() == ignored) {
-            return Err(format!("fuzz/.gitignore must ignore `{ignored}`"));
-        }
-    }
-    let corpus_dir = repo_path("fuzz/corpus/analyze");
-    let corpus_entries = fs::read_dir(&corpus_dir)
-        .map_err(|err| format!("failed to read {}: {err}", corpus_dir.display()))?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|err| format!("failed to enumerate {}: {err}", corpus_dir.display()))?;
-    if corpus_entries.is_empty() {
-        return Err("fuzz/corpus/analyze must include at least one corpus seed".to_string());
-    }
-    let mut has_diff_marker_seed = false;
-    for entry in corpus_entries {
-        let seed_path = entry.path();
-        if !seed_path.is_file() {
-            continue;
-        }
-        let seed = fs::read_to_string(&seed_path)
-            .map_err(|err| format!("failed to read {}: {err}", seed_path.display()))?;
-        if seed.contains("---DIFF---") {
-            has_diff_marker_seed = true;
-            break;
-        }
-    }
-    if !has_diff_marker_seed {
-        return Err(
-            "fuzz/corpus/analyze must include at least one seed containing `---DIFF---`"
-                .to_string(),
-        );
-    }
-
-    println!("check-fuzz: ok");
-    Ok(())
-}
-
 fn reject_positive_overclaims(path: &Path, text: &str) -> Result<(), String> {
     let mut previous = String::new();
     for (line_no, line) in text.lines().enumerate() {
@@ -7227,7 +5393,7 @@ fn reject_positive_overclaims(path: &Path, text: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn check_fixture(dir: &Path) -> Result<(), String> {
+pub(crate) fn check_fixture(dir: &Path) -> Result<(), String> {
     let name = fixture_dir_name(dir)?;
     if !is_snake_case_name(name) {
         return Err(format!(
@@ -10019,8 +8185,11 @@ fn check_pr_disposition_policy_texts(
 }
 
 fn markdown_heading_section<'a>(text: &'a str, heading: &str) -> Option<&'a str> {
-    let marker = format!("{heading}\n");
-    let start = text.find(&marker)? + marker.len();
+    let (marker_start, marker_len) = [format!("{heading}\n"), format!("{heading}\r\n")]
+        .into_iter()
+        .filter_map(|marker| text.find(&marker).map(|start| (start, marker.len())))
+        .min_by_key(|(start, _)| *start)?;
+    let start = marker_start + marker_len;
     let rest = &text[start..];
     let end = rest.find("\n## ").unwrap_or(rest.len());
     Some(&rest[..end])
@@ -10059,25 +8228,6 @@ fn check_local_context(paths: &[&Path]) -> Result<(), String> {
             }
             Ok(())
         })?;
-    }
-    Ok(())
-}
-
-fn check_tracked_generated_artifacts() -> Result<(), String> {
-    let output = Command::new("git")
-        .args(["ls-files"])
-        .output()
-        .map_err(|err| format!("failed to run git ls-files: {err}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "git ls-files failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    for path in String::from_utf8_lossy(&output.stdout).lines() {
-        if is_forbidden_generated_path(path) {
-            return Err(format!("generated artifact is tracked: {path}"));
-        }
     }
     Ok(())
 }
@@ -10156,7 +8306,11 @@ fn require_json_usize_at(
     }
 }
 
-fn require_toml_string(value: &toml::Value, key: &str, path: &str) -> Result<(), String> {
+pub(crate) fn require_toml_string(
+    value: &toml::Value,
+    key: &str,
+    path: &str,
+) -> Result<(), String> {
     match value.get(key).and_then(toml::Value::as_str) {
         Some(_) => Ok(()),
         None => Err(format!("{path} is missing string key `{key}`")),
@@ -10200,7 +8354,7 @@ fn toml_table<'a>(
         .ok_or_else(|| format!("{path} {key}[{idx}] must be a table"))
 }
 
-fn toml_str_array<'a>(
+pub(crate) fn toml_str_array<'a>(
     value: &'a toml::Value,
     path: &str,
     key: &str,
@@ -10549,7 +8703,7 @@ pub(crate) fn repo_path(relative: &str) -> PathBuf {
     workspace_path(relative)
 }
 
-fn fixture_dirs(dir: &Path) -> Result<Vec<PathBuf>, String> {
+pub(crate) fn fixture_dirs(dir: &Path) -> Result<Vec<PathBuf>, String> {
     let mut dirs = Vec::new();
     let entries =
         fs::read_dir(dir).map_err(|err| format!("read {} failed: {err}", dir.display()))?;
@@ -10627,7 +8781,7 @@ pub(crate) fn markdown_table_columns(line: &str) -> Vec<&str> {
     columns
 }
 
-fn fixture_dir_name(path: &Path) -> Result<&str, String> {
+pub(crate) fn fixture_dir_name(path: &Path) -> Result<&str, String> {
     path.file_name()
         .and_then(std::ffi::OsStr::to_str)
         .ok_or_else(|| format!("{} has a non-UTF-8 fixture directory name", path.display()))
@@ -10737,16 +8891,6 @@ mod tests {
         }
     }
 
-    fn doc_artifact_entry(status: &str) -> DocArtifactEntry {
-        DocArtifactEntry {
-            kind: "spec".to_string(),
-            path: "docs/specs/UNSAFE-REVIEW-SPEC-0026-accuracy-validation-and-calibration.md"
-                .to_string(),
-            status: status.to_string(),
-            owner: "calibration".to_string(),
-        }
-    }
-
     fn write_fake_workspace_root(root: &Path) -> Result<(), String> {
         fs::create_dir_all(root.join("xtask"))
             .map_err(|err| format!("create fake xtask dir failed: {err}"))?;
@@ -10813,6 +8957,82 @@ mod tests {
         let check_pr_args = parse_runtime_args(vec!["xtask".to_string(), "check-pr".to_string()])?;
         let check_pr_command = commands::XtaskCommand::parse(&check_pr_args.command_args)?;
         assert!(command_requires_workspace_root(&check_pr_command));
+        Ok(())
+    }
+
+    #[test]
+    fn help_text_advertises_supported_operational_commands() -> Result<(), String> {
+        // Exercises the production help text directly: every supported
+        // operational command must be discoverable and must parse.
+        let help = help_text();
+        for name in [
+            "cleanup-audit",
+            "check-subagent-results",
+            "check-self-unsafe",
+            "external-pilot-rollup",
+        ] {
+            assert!(
+                help.contains(name),
+                "production help text should advertise supported command `{name}`"
+            );
+            let args = vec!["xtask".to_string(), name.to_string()];
+            commands::XtaskCommand::parse(&args)
+                .map_err(|err| format!("advertised command `{name}` should parse, got: {err}"))?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn help_text_rejects_unknown_advertised_spelling() -> Result<(), String> {
+        // `external-pilot-usefulness` was advertised but never parsed; the
+        // supported command is `external-pilot-rollup`.
+        assert!(
+            !help_text().contains("external-pilot-usefulness"),
+            "production help text must not advertise the unknown `external-pilot-usefulness` spelling"
+        );
+        let args = vec!["xtask".to_string(), "external-pilot-usefulness".to_string()];
+        let err = err_text(commands::XtaskCommand::parse(&args))?;
+        assert!(
+            err.contains("unknown xtask command"),
+            "unexpected parser error: {err}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn help_text_classifies_deliberate_exclusions() -> Result<(), String> {
+        // `check-goals` (deprecated compatibility) and `check-local-run`
+        // (internal subprocess plumbing) stay parseable but are intentionally
+        // omitted from the command list; the trailing note records that.
+        let help = help_text();
+        let mut lines = help.split('\n');
+        lines
+            .next()
+            .ok_or_else(|| "production help text should open with the options line".to_string())?;
+        let commands_line = lines.next().ok_or_else(|| {
+            "production help text should list commands on its second line".to_string()
+        })?;
+        let note: String = lines.collect::<Vec<_>>().join("\n");
+        assert!(
+            !commands_line.contains("check-goals"),
+            "deprecated `check-goals` must stay out of the advertised command list"
+        );
+        assert!(
+            !commands_line.contains("check-local-run"),
+            "internal `check-local-run` must stay out of the advertised command list"
+        );
+        assert!(
+            note.contains("check-goals") && note.contains("check-local-run"),
+            "help note should classify the deliberate exclusions"
+        );
+        commands::XtaskCommand::parse(&["xtask".to_string(), "check-goals".to_string()])
+            .map_err(|err| format!("`check-goals` should remain parseable, got: {err}"))?;
+        commands::XtaskCommand::parse(&[
+            "xtask".to_string(),
+            "check-local-run".to_string(),
+            "policy".to_string(),
+        ])
+        .map_err(|err| format!("`check-local-run` should remain parseable, got: {err}"))?;
         Ok(())
     }
 
@@ -11101,6 +9321,14 @@ jobs:
     }
 
     #[test]
+    fn support_tier_parser_ignores_cargo_allow_header() {
+        assert_eq!(
+            support_tier_from_row("| Surface | Tier | Claim | Proof command | Notes |"),
+            None
+        );
+    }
+
+    #[test]
     fn support_tier_rows_reject_placeholder_proof_cells() -> Result<(), String> {
         let text = "| Capability | Tier | Surface | Proof | Known limits |\n\
                     |---|---|---|---|---|\n\
@@ -11196,18 +9424,6 @@ jobs:
     }
 
     #[test]
-    fn docs_automation_glob_matches_publication_receipts() {
-        assert!(docs_automation_paths::wildcard_match(
-            "*publication*.md",
-            "2026-05-21-release-0.2.0-publication.md",
-        ));
-        assert!(!docs_automation_paths::wildcard_match(
-            "*publication*.md",
-            "2026-05-21-source-promotion-0.2-sync.md",
-        ));
-    }
-
-    #[test]
     fn first_pr_artifact_list_surfaces_include_full_bundle() -> Result<(), String> {
         public_surfaces::check_first_pr_artifact_list_surfaces()
     }
@@ -11232,53 +9448,103 @@ jobs:
     }
 
     #[test]
-    fn docs_automation_scope_detects_external_agent_state_roots() {
-        assert!(repo_path_is_under_scope_root(
-            ".codex/agent-state.md",
-            ".codex"
-        ));
-        assert!(repo_path_is_under_scope_root(
-            ".jules\\goals\\README.md",
-            ".jules"
-        ));
-        assert!(!repo_path_is_under_scope_root(
-            "docs/contributing/spec-rails.md",
-            ".codex"
-        ));
-    }
+    fn github_action_guide_alias_stays_pointer_only() -> Result<(), String> {
+        public_surfaces::require_legacy_github_action_guide_alias(
+            "docs/ci/github-actions.md",
+            "# GitHub Actions Guide\n\n[docs/ci/github-action.md](github-action.md)\n",
+        )?;
 
-    #[test]
-    fn docs_automation_rejects_owned_external_state_root() -> Result<(), String> {
-        let owned_roots = vec!["docs".to_string(), ".codex".to_string()];
-        let external_roots = vec![".codex".to_string()];
-
-        let Err(err) = check_docs_automation_scope_boundaries(&owned_roots, &external_roots) else {
-            return Err("external state root in owned_roots should fail".to_string());
-        };
-
-        assert!(err.contains("owned_roots"));
-        assert!(err.contains("external_awareness_only"));
-        assert!(err.contains(".codex"));
-        Ok(())
-    }
-
-    #[test]
-    fn docs_automation_rejects_checked_external_state_path() -> Result<(), String> {
-        let external_roots = vec![".codex".to_string()];
-
-        let Err(err) = reject_docs_automation_external_path(
-            "agent-operating-contract",
-            "path",
-            ".codex/AGENTS.md",
-            &external_roots,
+        let Err(err) = public_surfaces::require_legacy_github_action_guide_alias(
+            "docs/ci/github-actions.md",
+            "# GitHub Actions Guide\n\n```yaml\nsteps: []\n```\n[docs/ci/github-action.md](github-action.md)\n",
         ) else {
-            return Err("external state path should fail".to_string());
+            return Err("duplicate guide content should fail".to_string());
         };
 
-        assert!(err.contains("agent-operating-contract"));
-        assert!(err.contains("external_awareness_only"));
-        assert!(err.contains(".codex/AGENTS.md"));
+        if !err.contains("compatibility alias") {
+            return Err(format!("expected compatibility alias error, got: {err}"));
+        }
         Ok(())
+    }
+
+    #[test]
+    fn github_action_guide_surfaces_reject_legacy_alias() -> Result<(), String> {
+        public_surfaces::require_canonical_github_action_guide_pointer(
+            "docs/README.md",
+            "See docs/ci/github-action.md for setup.",
+        )?;
+
+        let Err(err) = public_surfaces::require_canonical_github_action_guide_pointer(
+            "docs/README.md",
+            "See docs/ci/github-actions.md for setup.",
+        ) else {
+            return Err("legacy action guide pointer should fail".to_string());
+        };
+
+        if !err.contains("docs/ci/github-action.md") {
+            return Err(format!(
+                "expected canonical guide path in error, got: {err}"
+            ));
+        }
+        if !err.contains("docs/ci/github-actions.md") {
+            return Err(format!("expected legacy guide path in error, got: {err}"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn first_pr_artifact_name_list_rejects_missing_new_action_artifacts() -> Result<(), String> {
+        for missing in [
+            "target/unsafe-review/receipt-audit.json",
+            "target/unsafe-review/policy-report.json",
+            "target/unsafe-review/policy-report.md",
+        ] {
+            let text = first_pr_artifact_names_except(missing)?;
+
+            let Err(err) = public_surfaces::require_first_pr_artifact_names(
+                ".github/actions/example.yml",
+                &text,
+            ) else {
+                return Err(format!("missing artifact name `{missing}` should fail"));
+            };
+
+            let missing_name = artifact_file_name(missing)?;
+            assert!(err.contains(".github/actions/example.yml"));
+            assert!(err.contains(missing_name));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn first_pr_artifact_name_list_requires_standalone_repair_queue() -> Result<(), String> {
+        let text = first_pr_artifact_names_except("target/unsafe-review/repair-queue.json")?;
+
+        let Err(err) =
+            public_surfaces::require_first_pr_artifact_names(".github/actions/example.yml", &text)
+        else {
+            return Err("missing standalone repair-queue artifact name should fail".to_string());
+        };
+
+        assert!(text.contains("manual-repair-queue.json"));
+        assert!(err.contains("repair-queue.json"));
+        Ok(())
+    }
+
+    fn first_pr_artifact_names_except(missing: &str) -> Result<String, String> {
+        public_surfaces::FIRST_PR_BUNDLE_ARTIFACT_PATHS
+            .iter()
+            .copied()
+            .filter(|artifact| *artifact != missing)
+            .map(artifact_file_name)
+            .collect::<Result<Vec<_>, _>>()
+            .map(|names| names.join("\n"))
+    }
+
+    fn artifact_file_name(artifact: &str) -> Result<&str, String> {
+        Path::new(artifact)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| format!("test artifact `{artifact}` has no file name"))
     }
 
     #[test]
@@ -11373,7 +9639,7 @@ jobs:
     #[test]
     fn fixture_exception_ledgers_reference_current_fixtures() -> Result<(), String> {
         let dirs = fixture_dirs(&workspace_path("fixtures"))?;
-        check_fixture_exception_ledgers(&dirs)
+        fixture_surfaces::check_fixture_exception_ledgers(&dirs)
     }
 
     #[test]
@@ -12577,114 +10843,6 @@ jobs:
     }
 
     #[test]
-    fn rewrite_calibration_report_counts_updates_all_count_lines() -> Result<(), String> {
-        let stats = test_accuracy_report_stats();
-        let original = test_accuracy_report_text();
-        // Make all count lines stale.
-        let stale = original
-            .replace("- Claims: 1", "- Claims: 99")
-            .replace("- Fixture-pinned claims: 1", "- Fixture-pinned claims: 99")
-            .replace(
-                "- Dogfood-measured claims: 0",
-                "- Dogfood-measured claims: 99",
-            )
-            .replace(
-                "- Labeled-calibrated claims: 0",
-                "- Labeled-calibrated claims: 99",
-            )
-            .replace(
-                "- Policy-eligible claims: 0",
-                "- Policy-eligible claims: 99",
-            )
-            .replace("- Calibration cases: 2", "- Calibration cases: 99")
-            .replace("- Label ledgers: 1", "- Label ledgers: 99")
-            .replace("- Label samples: 2", "- Label samples: 99")
-            .replace("- Labeled reports: 0", "- Labeled reports: 99");
-
-        let result = rewrite_calibration_report_counts(&stale, &stats)?;
-
-        // All counts must match stats after rewrite.
-        assert!(result.contains("- Claims: 1"));
-        assert!(result.contains("- Fixture-pinned claims: 1"));
-        assert!(result.contains("- Dogfood-measured claims: 0"));
-        assert!(result.contains("- Labeled-calibrated claims: 0"));
-        assert!(result.contains("- Policy-eligible claims: 0"));
-        assert!(result.contains("- Calibration cases: 2"));
-        assert!(result.contains("- Label ledgers: 1"));
-        assert!(result.contains("- Label samples: 2"));
-        assert!(result.contains("- Labeled reports: 0"));
-        // Non-count prose must be preserved.
-        assert!(result.contains("No global precision/recall claim"));
-        assert!(result.contains("No policy readiness claim"));
-        Ok(())
-    }
-
-    #[test]
-    fn rewrite_calibration_report_counts_no_change_when_current() -> Result<(), String> {
-        let stats = test_accuracy_report_stats();
-        let original = test_accuracy_report_text();
-
-        let result = rewrite_calibration_report_counts(&original, &stats)?;
-
-        assert_eq!(result, original);
-        Ok(())
-    }
-
-    #[test]
-    fn rewrite_objective_audit_counts_updates_four_tokens() -> Result<(), String> {
-        let stats = test_accuracy_report_stats();
-        // stats: fixture_pinned=1, calibration_case=2, label_ledger=1, label_sample=2
-        let text = "The checked report currently records 99 fixture-pinned claims, 99 calibration cases, 99 label ledgers, and 99 label samples.";
-
-        let result = rewrite_objective_audit_counts(text, &stats)?;
-
-        assert!(result.contains("1 fixture-pinned claims"));
-        assert!(result.contains("2 calibration cases"));
-        assert!(result.contains("1 label ledgers"));
-        assert!(result.contains("2 label samples"));
-        Ok(())
-    }
-
-    #[test]
-    fn rewrite_objective_audit_counts_handles_line_wrap() -> Result<(), String> {
-        let stats = test_accuracy_report_stats();
-        // Simulate the real file where numbers and phrases span line breaks.
-        let text = "records 99\nfixture-pinned claims, 99 calibration cases, 99 label ledgers, and 99 label\nsamples.";
-
-        let result = rewrite_objective_audit_counts(text, &stats)?;
-
-        assert!(result.contains("1\nfixture-pinned claims"));
-        assert!(result.contains("2 calibration cases"));
-        assert!(result.contains("1 label ledgers"));
-        // label\nsamples anchor is used when label samples is line-wrapped.
-        assert!(result.contains("2 label\nsamples"));
-        Ok(())
-    }
-
-    #[test]
-    fn rewrite_objective_audit_counts_no_change_when_current() -> Result<(), String> {
-        let stats = test_accuracy_report_stats();
-        let text = "The checked report currently records 1 fixture-pinned claims, 2 calibration cases, 1 label ledgers, and 2 label samples.";
-
-        let result = rewrite_objective_audit_counts(text, &stats)?;
-
-        assert_eq!(result, text);
-        Ok(())
-    }
-
-    #[test]
-    fn rewrite_objective_audit_counts_preserves_surrounding_prose() -> Result<(), String> {
-        let stats = test_accuracy_report_stats();
-        let text = "Some leading prose. The checked report currently records 1 fixture-pinned claims, 2 calibration cases, 1 label ledgers, and 2 label samples. Some trailing prose.";
-
-        let result = rewrite_objective_audit_counts(text, &stats)?;
-
-        assert!(result.starts_with("Some leading prose."));
-        assert!(result.ends_with("Some trailing prose."));
-        Ok(())
-    }
-
-    #[test]
     fn calibration_report_requires_boundary_text() -> Result<(), String> {
         let stats = test_accuracy_report_stats();
         let text =
@@ -12940,7 +11098,7 @@ jobs:
         .map_err(|err| format!("parse test card failed: {err}"))
     }
 
-    fn test_accuracy_report_stats() -> AccuracyCalibrationReportStats {
+    pub(crate) fn test_accuracy_report_stats() -> AccuracyCalibrationReportStats {
         AccuracyCalibrationReportStats {
             claim_count: 1,
             calibration_case_count: 2,
@@ -12954,7 +11112,7 @@ jobs:
         }
     }
 
-    fn test_accuracy_report_text() -> String {
+    pub(crate) fn test_accuracy_report_text() -> String {
         r#"
 Static unsafe contract review only. This is not a proof of memory safety, not UB-free status, and not a Miri result.
 
@@ -13632,45 +11790,6 @@ OperationFamily::RawPointerRead => vec![
     }
 
     #[test]
-    fn doc_artifact_index_status_matches_policy_ledger() -> Result<(), String> {
-        let mut ledger = BTreeMap::new();
-        ledger.insert(
-            "UNSAFE-REVIEW-SPEC-0026".to_string(),
-            doc_artifact_entry("proposed"),
-        );
-        let mut index = BTreeMap::new();
-        index.insert(
-            "UNSAFE-REVIEW-SPEC-0026".to_string(),
-            doc_artifact_entry("proposed"),
-        );
-
-        check_doc_artifacts_source_index_consistency(&ledger, &index)
-    }
-
-    #[test]
-    fn doc_artifact_index_status_rejects_policy_ledger_drift() -> Result<(), String> {
-        let mut ledger = BTreeMap::new();
-        ledger.insert(
-            "UNSAFE-REVIEW-SPEC-0026".to_string(),
-            doc_artifact_entry("proposed"),
-        );
-        let mut index = BTreeMap::new();
-        index.insert(
-            "UNSAFE-REVIEW-SPEC-0026".to_string(),
-            doc_artifact_entry("draft"),
-        );
-
-        let err = err_text(check_doc_artifacts_source_index_consistency(
-            &ledger, &index,
-        ))?;
-
-        assert!(err.contains(".rails/index.toml"));
-        assert!(err.contains("UNSAFE-REVIEW-SPEC-0026"));
-        assert!(err.contains("status `draft` must match"));
-        Ok(())
-    }
-
-    #[test]
     fn spec_status_proof_commands_reject_unknown_xtask_commands() -> Result<(), String> {
         let Err(err) = spec_status::check_proof_commands(
             "UNSAFE-REVIEW-SPEC-0024",
@@ -14338,7 +12457,7 @@ fixture = "fixtures/raw_pointer_alignment"
 root = "fixtures/raw_pointer_alignment"
 diff = "fixtures/raw_pointer_alignment/change.diff"
 purpose = "fixture-level first-pr smoke for committed Bun manual-candidate projection through manual-candidates.json and review-kit handoff surfaces"
-command = "rtk cargo run --locked -p xtask -- check-manual-candidate-examples"
+command = "cargo run --locked -p xtask -- check-manual-candidate-examples"
 artifact_status = "local_untracked"
 artifacts = [
   "target/unsafe-review-manual-candidate-smoke/manual-candidates.json",
@@ -14357,6 +12476,64 @@ artifacts = [
 
         assert!(err.contains("manual-repair-queue.json"), "{err}");
         assert!(err.contains("Bun manual-candidate smoke artifact"), "{err}");
+        Ok(())
+    }
+
+    #[test]
+    fn dogfood_manifest_rejects_checked_in_external_snapshot() -> Result<(), String> {
+        let target = toml::from_str::<toml::Value>(
+            r#"
+id = "external-snapshot-checked-in"
+repository = "example/repo"
+crate = "example"
+kind = "repo-snapshot"
+status = "active"
+commit = "0123456789abcdef0123456789abcdef01234567"
+root = "fixtures/raw_pointer_alignment"
+purpose = "external repo snapshot dogfood target that must stay local_untracked"
+command = "cargo run --locked -p unsafe-review -- first-pr --format json"
+artifact_status = "checked_in"
+artifacts = [
+  "target/unsafe-review-external-snapshot/cards.json",
+]
+"#,
+        )
+        .map_err(|err| err.to_string())?;
+        let mut ids = BTreeSet::new();
+        let err = err_text(dogfood_checks::validate_target(&target, 0, &mut ids))?;
+
+        assert!(err.contains("local_untracked"), "{err}");
+        assert!(err.contains("repo-snapshot"), "{err}");
+        assert!(err.contains("checked_in"), "{err}");
+        Ok(())
+    }
+
+    #[test]
+    fn dogfood_manifest_rejects_remote_manual_pr_diff() -> Result<(), String> {
+        let target = toml::from_str::<toml::Value>(
+            r#"
+id = "external-pr-diff-remote-manual"
+repository = "example/repo"
+crate = "example"
+kind = "pr-diff"
+status = "active"
+pr = 42
+root = "fixtures/raw_pointer_alignment"
+diff = "fixtures/raw_pointer_alignment/change.diff"
+purpose = "external pr-diff dogfood target that must stay local_untracked"
+command = "cargo run --locked -p unsafe-review -- first-pr --format json"
+artifact_status = "remote_manual"
+artifacts = [
+  "target/unsafe-review-external-pr/cards.json",
+]
+"#,
+        )
+        .map_err(|err| err.to_string())?;
+        let mut ids = BTreeSet::new();
+        let err = err_text(dogfood_checks::validate_target(&target, 0, &mut ids))?;
+
+        assert!(err.contains("local_untracked"), "{err}");
+        assert!(err.contains("pr-diff"), "{err}");
         Ok(())
     }
 
@@ -14496,8 +12673,21 @@ artifacts = [
     }
 
     #[test]
+    fn dogfood_bun_manual_smoke_report_accepts_crlf() -> Result<(), String> {
+        let examples = manual_candidate_examples()?;
+        let text = read_to_string(&workspace_path(BUN_MANUAL_CANDIDATE_SMOKE_REPORT))?;
+        let text = text.replace("\r\n", "\n").replace('\n', "\r\n");
+
+        check_dogfood_bun_manual_candidate_smoke_report_text(
+            BUN_MANUAL_CANDIDATE_SMOKE_REPORT,
+            &text,
+            &examples,
+        )
+    }
+
+    #[test]
     fn manual_fuzz_harness_validates_current_shape() -> Result<(), String> {
-        check_manual_fuzz_harness()
+        fuzz_artifact_checks::check_manual_fuzz_harness()
     }
 
     #[test]
@@ -16995,6 +15185,225 @@ Snapshot reports:
     }
 
     #[test]
+    fn first_pr_artifact_checker_rejects_gate_manifest_movement_drift() -> Result<(), String> {
+        let dir = unique_temp_dir("unsafe-review-first-pr-gate-movement-drift")?;
+        fs::create_dir_all(&dir).map_err(|err| format!("create temp dir failed: {err}"))?;
+        write_valid_first_pr_artifacts(&dir)?;
+        let path = dir.join("unsafe-review-gate.json");
+        let mut manifest = parse_json_file(&path)?;
+        manifest["summary"]["new_gaps"] = serde_json::json!(99);
+        fs::write(&path, manifest.to_string())
+            .map_err(|err| format!("write gate manifest failed: {err}"))?;
+
+        let result = check_first_pr_artifacts(&dir);
+
+        fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        let err = match result {
+            Ok(()) => return Err("gate manifest movement drift should fail".to_string()),
+            Err(err) => err,
+        };
+        assert!(
+            err.contains(
+                "unsafe-review-gate.json summary.new_gaps must project cards.json summary.new_gaps `1`; got `99`"
+            ),
+            "{err}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn first_pr_artifact_checker_rejects_gate_manifest_artifact_pointer_drift() -> Result<(), String>
+    {
+        let dir = unique_temp_dir("unsafe-review-first-pr-gate-artifact-drift")?;
+        fs::create_dir_all(&dir).map_err(|err| format!("create temp dir failed: {err}"))?;
+        write_valid_first_pr_artifacts(&dir)?;
+        let path = dir.join("unsafe-review-gate.json");
+        let mut manifest = parse_json_file(&path)?;
+        manifest["artifacts"]["comment_plan"] = serde_json::json!("pr-summary.md");
+        fs::write(&path, manifest.to_string())
+            .map_err(|err| format!("write gate manifest failed: {err}"))?;
+
+        let result = check_first_pr_artifacts(&dir);
+
+        fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        let err = match result {
+            Ok(()) => return Err("gate manifest artifact pointer drift should fail".to_string()),
+            Err(err) => err,
+        };
+        assert!(
+            err.contains(
+                "unsafe-review-gate.json artifacts.comment_plan must be `comment-plan.json`; got `pr-summary.md`"
+            ),
+            "{err}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn first_pr_artifact_checker_rejects_gate_manifest_status_drift() -> Result<(), String> {
+        let dir = unique_temp_dir("unsafe-review-first-pr-gate-status-drift")?;
+        fs::create_dir_all(&dir).map_err(|err| format!("create temp dir failed: {err}"))?;
+        write_valid_first_pr_artifacts(&dir)?;
+        let path = dir.join("unsafe-review-gate.json");
+        let mut manifest = parse_json_file(&path)?;
+        manifest["status"] = serde_json::json!("blocking");
+        fs::write(&path, manifest.to_string())
+            .map_err(|err| format!("write gate manifest failed: {err}"))?;
+
+        let result = check_first_pr_artifacts(&dir);
+
+        fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        let err = match result {
+            Ok(()) => return Err("gate manifest status drift should fail".to_string()),
+            Err(err) => err,
+        };
+        assert!(
+            err.contains("unsafe-review-gate.json key `status` is `blocking`, expected `advisory`"),
+            "{err}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn first_pr_artifact_checker_rejects_gate_manifest_trust_boundary_drift() -> Result<(), String>
+    {
+        let dir = unique_temp_dir("unsafe-review-first-pr-gate-boundary-drift")?;
+        fs::create_dir_all(&dir).map_err(|err| format!("create temp dir failed: {err}"))?;
+        write_valid_first_pr_artifacts(&dir)?;
+        let path = dir.join("unsafe-review-gate.json");
+        let mut manifest = parse_json_file(&path)?;
+        manifest["trust_boundary"] = serde_json::json!("safe; not proof; not a merge verdict");
+        fs::write(&path, manifest.to_string())
+            .map_err(|err| format!("write gate manifest failed: {err}"))?;
+
+        let result = check_first_pr_artifacts(&dir);
+
+        fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        let err = match result {
+            Ok(()) => return Err("gate manifest trust boundary drift should fail".to_string()),
+            Err(err) => err,
+        };
+        assert!(
+            err.contains(
+                "unsafe-review-gate.json trust_boundary must be `static unsafe-review coverage evidence; not proof, not a merge verdict`; got `safe; not proof; not a merge verdict`"
+            ),
+            "{err}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn first_pr_artifact_checker_rejects_gate_manifest_volatile_field() -> Result<(), String> {
+        let dir = unique_temp_dir("unsafe-review-first-pr-gate-volatile")?;
+        fs::create_dir_all(&dir).map_err(|err| format!("create temp dir failed: {err}"))?;
+        write_valid_first_pr_artifacts(&dir)?;
+        let path = dir.join("unsafe-review-gate.json");
+        let mut manifest = parse_json_file(&path)?;
+        manifest["generated_at"] = serde_json::json!("2026-06-19T00:00:00Z");
+        fs::write(&path, manifest.to_string())
+            .map_err(|err| format!("write gate manifest failed: {err}"))?;
+
+        let result = check_first_pr_artifacts(&dir);
+
+        fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        let err = match result {
+            Ok(()) => return Err("gate manifest volatile field should fail".to_string()),
+            Err(err) => err,
+        };
+        assert!(
+            err.contains("unsafe-review-gate.json must not contain volatile `generated_at`"),
+            "{err}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn first_pr_artifact_checker_rejects_usefulness_telemetry_card_inventory_drift()
+    -> Result<(), String> {
+        let dir = unique_temp_dir("unsafe-review-first-pr-usefulness-inventory-drift")?;
+        fs::create_dir_all(&dir).map_err(|err| format!("create temp dir failed: {err}"))?;
+        write_valid_first_pr_artifacts(&dir)?;
+        let path = dir.join("usefulness-telemetry.json");
+        let mut telemetry = parse_json_file(&path)?;
+        telemetry["card_inventory"]["new_cards"] = serde_json::json!(99);
+        fs::write(&path, telemetry.to_string())
+            .map_err(|err| format!("write usefulness telemetry failed: {err}"))?;
+
+        let result = check_first_pr_artifacts(&dir);
+
+        fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        let err = match result {
+            Ok(()) => return Err("usefulness telemetry inventory drift should fail".to_string()),
+            Err(err) => err,
+        };
+        assert!(
+            err.contains(
+                "usefulness-telemetry.json card_inventory.new_cards must project cards.json summary.new_gaps `1`; got `99`"
+            ),
+            "{err}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn first_pr_artifact_checker_rejects_usefulness_telemetry_comment_selection_drift()
+    -> Result<(), String> {
+        let dir = unique_temp_dir("unsafe-review-first-pr-usefulness-comment-drift")?;
+        fs::create_dir_all(&dir).map_err(|err| format!("create temp dir failed: {err}"))?;
+        write_valid_first_pr_artifacts(&dir)?;
+        let path = dir.join("usefulness-telemetry.json");
+        let mut telemetry = parse_json_file(&path)?;
+        telemetry["comment_selection"]["selected_count"] = serde_json::json!(0);
+        fs::write(&path, telemetry.to_string())
+            .map_err(|err| format!("write usefulness telemetry failed: {err}"))?;
+
+        let result = check_first_pr_artifacts(&dir);
+
+        fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        let err = match result {
+            Ok(()) => {
+                return Err("usefulness telemetry comment selection drift should fail".to_string());
+            }
+            Err(err) => err,
+        };
+        assert!(
+            err.contains(
+                "usefulness-telemetry.json comment_selection.selected_count must project comment-plan.json summary.selected_count `1`; got `0`"
+            ),
+            "{err}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn first_pr_artifact_checker_rejects_usefulness_telemetry_readiness_drift() -> Result<(), String>
+    {
+        let dir = unique_temp_dir("unsafe-review-first-pr-usefulness-readiness-drift")?;
+        fs::create_dir_all(&dir).map_err(|err| format!("create temp dir failed: {err}"))?;
+        write_valid_first_pr_artifacts(&dir)?;
+        let path = dir.join("usefulness-telemetry.json");
+        let mut telemetry = parse_json_file(&path)?;
+        telemetry["agent_readiness"]["ready"] = serde_json::json!(0);
+        fs::write(&path, telemetry.to_string())
+            .map_err(|err| format!("write usefulness telemetry failed: {err}"))?;
+
+        let result = check_first_pr_artifacts(&dir);
+
+        fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        let err = match result {
+            Ok(()) => return Err("usefulness telemetry readiness drift should fail".to_string()),
+            Err(err) => err,
+        };
+        assert!(
+            err.contains(
+                "usefulness-telemetry.json agent_readiness.ready must project repair-queue.json agent_readiness `1`; got `0`"
+            ),
+            "{err}"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn first_pr_artifact_checker_rejects_cards_json_missing_confirmation_cue() -> Result<(), String>
     {
         let dir = unique_temp_dir("unsafe-review-first-pr-cards-missing-confirmation-cue")?;
@@ -18168,7 +16577,7 @@ Snapshot reports:
     }
 
     #[test]
-    fn first_pr_artifact_checker_rejects_review_kit_missing_artifact() -> Result<(), String> {
+    fn first_pr_artifact_checker_rejects_review_kit_extra_artifact() -> Result<(), String> {
         let dir = unique_temp_dir("unsafe-review-first-pr-review-kit-missing-artifact")?;
         fs::create_dir_all(&dir).map_err(|err| format!("create temp dir failed: {err}"))?;
         write_valid_first_pr_artifacts(&dir)?;
@@ -18194,14 +16603,336 @@ Snapshot reports:
         fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
         let err = match result {
             Ok(()) => {
-                return Err("missing review-kit artifact should fail verification".to_string());
+                return Err("extra review-kit artifact should fail verification".to_string());
             }
             Err(err) => err,
         };
         assert!(
-            err.contains("review-kit.json lists missing artifact `sidecar.json`"),
+            err.contains("artifact=`sidecar.json` field=`path`"),
             "{err}"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn first_pr_artifact_checker_rejects_missing_identity_file() -> Result<(), String> {
+        let dir = first_pr_identity_fixture("unsafe-review-first-pr-identity-missing-file")?;
+        fs::remove_file(dir.join("cards.sarif"))
+            .map_err(|err| format!("remove cards.sarif failed: {err}"))?;
+
+        let err = finish_first_pr_identity_error(&dir)?;
+        assert!(
+            err.contains(
+                "artifact=`cards.sarif` field=`file` expected=`regular file` actual=`missing`"
+            ),
+            "{err}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn first_pr_artifact_checker_rejects_missing_manifest_identity() -> Result<(), String> {
+        let dir = first_pr_identity_fixture("unsafe-review-first-pr-identity-missing-entry")?;
+        mutate_json_fixture(&dir.join("review-kit.json"), |review_kit| {
+            let artifacts = review_kit["artifacts"]
+                .as_array_mut()
+                .ok_or_else(|| "review-kit artifacts fixture must be an array".to_string())?;
+            artifacts.retain(|entry| entry["path"] != "cards.sarif");
+            Ok(())
+        })?;
+
+        let err = finish_first_pr_identity_error(&dir)?;
+        assert!(
+            err.contains("artifact=`review-kit.json` field=`artifacts`"),
+            "{err}"
+        );
+        assert!(err.contains("exact 18 first-pr artifact paths"), "{err}");
+        Ok(())
+    }
+
+    #[test]
+    fn first_pr_artifact_checker_rejects_escaping_identity_path() -> Result<(), String> {
+        let dir = first_pr_identity_fixture("unsafe-review-first-pr-identity-path-escape")?;
+        let path = dir.join("review-kit.json");
+        mutate_json_fixture(&path, |review_kit| {
+            review_kit_artifact_entry_mut(review_kit, "cards.json")?["path"] =
+                serde_json::json!("../cards.json");
+            Ok(())
+        })?;
+
+        let err = finish_first_pr_identity_error(&dir)?;
+        assert!(
+            err.contains("artifact=`../cards.json` field=`path`"),
+            "{err}"
+        );
+        assert!(err.contains("without escape components"), "{err}");
+        Ok(())
+    }
+
+    #[test]
+    fn first_pr_artifact_checker_rejects_kind_and_format_identity_drift() -> Result<(), String> {
+        for (field, value, expected) in [
+            ("kind", "other_cards", "review_cards"),
+            ("format", "markdown", "json"),
+        ] {
+            let dir = first_pr_identity_fixture(&format!(
+                "unsafe-review-first-pr-identity-{field}-drift"
+            ))?;
+            let path = dir.join("review-kit.json");
+            mutate_json_fixture(&path, |review_kit| {
+                review_kit_artifact_entry_mut(review_kit, "cards.json")?[field] =
+                    serde_json::json!(value);
+                Ok(())
+            })?;
+
+            let err = finish_first_pr_identity_error(&dir)?;
+            assert!(err.contains("artifact=`cards.json`"), "{field}: {err}");
+            assert!(err.contains(&format!("field=`{field}`")), "{field}: {err}");
+            assert!(
+                err.contains(&format!("expected=`{expected}` actual=`{value}`")),
+                "{field}: {err}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn first_pr_artifact_checker_rejects_manifest_schema_missing_type_and_unsupported()
+    -> Result<(), String> {
+        for (case, value, actual) in [
+            ("missing", None, "missing"),
+            ("type", Some(serde_json::json!(2)), "number"),
+            ("unsupported", Some(serde_json::json!("9.0")), "9.0"),
+        ] {
+            let dir = first_pr_identity_fixture(&format!(
+                "unsafe-review-first-pr-manifest-schema-{case}"
+            ))?;
+            let path = dir.join("review-kit.json");
+            mutate_json_fixture(&path, |review_kit| {
+                let entry = review_kit_artifact_entry_mut(review_kit, "lsp.json")?;
+                if let Some(value) = value {
+                    entry["schema_version"] = value;
+                } else {
+                    entry
+                        .as_object_mut()
+                        .ok_or_else(|| "lsp identity fixture must be an object".to_string())?
+                        .remove("schema_version");
+                }
+                Ok(())
+            })?;
+
+            let err = finish_first_pr_identity_error(&dir)?;
+            assert!(
+                err.contains(&format!(
+                    "artifact=`lsp.json` field=`schema_version` expected=`0.2` actual=`{actual}`"
+                )),
+                "{case}: {err}"
+            );
+        }
+
+        let dir = first_pr_identity_fixture("unsafe-review-first-pr-markdown-schema-version")?;
+        mutate_json_fixture(&dir.join("review-kit.json"), |review_kit| {
+            review_kit_artifact_entry_mut(review_kit, "pr-summary.md")?["schema_version"] =
+                serde_json::json!("0.1");
+            Ok(())
+        })?;
+        let err = finish_first_pr_identity_error(&dir)?;
+        assert!(
+            err.contains(
+                "artifact=`pr-summary.md` field=`schema_version` expected=`null` actual=`0.1`"
+            ),
+            "{err}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn first_pr_artifact_checker_rejects_payload_schema_missing_type_and_unsupported()
+    -> Result<(), String> {
+        for (case, value, actual) in [
+            ("missing", None, "missing"),
+            ("type", Some(serde_json::json!(2)), "number"),
+            ("unsupported", Some(serde_json::json!("9.0")), "9.0"),
+        ] {
+            let dir = first_pr_identity_fixture(&format!(
+                "unsafe-review-first-pr-payload-schema-{case}"
+            ))?;
+            let path = dir.join("lsp.json");
+            mutate_json_fixture(&path, |lsp| {
+                if let Some(value) = value {
+                    lsp["schema_version"] = value;
+                } else {
+                    lsp.as_object_mut()
+                        .ok_or_else(|| "lsp fixture must be an object".to_string())?
+                        .remove("schema_version");
+                }
+                Ok(())
+            })?;
+
+            let err = finish_first_pr_identity_error(&dir)?;
+            assert!(
+                err.contains(&format!(
+                    "artifact=`lsp.json` field=`schema_version` expected=`0.2` actual=`{actual}`"
+                )),
+                "{case}: {err}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn first_pr_artifact_checker_accepts_additive_unknown_object_fields() -> Result<(), String> {
+        let dir = first_pr_identity_fixture("unsafe-review-first-pr-additive-object-fields")?;
+        mutate_json_fixture(&dir.join("review-kit.json"), |review_kit| {
+            review_kit["future_optional"] = serde_json::json!({"nested": true});
+            review_kit_artifact_entry_mut(review_kit, "cards.json")?["future_optional"] =
+                serde_json::json!({"nested": true});
+            Ok(())
+        })?;
+        mutate_json_fixture(&dir.join("cards.json"), |cards| {
+            cards["future_optional"] = serde_json::json!({"nested": true});
+            cards["cards"][0]["future_optional"] = serde_json::json!({"nested": true});
+            Ok(())
+        })?;
+
+        let result = check_first_pr_artifacts(&dir);
+        fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        result.map_err(|err| format!("additive optional fields should be accepted: {err}"))
+    }
+
+    #[test]
+    fn first_pr_artifact_checker_accepts_consistent_additive_operation_family() -> Result<(), String>
+    {
+        let dir = first_pr_identity_fixture("unsafe-review-first-pr-additive-operation-family")?;
+        for entry in fs::read_dir(&dir).map_err(|err| format!("read fixture dir failed: {err}"))? {
+            let path = entry
+                .map_err(|err| format!("read fixture entry failed: {err}"))?
+                .path();
+            if !path.is_file() {
+                continue;
+            }
+            let text = fs::read_to_string(&path)
+                .map_err(|err| format!("read {} failed: {err}", path.display()))?;
+            fs::write(
+                &path,
+                text.replace("raw_pointer_read", "future_raw_pointer_family"),
+            )
+            .map_err(|err| format!("write {} failed: {err}", path.display()))?;
+        }
+
+        let result = check_first_pr_artifacts(&dir);
+        fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        result.map_err(|err| format!("additive operation family should be accepted: {err}"))
+    }
+
+    #[test]
+    fn first_pr_artifact_checker_rejects_inconsistent_additive_operation_family()
+    -> Result<(), String> {
+        let dir =
+            first_pr_identity_fixture("unsafe-review-first-pr-inconsistent-operation-family")?;
+        mutate_json_fixture(&dir.join("cards.json"), |cards| {
+            cards["cards"][0]["operation_family"] = serde_json::json!("future_raw_pointer_family");
+            Ok(())
+        })?;
+
+        let err = finish_first_pr_identity_error(&dir)?;
+        assert!(err.contains("cards.sarif"), "{err}");
+        assert!(err.contains("future_raw_pointer_family"), "{err}");
+        assert!(err.contains("raw_pointer_read"), "{err}");
+        Ok(())
+    }
+
+    #[test]
+    fn first_pr_artifact_checker_rejects_additive_closed_vocabulary_value() -> Result<(), String> {
+        let dir = first_pr_identity_fixture("unsafe-review-first-pr-closed-review-class")?;
+        mutate_json_fixture(&dir.join("cards.json"), |cards| {
+            cards["cards"][0]["class"] = serde_json::json!("future_review_class");
+            Ok(())
+        })?;
+
+        let err = finish_first_pr_identity_error(&dir)?;
+        assert!(err.contains("cards.json"), "{err}");
+        assert!(err.contains("class"), "{err}");
+        assert!(err.contains("future_review_class"), "{err}");
+        Ok(())
+    }
+
+    #[test]
+    fn first_pr_artifact_checker_rejects_unsupported_schema_from_future_producer()
+    -> Result<(), String> {
+        let dir = first_pr_identity_fixture("unsafe-review-first-pr-future-tool-schema-drift")?;
+        mutate_json_fixture(&dir.join("review-kit.json"), |review_kit| {
+            review_kit["tool_version"] = serde_json::json!("0.4.0");
+            Ok(())
+        })?;
+        mutate_json_fixture(&dir.join("lsp.json"), |lsp| {
+            lsp["schema_version"] = serde_json::json!("9.0");
+            Ok(())
+        })?;
+
+        let err = finish_first_pr_identity_error(&dir)?;
+        assert!(
+            err.contains("artifact=`lsp.json` field=`schema_version` expected=`0.2` actual=`9.0`"),
+            "{err}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn first_pr_artifact_checker_enforces_minimum_producer_version() -> Result<(), String> {
+        for version in ["0.3.8", "0.3.9-test", "0.4.0", "1.0.0+build"] {
+            let dir = first_pr_identity_fixture(&format!(
+                "unsafe-review-first-pr-producer-accept-{}",
+                version.replace(['.', '+'], "-")
+            ))?;
+            mutate_json_fixture(&dir.join("review-kit.json"), |review_kit| {
+                review_kit["tool_version"] = serde_json::json!(version);
+                Ok(())
+            })?;
+            let result = check_first_pr_artifacts(&dir);
+            fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
+            result.map_err(|err| format!("producer {version} should be accepted: {err}"))?;
+        }
+
+        for (case, value, actual) in [
+            ("old", Some(serde_json::json!("0.3.7")), "0.3.7"),
+            (
+                "floor-prerelease",
+                Some(serde_json::json!("0.3.8-test")),
+                "0.3.8-test",
+            ),
+            ("malformed", Some(serde_json::json!("current")), "current"),
+            ("leading-zero", Some(serde_json::json!("00.3.8")), "00.3.8"),
+            (
+                "empty-prerelease",
+                Some(serde_json::json!("0.3.8-")),
+                "0.3.8-",
+            ),
+            ("type", Some(serde_json::json!(308)), "number"),
+            ("missing", None, "missing"),
+        ] {
+            let dir = first_pr_identity_fixture(&format!(
+                "unsafe-review-first-pr-producer-reject-{case}"
+            ))?;
+            mutate_json_fixture(&dir.join("review-kit.json"), |review_kit| {
+                if let Some(value) = value {
+                    review_kit["tool_version"] = value;
+                } else {
+                    review_kit
+                        .as_object_mut()
+                        .ok_or_else(|| "review-kit fixture must be an object".to_string())?
+                        .remove("tool_version");
+                }
+                Ok(())
+            })?;
+            let err = finish_first_pr_identity_error(&dir)?;
+            assert!(
+                err.contains(&format!(
+                    "artifact=`review-kit.json` field=`tool_version` expected=`>=0.3.8 semantic version` actual=`{actual}`"
+                )),
+                "{case}: {err}"
+            );
+        }
         Ok(())
     }
 
@@ -18630,33 +17361,31 @@ Snapshot reports:
     }
 
     #[test]
-    fn first_pr_artifact_checker_rejects_witness_plan_duplicate_card_heading() -> Result<(), String>
-    {
-        let dir = unique_temp_dir("unsafe-review-first-pr-witness-duplicate-heading")?;
+    fn first_pr_artifact_checker_accepts_witness_plan_repeated_route_group_heading()
+    -> Result<(), String> {
+        let dir = unique_temp_dir("unsafe-review-first-pr-witness-repeated-heading")?;
         fs::create_dir_all(&dir).map_err(|err| format!("create temp dir failed: {err}"))?;
         write_valid_first_pr_artifacts(&dir)?;
         let path = dir.join("witness-plan.md");
         let witness_plan =
             fs::read_to_string(&path).map_err(|err| format!("read witness plan failed: {err}"))?;
+        let (before_trust, trust_boundary) = witness_plan
+            .split_once("## Trust boundary")
+            .ok_or_else(|| "witness plan fixture must contain trust boundary".to_string())?;
+        let card_section_start = before_trust
+            .find("#### `card-1`")
+            .ok_or_else(|| "witness plan fixture must contain card-1 section".to_string())?;
+        let card_section = &before_trust[card_section_start..];
         fs::write(
             &path,
-            witness_plan.replace(
-                "## Trust boundary",
-                "#### `card-1`\n\n- Route: `human-deep-review`\n  - Reason: duplicate route section\n  - What it can show: focused reviewer attention\n  - What it cannot prove: arbitrary callers\n  - Receipt hint: unsafe-review receipt import-manual card-1\n\n## Trust boundary",
-            ),
+            format!("{before_trust}{card_section}\n## Trust boundary{trust_boundary}"),
         )
         .map_err(|err| format!("write witness plan failed: {err}"))?;
 
         let result = check_first_pr_artifacts(&dir);
 
         fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
-        assert!(
-            result
-                .err()
-                .unwrap_or_default()
-                .contains("witness-plan route heading duplicates ReviewCard id `card-1`")
-        );
-        Ok(())
+        result
     }
 
     #[test]
@@ -18793,6 +17522,12 @@ Snapshot reports:
             r#"{"schema_version":"0.1","tool":"unsafe-review","mode":"read_only_projection","policy":"advisory","scope":"diff","status":{"state":"actionable","cards":1,"open_actionable_gaps":1,"high_priority_cards":1,"message":"1 unsafe-review card(s), 1 open actionable gap(s)","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"},"diagnostics":[{"card_id":"missing","witness_routes":[],"verify_commands":[],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}],"hovers":[],"code_actions":[],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}"#,
         )
         .map_err(|err| format!("write lsp failed: {err}"))?;
+        write_valid_first_pr_artifacts(&dir)?;
+        let lsp_path = dir.join("lsp.json");
+        let mut lsp = parse_json_file(&lsp_path)?;
+        lsp["diagnostics"][0]["card_id"] = serde_json::json!("missing");
+        fs::write(&lsp_path, lsp.to_string())
+            .map_err(|err| format!("rewrite lsp failed: {err}"))?;
 
         let result = check_first_pr_artifacts(&dir);
 
@@ -19775,7 +18510,7 @@ Snapshot reports:
             result
                 .err()
                 .unwrap_or_default()
-                .contains("code_actions missing command `unsafe-review.explainWitnessRoute`")
+                .contains("code_actions missing action_id `witness-route`")
         );
         Ok(())
     }
@@ -19800,7 +18535,7 @@ Snapshot reports:
             result
                 .err()
                 .unwrap_or_default()
-                .contains("code_actions repeat command `unsafe-review.copyAgentPacket`")
+                .contains("code_actions repeat action_id `agent-packet`")
         );
         Ok(())
     }
@@ -19825,7 +18560,7 @@ Snapshot reports:
             result
                 .err()
                 .unwrap_or_default()
-                .contains("arguments[0] must be `card-1`")
+                .contains("arguments card_id")
         );
         Ok(())
     }
@@ -19855,7 +18590,7 @@ Snapshot reports:
             result
                 .err()
                 .unwrap_or_default()
-                .contains("code_action `unsafe-review.copyAgentPacket` title must be")
+                .contains("invalid agent packet title")
         );
         Ok(())
     }
@@ -19880,9 +18615,7 @@ Snapshot reports:
             result
                 .err()
                 .unwrap_or_default()
-                .contains(
-                    "copyWitnessCommand payload command `cargo test unrelated` must match a ReviewCard verify command"
-                )
+                .contains("arguments card_id")
         );
         Ok(())
     }
@@ -19934,7 +18667,11 @@ Snapshot reports:
             .and_then(|actions| actions.first_mut())
             .and_then(serde_json::Value::as_object_mut)
             .ok_or_else(|| "test lsp missing first code action".to_string())?;
-        first_action.remove("path");
+        first_action
+            .get_mut("diagnostic")
+            .and_then(serde_json::Value::as_object_mut)
+            .ok_or_else(|| "test lsp action missing diagnostic".to_string())?
+            .remove("path");
         fs::write(&lsp_path, lsp.to_string()).map_err(|err| format!("write lsp failed: {err}"))?;
 
         let result = check_first_pr_artifacts(&dir);
@@ -19964,7 +18701,7 @@ Snapshot reports:
             .and_then(serde_json::Value::as_array_mut)
             .and_then(|actions| actions.first_mut())
             .ok_or_else(|| "test lsp missing first code action".to_string())?;
-        first_action["path"] = serde_json::json!("src/other.rs");
+        first_action["diagnostic"]["path"] = serde_json::json!("src/other.rs");
         fs::write(&lsp_path, lsp.to_string()).map_err(|err| format!("write lsp failed: {err}"))?;
 
         let result = check_first_pr_artifacts(&dir);
@@ -19974,7 +18711,7 @@ Snapshot reports:
             result
                 .err()
                 .unwrap_or_default()
-                .contains("lsp.json code_action path must be `src/lib.rs`")
+                .contains("lsp.json code_action diagnostic path must be `src/lib.rs`")
         );
         Ok(())
     }
@@ -20015,13 +18752,7 @@ Snapshot reports:
         let result = check_first_pr_artifacts(&dir);
 
         fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
-        assert!(
-            result
-                .err()
-                .unwrap_or_default()
-                .contains("related_test path must be `tests/read_header.rs`")
-        );
-        Ok(())
+        result
     }
 
     #[test]
@@ -20065,8 +18796,8 @@ Snapshot reports:
             .and_then(serde_json::Value::as_array_mut)
             .and_then(|actions| actions.first_mut())
             .ok_or_else(|| "test lsp missing first code action".to_string())?;
-        first_action["range"]["end"]["line"] = serde_json::json!(5);
-        first_action["range"]["end"]["character"] = serde_json::json!(0);
+        first_action["diagnostic"]["range"]["end"]["line"] = serde_json::json!(5);
+        first_action["diagnostic"]["range"]["end"]["character"] = serde_json::json!(0);
         fs::write(&lsp_path, lsp.to_string()).map_err(|err| format!("write lsp failed: {err}"))?;
 
         let result = check_first_pr_artifacts(&dir);
@@ -20832,11 +19563,24 @@ Snapshot reports:
         let dir = unique_temp_dir("unsafe-review-first-pr-lsp-obligation-evidence")?;
         fs::create_dir_all(&dir).map_err(|err| format!("create temp dir failed: {err}"))?;
         write_valid_first_pr_artifacts(&dir)?;
+        let lsp_path = dir.join("lsp.json");
         fs::write(
-            dir.join("lsp.json"),
-            r#"{"schema_version":"0.1","tool":"unsafe-review","mode":"read_only_projection","policy":"advisory","scope":"diff","status":{"state":"actionable","cards":1,"open_actionable_gaps":1,"high_priority_cards":1,"message":"1 unsafe-review card(s), 1 open actionable gap(s)","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"},"diagnostics":[{"card_id":"card-1","path":"src/lib.rs","range":{"start":{"line":6,"character":0},"end":{"line":6,"character":1}},"code":"guard_missing","operation":"unsafe { ptr.cast::<Header>().read() }","operation_family":"raw_pointer_read","proof_path":"source_route_only","next_action":"Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.","hazards":["alignment"],"witness_routes":[{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}],"verify_commands":["cargo +nightly miri test card"],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}],"hovers":[{"card_id":"card-1","path":"src/lib.rs","position":{"line":6,"character":0},"contents":"Card: `card-1`\n\nRelevant hazard families:\n- `alignment`\n\nTrust boundary: static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}],"code_actions":[{"card_id":"card-1","path":"src/lib.rs","range":{"start":{"line":6,"character":0},"end":{"line":6,"character":1}},"title":"Copy unsafe-review packet for card-1","kind":"quickfix","command":"unsafe-review.copyAgentPacket","payload":{"kind":"unsafe-review.agent_packet","card_id":"card-1","proof_path":"source_route_only","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"},"arguments":["card-1"]},{"card_id":"card-1","path":"src/lib.rs","range":{"start":{"line":6,"character":0},"end":{"line":6,"character":1}},"title":"Explain unsafe-review witness route","kind":"quickfix","command":"unsafe-review.explainWitnessRoute","payload":{"kind":"unsafe-review.witness_route","card_id":"card-1","proof_path":"source_route_only","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"},"arguments":["card-1"]}],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}"#,
+            &lsp_path,
+            r#"{"schema_version":"0.1","tool":"unsafe-review","mode":"read_only_projection","policy":"advisory","scope":"diff","status":{"state":"actionable","cards":1,"open_actionable_gaps":1,"high_priority_cards":1,"message":"1 unsafe-review card(s), 1 open actionable gap(s)","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"},"diagnostics":[{"card_id":"card-1","path":"src/lib.rs","range":{"start":{"line":6,"character":0},"end":{"line":6,"character":1}},"severity":2,"code":"guard_missing","operation":"unsafe { ptr.cast::<Header>().read() }","operation_family":"raw_pointer_read","proof_path":"source_route_only","next_action":"Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.","hazards":["alignment"],"witness_routes":[{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}],"verify_commands":["cargo +nightly miri test card"],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}],"hovers":[{"card_id":"card-1","path":"src/lib.rs","position":{"line":6,"character":0},"contents":"Card: `card-1`\n\nRelevant hazard families:\n- `alignment`\n\nTrust boundary: static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}],"code_actions":[{"card_id":"card-1","path":"src/lib.rs","range":{"start":{"line":6,"character":0},"end":{"line":6,"character":1}},"title":"Copy unsafe-review packet for card-1","kind":"quickfix","command":"unsafe-review.copyAgentPacket","payload":{"kind":"unsafe-review.agent_packet","card_id":"card-1","proof_path":"source_route_only","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"},"arguments":["card-1"]},{"card_id":"card-1","path":"src/lib.rs","range":{"start":{"line":6,"character":0},"end":{"line":6,"character":1}},"title":"Explain unsafe-review witness route","kind":"quickfix","command":"unsafe-review.explainWitnessRoute","payload":{"kind":"unsafe-review.witness_route","card_id":"card-1","proof_path":"source_route_only","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"},"arguments":["card-1"]}],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}"#,
         )
         .map_err(|err| format!("write lsp failed: {err}"))?;
+        write_valid_first_pr_artifacts(&dir)?;
+        let lsp_path = dir.join("lsp.json");
+        let mut canonical_lsp = parse_json_file(&lsp_path)?;
+        canonical_lsp["diagnostics"][0]
+            .as_object_mut()
+            .ok_or_else(|| "test lsp diagnostic must be an object".to_string())?
+            .remove("required_safety_conditions");
+        fs::write(&lsp_path, canonical_lsp.to_string())
+            .map_err(|err| format!("write canonical lsp failed: {err}"))?;
+        let mut lsp = parse_json_file(&lsp_path)?;
+        lsp["diagnostics"][0]["coverage"] = lsp_fixture_coverage();
+        fs::write(&lsp_path, lsp.to_string()).map_err(|err| format!("write lsp failed: {err}"))?;
 
         let result = check_first_pr_artifacts(&dir);
 
@@ -20938,6 +19682,14 @@ Snapshot reports:
             )?,
         )
         .map_err(|err| format!("write lsp failed: {err}"))?;
+        let lsp_path = dir.join("lsp.json");
+        let mut lsp = parse_json_file(&lsp_path)?;
+        lsp["code_actions"][0]
+            .as_object_mut()
+            .ok_or_else(|| "test code action must be an object".to_string())?
+            .remove("payload");
+        fs::write(&lsp_path, lsp.to_string())
+            .map_err(|err| format!("rewrite lsp failed: {err}"))?;
 
         let result = check_first_pr_artifacts(&dir);
 
@@ -21115,7 +19867,7 @@ Snapshot reports:
         write_valid_artifacts(&dir)?;
         fs::write(
             dir.join("cards.sarif"),
-            r#"{"version":"2.1.0","runs":[{"tool":{"driver":{"rules":[{"id":"guard_missing"}]}},"results":[{"ruleId":"guard_missing","locations":[{"physicalLocation":{"artifactLocation":{"uri":"src/lib.rs"},"region":{"startLine":7,"startColumn":5}}}],"properties":{"cardId":"card-1","class":"guard_missing","priority":"high","confidence":"medium","proofPath":"source_route_only","operationFamily":"raw_pointer_read","operation":"unsafe { ptr.cast::<Header>().read() }","nextAction":"Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.","verifyCommands":["cargo +nightly miri test card"],"trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}],"properties":{"trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}]}"#,
+            r#"{"version":"2.1.0","runs":[{"tool":{"driver":{"rules":[{"id":"guard_missing"}]}},"results":[{"ruleId":"guard_missing","level":"warning","locations":[{"physicalLocation":{"artifactLocation":{"uri":"src/lib.rs"},"region":{"startLine":7,"startColumn":5}}}],"properties":{"cardId":"card-1","class":"guard_missing","priority":"high","confidence":"medium","proofPath":"source_route_only","operationFamily":"raw_pointer_read","operation":"unsafe { ptr.cast::<Header>().read() }","nextAction":"Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.","verifyCommands":["cargo +nightly miri test card"],"trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}],"properties":{"trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}]}"#,
         )
         .map_err(|err| format!("write sarif failed: {err}"))?;
 
@@ -21337,7 +20089,7 @@ Snapshot reports:
         write_two_card_artifacts(&dir)?;
         fs::write(
             dir.join("cards.sarif"),
-            r#"{"version":"2.1.0","runs":[{"tool":{"driver":{"rules":[{"id":"guard_missing"},{"id":"contract_missing"}]}},"results":[{"ruleId":"guard_missing","locations":[{"physicalLocation":{"artifactLocation":{"uri":"src/lib.rs"},"region":{"startLine":7,"startColumn":5}}}],"properties":{"cardId":"card-1","class":"guard_missing","priority":"high","confidence":"medium","proofPath":"source_route_only","operationFamily":"raw_pointer_read","operation":"unsafe { ptr.cast::<Header>().read() }","hazards":["alignment"],"missingEvidence":[],"nextAction":"Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.","witnessRoutes":["miri: route"],"witnessRouteDetails":[{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}],"verifyCommands":["cargo +nightly miri test card"],"trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}},{"ruleId":"guard_missing","locations":[{"physicalLocation":{"artifactLocation":{"uri":"src/lib.rs"},"region":{"startLine":7,"startColumn":5}}}],"properties":{"cardId":"card-1","class":"guard_missing","priority":"high","confidence":"medium","proofPath":"source_route_only","operationFamily":"raw_pointer_read","operation":"unsafe { ptr.cast::<Header>().read() }","hazards":["alignment"],"missingEvidence":[],"nextAction":"Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.","witnessRoutes":["miri: route"],"witnessRouteDetails":[{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}],"verifyCommands":["cargo +nightly miri test card"],"trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}],"properties":{"trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}]}"#,
+            r#"{"version":"2.1.0","runs":[{"tool":{"driver":{"rules":[{"id":"guard_missing"},{"id":"contract_missing"}]}},"results":[{"ruleId":"guard_missing","level":"warning","locations":[{"physicalLocation":{"artifactLocation":{"uri":"src/lib.rs"},"region":{"startLine":7,"startColumn":5}}}],"properties":{"cardId":"card-1","class":"guard_missing","priority":"high","confidence":"medium","proofPath":"source_route_only","operationFamily":"raw_pointer_read","operation":"unsafe { ptr.cast::<Header>().read() }","hazards":["alignment"],"missingEvidence":[],"nextAction":"Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.","witnessRoutes":["miri: route"],"witnessRouteDetails":[{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}],"verifyCommands":["cargo +nightly miri test card"],"trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}},{"ruleId":"guard_missing","level":"warning","locations":[{"physicalLocation":{"artifactLocation":{"uri":"src/lib.rs"},"region":{"startLine":7,"startColumn":5}}}],"properties":{"cardId":"card-1","class":"guard_missing","priority":"high","confidence":"medium","proofPath":"source_route_only","operationFamily":"raw_pointer_read","operation":"unsafe { ptr.cast::<Header>().read() }","hazards":["alignment"],"missingEvidence":[],"nextAction":"Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.","witnessRoutes":["miri: route"],"witnessRouteDetails":[{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}],"verifyCommands":["cargo +nightly miri test card"],"trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}],"properties":{"trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}]}"#,
         )
         .map_err(|err| format!("write sarif failed: {err}"))?;
 
@@ -21402,6 +20154,32 @@ Snapshot reports:
                 .err()
                 .unwrap_or_default()
                 .contains("operationFamily must be `raw_pointer_read`")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn advisory_artifact_checker_rejects_sarif_level_drift() -> Result<(), String> {
+        let dir = unique_temp_dir("unsafe-review-artifacts-sarif-level-drift")?;
+        fs::create_dir_all(&dir).map_err(|err| format!("create temp dir failed: {err}"))?;
+        write_valid_artifacts(&dir)?;
+        let sarif_path = dir.join("cards.sarif");
+        let mut sarif: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(&sarif_path).map_err(|err| format!("read sarif failed: {err}"))?,
+        )
+        .map_err(|err| format!("parse sarif failed: {err}"))?;
+        sarif["runs"][0]["results"][0]["level"] = serde_json::json!("note");
+        fs::write(&sarif_path, sarif.to_string())
+            .map_err(|err| format!("write sarif failed: {err}"))?;
+
+        let result = check_advisory_artifacts(&dir);
+
+        fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        assert!(
+            result
+                .err()
+                .unwrap_or_default()
+                .contains("cards.sarif result level must be `warning`; got `note`")
         );
         Ok(())
     }
@@ -22261,6 +21039,7 @@ Snapshot reports:
         fs::write(&cards_path, cards.to_string())
             .map_err(|err| format!("write cards failed: {err}"))?;
         add_confirmation_cues_to_cards(&cards_path)?;
+        add_coverage_to_cards(&cards_path)?;
 
         let pr_summary_path = dir.join("pr-summary.md");
         let pr_summary = fs::read_to_string(&pr_summary_path)
@@ -23060,8 +21839,33 @@ Snapshot reports:
             result
                 .err()
                 .unwrap_or_default()
-                .contains("lsp.json key `schema_version` is `2.0`, expected `0.1`")
+                .contains(
+                    "artifact identity mismatch: artifact=`lsp.json` field=`schema_version` expected=`0.2` actual=`2.0`"
+                )
         );
+        Ok(())
+    }
+
+    #[test]
+    fn first_pr_artifact_checker_rejects_lsp_severity_drift() -> Result<(), String> {
+        let dir = unique_temp_dir("unsafe-review-artifacts-lsp-severity-drift")?;
+        fs::create_dir_all(&dir).map_err(|err| format!("create temp dir failed: {err}"))?;
+        write_valid_first_pr_artifacts(&dir)?;
+
+        let path = dir.join("lsp.json");
+        let mut lsp: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(&path).map_err(|err| format!("read lsp.json failed: {err}"))?,
+        )
+        .map_err(|err| format!("parse lsp.json failed: {err}"))?;
+        lsp["diagnostics"][0]["severity"] = serde_json::json!(4);
+        fs::write(&path, lsp.to_string()).map_err(|err| format!("write lsp.json failed: {err}"))?;
+
+        let result = check_first_pr_artifacts(&dir);
+
+        fs::remove_dir_all(&dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        assert!(result.err().unwrap_or_default().contains(
+            "lsp.json diagnostic severity must project ReviewClass `guard_missing` value `2`; got `4`"
+        ));
         Ok(())
     }
 
@@ -23077,7 +21881,10 @@ status = "empty"
         )
         .map_err(|err| format!("write ledger failed: {err}"))?;
 
-        let result = check_unsafe_review_ledger(&path, LedgerKind::Baseline);
+        let result = unsafe_review_ledger::check_unsafe_review_ledger(
+            &path,
+            unsafe_review_ledger::LedgerKind::Baseline,
+        );
 
         fs::remove_file(&path).map_err(|err| format!("remove ledger failed: {err}"))?;
         result
@@ -23102,7 +21909,10 @@ review_after = "2026-08-01"
         )
         .map_err(|err| format!("write ledger failed: {err}"))?;
 
-        let result = check_unsafe_review_ledger(&path, LedgerKind::Baseline);
+        let result = unsafe_review_ledger::check_unsafe_review_ledger(
+            &path,
+            unsafe_review_ledger::LedgerKind::Baseline,
+        );
 
         fs::remove_file(&path).map_err(|err| format!("remove ledger failed: {err}"))?;
         result
@@ -23126,7 +21936,10 @@ evidence = "issue: manual-review"
         )
         .map_err(|err| format!("write ledger failed: {err}"))?;
 
-        let result = check_unsafe_review_ledger(&path, LedgerKind::Suppression);
+        let result = unsafe_review_ledger::check_unsafe_review_ledger(
+            &path,
+            unsafe_review_ledger::LedgerKind::Suppression,
+        );
 
         fs::remove_file(&path).map_err(|err| format!("remove ledger failed: {err}"))?;
         assert!(
@@ -23157,7 +21970,10 @@ review_after = "2026-08-01"
         )
         .map_err(|err| format!("write ledger failed: {err}"))?;
 
-        let result = check_unsafe_review_ledger(&path, LedgerKind::Baseline);
+        let result = unsafe_review_ledger::check_unsafe_review_ledger(
+            &path,
+            unsafe_review_ledger::LedgerKind::Baseline,
+        );
 
         fs::remove_file(&path).map_err(|err| format!("remove ledger failed: {err}"))?;
         assert!(result.err().unwrap_or_default().contains("exact counted"));
@@ -23183,7 +21999,10 @@ review_after = "2026-08-01"
         )
         .map_err(|err| format!("write ledger failed: {err}"))?;
 
-        let result = check_unsafe_review_ledger(&path, LedgerKind::Baseline);
+        let result = unsafe_review_ledger::check_unsafe_review_ledger(
+            &path,
+            unsafe_review_ledger::LedgerKind::Baseline,
+        );
 
         fs::remove_file(&path).map_err(|err| format!("remove ledger failed: {err}"))?;
         let err = result.err().unwrap_or_default();
@@ -23226,7 +22045,10 @@ review_after = "2026-08-01"
             fs::write(&path, &content)
                 .map_err(|err| format!("write ledger failed for prefix '{prefix}': {err}"))?;
 
-            let result = check_unsafe_review_ledger(&path, LedgerKind::Baseline);
+            let result = unsafe_review_ledger::check_unsafe_review_ledger(
+                &path,
+                unsafe_review_ledger::LedgerKind::Baseline,
+            );
 
             fs::remove_file(&path)
                 .map_err(|err| format!("remove ledger failed for prefix '{prefix}': {err}"))?;
@@ -23243,6 +22065,43 @@ review_after = "2026-08-01"
 
     fn repair_queue_trust_boundary() -> &'static str {
         "static unsafe contract review, not a proof of memory safety, not UB-free status, not a Miri result, and not an automatic repair queue. It does not run agents, does not run witnesses, does not edit source, does not post comments, does not suppress cards, and does not resolve cards"
+    }
+
+    fn mutate_json_fixture(
+        path: &Path,
+        mutate: impl FnOnce(&mut serde_json::Value) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let mut value = parse_json_file(path)?;
+        mutate(&mut value)?;
+        fs::write(path, value.to_string())
+            .map_err(|err| format!("write {} failed: {err}", path.display()))
+    }
+
+    fn first_pr_identity_fixture(name: &str) -> Result<PathBuf, String> {
+        let dir = unique_temp_dir(name)?;
+        fs::create_dir_all(&dir).map_err(|err| format!("create temp dir failed: {err}"))?;
+        write_valid_first_pr_artifacts(&dir)?;
+        Ok(dir)
+    }
+
+    fn finish_first_pr_identity_error(dir: &Path) -> Result<String, String> {
+        let result = check_first_pr_artifacts(dir);
+        fs::remove_dir_all(dir).map_err(|err| format!("remove temp dir failed: {err}"))?;
+        result
+            .err()
+            .ok_or_else(|| "mutated first-pr identity should fail verification".to_string())
+    }
+
+    fn review_kit_artifact_entry_mut<'a>(
+        review_kit: &'a mut serde_json::Value,
+        path: &str,
+    ) -> Result<&'a mut serde_json::Value, String> {
+        review_kit["artifacts"]
+            .as_array_mut()
+            .ok_or_else(|| "review-kit artifacts fixture must be an array".to_string())?
+            .iter_mut()
+            .find(|entry| entry["path"] == path)
+            .ok_or_else(|| format!("review-kit fixture is missing artifact `{path}`"))
     }
 
     fn write_review_kit_artifact(
@@ -23310,7 +22169,7 @@ review_after = "2026-08-01"
         let value = serde_json::json!({
             "schema_version": "0.1",
             "tool": "unsafe-review",
-            "tool_version": "0.2.1-test",
+            "tool_version": "0.3.8",
             "mode": "review_kit_manifest",
             "source": "first_pr",
             "policy": "advisory",
@@ -23403,7 +22262,7 @@ review_after = "2026-08-01"
                 {"path":"manual-repair-queue.json","kind":"manual_repair_queue","format":"json","schema_version":"manual-repair-queue/v1"},
                 {"path":"tokmd-packets.json","kind":"tokmd_packets","format":"json","schema_version":"tokmd-packets/v1"},
                 {"path":"usefulness-telemetry.json","kind":"usefulness_telemetry","format":"json","schema_version":"usefulness-telemetry/v1"},
-                {"path":"lsp.json","kind":"saved_lsp","format":"json","schema_version":"0.1"},
+                {"path":"lsp.json","kind":"saved_lsp","format":"json","schema_version":"0.2"},
                 {"path":"repair-queue.json","kind":"repair_queue","format":"json","schema_version":"0.1"}
             ],
             "trust_boundary": "Static unsafe contract review kit manifest only; this indexes first-pr artifacts and does not reclassify ReviewCards. It is not a proof of memory safety, not UB-free status, not a Miri result, not Miri-clean status, and not site-execution proof. unsafe-review did not run witnesses, post comments, edit source, run an agent, or enforce blocking policy.",
@@ -23413,16 +22272,22 @@ review_after = "2026-08-01"
     }
 
     fn write_gate_manifest_artifact(dir: &Path) -> Result<(), String> {
+        let cards = parse_json_file(&dir.join("cards.json"))?;
+        let new_gaps = json_usize_at(&cards, "/summary/new_gaps", "cards.json")?;
+        let worsened_gaps = json_usize_at(&cards, "/summary/worsened_gaps", "cards.json")?;
+        let improved_gaps = json_usize_at(&cards, "/summary/improved_gaps", "cards.json")?;
+        let resolved_gaps = json_usize_at(&cards, "/summary/resolved_gaps", "cards.json")?;
+        let inherited_gaps = json_usize_at(&cards, "/summary/inherited_gaps", "cards.json")?;
         let value = serde_json::json!({
             "schema_version": "unsafe-review-gate/v1",
             "dialect": "unsafe-review",
             "status": "advisory",
             "summary": {
-                "new_gaps": 0,
-                "worsened_gaps": 0,
-                "improved_gaps": 0,
-                "resolved_gaps": 0,
-                "inherited_gaps": 0
+                "new_gaps": new_gaps,
+                "worsened_gaps": worsened_gaps,
+                "improved_gaps": improved_gaps,
+                "resolved_gaps": resolved_gaps,
+                "inherited_gaps": inherited_gaps
             },
             "artifacts": {
                 "cards": "cards.json",
@@ -23445,48 +22310,241 @@ review_after = "2026-08-01"
     }
 
     fn write_usefulness_telemetry_artifact(dir: &Path) -> Result<(), String> {
+        let cards = parse_json_file(&dir.join("cards.json"))?;
+        let comment_plan = parse_json_file(&dir.join("comment-plan.json"))?;
+        let card_array = cards
+            .get("cards")
+            .and_then(serde_json::Value::as_array)
+            .ok_or_else(|| "cards.json fixture must have cards array".to_string())?;
+        let mut coverage_slots = BTreeMap::from([
+            ("contract_missing", 0usize),
+            ("contract_weak", 0usize),
+            ("guard_missing", 0usize),
+            ("guard_weak", 0usize),
+            ("test_reach_missing", 0usize),
+            ("test_reach_weak", 0usize),
+            ("witness_receipt_missing", 0usize),
+        ]);
+        let mut confidence_distribution = BTreeMap::from([
+            ("high", 0usize),
+            ("medium", 0usize),
+            ("low", 0usize),
+            ("unknown", 0usize),
+        ]);
+        let mut actionability_distribution = BTreeMap::<&str, usize>::new();
+        let mut unfulfilled_obligation_count = 0usize;
+        for card in card_array {
+            let class = card
+                .get("class")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("static_unknown");
+            match class {
+                "contract_missing" => {
+                    *coverage_slots.entry("contract_missing").or_insert(0) += 1;
+                    *actionability_distribution
+                        .entry("specific_contract_missing")
+                        .or_insert(0) += 1;
+                }
+                "guard_missing" => {
+                    *coverage_slots.entry("guard_missing").or_insert(0) += 1;
+                    *actionability_distribution
+                        .entry("specific_guard_missing")
+                        .or_insert(0) += 1;
+                }
+                "unsafe_unreached" => {
+                    *coverage_slots.entry("test_reach_missing").or_insert(0) += 1;
+                    *actionability_distribution
+                        .entry("specific_reach_missing")
+                        .or_insert(0) += 1;
+                }
+                _ => {
+                    *actionability_distribution
+                        .entry("not_actionable")
+                        .or_insert(0) += 1;
+                }
+            }
+            if card
+                .get("witness")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|witness| witness.contains("No imported witness receipt"))
+            {
+                *coverage_slots.entry("witness_receipt_missing").or_insert(0) += 1;
+            }
+            let confidence = card
+                .get("confidence")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("unknown");
+            if let Some(count) = confidence_distribution.get_mut(confidence) {
+                *count += 1;
+            }
+            if let Some(obligations) = card
+                .get("obligation_evidence")
+                .and_then(serde_json::Value::as_array)
+            {
+                for obligation in obligations {
+                    for field in ["contract", "discharge", "reach", "witness"] {
+                        if obligation
+                            .get(field)
+                            .and_then(|value| value.get("present"))
+                            .and_then(serde_json::Value::as_bool)
+                            == Some(false)
+                        {
+                            unfulfilled_obligation_count += 1;
+                        }
+                    }
+                }
+            }
+        }
+        let readiness_counts = usefulness_fixture_readiness_counts(dir)?;
+        let not_selected_histograms = usefulness_fixture_not_selected_histograms(&comment_plan)?;
         let value = serde_json::json!({
             "schema_version": "usefulness-telemetry/v1",
             "trust_boundary": "operational diagnostic usefulness only — not calibrated, not a measurement of detection accuracy, not a memory guarantee, not a soundness guarantee, not a gate, and not a merge verdict; all telemetry is projected from ReviewCard/Summary/CoverageBlock/CommentPlan fields deterministically",
             "card_inventory": {
-                "total_cards": 1,
-                "actionable_cards": 1,
-                "new_cards": 1,
-                "worsened_cards": 0,
-                "resolved_cards": 0,
-                "inherited_cards": 0
+                "total_cards": json_usize_at(&cards, "/summary/cards", "cards.json")?,
+                "actionable_cards": json_usize_at(&cards, "/summary/open_actionable_gaps", "cards.json")?,
+                "new_cards": json_usize_at(&cards, "/summary/new_gaps", "cards.json")?,
+                "worsened_cards": json_usize_at(&cards, "/summary/worsened_gaps", "cards.json")?,
+                "improved_cards": json_usize_at(&cards, "/summary/improved_gaps", "cards.json")?,
+                "resolved_cards": json_usize_at(&cards, "/summary/resolved_gaps", "cards.json")?,
+                "inherited_cards": json_usize_at(&cards, "/summary/inherited_gaps", "cards.json")?
             },
             "coverage_slots": {
-                "contract_missing": 0,
-                "contract_weak": 0,
-                "guard_missing": 1,
-                "guard_weak": 0,
-                "test_reach_missing": 0,
-                "test_reach_weak": 0,
-                "witness_receipt_missing": 1
+                "contract_missing": fixture_count(&coverage_slots, "contract_missing")?,
+                "contract_weak": fixture_count(&coverage_slots, "contract_weak")?,
+                "guard_missing": fixture_count(&coverage_slots, "guard_missing")?,
+                "guard_weak": fixture_count(&coverage_slots, "guard_weak")?,
+                "test_reach_missing": fixture_count(&coverage_slots, "test_reach_missing")?,
+                "test_reach_weak": fixture_count(&coverage_slots, "test_reach_weak")?,
+                "witness_receipt_missing": fixture_count(&coverage_slots, "witness_receipt_missing")?
             },
             "agent_readiness": {
-                "ready": 1,
-                "needs_human": 0,
-                "unsupported": 0
+                "ready": fixture_count(&readiness_counts, "ready")?,
+                "requires_witness_receipt": fixture_count(&readiness_counts, "requires_witness_receipt")?,
+                "needs_human": fixture_count(&readiness_counts, "needs_human")?,
+                "unsupported": fixture_count(&readiness_counts, "unsupported")?
             },
             "comment_selection": {
-                "selected_count": 1,
-                "not_selected_count": 0,
-                "not_selected_reason_histogram": {}
+                "selected_count": json_usize_at(&comment_plan, "/summary/selected_count", "comment-plan.json")?,
+                "not_selected_count": json_usize_at(&comment_plan, "/summary/not_selected_count", "comment-plan.json")?,
+                "not_selected_reason_histogram": not_selected_histograms.reason,
+                "not_selected_class_histogram": not_selected_histograms.class
             },
             "confidence_distribution": {
-                "high": 0,
-                "medium": 1,
-                "low": 0,
-                "unknown": 0
+                "high": fixture_count(&confidence_distribution, "high")?,
+                "medium": fixture_count(&confidence_distribution, "medium")?,
+                "low": fixture_count(&confidence_distribution, "low")?,
+                "unknown": fixture_count(&confidence_distribution, "unknown")?
             },
-            "actionability_distribution": {
-                "specific_guard_missing": 1
-            }
+            "actionability_distribution": actionability_distribution,
+            "unfulfilled_obligation_count": unfulfilled_obligation_count
         });
         fs::write(dir.join("usefulness-telemetry.json"), value.to_string())
             .map_err(|err| format!("write usefulness telemetry failed: {err}"))
+    }
+
+    fn usefulness_fixture_not_selected_histograms(
+        comment_plan: &serde_json::Value,
+    ) -> Result<UsefulnessFixtureNotSelectedHistograms, String> {
+        let mut reason = BTreeMap::<String, usize>::new();
+        let mut class = BTreeMap::<String, usize>::new();
+        if let Some(not_selected) = comment_plan.get("not_selected") {
+            let not_selected = not_selected.as_array().ok_or_else(|| {
+                "comment-plan.json fixture not_selected must be an array".to_string()
+            })?;
+            for entry in not_selected {
+                let reason_code = entry
+                    .get("reason_code")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| {
+                        "comment-plan.json fixture not_selected entry must have reason_code"
+                            .to_string()
+                    })?;
+                let class_name = entry
+                    .get("class")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| {
+                        "comment-plan.json fixture not_selected entry must have class".to_string()
+                    })?;
+                *reason.entry(reason_code.to_string()).or_insert(0) += 1;
+                *class
+                    .entry(format!("{reason_code}/{class_name}"))
+                    .or_insert(0) += 1;
+            }
+        }
+        Ok(UsefulnessFixtureNotSelectedHistograms { reason, class })
+    }
+
+    struct UsefulnessFixtureNotSelectedHistograms {
+        reason: BTreeMap<String, usize>,
+        class: BTreeMap<String, usize>,
+    }
+
+    fn fixture_count(
+        counts: &BTreeMap<&'static str, usize>,
+        key: &'static str,
+    ) -> Result<usize, String> {
+        counts
+            .get(key)
+            .copied()
+            .ok_or_else(|| format!("fixture count map is missing `{key}`"))
+    }
+
+    fn usefulness_fixture_readiness_counts(
+        dir: &Path,
+    ) -> Result<BTreeMap<&'static str, usize>, String> {
+        let repair_queue = parse_json_file(&dir.join("repair-queue.json"))?;
+        let mut readiness_by_card = BTreeMap::<String, String>::new();
+        let buckets = repair_queue
+            .get("buckets")
+            .and_then(serde_json::Value::as_object)
+            .ok_or_else(|| "repair-queue.json fixture must have buckets object".to_string())?;
+        for entries in buckets.values() {
+            let entries = entries
+                .as_array()
+                .ok_or_else(|| "repair-queue.json fixture bucket must be an array".to_string())?;
+            for entry in entries {
+                let card_id = entry
+                    .get("card_id")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| {
+                        "repair-queue.json fixture entry must have card_id".to_string()
+                    })?;
+                let state = entry
+                    .pointer("/agent_readiness/state")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| {
+                        "repair-queue.json fixture entry must have agent_readiness.state"
+                            .to_string()
+                    })?;
+                readiness_by_card
+                    .entry(card_id.to_string())
+                    .or_insert_with(|| state.to_string());
+            }
+        }
+        let mut counts = BTreeMap::from([
+            ("ready", 0usize),
+            ("requires_witness_receipt", 0usize),
+            ("needs_human", 0usize),
+            ("unsupported", 0usize),
+        ]);
+        for state in readiness_by_card.values() {
+            let field = match state.as_str() {
+                "ready_for_agent" => "ready",
+                "requires_witness_receipt" => "requires_witness_receipt",
+                "requires_human_review" => "needs_human",
+                "unsupported" => "unsupported",
+                other => {
+                    return Err(format!(
+                        "repair-queue.json fixture has unknown agent_readiness.state `{other}`"
+                    ));
+                }
+            };
+            if let Some(count) = counts.get_mut(field) {
+                *count += 1;
+            }
+        }
+        Ok(counts)
     }
 
     fn write_empty_manual_candidates_artifact(dir: &Path) -> Result<(), String> {
@@ -23602,6 +22660,7 @@ review_after = "2026-08-01"
     fn write_empty_tokmd_packets_artifact(dir: &Path) -> Result<(), String> {
         let comment_plan_input = tokmd_comment_plan_input_fixture(dir)?;
         let value = serde_json::json!({
+            "schema": "tokmd.packets/v1",
             "schema_version": "tokmd-packets/v1",
             "tool": "unsafe-review",
             "tool_version": "0.2.1-test",
@@ -23986,6 +23045,7 @@ review_after = "2026-08-01"
         let handoff = manual_candidate_handoff_fixture();
         let comment_plan_input = tokmd_comment_plan_input_fixture(dir)?;
         let value = serde_json::json!({
+            "schema": "tokmd.packets/v1",
             "schema_version": "tokmd-packets/v1",
             "tool": "unsafe-review",
             "tool_version": "0.2.1-test",
@@ -24672,6 +23732,59 @@ review_after = "2026-08-01"
             .map_err(|err| format!("write comment plan failed: {err}"))
     }
 
+    fn add_coverage_to_cards(path: &Path) -> Result<(), String> {
+        let mut value = parse_json_file(path)?;
+        let cards = value
+            .get_mut("cards")
+            .and_then(serde_json::Value::as_array_mut)
+            .ok_or_else(|| "cards fixture cards must be an array".to_string())?;
+        for card in cards {
+            let class_name = card
+                .get("class")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| "cards fixture card class must be a string".to_string())?;
+            let operation_family = card
+                .get("operation_family")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            let card_id = card
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            let (contract, guard, test_reach, witness) = match class_name {
+                "contract_missing" => ("missing", "missing", "missing", "missing"),
+                "guard_missing" => ("present", "missing", "missing", "missing"),
+                "unsafe_unreached" => ("present", "present", "missing", "missing"),
+                "guarded_unwitnessed" | "reachable_unwitnessed" => {
+                    ("present", "present", "present", "missing")
+                }
+                _ => ("present", "present", "present", "missing"),
+            };
+            let comment_plan_status = if card_id == "card-2" {
+                "not_selected"
+            } else {
+                "selected"
+            };
+            let agent_lsp_readiness = if operation_family == "unsafe_declaration" {
+                "needs_human"
+            } else {
+                "ready"
+            };
+            card["coverage"] = serde_json::json!({
+                "contract_coverage": contract,
+                "guard_coverage": guard,
+                "test_reach_coverage": test_reach,
+                "witness_receipt_coverage": witness,
+                "manual_context": "absent",
+                "baseline_state": "new",
+                "outcome_movement": "regressed",
+                "comment_plan_status": comment_plan_status,
+                "agent_lsp_readiness": agent_lsp_readiness
+            });
+        }
+        fs::write(path, value.to_string()).map_err(|err| format!("write cards failed: {err}"))
+    }
+
     fn coverage_gap_for_fixture_class(class: &str) -> &'static str {
         match class {
             "contract_missing" => "contract_coverage: missing",
@@ -24890,10 +24003,11 @@ review_after = "2026-08-01"
     fn write_valid_artifacts(dir: &Path) -> Result<(), String> {
         fs::write(
             dir.join("cards.json"),
-            r#"{"schema_version":"0.2","tool":"unsafe-review","policy":"advisory","scope":"diff","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result","summary":{"changed_files":1,"changed_rust_files":1,"changed_non_rust_files":0,"cards":1,"open_actionable_gaps":1},"cards":[{"id":"card-1","class":"guard_missing","priority":"high","confidence":"medium","proof_path":"source_route_only","hazards":["alignment"],"site":{"file":"src/lib.rs","line":7,"column":5,"kind":"operation","owner":"read_header"},"operation":"unsafe { ptr.cast::<Header>().read() }","operation_family":"raw_pointer_read","next_action":"Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.","obligation_evidence":[{"key":"alignment","description":"pointer aligned","contract":{"present":true,"state":"present","summary":"safety contract"},"discharge":{"present":false,"state":"missing","summary":"No visible local guard"},"reach":{"present":true,"state":"present","summary":"related test mention"},"witness":{"present":false,"state":"missing","summary":"No imported witness receipt"}}],"contract":"safety contract","discharge":"No visible local guard","reach":"related test mention","witness":"No imported witness receipt","verify_commands":["cargo +nightly miri test card"],"witness_routes":[{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}]}]}"#,
+            r#"{"schema_version":"0.2","tool":"unsafe-review","policy":"advisory","scope":"diff","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result","summary":{"changed_files":1,"changed_rust_files":1,"changed_non_rust_files":0,"cards":1,"open_actionable_gaps":1,"new_gaps":1,"worsened_gaps":0,"improved_gaps":0,"resolved_gaps":0,"inherited_gaps":0},"cards":[{"id":"card-1","class":"guard_missing","priority":"high","confidence":"medium","proof_path":"source_route_only","hazards":["alignment"],"site":{"file":"src/lib.rs","line":7,"column":5,"kind":"operation","owner":"read_header"},"operation":"unsafe { ptr.cast::<Header>().read() }","operation_family":"raw_pointer_read","next_action":"Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.","obligation_evidence":[{"key":"alignment","description":"pointer aligned","contract":{"present":true,"state":"present","summary":"safety contract"},"discharge":{"present":false,"state":"missing","summary":"No visible local guard"},"reach":{"present":true,"state":"present","summary":"related test mention"},"witness":{"present":false,"state":"missing","summary":"No imported witness receipt"}}],"contract":"safety contract","discharge":"No visible local guard","reach":"related test mention","witness":"No imported witness receipt","verify_commands":["cargo +nightly miri test card"],"witness_routes":[{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}]}]}"#,
         )
         .map_err(|err| format!("write cards failed: {err}"))?;
         add_confirmation_cues_to_cards(&dir.join("cards.json"))?;
+        add_coverage_to_cards(&dir.join("cards.json"))?;
         fs::write(
             dir.join("pr-summary.md"),
             "- Scope: `diff`\n- Review cards: 1\n- Open actionable gaps: 1\n- Policy mode: `advisory`\n\n## Top card\n\n- ID: `card-1`\n- Class: `guard_missing`\n- Proof path: `source_route_only`\n- Location: src/lib.rs:7\n- Operation: `unsafe { ptr.cast::<Header>().read() }`\n- Operation family: `raw_pointer_read`\n- Proof path: `source_route_only`\n- Hypothesis to confirm: static `guard_missing` ReviewCard for `unsafe { ptr.cast::<Header>().read() }`; confirm with external evidence before treating it as observed runtime behavior\n- Build/run this first: Build/run `cargo +nightly miri test card` first for this card; attach a matching receipt only if it confirms the route\n- Minimal repro cue:\n  - Confirm ReviewCard `card-1` still maps to `unsafe { ptr.cast::<Header>().read() }` at `src/lib.rs:7:5` before upgrading confidence.\n  - Build/run `cargo +nightly miri test card` as the smallest available command for this card.\n  - Attach a matching receipt only if that run confirms the same route and ReviewCard identity.\n  - Limitation: Minimal repro cue only; unsafe-review did not run this command, observe runtime behavior, prove site execution, prove UB, or prove repository safety.\n- Missing evidence: No missing evidence recorded\n- Primary route: `miri` because route\n\n```bash\ncargo +nightly miri test card\n```\n- Next action: Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.\n- Confirmation step: build/run `cargo +nightly miri test card` first for this card, then attach a matching receipt if it confirms the route\n- Receipt audit: `receipt-audit.md` checks saved receipt metadata only; no witness was run.\n- Explain: `unsafe-review explain card-1`\n- Agent context: `unsafe-review context card-1 --json`\n- Agent handoff: `ready_for_agent`; buckets: `repairable_by_guard`, `requires_witness_receipt`; bucket reasons: `guard_evidence_missing`, `witness_receipt_missing`; readiness reasons: specific operation family\n\n## Card table\n\n| ID | Class | Proof path | Location | Operation family | Operation | Missing evidence | Route | Next action |\n|---|---|---|---|---|---|---|---|---|\n| `card-1` | `guard_missing` | `source_route_only` | src/lib.rs:7 | `raw_pointer_read` | `unsafe { ptr.cast::<Header>().read() }` | No missing evidence recorded | `miri` | Add or expose the local guard that discharges the `raw_pointer_read` safety obligation. |\n\n## Witness plan\n\n- `card-1` hypothesis: static `guard_missing` ReviewCard for `unsafe { ptr.cast::<Header>().read() }`; confirm with external evidence before treating it as observed runtime behavior\n  - Confirmation step: build/run `cargo +nightly miri test card` first for this card, then attach a matching receipt if it confirms the route\n  - Build/run this first: Build/run `cargo +nightly miri test card` first for this card; attach a matching receipt only if it confirms the route\n  - Minimal repro cue:\n    - Confirm ReviewCard `card-1` still maps to `unsafe { ptr.cast::<Header>().read() }` at `src/lib.rs:7:5` before upgrading confidence.\n    - Build/run `cargo +nightly miri test card` as the smallest available command for this card.\n    - Attach a matching receipt only if that run confirms the same route and ReviewCard identity.\n    - Limitation: Minimal repro cue only; unsafe-review did not run this command, observe runtime behavior, prove site execution, prove UB, or prove repository safety.\n  - Route: `miri` because route\n\n```bash\ncargo +nightly miri test card\n```\n\n## Trust boundary\n\nThis artifact is static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result unless a witness receipt is attached.\n",
@@ -24901,7 +24015,7 @@ review_after = "2026-08-01"
         .map_err(|err| format!("write pr summary failed: {err}"))?;
         fs::write(
             dir.join("cards.sarif"),
-            r#"{"version":"2.1.0","runs":[{"tool":{"driver":{"rules":[{"id":"guard_missing"}]}},"results":[{"ruleId":"guard_missing","locations":[{"physicalLocation":{"artifactLocation":{"uri":"src/lib.rs"},"region":{"startLine":7,"startColumn":5}}}],"properties":{"cardId":"card-1","class":"guard_missing","priority":"high","confidence":"medium","proofPath":"source_route_only","operationFamily":"raw_pointer_read","operation":"unsafe { ptr.cast::<Header>().read() }","hazards":["alignment"],"missingEvidence":[],"nextAction":"Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.","witnessRoutes":["miri: route"],"witnessRouteDetails":[{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}],"verifyCommands":["cargo +nightly miri test card"],"trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}],"properties":{"scope":"diff","trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}]}"#,
+            r#"{"version":"2.1.0","runs":[{"tool":{"driver":{"rules":[{"id":"guard_missing"}]}},"results":[{"ruleId":"guard_missing","level":"warning","locations":[{"physicalLocation":{"artifactLocation":{"uri":"src/lib.rs"},"region":{"startLine":7,"startColumn":5}}}],"properties":{"cardId":"card-1","class":"guard_missing","priority":"high","confidence":"medium","proofPath":"source_route_only","operationFamily":"raw_pointer_read","operation":"unsafe { ptr.cast::<Header>().read() }","hazards":["alignment"],"missingEvidence":[],"nextAction":"Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.","witnessRoutes":["miri: route"],"witnessRouteDetails":[{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}],"verifyCommands":["cargo +nightly miri test card"],"trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}],"properties":{"scope":"diff","trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}]}"#,
         )
         .map_err(|err| format!("write sarif failed: {err}"))?;
         fs::write(
@@ -25011,10 +24125,11 @@ review_after = "2026-08-01"
         write_valid_artifacts(dir)?;
         fs::write(
             dir.join("cards.json"),
-            r#"{"schema_version":"0.2","tool":"unsafe-review","policy":"advisory","scope":"diff","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result","summary":{"changed_files":1,"changed_rust_files":1,"changed_non_rust_files":0,"cards":2,"open_actionable_gaps":2},"cards":[{"id":"card-1","class":"guard_missing","priority":"high","confidence":"medium","proof_path":"source_route_only","hazards":["alignment"],"site":{"file":"src/lib.rs","line":7,"column":5,"kind":"operation","owner":"read_header"},"operation":"unsafe { ptr.cast::<Header>().read() }","operation_family":"raw_pointer_read","next_action":"Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.","verify_commands":["cargo +nightly miri test card"],"witness_routes":[{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}]},{"id":"card-2","class":"contract_missing","priority":"high","confidence":"high","proof_path":"human_review_only","hazards":["unknown"],"site":{"file":"src/lib.rs","line":7,"column":1,"kind":"unsafe_fn","owner":"read_header"},"operation":"unsafe fn read_header(ptr: *const u8)","operation_family":"unsafe_declaration","next_action":"Add a precise public `# Safety` section that names the required caller obligations.","verify_commands":[],"witness_routes":[{"kind":"human-deep-review","reason":"route","command":null,"required":false}]}]}"#,
+            r#"{"schema_version":"0.2","tool":"unsafe-review","policy":"advisory","scope":"diff","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result","summary":{"changed_files":1,"changed_rust_files":1,"changed_non_rust_files":0,"cards":2,"open_actionable_gaps":2,"new_gaps":2,"worsened_gaps":0,"improved_gaps":0,"resolved_gaps":0,"inherited_gaps":0},"cards":[{"id":"card-1","class":"guard_missing","priority":"high","confidence":"medium","proof_path":"source_route_only","hazards":["alignment"],"site":{"file":"src/lib.rs","line":7,"column":5,"kind":"operation","owner":"read_header"},"operation":"unsafe { ptr.cast::<Header>().read() }","operation_family":"raw_pointer_read","next_action":"Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.","verify_commands":["cargo +nightly miri test card"],"witness_routes":[{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}]},{"id":"card-2","class":"contract_missing","priority":"high","confidence":"high","proof_path":"human_review_only","hazards":["unknown"],"site":{"file":"src/lib.rs","line":7,"column":1,"kind":"unsafe_fn","owner":"read_header"},"operation":"unsafe fn read_header(ptr: *const u8)","operation_family":"unsafe_declaration","next_action":"Add a precise public `# Safety` section that names the required caller obligations.","verify_commands":[],"witness_routes":[{"kind":"human-deep-review","reason":"route","command":null,"required":false}]}]}"#,
         )
         .map_err(|err| format!("write cards failed: {err}"))?;
         add_confirmation_cues_to_cards(&dir.join("cards.json"))?;
+        add_coverage_to_cards(&dir.join("cards.json"))?;
         fs::write(
             dir.join("pr-summary.md"),
             "- Scope: `diff`\n- Review cards: 2\n- Open actionable gaps: 2\n- Policy mode: `advisory`\n\n- Receipt audit: `receipt-audit.md` checks saved receipt metadata only; no witness was run.\n\nThis artifact is static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result unless a witness receipt is attached.\n",
@@ -25022,7 +24137,7 @@ review_after = "2026-08-01"
         .map_err(|err| format!("write pr summary failed: {err}"))?;
         fs::write(
             dir.join("cards.sarif"),
-            r#"{"version":"2.1.0","runs":[{"tool":{"driver":{"rules":[{"id":"guard_missing"},{"id":"contract_missing"}]}},"results":[{"ruleId":"guard_missing","locations":[{"physicalLocation":{"artifactLocation":{"uri":"src/lib.rs"},"region":{"startLine":7,"startColumn":5}}}],"properties":{"cardId":"card-1","class":"guard_missing","priority":"high","confidence":"medium","proofPath":"source_route_only","operationFamily":"raw_pointer_read","operation":"unsafe { ptr.cast::<Header>().read() }","hazards":["alignment"],"missingEvidence":[],"nextAction":"Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.","witnessRoutes":["miri: route"],"witnessRouteDetails":[{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}],"verifyCommands":["cargo +nightly miri test card"],"trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}},{"ruleId":"contract_missing","locations":[{"physicalLocation":{"artifactLocation":{"uri":"src/lib.rs"},"region":{"startLine":7,"startColumn":1}}}],"properties":{"cardId":"card-2","class":"contract_missing","priority":"high","confidence":"high","proofPath":"human_review_only","operationFamily":"unsafe_declaration","operation":"unsafe fn read_header(ptr: *const u8)","hazards":["unknown"],"missingEvidence":[],"nextAction":"Add a precise public `# Safety` section that names the required caller obligations.","witnessRoutes":["human-deep-review: route"],"witnessRouteDetails":[{"kind":"human-deep-review","reason":"route","command":null,"required":false}],"verifyCommands":[],"trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}],"properties":{"scope":"diff","trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}]}"#,
+            r#"{"version":"2.1.0","runs":[{"tool":{"driver":{"rules":[{"id":"guard_missing"},{"id":"contract_missing"}]}},"results":[{"ruleId":"guard_missing","level":"warning","locations":[{"physicalLocation":{"artifactLocation":{"uri":"src/lib.rs"},"region":{"startLine":7,"startColumn":5}}}],"properties":{"cardId":"card-1","class":"guard_missing","priority":"high","confidence":"medium","proofPath":"source_route_only","operationFamily":"raw_pointer_read","operation":"unsafe { ptr.cast::<Header>().read() }","hazards":["alignment"],"missingEvidence":[],"nextAction":"Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.","witnessRoutes":["miri: route"],"witnessRouteDetails":[{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}],"verifyCommands":["cargo +nightly miri test card"],"trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}},{"ruleId":"contract_missing","level":"warning","locations":[{"physicalLocation":{"artifactLocation":{"uri":"src/lib.rs"},"region":{"startLine":7,"startColumn":1}}}],"properties":{"cardId":"card-2","class":"contract_missing","priority":"high","confidence":"high","proofPath":"human_review_only","operationFamily":"unsafe_declaration","operation":"unsafe fn read_header(ptr: *const u8)","hazards":["unknown"],"missingEvidence":[],"nextAction":"Add a precise public `# Safety` section that names the required caller obligations.","witnessRoutes":["human-deep-review: route"],"witnessRouteDetails":[{"kind":"human-deep-review","reason":"route","command":null,"required":false}],"verifyCommands":[],"trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}],"properties":{"scope":"diff","trustBoundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}]}"#,
         )
         .map_err(|err| format!("write sarif failed: {err}"))?;
         fs::write(
@@ -25144,11 +24259,102 @@ This artifact is static unsafe contract review. It routes reviewers to credible 
         .to_string()
     }
 
+    fn lsp_fixture_coverage() -> serde_json::Value {
+        serde_json::json!({
+            "contract_coverage": "present",
+            "guard_coverage": "missing",
+            "test_reach_coverage": "missing",
+            "witness_receipt_coverage": "missing",
+            "manual_context": "absent",
+            "baseline_state": "new",
+            "outcome_movement": "regressed",
+            "comment_plan_status": "selected",
+            "agent_lsp_readiness": "ready"
+        })
+    }
+
     fn valid_lsp_json(code_actions: &str) -> Result<String, String> {
         let mut value: serde_json::Value = serde_json::from_str(&format!(
-            r#"{{"schema_version":"0.1","tool":"unsafe-review","mode":"read_only_projection","policy":"advisory","scope":"diff","status":{{"state":"actionable","cards":1,"open_actionable_gaps":1,"high_priority_cards":1,"message":"1 unsafe-review card(s), 1 open actionable gap(s)","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}},"diagnostics":[{{"card_id":"card-1","path":"src/lib.rs","range":{{"start":{{"line":6,"character":0}},"end":{{"line":6,"character":1}}}},"code":"guard_missing","operation":"unsafe {{ ptr.cast::<Header>().read() }}","operation_family":"raw_pointer_read","proof_path":"source_route_only","next_action":"Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.","hazards":["alignment"],"required_safety_conditions":[{{"key":"alignment","description":"pointer aligned"}}],"evidence_summary":{{"contract":{{"present":true,"state":"present","summary":"safety contract"}},"discharge":{{"present":false,"state":"missing","summary":"No visible local guard"}},"reach":{{"state":"owner_reached","summary":"related test mention"}},"witness":{{"present":false,"state":"missing","summary":"No imported witness receipt"}},"reach_limitation":"static reach evidence is not proof that the unsafe site executed"}},"obligation_evidence":[{{"key":"alignment","description":"pointer aligned","contract":{{"present":true,"state":"present","summary":"safety contract"}},"discharge":{{"present":false,"state":"missing","summary":"No visible local guard"}},"reach":{{"present":true,"state":"present","summary":"related test mention"}},"witness":{{"present":false,"state":"missing","summary":"No imported witness receipt"}}}}],"witness_routes":[{{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}}],"verify_commands":["cargo +nightly miri test card"],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}],"hovers":[{{"card_id":"card-1","path":"src/lib.rs","position":{{"line":6,"character":0}},"contents":"Card: `card-1`; priority `high`; confidence `medium`\n\nWhy this card exists:\n- The changed code contains a `raw_pointer_read` unsafe operation that unsafe-review classifies as `guard_missing`.\n- Operation: `unsafe {{ ptr.cast::<Header>().read() }}`\n\nProof path: `source_route_only`\n\nRelevant hazard families:\n- `alignment`\n\nRequired safety conditions:\n- pointer aligned\n\nEvidence found:\n- Contract [present]: safety contract\n- Guard/discharge [missing]: No visible local guard\n- Reach [owner_reached]: related test mention\n- Witness [missing]: No imported witness receipt\n\nEvidence missing:\n- none recorded\n\nWhat would resolve this:\n- Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.\n\nVerify commands:\n- `cargo +nightly miri test card`\n\nWhat would not resolve this:\n- A `SAFETY:` comment alone does not discharge missing guard evidence.\n- A related test mention is not proof that this unsafe site executed.\n- Do not claim witness proof unless a matching receipt exists.\n- Do not widen unsafe scope, suppress the card, or change unrelated unsafe code to silence this review item.\n\nWitness route: `miri` because route.\n\nTrust boundary: static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}],"code_actions":{code_actions},"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}"#
+            r#"{{"schema_version":"0.1","tool":"unsafe-review","mode":"read_only_projection","policy":"advisory","scope":"diff","status":{{"state":"actionable","cards":1,"open_actionable_gaps":1,"high_priority_cards":1,"message":"1 unsafe-review card(s), 1 open actionable gap(s)","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}},"diagnostics":[{{"card_id":"card-1","path":"src/lib.rs","range":{{"start":{{"line":6,"character":0}},"end":{{"line":6,"character":1}}}},"severity":2,"code":"guard_missing","operation":"unsafe {{ ptr.cast::<Header>().read() }}","operation_family":"raw_pointer_read","proof_path":"source_route_only","next_action":"Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.","hazards":["alignment"],"required_safety_conditions":[{{"key":"alignment","description":"pointer aligned"}}],"evidence_summary":{{"contract":{{"present":true,"state":"present","summary":"safety contract"}},"discharge":{{"present":false,"state":"missing","summary":"No visible local guard"}},"reach":{{"state":"owner_reached","summary":"related test mention"}},"witness":{{"present":false,"state":"missing","summary":"No imported witness receipt"}},"reach_limitation":"static reach evidence is not proof that the unsafe site executed"}},"obligation_evidence":[{{"key":"alignment","description":"pointer aligned","contract":{{"present":true,"state":"present","summary":"safety contract"}},"discharge":{{"present":false,"state":"missing","summary":"No visible local guard"}},"reach":{{"present":true,"state":"present","summary":"related test mention"}},"witness":{{"present":false,"state":"missing","summary":"No imported witness receipt"}}}}],"witness_routes":[{{"kind":"miri","reason":"route","command":"cargo +nightly miri test card","required":false}}],"verify_commands":["cargo +nightly miri test card"],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}],"hovers":[{{"card_id":"card-1","path":"src/lib.rs","position":{{"line":6,"character":0}},"contents":"Card: `card-1`; priority `high`; confidence `medium`\n\nWhy this card exists:\n- The changed code contains a `raw_pointer_read` unsafe operation that unsafe-review classifies as `guard_missing`.\n- Operation: `unsafe {{ ptr.cast::<Header>().read() }}`\n\nProof path: `source_route_only`\n\nRelevant hazard families:\n- `alignment`\n\nRequired safety conditions:\n- pointer aligned\n\nEvidence found:\n- Contract [present]: safety contract\n- Guard/discharge [missing]: No visible local guard\n- Reach [owner_reached]: related test mention\n- Witness [missing]: No imported witness receipt\n\nEvidence missing:\n- none recorded\n\nWhat would resolve this:\n- Add or expose the local guard that discharges the `raw_pointer_read` safety obligation.\n\nVerify commands:\n- `cargo +nightly miri test card`\n\nWhat would not resolve this:\n- A `SAFETY:` comment alone does not discharge missing guard evidence.\n- A related test mention is not proof that this unsafe site executed.\n- Do not claim witness proof unless a matching receipt exists.\n- Do not widen unsafe scope, suppress the card, or change unrelated unsafe code to silence this review item.\n\nWitness route: `miri` because route.\n\nTrust boundary: static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}],"code_actions":{code_actions},"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}}"#
         ))
         .map_err(|err| format!("valid lsp json fixture failed to parse: {err}"))?;
+        value["schema_version"] = serde_json::json!("0.2");
+        let analysis = serde_json::json!({
+            "analysis_id": "test-analysis",
+            "generation": 1,
+            "tool_version": "0.3.8",
+            "scope": "diff",
+            "state": "current"
+        });
+        value["analysis"] = analysis.clone();
+        let legacy_actions = value["code_actions"]
+            .as_array()
+            .cloned()
+            .ok_or_else(|| "valid lsp code_actions must be an array".to_string())?;
+        let mut canonical_actions = legacy_actions
+            .into_iter()
+            .map(|action| canonical_test_code_action(action, &analysis))
+            .collect::<Result<Vec<_>, _>>()?;
+        for (action_id, title, kind, command, reason_code, reason) in [
+            (
+                "witness-command",
+                "Copy witness command (does not run)",
+                "source.unsafeReview.witnessCommand",
+                "unsafe-review.collectWitnessCommand",
+                "no_witness_command",
+                "No witness command is available for this card.",
+            ),
+            (
+                "related-test",
+                "Open related test",
+                "source.unsafeReview.relatedTest",
+                "unsafe-review.openRelatedTest",
+                "no_related_test",
+                "No structured related test is available for this card.",
+            ),
+        ] {
+            if canonical_actions
+                .iter()
+                .any(|action| action["action_id"] == action_id)
+            {
+                continue;
+            }
+            let diagnostic = canonical_actions
+                .first()
+                .and_then(|action| action.get("diagnostic"))
+                .cloned()
+                .ok_or_else(|| "test lsp needs a diagnostic-backed action".to_string())?;
+            let applicability = if action_id == "witness-command" {
+                serde_json::json!({ "state": "available" })
+            } else {
+                serde_json::json!({
+                    "state": "disabled",
+                    "reason_code": reason_code,
+                    "reason": reason,
+                })
+            };
+            canonical_actions.push(serde_json::json!({
+                "action_id": action_id,
+                "title": title,
+                "kind": kind,
+                "diagnostic": diagnostic,
+                "payload": {
+                    "action_id": action_id,
+                    "card_id": "card-1",
+                    "analysis": analysis,
+                    "agent_readiness": "ready_for_agent",
+                },
+                "command": {
+                    "command": command,
+                    "arguments": { "card_id": "card-1", "analysis": analysis },
+                },
+                "applicability": applicability,
+                "is_preferred": false,
+                "command_only": true,
+                "trust_boundary": "static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result",
+            }));
+        }
+        value["code_actions"] = serde_json::Value::Array(canonical_actions);
         let hover_contents = value["hovers"][0]["contents"]
             .as_str()
             .ok_or_else(|| "valid lsp hover contents must be a string".to_string())?
@@ -25162,13 +24368,107 @@ This artifact is static unsafe contract review. It routes reviewers to credible 
             );
         value["hovers"][0]["contents"] = serde_json::json!(hover_contents);
         value["diagnostics"][0]["missing_evidence"] = serde_json::json!([]);
+        value["diagnostics"][0]["coverage"] = lsp_fixture_coverage();
         Ok(value.to_string())
+    }
+
+    fn canonical_test_code_action(
+        action: serde_json::Value,
+        analysis: &serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        let legacy_command = action["command"]
+            .as_str()
+            .ok_or_else(|| "legacy test code_action command must be a string".to_string())?;
+        let (action_id, command, kind) = match legacy_command {
+            "unsafe-review.copyAgentPacket" => (
+                "agent-packet",
+                "unsafe-review.collectAgentPacket",
+                "quickfix.unsafeReview.agentPacket",
+            ),
+            "unsafe-review.explainWitnessRoute" => (
+                "witness-route",
+                legacy_command,
+                "source.unsafeReview.witnessRoute",
+            ),
+            "unsafe-review.copyWitnessCommand" => (
+                "witness-command",
+                "unsafe-review.collectWitnessCommand",
+                "source.unsafeReview.witnessCommand",
+            ),
+            "unsafe-review.openRelatedTest" => (
+                "related-test",
+                legacy_command,
+                "source.unsafeReview.relatedTest",
+            ),
+            other => return Err(format!("unknown legacy test code_action command `{other}`")),
+        };
+        let card_id = action["card_id"]
+            .as_str()
+            .ok_or_else(|| "legacy test code_action must have card_id".to_string())?;
+        let argument_card_id = action["arguments"]
+            .as_array()
+            .and_then(|values| values.first())
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(card_id);
+        let mut arguments = serde_json::json!({
+            "card_id": argument_card_id,
+            "analysis": analysis,
+        });
+        if action_id == "related-test" {
+            for field in ["file", "line", "name"] {
+                if let Some(value) = action.get("payload").and_then(|value| value.get(field)) {
+                    arguments[field] = value.clone();
+                }
+            }
+        } else if action_id == "witness-command"
+            && let Some(command) = action.get("payload").and_then(|value| value.get("command"))
+        {
+            arguments["command"] = command.clone();
+        }
+        let title = match action_id {
+            "agent-packet" => "Copy bounded unsafe-review agent packet".to_string(),
+            "related-test" if action["title"] == "Open unrelated test" => {
+                "Open unrelated test".to_string()
+            }
+            "related-test" => arguments
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .map_or_else(
+                    || "Open related test".to_string(),
+                    |name| format!("Open related test `{name}`"),
+                ),
+            _ => action["title"].as_str().unwrap_or_default().to_string(),
+        };
+        Ok(serde_json::json!({
+            "action_id": action_id,
+            "title": title,
+            "kind": kind,
+            "diagnostic": {
+                "card_id": card_id,
+                "path": if action_id == "related-test" { serde_json::json!("src/lib.rs") } else { action["path"].clone() },
+                "range": if action_id == "related-test" { serde_json::json!({"start":{"line":6,"character":0},"end":{"line":6,"character":1}}) } else { action["range"].clone() },
+            },
+            "payload": {
+                "action_id": action_id,
+                "card_id": card_id,
+                "analysis": analysis,
+                "agent_readiness": "ready_for_agent",
+            },
+            "command": {
+                "command": command,
+                "arguments": arguments,
+            },
+            "applicability": { "state": "available" },
+            "is_preferred": false,
+            "command_only": true,
+            "trust_boundary": "static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result",
+        }))
     }
 
     fn write_valid_zero_card_first_pr_artifacts(dir: &Path) -> Result<(), String> {
         fs::write(
             dir.join("cards.json"),
-            r#"{"schema_version":"0.2","tool":"unsafe-review","policy":"advisory","scope":"diff","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result","summary":{"changed_files":0,"changed_rust_files":0,"changed_non_rust_files":0,"cards":0,"open_actionable_gaps":0},"cards":[]}"#,
+            r#"{"schema_version":"0.2","tool":"unsafe-review","policy":"advisory","scope":"diff","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result","summary":{"changed_files":0,"changed_rust_files":0,"changed_non_rust_files":0,"cards":0,"open_actionable_gaps":0,"new_gaps":0,"worsened_gaps":0,"improved_gaps":0,"resolved_gaps":0,"inherited_gaps":0},"cards":[]}"#,
         )
         .map_err(|err| format!("write cards failed: {err}"))?;
         fs::write(
@@ -25193,7 +24493,7 @@ This artifact is static unsafe contract review. It routes reviewers to credible 
         .map_err(|err| format!("write witness plan failed: {err}"))?;
         fs::write(
             dir.join("lsp.json"),
-            r#"{"schema_version":"0.1","tool":"unsafe-review","mode":"read_only_projection","policy":"advisory","scope":"diff","status":{"state":"quiet","cards":0,"open_actionable_gaps":0,"high_priority_cards":0,"message":"No unsafe-review cards for this scope","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"},"diagnostics":[],"hovers":[],"code_actions":[],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}"#,
+            r#"{"schema_version":"0.2","tool":"unsafe-review","mode":"read_only_projection","policy":"advisory","scope":"diff","analysis":{"analysis_id":"test-analysis-zero","generation":1,"tool_version":"0.3.8","scope":"diff","state":"current"},"status":{"state":"quiet","cards":0,"open_actionable_gaps":0,"high_priority_cards":0,"message":"No unsafe-review cards for this scope","trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"},"diagnostics":[],"hovers":[],"code_actions":[],"trust_boundary":"static unsafe contract review, not a proof of memory safety, not UB-free status, and not a Miri result"}"#,
         )
         .map_err(|err| format!("write lsp failed: {err}"))?;
         fs::write(
@@ -25294,7 +24594,7 @@ review_after = "2027-01-01"
         .map_err(|e| e.to_string())
         .map(toml::Value::Table)?;
 
-        let report = evaluate_detector_contracts(&toml, "test")?;
+        let report = detector_contracts::evaluate_detector_contracts(&toml, "test")?;
         assert!(
             report.blocking.is_empty(),
             "expected no blocking findings, got: {:?}",
@@ -25321,7 +24621,7 @@ review_after = "2027-01-01"
         .map_err(|e| e.to_string())
         .map(toml::Value::Table)?;
 
-        let report = evaluate_detector_contracts(&toml, "test")?;
+        let report = detector_contracts::evaluate_detector_contracts(&toml, "test")?;
         assert!(
             report
                 .blocking
@@ -25358,7 +24658,7 @@ review_after = "2027-01-01"
         .map_err(|e| e.to_string())
         .map(toml::Value::Table)?;
 
-        let report = evaluate_detector_contracts(&toml, "test")?;
+        let report = detector_contracts::evaluate_detector_contracts(&toml, "test")?;
         assert!(
             report
                 .blocking
@@ -25388,7 +24688,7 @@ review_after = "2027-01-01"
         .map_err(|e| e.to_string())
         .map(toml::Value::Table)?;
 
-        let report = evaluate_detector_contracts(&toml, "test")?;
+        let report = detector_contracts::evaluate_detector_contracts(&toml, "test")?;
         assert!(
             !report.blocking.is_empty(),
             "expected blocking finding for empty negative_fixtures without proof_gap"
@@ -25417,7 +24717,7 @@ owner = "core / analysis"
         .map_err(|e| e.to_string())
         .map(toml::Value::Table)?;
 
-        let report = evaluate_detector_contracts(&toml, "test")?;
+        let report = detector_contracts::evaluate_detector_contracts(&toml, "test")?;
         assert!(
             report.blocking.is_empty(),
             "expected no blocking findings with documented gap, got: {:?}",
@@ -25450,7 +24750,7 @@ proof_gap = "negative controls not yet written"
         .map_err(|e| e.to_string())
         .map(toml::Value::Table)?;
 
-        let report = evaluate_detector_contracts(&toml, "test")?;
+        let report = detector_contracts::evaluate_detector_contracts(&toml, "test")?;
         assert!(
             !report.blocking.is_empty(),
             "expected blocking finding when proof_gap present but owner missing"
@@ -25477,7 +24777,7 @@ review_after = "2027-01-01"
         .map_err(|e| e.to_string())
         .map(toml::Value::Table)?;
 
-        let report = evaluate_stance_decisions(&toml, "test")?;
+        let report = stance_checks::evaluate_stance_decisions(&toml, "test")?;
         assert!(
             report.blocking.is_empty(),
             "expected no blocking findings, got: {:?}",
@@ -25505,7 +24805,7 @@ review_after = "2026-09-15"
         .map_err(|e| e.to_string())
         .map(toml::Value::Table)?;
 
-        let report = evaluate_stance_decisions(&toml, "test")?;
+        let report = stance_checks::evaluate_stance_decisions(&toml, "test")?;
         assert!(
             report.blocking.is_empty(),
             "expected no blocking findings with documented proof_gap, got: {:?}",
@@ -25535,7 +24835,7 @@ proof_gap = "no dedicated unit test yet"
         .map_err(|e| e.to_string())
         .map(toml::Value::Table)?;
 
-        let report = evaluate_stance_decisions(&toml, "test")?;
+        let report = stance_checks::evaluate_stance_decisions(&toml, "test")?;
         assert!(
             !report.blocking.is_empty(),
             "expected blocking finding for proof_gap without review_after"
@@ -25559,7 +24859,7 @@ linked_tests = ["some::test"]
         .map_err(|e| e.to_string())
         .map(toml::Value::Table)?;
 
-        let report = evaluate_stance_decisions(&toml, "test")?;
+        let report = stance_checks::evaluate_stance_decisions(&toml, "test")?;
         assert!(
             !report.blocking.is_empty(),
             "expected blocking finding for missing required field"
@@ -25583,7 +24883,7 @@ single_truth = true
         .map_err(|e| e.to_string())
         .map(toml::Value::Table)?;
 
-        let report = evaluate_spec_coverage(&toml, "test")?;
+        let report = stance_checks::evaluate_spec_coverage(&toml, "test")?;
         assert!(
             report.blocking.is_empty(),
             "expected no blocking findings, got: {:?}",
@@ -25607,7 +24907,7 @@ note = "two places compute it"
         .map_err(|e| e.to_string())
         .map(toml::Value::Table)?;
 
-        let report = evaluate_spec_coverage(&toml, "test")?;
+        let report = stance_checks::evaluate_spec_coverage(&toml, "test")?;
         assert!(
             !report.blocking.is_empty(),
             "expected blocking finding for single_truth=false"
@@ -25628,11 +24928,36 @@ single_truth = true
         .map_err(|e| e.to_string())
         .map(toml::Value::Table)?;
 
-        let report = evaluate_spec_coverage(&toml, "test")?;
+        let report = stance_checks::evaluate_spec_coverage(&toml, "test")?;
         assert!(
             !report.blocking.is_empty(),
             "expected blocking finding for missing canonical_source"
         );
         Ok(())
+    }
+
+    // #1804: the doc-claim-discipline check reuses reject_positive_overclaims
+    // over README.md / CHANGELOG.md. Lock both the catch (a bare Miri-clean
+    // claim with no negation context is rejected) and the pass (the same claim
+    // with "not " negation context is accepted) so the doc guard cannot
+    // silently degrade to a no-op.
+    #[test]
+    fn doc_claim_rail_catches_bare_miri_clean_claim() -> Result<(), String> {
+        let path = std::path::Path::new("README.md");
+        let err = reject_positive_overclaims(path, "unsafe-review is Miri-clean.");
+        let Err(msg) = err else {
+            return Err("bare Miri-clean claim must be rejected".to_string());
+        };
+        if !msg.contains("Miri-clean") {
+            return Err(format!("error must name Miri-clean: {msg}"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn doc_claim_rail_accepts_negated_miri_clean_disclaimer() -> Result<(), String> {
+        let path = std::path::Path::new("README.md");
+        // The canonical trust-boundary form: "not Miri-clean status".
+        reject_positive_overclaims(path, "This is not Miri-clean status.")
     }
 }

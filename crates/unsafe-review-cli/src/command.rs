@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use unsafe_review_core::{DiscoveryOptions, PolicyMode};
 
 /// Query surface for `context` — either a single card by id or a file:line range.
@@ -63,6 +63,8 @@ impl Default for CheckOptions {
 pub(crate) struct FirstPrOptions {
     pub check: CheckOptions,
     pub out_dir: PathBuf,
+    pub entrypoint: FirstPrEntrypoint,
+    pub expected_head_sha: Option<String>,
     /// When `true`, execute auto-detects the git root and default base ref
     /// rather than using the parse-time defaults.  Set only when the user
     /// invokes `unsafe-review pr` without explicit `--root`/`--base`/`--diff`.
@@ -74,7 +76,36 @@ impl Default for FirstPrOptions {
         Self {
             check: CheckOptions::default(),
             out_dir: PathBuf::from("target/unsafe-review"),
+            entrypoint: FirstPrEntrypoint::FirstPr,
+            expected_head_sha: None,
             auto_detect: false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ExternalPrSetupOptions {
+    pub repo: String,
+    pub number: String,
+    pub root: PathBuf,
+    pub base_ref: String,
+    pub base_sha: String,
+    pub head_sha: String,
+    pub out_dir: PathBuf,
+    pub diff_out: PathBuf,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FirstPrEntrypoint {
+    FirstPr,
+    Pr,
+}
+
+impl FirstPrEntrypoint {
+    pub(crate) const fn terminal_command(self) -> &'static str {
+        match self {
+            Self::FirstPr => "first-pr",
+            Self::Pr => "pr",
         }
     }
 }
@@ -217,6 +248,10 @@ pub(crate) struct BaselineInitOptions {
     pub out: Option<PathBuf>,
     /// Override the default `review_after` date (ISO 8601 YYYY-MM-DD).
     pub review_after: Option<String>,
+    /// Preview the baseline plan without writing the ledger or snapshot.
+    pub dry_run: bool,
+    /// Output encoding for the baseline plan/result.
+    pub format: Format,
 }
 
 impl Default for BaselineInitOptions {
@@ -225,6 +260,8 @@ impl Default for BaselineInitOptions {
             root: PathBuf::from("."),
             out: None,
             review_after: None,
+            dry_run: false,
+            format: Format::Human,
         }
     }
 }
@@ -242,11 +279,70 @@ pub(crate) struct BaselineAddOptions {
     pub out: Option<PathBuf>,
 }
 
+/// Options for `baseline status` (SPEC-0030 baseline health surface, issue #1893).
+/// Read-only: runs a full repo scan and reads policy files, writes nothing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct BaselineStatusOptions {
+    pub root: PathBuf,
+    /// `Format::Human` or `Format::Json` only.
+    pub format: Format,
+}
+
+impl Default for BaselineStatusOptions {
+    fn default() -> Self {
+        Self {
+            root: PathBuf::from("."),
+            format: Format::Human,
+        }
+    }
+}
+
+/// Options for `baseline refresh --dry-run` (issue #1893). `--dry-run` is required —
+/// there is no apply mode. `--out`, if given, additionally writes the deterministic
+/// JSON plan to `<out>/baseline-refresh-plan.json`; the scanned `--root` is never
+/// written to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct BaselineRefreshOptions {
+    pub root: PathBuf,
+    pub dry_run: bool,
+    pub out: Option<PathBuf>,
+}
+
+/// Options for the preview-only repository adoption proposal.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct InitOptions {
+    pub root: PathBuf,
+    pub format: Format,
+    pub out: Option<PathBuf>,
+}
+
+impl Default for InitOptions {
+    fn default() -> Self {
+        Self {
+            root: PathBuf::from("."),
+            format: Format::Human,
+            out: None,
+        }
+    }
+}
+
+impl Default for BaselineRefreshOptions {
+    fn default() -> Self {
+        Self {
+            root: PathBuf::from("."),
+            dry_run: false,
+            out: None,
+        }
+    }
+}
+
 /// Subcommand variants for `baseline`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum BaselineCommand {
     Init(BaselineInitOptions),
     Add(BaselineAddOptions),
+    Status(BaselineStatusOptions),
+    Refresh(BaselineRefreshOptions),
     Help,
 }
 
@@ -262,6 +358,8 @@ pub(crate) enum SubcommandHelpTarget {
     Receipt,
     Outcome,
     Policy,
+    Init,
+    PrSetup,
     Doctor,
     Badges,
     Lsp,
@@ -284,6 +382,7 @@ pub(crate) enum Command {
     Repo(RepoOptions),
     Pilot(CheckOptions),
     FirstPr(FirstPrOptions),
+    PrSetup(ExternalPrSetupOptions),
     Badges {
         root: PathBuf,
         out: PathBuf,
@@ -299,6 +398,7 @@ pub(crate) enum Command {
     },
     Candidate(CandidateCommand),
     Baseline(BaselineCommand),
+    Init(InitOptions),
     Confirm(ConfirmOptions),
     ReceiptTemplate(ReceiptTemplateOptions),
     ReceiptValidate {
@@ -313,4 +413,65 @@ pub(crate) enum Command {
     Outcome(OutcomeOptions),
     PolicyReport(CheckOptions),
     Lsp,
+}
+
+impl Command {
+    /// The directory this command will scan, when it takes a `--root`.
+    ///
+    /// Used to validate the root once, before any scan starts. A missing or
+    /// non-directory root would otherwise surface as a walker IO string or —
+    /// worse, when `--root` names a file — as an empty scan that reads like a
+    /// clean review.
+    ///
+    /// Commands that take no root, or whose root is a write target rather than
+    /// a scan target, return `None`.
+    pub(crate) fn review_root(&self) -> Option<&Path> {
+        match self {
+            Command::Doctor { root }
+            | Command::Badges { root, .. }
+            | Command::Explain { root, .. }
+            | Command::Context { root, .. }
+            | Command::ReceiptValidate { root } => Some(root),
+            Command::Check(options)
+            | Command::Pilot(options)
+            | Command::ReceiptAudit(options)
+            | Command::PolicyReport(options) => Some(&options.root),
+            Command::Repo(options) => Some(&options.check.root),
+            Command::FirstPr(options) => Some(&options.check.root),
+            Command::Confirm(options) => Some(&options.root),
+            Command::Candidate(command) => match command {
+                CandidateCommand::List(options) => Some(&options.root),
+                CandidateCommand::WitnessPlan(options) => Some(&options.root),
+                CandidateCommand::New(_)
+                | CandidateCommand::Import(_)
+                | CandidateCommand::Lint(_) => None,
+            },
+            Command::Baseline(command) => match command {
+                BaselineCommand::Init(options) => Some(&options.root),
+                BaselineCommand::Add(options) => Some(&options.root),
+                BaselineCommand::Status(options) => Some(&options.root),
+                BaselineCommand::Refresh(options) => Some(&options.root),
+                BaselineCommand::Help => None,
+            },
+            Command::Init(options) => Some(&options.root),
+            Command::Help
+            | Command::RepoHelp
+            | Command::CandidateHelp
+            | Command::BaselineHelp
+            | Command::SubcommandHelp(_)
+            | Command::Version
+            | Command::Support
+            | Command::ReceiptTemplate(_)
+            | Command::ReceiptImportMiri(_)
+            | Command::ReceiptImportCareful(_)
+            | Command::ReceiptImportSanitizer(_)
+            | Command::ReceiptImportConcurrency(_)
+            | Command::ReceiptImportProof(_)
+            | Command::Outcome(_)
+            // `pr-setup` only prints commands; its --root names where the
+            // caller will check the external PR out, which need not exist yet.
+            | Command::PrSetup(_)
+            | Command::Lsp => None,
+        }
+    }
 }

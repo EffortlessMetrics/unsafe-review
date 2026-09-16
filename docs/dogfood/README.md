@@ -11,7 +11,9 @@ measurement, and not memory-safety proof.
 The manifest is [`corpus.toml`](corpus.toml). The human-facing index is
 [`index.md`](index.md), with a machine-readable companion at
 [`index.json`](index.json). Reviewer usefulness notes live in
-[`usefulness-notes.md`](usefulness-notes.md). Dogfood report labels are defined
+[`usefulness-notes.md`](usefulness-notes.md). The external pilot usefulness
+rollup is [external pilot usefulness](reports/external-pilot-usefulness-rollup.md).
+Dogfood report labels are defined
 in the [`triage taxonomy`](triage-taxonomy.md). Follow-up work seeds are tracked
 in [`follow-up-seeds.md`](follow-up-seeds.md). Bun stable-byte follow-up seeds
 are tracked in [`stable-byte-follow-up-seeds.md`](stable-byte-follow-up-seeds.md)
@@ -21,7 +23,11 @@ inventory requirements for `ripr` are tracked in
 [`ripr-bun-diff-first-requirements.md`](ripr-bun-diff-first-requirements.md).
 Bun packet preset requirements for `tokmd` are tracked in
 [`tokmd-bun-packet-presets.md`](tokmd-bun-packet-presets.md).
+Presentation-density observations follow the
+[`dogfood density receipt schema`](density-receipts/README.md).
 Reviewer judgment files follow the [`dogfood judgment schema`](judgments/README.md).
+External read-only pilot receipts follow the
+[`external pilot receipt schema`](pilots/README.md).
 The generated per-label usefulness count rollup lives in
 [`USEFULNESS.md`](USEFULNESS.md); regenerate it with
 `cargo run --locked -p xtask -- dogfood-usefulness`.
@@ -32,6 +38,21 @@ lives in [`REAL_WORLD_FINDINGS.md`](REAL_WORLD_FINDINGS.md).
 
 Snapshot reports:
 
+- [2026-08-20 ub-review exact producer/consumer smoke (#2116)](reports/2026-08-20-ub-review-consumer-smoke.md)
+- [2026-08-14 holdout rotation closeout](reports/2026-08-14-holdout-rotation-closeout.md)
+- [2026-08-10 tokmd consumer five-preset receipt](reports/2026-08-10-tokmd-consumer-five-preset-receipt.md)
+- [2026-08-10 typed repair candidate agent evaluation](reports/2026-08-10-repair-candidate-agent-evaluation.md)
+- [2026-08-10 cargo-allow #541 reproduction (#1890)](reports/2026-08-10-cargo-allow-541-reproduction.md)
+- [2026-08-08 cargo-allow current-main reproduction](reports/2026-08-08-cargo-allow-current-main.md)
+- [2026-08-10 serde holdout](reports/2026-08-10-serde-holdout.md)
+- [2026-07-29 simdutf8 holdout](reports/2026-07-29-simdutf8-holdout.md)
+- [2026-07-30 crossbeam holdout](reports/2026-07-30-crossbeam-holdout.md)
+- [2026-07-30 rkyv holdout](reports/2026-07-30-rkyv-holdout.md)
+- [2026-07-30 slab holdout](reports/2026-07-30-slab-holdout.md)
+- [2026-07-29 portable-atomic holdout](reports/2026-07-29-portable-atomic-holdout.md)
+- [2026-07-19 holdout contract audit](reports/2026-07-19-holdout-contract-audit.md)
+- [2026-06-19 generalization validation closeout](reports/2026-06-19-generalization-validation-closeout.md)
+- [2026-06-19 initial holdout report](reports/2026-06-19-initial-holdout-report.md)
 - [2026-06-18 residual unknown classifier report](reports/2026-06-18-residual-unknown-classifier-report.md)
 - [2026-06-15 fresh-crate control-plane validation](reports/2026-06-15-fresh-control-plane-validation.md)
 - [2026-06-14 stance-change validation (#1705-1718)](reports/2026-06-14-stance-change-validation.md)
@@ -68,6 +89,11 @@ Report requirements:
   precision/recall, policy readiness, witness adequacy, or safety evidence.
   Committed judgment files must reference known targets, linked reports, known
   card families or review-kit surfaces, and the advisory trust boundary.
+- External pilots record read-only public Action or equivalent first-pr bundle
+  runs against real external PRs. They are product-usefulness evidence only:
+  setup friction, runtime, artifact size, comment selection/omission, and human
+  judgments. They do not authorize source edits, witness execution, comments,
+  reviews, or issue filing in third-party repositories.
 - Agent repair experiments measure whether one ReviewCard context packet and one
   repair-queue item produce a bounded, reviewable dry run. They are manual
   experiments only; `unsafe-review` does not run an agent, execute witnesses,
@@ -99,13 +125,23 @@ cards, record it as a named limitation in the dogfood handoff or objective audit
 instead of counting it as an active corpus target. A zero-card result is not
 evidence that the PR is safe.
 
-When streaming a raw GitHub PR diff, enable pipeline failure propagation and
-pass the checkout that matches the diff to `unsafe-review pr --diff -`:
+When running a real PR from exact product input, fetch the base branch and PR
+ref into a local checkout, keep the exact base/head SHAs visible, and run:
 
 ```bash
-set -o pipefail
-gh pr diff 681 -R rust-lang/hashbrown --patch \
-  | cargo run --locked -p unsafe-review -- pr \
-      --root target/dogfood-work/hashbrown-pr681-root \
-      --diff -
+unsafe-review pr --base-sha <base-sha> --head-sha <head-sha>
 ```
+
+The tool validates the checked-out head before analysis. If a dogfood target
+needs a saved raw diff, use `git diff --output=<path>` so the saved file is not
+shaped by the shell:
+
+```bash
+git -C target/dogfood-work/hashbrown diff --no-ext-diff --binary \
+  --output=/absolute/path/to/target/dogfood-work/hashbrown-pr681.raw.diff \
+  <base-sha> <head-sha>
+```
+
+If a dogfood run must stream `gh pr diff`, feed the stream directly to
+`unsafe-review pr --diff -`; do not save product-input patches through
+PowerShell redirection.

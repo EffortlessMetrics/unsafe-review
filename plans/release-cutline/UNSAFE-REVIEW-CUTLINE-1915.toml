@@ -1,0 +1,512 @@
+# UNSAFE-REVIEW-CUTLINE-1915
+schema_version = "1"
+issue = "https://github.com/EffortlessMetrics/unsafe-review-swarm/issues/1915"
+candidate = "46afd7086a90a957f1fcdf08235e42721540253c"
+status = "draft"
+swarm_base = "46afd7086a90a957f1fcdf08235e42721540253c"
+source_base = "c25d65272c760c3630eb9528b7efaae2234d9e19"
+candidate_commit = "46afd7086a90a957f1fcdf08235e42721540253c"
+candidate_commit_rationale = "Candidate refreshed to 46afd7086a90a957f1fcdf08235e42721540253c (docs(1916): refresh dependency records #2189) at audit 2026-09-09; prior draft base ed345b71f84e3cc4344fba52c21322f8fd4efbf6 and withdrawn 7649bff733b7f4cf1676b9b4b4fb40226c5744b5 remain audit records. Since ed345b71: MSRV 1.98 floor (#2188), ra_ap_syntax 0.0.350 (#2180), badge-projection dedup (#2187), disposition refresh (#2189), and #2095 merged; #1620 closed unmerged; #2135 open draft. Advisory refresh only; no safety, UB-free, or qualification claim follows from the refresh alone."
+audited_at = "2026-08-29"
+owner = "repo-infra"
+semver_rationale = "No version is frozen in the draft. The candidate must be derived from integrated public-surface changes after the required editor/agent and installed-product evidence is complete; historical 0.3.9 and 0.4.0 names are not authoritative."
+dependency_freeze = "not_active; freeze only in the follow-up cutline PR after prerequisites are dispositioned"
+rollback = "Supersede this draft with a dated cutline artifact and retain it as an audit record; do not alter source history, tags, publication state, or public v1."
+
+# `disposition` answers "is this required to qualify the candidate?" and is an
+# owner decision. `integration` answers the separate factual question "is this
+# work present on swarm main today?" and is refreshed from the git log at each
+# audit. The two are independent: deferred work can still be integrated, and
+# required work can still be absent. Conflating them is what made the previous
+# snapshot misleading.
+#
+# integration values:
+#   on_swarm_main         - the issue's PR sequence appears complete on swarm main
+#   partial_on_swarm_main - some slices landed; named slices remain outstanding
+#   not_on_swarm_main     - no matching work found on swarm main
+#   open_pr               - work exists only on an unmerged PR branch
+#
+# Where a commit does not cite its issue number, `integration_evidence` names
+# the commits matched by scope and title and says so explicitly. Those are
+# attributions, not citations.
+#
+# Refresh 2026-09-09 (candidate 46afd708) re-verified every evidence SHA
+# against main, fixed stale PR-2095/PR-1620 entries, and recorded landed
+# (PR-2188, ISSUE-2169) plus newly blocking (PR-2135, ISSUE-2100, ISSUE-2133,
+# ISSUE-2171) and deferred (ISSUE-2173) items.
+#
+# Amendment 2026-09-10: candidate stays 46afd708 (full re-audit lands with the
+# freeze); integration below is read against main bae41d3a. PR-2135 and
+# ISSUE-2171 moved to on_swarm_main after their merges (fc69a255, c542d2fd);
+# the nine pending-review governance/pilot issues are now dispositioned from
+# their issue bodies with live verification where stated (1877 seam, 1878
+# absence).
+
+[[item]]
+id = "PR-1939"
+disposition = "required"
+integration = "on_swarm_main"
+integration_evidence = ["ed06cb2b governance: replace single-active-goal routing with portfolio semantics (#1939)"]
+reason = "Moves durable governance authority to .allow and keeps GitHub as the operational portfolio."
+proof = ["cargo-allow check --profile spec-system --mode audit", "cargo run --locked -p xtask -- check-pr"]
+
+[[item]]
+id = "PR-1941"
+disposition = "required"
+integration = "on_swarm_main"
+integration_evidence = ["ddb7b850 spec-system: add issue-linked work-spec contract (#1941)"]
+reason = "Provides the issue-linked work-spec contract used by later release qualification slices."
+proof = ["cargo run --locked -p xtask -- check-work-specs", "cargo run --locked -p xtask -- check-pr"]
+
+[[item]]
+id = "PR-1913"
+disposition = "required"
+integration = "on_swarm_main"
+integration_evidence = ["a25d2ddc docs(contract): map canonical editor and agent fields (#1913)"]
+reason = "Canonical editor and agent field ownership is already integrated on swarm main and must remain in the candidate contract."
+proof = ["cargo run --locked -p xtask -- check-spec-coverage", "cargo run --locked -p xtask -- check-pr"]
+
+[[item]]
+id = "ISSUE-1884"
+disposition = "required"
+integration = "partial_on_swarm_main"
+integration_evidence = [
+  "merged #1959 count-parity regression guard",
+  "merged #2001/#2005/#2008/#2010/#2012 first-run and count-truth slices",
+  "bdcd8232 ux: put first-pr next action in front panel (#2030) adds changed-file scope and earlier canonical next action",
+  "c8ab83f6 ux: surface evidence movement in first-pr panel (#2040)",
+  "302c3571 ux: show comment-plan counts in first-pr panel (#2041)",
+  "dd0c1d94 ux: show selected reviewer actions in first-pr panel",
+  "5ae3d360 ux: add base ref recovery guidance (#2043)",
+  "2faffbf2 ux: compact brownfield baseline handoff (#2059)",
+  "a89568a3 ux: compact artifact inventory handoff (#2060)",
+  "c06c6b48 ux: compact first-pr minimal repro cue (#2063)",
+  "13f6071d ux: compact first-pr overview counts (#2064)",
+  "e5d7caaa ux: deduplicate top-card reviewer action handoff (#2066)",
+  "cc0b675a ux: compact manual candidate terminal handoff (#2068)",
+  "bd9a6874 ux: remove duplicate manual queue summary (#2070)",
+  "adec1af3 ux: make pr-setup routes copyable (#2072)",
+  "fdfd32fa ux: compact secondary first-pr handoffs (#2074)",
+  "c596aab9 ux: make pr output an action-first front panel (#2078)",
+  "0154a86f build(deps): bump ra_ap_syntax from 0.0.343 to 0.0.344 (#2013)",
+  "issue remains open for the full one-screen action-first front door",
+]
+reason = "The candidate must present bounded, action-first PR output without hiding inherited or partial states; the bounded pr front panel is integrated, while broader one-screen compression remains open."
+proof = ["cargo test -p unsafe-review-cli --locked", "cargo test -p unsafe-review --test e2e --locked", "cargo run --locked -p xtask -- check-first-hour", "cargo run --locked -p xtask -- check-pr"]
+
+[[item]]
+id = "ISSUE-1885"
+disposition = "required"
+integration = "on_swarm_main"
+integration_evidence = [
+  "merged #1995 baseline init --dry-run preview slice",
+  "3980fa9c ux: add preview-only repository adoption init (#2044)",
+  "fresh-main proof: JSON/human preview, conflict/diff/rollback guidance, no default writes, and release placeholder",
+]
+reason = "Guided adoption is part of release UX, but the shipped surface must remain preview-only, deterministic, conflict-aware, and non-mutating by default."
+proof = ["cargo test -p unsafe-review-cli --locked", "cargo test -p unsafe-review --test e2e --locked", "cargo run --locked -p xtask -- check-first-hour", "cargo run --locked -p xtask -- check-pr"]
+
+[[item]]
+id = "ISSUE-1889"
+disposition = "required"
+integration = "on_swarm_main"
+integration_evidence = ["488f4155 docs: record issue 1889 recovery audit (#2015)"]
+reason = "Recovery audit must establish that still-correct local slices are integrated or explicitly rejected before candidate freeze."
+proof = ["git fetch origin", "cargo run --locked -p xtask -- source-divergence"]
+
+[[item]]
+id = "ISSUE-1890"
+disposition = "required"
+integration = "on_swarm_main"
+integration_evidence = ["e94643fd docs(dogfood): record cargo-allow current-main receipt (#2017)", "source issue #541 dispositioned and closed 2026-08-10; 13-card result re-confirmed on 79e83eef after the ra_ap_syntax 0.0.344 bump"]
+reason = "Current-main cargo-allow false-actionability evidence is a release qualification input, not a global accuracy claim."
+proof = ["cargo run --locked -p xtask -- check-dogfood", "cargo run --locked -p xtask -- check-pr"]
+
+[[item]]
+id = "ISSUE-1857"
+disposition = "required"
+integration = "on_swarm_main"
+integration_evidence = ["cf74f497 docs: record tokmd packet acceptance (#2016)", "8c2688e1 docs(dogfood): record tokmd consumer five-preset receipt for #1857 (#2083)"]
+reason = "The candidate's named tokmd packet producer/consumer contract must be qualified without claiming broad published compatibility."
+proof = ["cargo run --locked -p xtask -- check-pr", "cargo test --locked -p tokmd --test render_packets_integration"]
+
+[[item]]
+id = "ISSUE-1907"
+disposition = "required"
+integration = "on_swarm_main"
+integration_evidence = [
+  "576ac8e2 feat(lsp): define canonical editor diagnostic DTO (#1935)",
+  "c1c9b9e4 feat(lsp): serialize saved diagnostics from canonical DTO (#1936)",
+  "43b6fcc1 feat(lsp): project live diagnostics from canonical DTO (#1937)",
+  "7aad7969 feat(vscode): preserve canonical diagnostic fields (#1938)",
+  "attribution by scope and title only; no commit in swarm history cites #1907",
+]
+reason = "Canonical live/saved/editor diagnostic projection is part of the candidate public contract."
+proof = ["cargo test -p unsafe-review-cli lsp --locked", "cargo run --locked -p xtask -- check-pr"]
+
+[[item]]
+id = "ISSUE-1908"
+disposition = "required"
+integration = "partial_on_swarm_main"
+integration_evidence = [
+  "3aefc619 lsp: surface a failed refresh instead of a clean-looking clear (#1908 PR3) (#1949)",
+  "03e98fc2 feat: coalesce concurrent LSP refreshes (#2028) completes PR4 concurrency/coalescing",
+  "3c06a1a6 test(lsp): add live protocol qualification rail (#2034)",
+  "94b5cd4a test(lsp): allow cold-start smoke builds (#2035)",
+  "issue remains open for installed qualification and the separately scoped usability study",
+]
+reason = "Freshness, version, stale, failure, partial, and capped states are required for honest editor diagnostics."
+proof = ["cargo test -p unsafe-review-cli lsp --locked", "cargo run --locked -p xtask -- check-pr"]
+
+[[item]]
+id = "ISSUE-1909"
+disposition = "required"
+integration = "on_swarm_main"
+integration_evidence = [
+  "06faa5d5 lsp: define structured command-only action contract (#1909 PR1) (#1955)",
+  "8b7745ed lsp: return diagnostic-bound structured code actions (#1909 PR2) (#1956)",
+  "18e33cb9 lsp: align saved actions with canonical contract (#1909 PR3) (#1961)",
+]
+reason = "Structured command-only actions must remain bound to canonical diagnostics and readiness."
+proof = ["cargo test -p unsafe-review-cli lsp --locked", "cargo run --locked -p xtask -- check-pr"]
+
+[[item]]
+id = "ISSUE-1910"
+disposition = "required"
+integration = "on_swarm_main"
+integration_evidence = [
+  "f4c68e4f vscode: bind saved interactions by exact identity (#1986)",
+  "3b37a804 editor: copy the saved bounded agent packet (#1989)",
+  "bab22c44 vscode: report hidden diagnostics from per-file caps (#1990)",
+  "attribution by scope and title only; no commit in swarm history cites #1910",
+]
+reason = "Exact editor identity and bounded packet delivery complete the candidate-facing editor contract."
+proof = ["cargo test -p unsafe-review-cli lsp --locked", "cargo run --locked -p xtask -- check-pr"]
+
+[[item]]
+id = "ISSUE-1887"
+disposition = "required"
+integration = "on_swarm_main"
+integration_evidence = [
+  "bdbf3d91 parity acceptance across LSP, agent packet, SARIF, and PR summary (#2024)",
+  "b5ba5bea stale-document LSP acceptance (#2025)",
+  "34f4c036 inherited-only and adjacent-card quietness (#2026)",
+  "4582d15d capped and partial refresh disclosure (#2027)",
+  "03e98fc2 concurrent refresh coalescing (#2028)",
+  "3c06a1a6 live protocol qualification rail (#2034)",
+  "94b5cd4a cold-start smoke repair (#2035)",
+]
+reason = "The diagnostic-to-explanation-to-packet-to-receipt loop must be proven on selected scenarios before claiming a coherent editor/agent product."
+proof = ["cargo test -p unsafe-review-core lsp --locked", "cargo test -p unsafe-review-cli lsp --locked", "cargo run --locked -p xtask -- check-pr"]
+
+[[item]]
+id = "PR-2095"
+disposition = "required"
+integration = "on_swarm_main"
+integration_evidence = ["5e2faa3a fix(cli): normalize first-pr handoff roots (#2095), merged 2026-08-29"]
+reason = "Shell-safe first-pr handoff roots are integrated on swarm main as part of the required action-first front door. Bounded failing-test identities remain unproven; that gap is now owned by ISSUE-2100 with substrate PR-2135, not by this item."
+proof = ["cargo test -p unsafe-review --test e2e --locked", "cargo run --locked -p xtask -- check-pr"]
+
+[[item]]
+id = "ISSUE-1911"
+disposition = "deferred"
+integration = "on_swarm_main"
+integration_evidence = [
+  "74ddbb31 agents: add typed repair candidates (#1979)",
+  "a690f296 agents: expose human-only declaration repair candidates (#1993)",
+  "717a39de agents: project repair candidates across consumers (#1994)",
+  "crates/unsafe-review-core/src/output/repair_queue.rs declares repair_candidates",
+  "attribution by scope and title only; no commit in swarm history cites #1911",
+]
+reason = "Typed repair candidates are additive and are not required to establish the current advisory candidate contract. They are nevertheless integrated on swarm main and are part of the candidate surface, so qualification must cover them even though they do not gate the cutline."
+proof = []
+
+[[item]]
+id = "ISSUE-1912"
+disposition = "deferred"
+integration = "not_on_swarm_main"
+integration_evidence = []
+reason = "Pull diagnostics, cancellation, and progress remain post-correctness evaluation work."
+proof = []
+
+[[item]]
+id = "ISSUE-1886"
+disposition = "deferred"
+integration = "not_on_swarm_main"
+integration_evidence = []
+reason = "Prebuilt distribution is a separate release-ergonomics lane and remains owner-gated."
+proof = []
+
+[[item]]
+id = "ISSUE-1894-1895"
+disposition = "deferred"
+integration = "on_swarm_main"
+integration_evidence = [
+  "2df73a2b surface: expose target-feature groups to agent packets (#1977), body cites #1894",
+  "21232921 surfacing: add unsafe-declaration volume summary projection (#1895) (#1952), closes #1895",
+]
+reason = "Grouping work was deferred pending measured evidence that it is necessary for the candidate. It has since landed additively with fixture and calibration coverage, so it is part of the candidate surface; the deferral now records only that it does not gate the cutline."
+proof = []
+
+[[item]]
+id = "PR-1620"
+disposition = "deferred"
+integration = "not_on_swarm_main"
+integration_evidence = ["swarm #1620 is closed unmerged; no branch state remains on the candidate"]
+reason = "RSS telemetry is not a release blocker for the current candidate and remains parked. Its proposed workspace self-unsafe posture is a product decision that this draft cutline does not make."
+proof = []
+
+[[item]]
+id = "ISSUE-1881"
+disposition = "deferred"
+integration = "partial_on_swarm_main"
+integration_evidence = [
+  "aae31001 docs(dogfood): record mio movement pilot evidence (#2101) brings the external-pilot set to ten exact development-binary receipts",
+  "the rollup records quiet, inherited-only, new-gap, and resolved/improved cases",
+  "public_action=false; the required real public Action pilot remains absent",
+]
+reason = "The current receipts are bounded development-binary usefulness evidence only. Exercising a public Action remains owner-gated publication work and cannot be inferred from the merged pilot rollup."
+proof = ["cargo run --locked -p xtask -- check-external-pilots", "cargo run --locked -p xtask -- check-corpus-partitions"]
+
+[[item]]
+id = "ISSUE-1883"
+disposition = "deferred"
+integration = "partial_on_swarm_main"
+integration_evidence = [
+  "deterministic hostile-input and fail-closed slices are integrated through merged PR #2061",
+  "unreadable-file coverage and the broader process-control/resource matrix remain open",
+]
+reason = "The remaining platform-sensitive robustness rows require an owner decision on a reliable test strategy; this refresh neither invents that strategy nor converts the completed slices into a broad robustness claim."
+proof = []
+
+[[item]]
+id = "ISSUE-2114"
+disposition = "done"
+integration = "on_swarm_main"
+integration_evidence = ["27d1563f policy(spec-coverage): reconcile human CLI and artifact identity parity (#2114, #2115) (#2141)"]
+reason = "Advisory artifact parity: human CLI and artifact ReviewCard identity now locked and on swarm main; no safety, UB-free, or completeness claim."
+proof = ["cargo run --locked -p xtask -- check-pr"]
+
+[[item]]
+id = "ISSUE-2115"
+disposition = "done"
+integration = "on_swarm_main"
+integration_evidence = ["27d1563f policy(spec-coverage): reconcile human CLI and artifact identity parity (#2114, #2115) (#2141)"]
+reason = "Advisory schema identity: artifact identity and consumer compatibility covered by the same 27d1563f slice on swarm main; no published compatibility or safety claim."
+proof = ["cargo run --locked -p xtask -- check-pr"]
+
+[[item]]
+id = "ISSUE-2122"
+disposition = "done"
+integration = "on_swarm_main"
+integration_evidence = ["f7bbb06b test(api): lock baseline_add ReviewCard snapshot parity (#2122) (#2142)"]
+reason = "Advisory baseline-add parity locked on swarm main; no memory-safety or UB-free claim."
+proof = ["cargo run --locked -p xtask -- check-pr"]
+
+[[item]]
+id = "ISSUE-2110"
+disposition = "done"
+integration = "on_swarm_main"
+integration_evidence = ["6f595070 fix(governance): distinguish mutation directives from commit reference nouns (#2143)"]
+reason = "Advisory governance fix: mutation directives distinguished from reference nouns; no policy enforcement or safety claim beyond the advisory finding."
+proof = ["cargo run --locked -p xtask -- check-pr"]
+
+[[item]]
+id = "ISSUE-2116"
+disposition = "done"
+integration = "on_swarm_main"
+integration_evidence = ["bdbfef68 feat(2116): smoke unsafe-review artifacts through ub-review (#2144)", "docs/receipts/ub-review-smoke-6f595070.md"]
+reason = "Advisory ub-review smoke: unsafe-review artifacts smoked through ub-review on selected fixtures; bounded receipt only, no broad ub-review compatibility or safety claim."
+proof = ["cargo run --locked -p xtask -- check-pr"]
+
+[[item]]
+id = "ISSUE-2124"
+disposition = "done"
+integration = "on_swarm_main"
+integration_evidence = ["e266d490 policy(spec-coverage): inventory shared rowless ReviewCard detail fields (#2124) (#2145)"]
+reason = "Advisory inventory: shared rowless ReviewCard detail fields inventoried on swarm main; no safety or completeness claim."
+proof = ["cargo run --locked -p xtask -- check-pr"]
+
+[[item]]
+id = "ISSUE-2125"
+disposition = "done"
+integration = "on_swarm_main"
+integration_evidence = ["c5a8c496 policy(spec-coverage): inventory rowless agent-packet details (#2125) (#2146)"]
+reason = "Advisory inventory: rowless agent-packet details inventoried on swarm main; no safety claim."
+proof = ["cargo run --locked -p xtask -- check-pr"]
+
+[[item]]
+id = "ISSUE-2126"
+disposition = "done"
+integration = "on_swarm_main"
+integration_evidence = ["8d91fae3 policy(spec-coverage): inventory rowless witness-plan details (#2126) (#2147)"]
+reason = "Advisory inventory: rowless witness-plan details inventoried on swarm main; no witness-execution or safety claim."
+proof = ["cargo run --locked -p xtask -- check-pr"]
+
+[[item]]
+id = "ISSUE-2127"
+disposition = "done"
+integration = "on_swarm_main"
+integration_evidence = ["48b082b7 policy(spec-coverage): lock outcome snapshot projection parity (#2127) (#2148)"]
+reason = "Advisory parity: outcome snapshot projection parity locked on swarm main; no UB-free or Miri-clean claim."
+proof = ["cargo run --locked -p xtask -- check-pr"]
+
+[[item]]
+id = "ISSUE-2121"
+disposition = "done"
+integration = "on_swarm_main"
+integration_evidence = ["96766340 artifacts: lock first-PR terminal ReviewCard parity (#2121) (#2149)"]
+reason = "Advisory terminal parity: first-PR terminal ReviewCard parity locked on swarm main; no safety or blocking-policy claim."
+proof = ["cargo run --locked -p xtask -- check-pr"]
+
+[[item]]
+id = "ISSUE-1806"
+disposition = "required"
+integration = "partial_on_swarm_main"
+integration_evidence = ["ed345b71 refactor(xtask): extract check dispatch (#1806) (#2150) is one slice of the multi-PR maintainability lane; issue remains open for remaining extractions"]
+reason = "Maintainability extraction lane is advisory and partially integrated; remaining xtask/advisory_artifacts slices remain open and required only as maintainability work, not as safety evidence."
+proof = ["cargo run --locked -p xtask -- check-pr", "cargo test -p xtask --locked"]
+
+[[item]]
+id = "ISSUE-1888"
+disposition = "deferred"
+integration = "partial_on_swarm_main"
+integration_evidence = ["product-work index live; release path owned by #1914 and this cutline per the issue's own 2026-09-08 audit"]
+reason = "Tracker, not a gate: qualification proceeds through #1914 items. Dispositioned 2026-09-10 without re-auditing its rows."
+proof = []
+
+[[item]]
+id = "ISSUE-1877"
+disposition = "deferred"
+integration = "partial_on_swarm_main"
+integration_evidence = ["residual seam verified live 2026-09-10: xtask/src/main.rs:498-499 still define .rails index/active manifests for the CheckGoals dispatch"]
+reason = "Legacy parity-command retirement is post-candidate governance work; the default check-pr gate does not dispatch it."
+proof = []
+
+[[item]]
+id = "ISSUE-1878"
+disposition = "deferred"
+integration = "not_on_swarm_main"
+integration_evidence = ["no root action.yml on swarm main, verified 2026-09-10; public v1 remains separately authorized delivery"]
+reason = "Public root Action is delivery work outside the unpublished candidate."
+proof = []
+
+[[item]]
+id = "ISSUE-1898"
+disposition = "deferred"
+integration = "partial_on_swarm_main"
+integration_evidence = [".allow foundations on swarm main; explicit read-only GitHub disposition auditing remains open"]
+reason = "Remote lifecycle reconciliation must not touch offline gates; post-candidate system work."
+proof = []
+
+[[item]]
+id = "ISSUE-1899"
+disposition = "deferred"
+integration = "partial_on_swarm_main"
+integration_evidence = ["front-door/portfolio correction implemented (AGENTS.md, lifecycle map, goals README); zero/one/many proof remains open"]
+reason = "Residual portfolio-semantics proof is post-candidate governance work."
+proof = []
+
+[[item]]
+id = "ISSUE-1900"
+disposition = "deferred"
+integration = "partial_on_swarm_main"
+integration_evidence = ["SPEC-0044, issue-work-spec schema, and checker delivered; offline link/lifecycle enforcement remains open"]
+reason = "Remaining work-spec contract enforcement is post-candidate system work."
+proof = []
+
+[[item]]
+id = "ISSUE-1903"
+disposition = "deferred"
+integration = "partial_on_swarm_main"
+integration_evidence = ["pilot documents landed; only observed controls count and none are measured yet"]
+reason = "Real-pilot measurement is usefulness validation, not candidate-blocking."
+proof = []
+
+[[item]]
+id = "ISSUE-1904"
+disposition = "deferred"
+integration = "partial_on_swarm_main"
+integration_evidence = ["#2162/#2163 receipt documents landed; real fresh-issue/root-replacement contracts remain open"]
+reason = "Document delivery is not completion; remaining real-work pilots are usefulness validation, not candidate-blocking."
+proof = []
+
+[[item]]
+id = "ISSUE-1905"
+disposition = "deferred"
+integration = "partial_on_swarm_main"
+integration_evidence = ["protocol/packet/skill foundations closed per the 2026-09-08 audit; measured evidence remains open"]
+reason = "Supporting delivery infrastructure, explicitly not the product priority for the candidate."
+proof = []
+
+[[item]]
+id = "PR-2188"
+disposition = "required"
+integration = "on_swarm_main"
+integration_evidence = ["3e1d124c build(msrv): raise minimum toolchain to Rust 1.98 (#2188)", "b2f55923 build(deps): bump ra_ap_syntax from 0.0.349 to 0.0.350 (#2180)"]
+reason = "The MSRV 1.98 floor and parser 0.0.350 dependency are integrated on swarm main with parser proof (946 core tests, 31 detector contracts, 15 parity goldens, determinism, clippy, workspace tests, full check-pr) plus the hosted Rust gate green. The floor must remain in the candidate."
+proof = ["cargo run --locked -p xtask -- check-pr", "cargo test --workspace --locked"]
+
+[[item]]
+id = "ISSUE-2169"
+disposition = "done"
+integration = "on_swarm_main"
+integration_evidence = ["bbb7795e fix(xtask): run generated badge projection once per check-pr (#2169) (#2187)"]
+reason = "Advisory CI economics: single badge-projection route with freshness preserved; no safety or speedup claim."
+proof = ["cargo run --locked -p xtask -- check-pr"]
+
+[[item]]
+id = "PR-2135"
+disposition = "required"
+integration = "on_swarm_main"
+integration_evidence = ["fc69a255 ci(test): add structured runner diagnostics substrate (#2135), merged after undraft with required gate green", "both nextest archive pins independently verified against upstream releases", "no 1.98 regressions in merge-result proof"]
+reason = "Structured runner substrate for bounded failing-test identities (ISSUE-2100) is integrated. #2100 acceptance itself remains open."
+proof = ["cargo test --locked -p xtask ci_test", "cargo run --locked -p xtask -- check-pr"]
+
+[[item]]
+id = "ISSUE-2100"
+disposition = "required"
+integration = "not_on_swarm_main"
+integration_evidence = ["issue open; no merged implementation; substrate PR-2135 open draft"]
+reason = "Bounded failing-test identities for workspace failures remain unproven (stable libtest output is spoofable). Required for diagnosable CI gates; path is the structured runner substrate."
+proof = []
+
+[[item]]
+id = "ISSUE-2133"
+disposition = "required"
+integration = "not_on_swarm_main"
+integration_evidence = ["issue open; substrate PR-2135 open draft"]
+reason = "Structured runner substrate prerequisite for ISSUE-2100; needs hosted receipt. Covered by the PR-2135 path."
+proof = []
+
+[[item]]
+id = "ISSUE-2171"
+disposition = "required"
+integration = "on_swarm_main"
+integration_evidence = ["c542d2fd fix(ci): run workspace tests for dependency and build changes (#2171) (#2193)", "one shared selector skips only all-Markdown diffs; 32 contract tests plus hosted gate green"]
+reason = "Dependency and build-configuration changes now select the full test path; only all-Markdown diffs skip. The skip route no longer leaves the runtime-test obligation uncovered."
+proof = ["cargo test --locked -p xtask ci_routing_contract", "cargo run --locked -p xtask -- check-pr"]
+
+[[item]]
+id = "ISSUE-2173"
+disposition = "deferred"
+integration = "not_on_swarm_main"
+integration_evidence = ["cause unproven per the issue's own claim boundary; diagnosis-only lane"]
+reason = "Windows repeated-rebuild diagnosis is CI cost investigation, not candidate-blocking. Deferred until the fingerprint cause is proven."
+proof = []
+
+[[item]]
+id = "ISSUE-1515"
+disposition = "done"
+integration = "on_swarm_main"
+integration_evidence = ["e3912c11 ci(#1515): share rust-cache key across lanes, warm it weekly, report real cache_hit_state (#2085)", "20905d31 ci: skip cargo test for docs-only PRs (#1515 candidate 2) (#1855)", "d873b8e7 ci: emit per-step timing for fmt/clippy/test/check-pr (#1515) (#1848)", "closed 2026-08-29T11:56:45Z as COMPLETED"]
+reason = "Advisory CI cost lane closed; cache sharing and timing evidence integrated on swarm main. No performance or safety claim; hosted gate remains advisory."
+proof = ["cargo run --locked -p xtask -- check-pr"]
+
+[[item]]
+id = "PUBLICATION-1879"
+disposition = "deferred"
+integration = "not_on_swarm_main"
+integration_evidence = []
+reason = "Source promotion, publication, tags, GitHub Release, and public v1 remain explicitly owner-gated after qualification."
+proof = []

@@ -150,6 +150,242 @@ mod tests {
     }
 
     #[test]
+    fn non_utf8_diff_file_is_rejected_fail_closed() -> Result<(), String> {
+        // A diff file that is not valid UTF-8 must fail closed at read time
+        // (`fs::read_to_string` rejects it) rather than being silently treated
+        // as an empty / zero-change diff. Hostile-input regression coverage for
+        // the `File` diff source (issue #1883): the only prior non-UTF-8 test
+        // targeted a source file during repo scan, not the diff input itself.
+        let path = unique_temp_path("unsafe-review-non-utf8-diff-test")?;
+        fs::write(&path, [0xffu8, 0xfe, 0x00, 0xfd])
+            .map_err(|err| format!("write temp diff failed: {err}"))?;
+        let source = DiffSource::File(path.clone());
+        let err = match load_diff_index(&source) {
+            Err(e) => e,
+            Ok(_) => {
+                let _ = fs::remove_file(&path);
+                return Err(
+                    "expected a non-UTF-8 diff file to be rejected, but it was accepted".into(),
+                );
+            }
+        };
+        let path_str = path.display().to_string();
+        assert!(
+            err.contains(&path_str),
+            "error should include the diff path: {err}"
+        );
+        assert!(
+            err.contains("read diff"),
+            "error should name the diff read step: {err}"
+        );
+        assert!(
+            err.contains("failed"),
+            "error should state the read failed: {err}"
+        );
+        let _ = fs::remove_file(&path);
+        Ok(())
+    }
+
+    #[test]
+    fn absolute_and_traversal_diff_paths_are_indexed_inertly_not_escaped() -> Result<(), String> {
+        // Hostile-input regression coverage for the `+++ b/` path-traversal /
+        // absolute-path row of issue #1883. A unified diff whose changed-file
+        // header names an absolute path or a `../` traversal path must be
+        // accepted and indexed as the *literal* path string; the parser must
+        // never normalize, resolve, or open it. Because the diff index is only
+        // ever consulted by exact-match lookups keyed by files discovered under
+        // the scan root (all relative), a foreign path is inert -- it can never
+        // pull an out-of-root file into analysis (the "cannot escape configured
+        // roots" contract). This test pins that the path is stored verbatim and
+        // is NOT silently normalized to a root-relative form.
+        let diff = concat!(
+            "diff --git a/../../../../etc/passwd.rs b/../../../../etc/passwd.rs\n",
+            "--- a/../../../../etc/passwd.rs\n",
+            "+++ b/../../../../etc/passwd.rs\n",
+            "@@ -0,0 +1,1 @@\n",
+            "+pub unsafe fn escaped() {}\n",
+            "diff --git a//etc/shadow.rs b//etc/shadow.rs\n",
+            "--- a//etc/shadow.rs\n",
+            "+++ b//etc/shadow.rs\n",
+            "@@ -0,0 +1,1 @@\n",
+            "+pub unsafe fn absolute() {}\n",
+        );
+        let index = load_diff_index(&DiffSource::Text(diff.to_string()))?;
+
+        // Both foreign paths are accepted as structurally valid diff entries.
+        assert_eq!(
+            index.changed_file_count(),
+            2,
+            "both foreign-path files should be indexed"
+        );
+
+        // The traversal path is stored as the literal string after `+++ b/`,
+        // not resolved or stripped to a root-relative path.
+        let traversal = std::path::PathBuf::from("../../../../etc/passwd.rs");
+        assert!(
+            index.contains_in_range(&traversal, 1, 1),
+            "traversal path must be indexed under its literal, unresolved key"
+        );
+        assert!(
+            !index.contains_in_range(&std::path::PathBuf::from("etc/passwd.rs"), 1, 1),
+            "traversal must not be normalized to a root-relative key"
+        );
+
+        // The absolute path is likewise stored literally (leading slash kept).
+        let absolute = std::path::PathBuf::from("/etc/shadow.rs");
+        assert!(
+            index.contains_in_range(&absolute, 1, 1),
+            "absolute path must be indexed under its literal key"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn oversized_hunk_numbers_and_long_lines_are_handled_without_panic() -> Result<(), String> {
+        // Hostile-input regression coverage for the oversized-hunk / extreme
+        // line-length row of issue #1883. A hunk header whose `+` start line is
+        // too large to fit in `usize` must not panic: `parse_new_start` returns
+        // `None`, so the coordinate simply stays at its default rather than
+        // overflowing, and the added line is still indexed (at the degenerate
+        // line 0, which no real 1-based site query can match -- fail-safe). An
+        // extremely long added line must likewise be handled without panic. The
+        // parser advances the coordinate with `saturating_add`, so large inputs
+        // truncate rather than crash.
+        let long_line = "a".repeat(200_000);
+        let diff = format!(
+            concat!(
+                "diff --git a/src/huge.rs b/src/huge.rs\n",
+                "--- a/src/huge.rs\n",
+                "+++ b/src/huge.rs\n",
+                // A `+` start line far beyond usize::MAX on any platform.
+                "@@ -0,0 +999999999999999999999999999999,1 @@\n",
+                "+{}\n",
+            ),
+            long_line
+        );
+        let index = load_diff_index(&DiffSource::Text(diff))?;
+
+        // The diff is accepted (structurally valid) and the file is indexed.
+        assert_eq!(
+            index.changed_file_count(),
+            1,
+            "an oversized-hunk diff should still index its changed file"
+        );
+        // The unparseable start line fell back to the degenerate coordinate 0,
+        // which cannot collide with a real 1-based unsafe-site query.
+        let path = std::path::PathBuf::from("src/huge.rs");
+        assert!(
+            index.contains_in_range(&path, 0, 0),
+            "the added line falls back to the degenerate line-0 coordinate"
+        );
+        assert!(
+            !index.contains_in_range(&path, 1, usize::MAX),
+            "no real 1-based line range should match the degenerate fallback"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn duplicated_file_headers_merge_deterministically_into_one_entry() -> Result<(), String> {
+        // Hostile-input regression coverage for the duplicated / conflicting
+        // file-header row of issue #1883. A diff that names the same file in two
+        // separate `diff --git` / `+++ b/` blocks must not double-count the file
+        // or drop either block's changed lines: the parser keys the index by
+        // path and merges the line sets (`entry(path).or_default()` preserves
+        // the existing set), so the result is one entry carrying the union of
+        // both blocks' lines. This pins that the merge is deterministic rather
+        // than last-block-wins or a duplicate entry.
+        let diff = concat!(
+            "diff --git a/src/lib.rs b/src/lib.rs\n",
+            "--- a/src/lib.rs\n",
+            "+++ b/src/lib.rs\n",
+            "@@ -0,0 +1,1 @@\n",
+            "+first block change\n",
+            "diff --git a/src/lib.rs b/src/lib.rs\n",
+            "--- a/src/lib.rs\n",
+            "+++ b/src/lib.rs\n",
+            "@@ -0,0 +5,1 @@\n",
+            "+second block change\n",
+        );
+        let index = load_diff_index(&DiffSource::Text(diff.to_string()))?;
+
+        assert_eq!(
+            index.changed_file_count(),
+            1,
+            "a file named in two header blocks must be indexed exactly once"
+        );
+        let path = std::path::PathBuf::from("src/lib.rs");
+        assert!(
+            index.contains_in_range(&path, 1, 1),
+            "the first block's changed line must survive the merge"
+        );
+        assert!(
+            index.contains_in_range(&path, 5, 5),
+            "the second block's changed line must survive the merge"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn nul_and_control_chars_in_diff_paths_are_indexed_literally() -> Result<(), String> {
+        // Hostile-input regression coverage for the NUL / control-character
+        // path row of issue #1883. A `+++ b/` header containing an interior NUL
+        // byte or an ESC control character must be parsed without panicking and
+        // indexed under the LITERAL path string -- not silently sanitized to a
+        // normal path.
+        //
+        // Scope note: this pins literal indexing only, not "never opened". A NUL
+        // byte is not a legal Unix filename, so a NUL-keyed entry can never match
+        // a file discovered under the root and is therefore inert. An ESC byte,
+        // by contrast, is a legal filename character: if the checkout actually
+        // contained that file, workspace discovery would find it and it would be
+        // scanned like any other changed file -- which is correct behavior, not a
+        // leak. The invariant asserted here is only that the diff parser
+        // preserves control-bearing paths verbatim rather than crashing or
+        // rewriting them.
+        let diff = concat!(
+            "diff --git a/src/a\u{0}b.rs b/src/a\u{0}b.rs\n",
+            "--- a/src/a\u{0}b.rs\n",
+            "+++ b/src/a\u{0}b.rs\n",
+            "@@ -0,0 +1,1 @@\n",
+            "+pub unsafe fn nul_path() {}\n",
+            "diff --git a/src/e\u{1b}c.rs b/src/e\u{1b}c.rs\n",
+            "--- a/src/e\u{1b}c.rs\n",
+            "+++ b/src/e\u{1b}c.rs\n",
+            "@@ -0,0 +1,1 @@\n",
+            "+pub unsafe fn esc_path() {}\n",
+        );
+        let index = load_diff_index(&DiffSource::Text(diff.to_string()))?;
+
+        assert_eq!(
+            index.changed_file_count(),
+            2,
+            "both control-laden paths should be indexed"
+        );
+        // Each path is stored under its literal (control-char-carrying) key and
+        // does not collide with a sanitized/normal path.
+        let nul_path = std::path::PathBuf::from("src/a\u{0}b.rs");
+        assert!(
+            index.contains_in_range(&nul_path, 1, 1),
+            "NUL path must be indexed under its literal key"
+        );
+        assert!(
+            !index.contains_in_range(&std::path::PathBuf::from("src/ab.rs"), 1, 1),
+            "the NUL must not be silently stripped to a normal path"
+        );
+        let esc_path = std::path::PathBuf::from("src/e\u{1b}c.rs");
+        assert!(
+            index.contains_in_range(&esc_path, 1, 1),
+            "ESC-control path must be indexed under its literal key"
+        );
+        assert!(
+            !index.contains_in_range(&std::path::PathBuf::from("src/ec.rs"), 1, 1),
+            "the ESC must not be silently stripped to a normal path"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn empty_string_is_accepted_as_empty_index() -> Result<(), String> {
         let source = DiffSource::Text(String::new());
         let index = load_diff_index(&source)?;

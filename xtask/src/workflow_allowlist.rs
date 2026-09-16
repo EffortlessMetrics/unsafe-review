@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use crate::{
-    WORKFLOW_ALLOWLIST, WORKFLOW_DIR, looks_like_iso_date, parse_toml_file, read_to_string,
-    required_toml_string, workspace_path,
+    WORKFLOW_ALLOWLIST, WORKFLOW_DIR, parse_toml_file, read_to_string, required_toml_string,
+    unsafe_review_ledger::looks_like_iso_date, workspace_path,
 };
 
 #[derive(Debug)]
@@ -50,7 +50,9 @@ pub(crate) fn check_workflow_allowlist(
     Ok(())
 }
 
-fn workflow_policy_entries(allowlist: &Path) -> Result<Vec<WorkflowPolicyEntry>, String> {
+pub(crate) fn workflow_policy_entries(
+    allowlist: &Path,
+) -> Result<Vec<WorkflowPolicyEntry>, String> {
     let value = parse_toml_file(allowlist)?;
     let path_display = allowlist.display().to_string();
     let entries = value

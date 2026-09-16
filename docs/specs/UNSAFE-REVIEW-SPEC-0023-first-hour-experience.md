@@ -40,7 +40,7 @@ A successful first hour supports this path:
 ```bash
 cargo install unsafe-review --locked
 unsafe-review doctor
-unsafe-review first-pr --base origin/main
+unsafe-review pr
 open target/unsafe-review/pr-summary.md
 unsafe-review explain <card-id>
 unsafe-review support
@@ -75,11 +75,27 @@ what unsafe-review is not claiming
 The public repair loop is:
 
 ```text
-first-pr -> pr-summary -> explain -> context -> witness-plan -> receipt audit -> outcome
+pr -> pr-summary -> explain -> context -> witness-plan -> receipt audit -> outcome
 ```
 
 Every first-hour surface must project from `ReviewCard`. No first-hour surface
 may reclassify findings independently or invent a second analyzer truth.
+
+The preview adoption loop is:
+
+```text
+init -> review proposal -> doctor -> pr
+```
+
+`unsafe-review init` is preview-only by default. It may inspect repository
+layout and write a JSON proposal envelope only to an explicitly selected
+proposal directory; it never applies workflow/configuration changes or edits
+source. The proposal carries complete proposed file content, target path,
+create/unchanged/conflict status, reason, rollback guidance, deterministic
+warnings, and exact next commands. Existing user workflows are conflicts, not
+overwrite targets. Any workflow release reference must be verified separately;
+the init proposal must not assume that a parked public Action or publication
+lane is ready.
 
 ## 4. Non-goals
 
@@ -99,9 +115,12 @@ may reclassify findings independently or invent a second analyzer truth.
 - keeps witness tools informational by default
 - states the advisory trust boundary
 
-`first-pr`:
+`pr`:
 
 - writes the standard advisory bundle
+- prints changed-file and actionable-gap counts from the canonical summary
+- places the top-card next action immediately after the card identity so the
+  first screen answers what to do before the detailed confirmation handoff
 - prints the summary path and top-card `explain` command
 - reports no-card states honestly
 
@@ -139,7 +158,7 @@ may reclassify findings independently or invent a second analyzer truth.
 ## 6. CI proof
 
 ```bash
-cargo run --locked -p unsafe-review -- first-pr \
+cargo run --locked -p unsafe-review -- pr \
   --root fixtures/raw_pointer_alignment \
   --diff fixtures/raw_pointer_alignment/change.diff \
   --out-dir target/unsafe-review-first-pr-smoke
@@ -170,8 +189,9 @@ packet examples all align with this spec.
 
 ## 9. Zero-arg convenience entry point (`unsafe-review pr`)
 
-`unsafe-review pr` is a pure parse-time alias for `first-pr`. It maps to the
-same `FirstPr` command and produces the same advisory output bundle. No new
+`unsafe-review pr` is the preferred first-run entry point. It maps to the same
+`FirstPr` command as `first-pr` and produces the same advisory output bundle.
+Only the terminal handoff label reflects the command the user invoked. No new
 output surface or second analyzer truth is introduced.
 
 ### 9.1 Auto-detection behavior
@@ -208,7 +228,7 @@ explicit flags too:
 
 ```text
 could not detect a git repository in the current directory (<git stderr>).
-Run `unsafe-review first-pr --root <repo> --base <ref>` to supply them explicitly.
+Run `unsafe-review pr --root <repo> --base <ref>` to supply them explicitly.
 ```
 
 ### 9.3 Advisory posture
@@ -227,7 +247,35 @@ The top-level help output includes a one-line hint pointing users at
 `unsafe-review pr`:
 
 ```text
-  pr      zero-config entry point: auto-detects root and base ref; alias for first-pr
+  pr        first-run PR review bundle: auto-detects root and base ref
 ```
 
 `unsafe-review pr --help` routes to the `first-pr` subcommand help page.
+
+### 9.5 Top-level help shape
+
+The top-level help is an overview, not a flag reference. Per-command help pages
+own the full flag list, defaults, and examples; the overview owns orientation.
+It contains, in order:
+
+- the product sentence
+  (`unsafe-review finds unsafe Rust changes missing a safety contract, guard,
+  test, or witness.`);
+- a `Usage:` block whose second line routes the reader to
+  `unsafe-review <command> --help` for full flags and examples;
+- a `Start here:` block of runnable first-run commands;
+- task-grouped command lists under `Review a change:`, `Inspect a finding:`,
+  `Track and discharge coverage debt:`, and `Repository posture:`;
+- the flag-syntax note, the exit-code table, and the trust boundary.
+
+Every command the argument parser routes is reachable from the overview, so no
+shipped entrypoint — including `lsp` — is discoverable only by reading the
+parser. Each command takes exactly one entry line in exactly one task group,
+and every entry's description starts at the same column so a group reads as a
+table. A compatibility alias whose name does not fit that column — currently
+`receipt-template`, which routes to `receipt template` — is named in the text
+of the entry it routes into rather than taking an entry of its own.
+
+The overview never claims proof, UB-free status, Miri-clean status, site
+execution, or calibrated precision/recall, and it restates that unsafe-review
+does not run witnesses, post comments, edit source, or block by default.

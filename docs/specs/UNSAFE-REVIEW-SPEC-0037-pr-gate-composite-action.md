@@ -60,14 +60,14 @@ callers.
 
 The action installs the `unsafe-review` CLI from crates.io using
 `cargo install --locked --version <pin>`. A pinned version input (default
-`0.3.6`, the latest published crates.io version) prevents silent breakage on
+`0.3.8`, the latest published crates.io version) prevents silent breakage on
 new releases.
 
 Binary acquisition decision: `cargo install` from crates.io is the MVP path
 because the `unsafe-review` crate is published to crates.io and no
 pre-compiled release binaries are currently distributed through GitHub
 Releases. The `cargo install` step runs inside the caller's job and uses the
-caller's Rust toolchain; the action installs `dtolnay/rust-toolchain@1.95.0`
+caller's Rust toolchain; the action installs `dtolnay/rust-toolchain@1.98`
 as a prerequisite.
 
 Optimization path: if pre-compiled binaries are later distributed as GitHub
@@ -81,7 +81,7 @@ runs.
 | Input | Required | Default | Description |
 |---|---|---|---|
 | `base_ref` | no | `${{ github.event.repository.default_branch }}` | Base ref to diff against (e.g. `main`) |
-| `version` | no | `0.3.6` | `unsafe-review` crate version to install from crates.io |
+| `version` | no | `0.3.8` | `unsafe-review` crate version to install from crates.io |
 | `fetch_depth` | no | `100` | Depth passed to `git fetch --depth` when fetching the base ref. Increase this for repositories with very long histories or shallow clones that fail to find the common ancestor. |
 | `out_dir` | no | `target/unsafe-review` | Directory for the advisory bundle output |
 | `fail_on_new_debt` | no | `false` | When `true`, exit non-zero if new or worsened coverage gaps are found (maps to exit 1; inherited gaps never fail). Advisory by default — callers must set this explicitly to change the default. |
@@ -118,6 +118,9 @@ cards.sarif
 comment-plan.json
 witness-plan.md
 receipt-audit.md
+receipt-audit.json
+policy-report.json
+policy-report.md
 manual-candidates.json
 manual-repair-queue.json
 tokmd-packets.json
@@ -215,7 +218,7 @@ The action may fail for the following reasons:
 ## 11. Version-skew rule
 
 The action installs the **pinned published** crates.io version (the `version`
-input, default `0.3.6`). Its required-artifact verify must therefore match what
+input, default `0.3.8`). Its required-artifact verify must therefore match what
 **that version** emits — not the dev-tree tip.
 
 Concrete rule: bundle artifacts added to the dev tree after the pinned published

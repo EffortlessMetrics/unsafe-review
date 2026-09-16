@@ -8,25 +8,42 @@ mod analysis;
 pub mod api;
 mod candidate;
 mod domain;
+pub mod freshness;
 mod input;
 mod output;
 mod policy;
 mod util;
 
+pub use output::agent::{
+    RepairCandidate, RepairCandidateApplicability, RepairCandidateKind, RepairCandidatePosition,
+    RepairCandidateRange, RepairCandidateTarget, RepairEvidenceMovement,
+};
 pub use output::comment_plan::COMMENT_BODY_WORD_LIMIT;
+pub use output::lsp::{
+    EditorActionApplicability, EditorActionArguments, EditorActionCommand, EditorActionContract,
+    EditorActionDiagnostic, EditorActionPayload, EditorActionReadiness, EditorCoverageBlock,
+    EditorDiagnostic, EditorEvidenceState, EditorEvidenceSummary, EditorObligationEvidence,
+    EditorPosition, EditorProjection, EditorRange, EditorReachEvidence, EditorSafetyCondition,
+    EditorSimpleEvidence, EditorWitnessRoute, actions_for_card,
+};
+pub use policy::baseline_ledger_path;
 
 pub use api::{
-    AnalysisMode, AnalyzeInput, AnalyzeOutput, BaselineInitResult, DiffSource, DiscoveryOptions,
-    FILE_TIMINGS_CAP, OutcomeReport, PerFileScanStats, PolicyMode, PolicyReport, Provenance,
-    ReceiptAuditReport, RepoScanEvent, RepoScanPhase, RepoScanStatus, RepoStopReason,
-    ReviewCardConfirmationProjection, ScanCost, Scope, analyze, analyze_with_discovery,
-    analyze_with_discovery_and_progress, analyze_with_discovery_and_repo_events,
-    audit_witness_receipts, baseline_add, baseline_init, bless_fixture_card_goldens,
+    AnalysisMode, AnalyzeInput, AnalyzeOutput, BaselineHealthCounts, BaselineHealthEntry,
+    BaselineHealthReport, BaselineInitResult, BaselineRefreshPlan, DiffSource, DiscoveryOptions,
+    FILE_TIMINGS_CAP, HealthBucket, OutcomeReport, PerFileScanStats, PolicyMode, PolicyReport,
+    Provenance, ReceiptAuditReport, RefreshAction, RefreshPlanEntry, RefreshPlanSummary,
+    RepoScanEvent, RepoScanPhase, RepoScanStatus, RepoStopReason, ReviewCardConfirmationProjection,
+    ScanCost, Scope, analyze, analyze_with_discovery, analyze_with_discovery_and_progress,
+    analyze_with_discovery_and_repo_events, audit_witness_receipts, baseline_add, baseline_init,
+    baseline_init_preview, baseline_refresh_preview, baseline_status, bless_fixture_card_goldens,
     bless_fixture_card_goldens_from_workspace, bless_fixture_surface_goldens,
     bless_fixture_surface_goldens_from_workspace, collect_context, collect_context_range,
     compare_outcome_json, discover_repo_files, evaluate_policy_report,
-    evaluate_policy_report_from_output, explain_card, project_editor,
-    project_review_card_confirmation, render_badge_jsons, render_comment_plan,
+    evaluate_policy_report_from_output, explain_card, project_actionable_editor_diagnostics,
+    project_editor, project_editor_diagnostics, project_review_card_confirmation,
+    render_badge_jsons, render_baseline_refresh_human, render_baseline_refresh_json,
+    render_baseline_status_human, render_baseline_status_json, render_comment_plan,
     render_fixture_surface, render_fixture_surface_from_workspace, render_gate_manifest,
     render_gate_manifest_repo, render_github_summary, render_human, render_json,
     render_json_with_provenance, render_lsp, render_lsp_hover, render_markdown,
@@ -35,6 +52,7 @@ pub use api::{
     render_receipt_audit_markdown, render_repair_queue, render_sarif, render_usefulness_telemetry,
     render_usefulness_telemetry_with_cost, render_witness_plan, validate_witness_receipts,
 };
+pub use freshness::{AnalysisIdentity, AnalysisState};
 
 /// Compute the SHA-256 hex digest of raw bytes.
 ///
@@ -54,9 +72,9 @@ pub use candidate::{
 };
 pub use domain::{
     CardId, CargoCarefulReceiptInput, ConcurrencyReceiptInput, Confidence, ContractEvidence,
-    DischargeEvidence, HazardKind, MiriReceiptInput, MissingEvidence, NextAction, Priority,
-    ProofPath, ProofReceiptInput, ReachEvidence, ReceiptCardIdKind, RelatedTest, ReviewCard,
-    ReviewClass, SafetyObligation, SanitizerReceiptInput, SourceLocation, UnsafeOperation,
-    UnsafeSite, WITNESS_RECEIPT_SCHEMA_VERSION, WitnessEvidence, WitnessKind, WitnessReceipt,
-    WitnessRoute,
+    DischargeEvidence, ExecutedReceiptInput, HazardKind, MiriReceiptInput, MissingEvidence,
+    NextAction, Priority, ProofPath, ProofReceiptInput, ReachEvidence, ReceiptCardIdKind,
+    RelatedTest, ReviewCard, ReviewClass, SafetyObligation, SanitizerReceiptInput, SourceLocation,
+    UnsafeOperation, UnsafeSite, WITNESS_RECEIPT_SCHEMA_VERSION, WitnessEvidence, WitnessKind,
+    WitnessReceipt, WitnessRoute,
 };

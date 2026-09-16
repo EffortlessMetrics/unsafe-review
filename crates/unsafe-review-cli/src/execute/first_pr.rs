@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command as ProcessCommand;
 
+use super::{normalize_shell_path, shell_arg};
 use crate::command::{CheckOptions, DiffInput};
 use serde_json::json;
 use unsafe_review_core::{
@@ -80,11 +81,13 @@ struct StableByteSeedLedger {
 }
 
 pub(super) struct FirstPrReport<'a> {
+    pub(super) terminal_command: &'static str,
     pub(super) output: &'a AnalyzeOutput,
     pub(super) out_dir: &'a Path,
     pub(super) root: &'a Path,
     pub(super) check: &'a CheckOptions,
     pub(super) manual_candidates: &'a [ManualCandidate],
+    pub(super) comment_plan: Option<&'a str>,
     pub(super) no_changed_gaps_message: &'a str,
     pub(super) no_changed_gaps_limitation: &'a str,
     pub(super) artifacts: &'a [&'a str],
@@ -95,30 +98,400 @@ pub(super) struct FirstPrReport<'a> {
 }
 
 pub(super) fn print_first_pr_report(report: FirstPrReport<'_>) {
-    print_first_pr_overview(report.output, report.out_dir, report.output_bytes);
-    print_manual_candidate_handoff(report.out_dir, report.root, report.manual_candidates);
-    print_receipt_audit_handoff(report.check);
-    print_policy_report_handoff(report.out_dir);
+    if report.terminal_command == "pr" {
+        print_pr_front_panel(report);
+        return;
+    }
+
+    print_first_pr_overview(
+        report.terminal_command,
+        report.output,
+        report.out_dir,
+        report.check,
+        report.output_bytes,
+    );
     print_top_card_summary(
         report.output,
         report.root,
         report.no_changed_gaps_message,
         report.no_changed_gaps_limitation,
     );
+    let top_card_id = report.output.cards.first().map(|card| card.id.to_string());
+    print_comment_plan_summary(report.comment_plan, report.root, top_card_id.as_deref());
+    print_secondary_handoffs(report.check, report.out_dir, report.root);
+    print_manual_candidate_handoff(report.out_dir, report.root, report.manual_candidates);
     print_artifact_paths(report.out_dir, report.artifacts);
     print_trust_boundary();
 }
 
-fn print_receipt_audit_handoff(check: &CheckOptions) {
-    println!("Audit saved receipts:");
-    println!("  {}", receipt_audit_command(check));
-    println!("  saved receipt metadata only; unsafe-review did not run a witness");
+fn print_pr_front_panel(report: FirstPrReport<'_>) {
+    print!("{}", format_pr_front_panel(&report));
 }
 
-fn print_policy_report_handoff(out_dir: &Path) {
-    println!("Policy report:");
-    println!("  {}", artifact_path_display(out_dir, "policy-report.md"));
-    println!("  ReviewCard-only policy simulation; manual candidates are not policy inputs");
+pub(super) fn format_pr_front_panel(report: &FirstPrReport<'_>) -> String {
+    let summary = &report.output.summary;
+    let scan_status = if summary.scan_capped {
+        "partial (card cap reached)"
+    } else {
+        "complete"
+    };
+    let (selected, omitted, omitted_reason) = comment_plan_selection(report.comment_plan);
+    let mut out = String::new();
+    let _ = writeln!(out, "unsafe-review pr");
+    let _ = writeln!(out, "Result: advisory");
+    let _ = writeln!(
+        out,
+        "Scope: diff; scan status: {scan_status}; changed files: {} ({} Rust)",
+        summary.changed_files, summary.changed_rust_files
+    );
+    let _ = writeln!(
+        out,
+        "Movement: new {} | worsened {} | improved {} | resolved {} | inherited {}",
+        summary.new_gaps,
+        summary.worsened_gaps,
+        summary.improved_gaps,
+        summary.resolved_gaps,
+        summary.inherited_gaps
+    );
+    if let Some(notice) = summary.capped_scan_notice() {
+        let _ = writeln!(out, "Limitation: {notice}");
+        let _ = writeln!(
+            out,
+            "Retry without cap: {}",
+            rerun_without_cap_command("pr", report.check, report.out_dir)
+        );
+    }
+    let _ = writeln!(
+        out,
+        "Reviewer actions: selected {selected}, omitted {omitted}{}",
+        omitted_reason
+    );
+    // Keep the baseline pointer ahead of card prose: a card's canonical next
+    // action may itself mention the baseline, but this is the stable handoff
+    // consumed by the existing front-door contract.
+    let _ = writeln!(out, "Baseline: {}", baseline_handoff(report.root));
+
+    if let Some(card) = report.output.cards.first() {
+        let missing = card
+            .missing
+            .iter()
+            .map(|missing| missing.kind.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let _ = writeln!(
+            out,
+            "Top action: {}:{} {} [{}]",
+            card_path_display(&card.site.location.file),
+            card.site.location.line,
+            card.operation.family.as_str(),
+            card.class.as_str()
+        );
+        if !missing.is_empty() {
+            let _ = writeln!(out, "Missing: {missing}");
+        }
+        let _ = writeln!(
+            out,
+            "Next: {}",
+            compact_terminal_text(&card.next_action.summary, 180)
+        );
+        if let Some(command) = card.next_action.verify_commands.first() {
+            let _ = writeln!(out, "Verify: {command}");
+        }
+        let _ = writeln!(out, "Explain: {}", explain_command(report.root, &card.id));
+        let _ = writeln!(
+            out,
+            "Agent packet: {}",
+            context_command(report.root, &card.id)
+        );
+    } else {
+        let _ = writeln!(
+            out,
+            "Top action: none; no changed evidence gaps were found."
+        );
+        let _ = writeln!(
+            out,
+            "Next: open {}",
+            artifact_path_display(report.out_dir, "pr-summary.md")
+        );
+    }
+
+    if !report.manual_candidates.is_empty() {
+        let _ = writeln!(
+            out,
+            "Manual candidates: {} (advisory sidecar; not analyzer ReviewCards)",
+            report.manual_candidates.len()
+        );
+    }
+    let _ = writeln!(
+        out,
+        "Bundle: {} ({} artifacts, {} bytes)",
+        card_path_display(report.out_dir),
+        report.artifacts.len(),
+        report.output_bytes
+    );
+    let _ = writeln!(out, "Trust: {}", trust_boundary_text());
+    out
+}
+
+fn comment_plan_selection(comment_plan: Option<&str>) -> (usize, usize, String) {
+    let Some(comment_plan) = comment_plan else {
+        return (
+            0,
+            0,
+            " (unavailable; inspect comment-plan.json)".to_string(),
+        );
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(comment_plan) else {
+        return (
+            0,
+            0,
+            " (unavailable; inspect comment-plan.json)".to_string(),
+        );
+    };
+    let Some(summary) = value.get("summary") else {
+        return (
+            0,
+            0,
+            " (unavailable; inspect comment-plan.json)".to_string(),
+        );
+    };
+    let Some(selected) = summary
+        .get("selected_count")
+        .and_then(serde_json::Value::as_u64)
+    else {
+        return (
+            0,
+            0,
+            " (unavailable; inspect comment-plan.json)".to_string(),
+        );
+    };
+    let Some(omitted) = summary
+        .get("not_selected_count")
+        .and_then(serde_json::Value::as_u64)
+    else {
+        return (
+            0,
+            0,
+            " (unavailable; inspect comment-plan.json)".to_string(),
+        );
+    };
+    let reason = value
+        .get("not_selected")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|card| card.get("reason_code").and_then(serde_json::Value::as_str))
+        .next()
+        .map_or_else(String::new, |code| format!(" (top omission: {code})"));
+    (selected as usize, omitted as usize, reason)
+}
+
+fn compact_terminal_text(value: &str, max_chars: usize) -> String {
+    let compact = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if compact.chars().count() <= max_chars {
+        return compact;
+    }
+    if max_chars == 0 {
+        return String::new();
+    }
+    let mut chars = compact.chars();
+    let truncated = chars.by_ref().take(max_chars - 1).collect::<String>();
+    format!("{truncated}…")
+}
+
+fn baseline_handoff(root: &Path) -> String {
+    let existing = root
+        .join("policy")
+        .join("unsafe-review-baseline.toml")
+        .is_file();
+    let mut baseline = String::from("baseline");
+    if existing {
+        baseline.push_str(&format!(
+            " existing: status {}; refresh: {};",
+            baseline_status_command(root),
+            baseline_refresh_command(root)
+        ));
+    }
+    baseline.push_str(&format!(
+        " new: {} (clean base/default branch only; records pre-existing debt)",
+        baseline_init_command(root)
+    ));
+    baseline
+}
+
+fn print_comment_plan_summary(comment_plan: Option<&str>, root: &Path, top_card_id: Option<&str>) {
+    print!(
+        "{}",
+        format_comment_plan_summary(comment_plan, root, top_card_id)
+    );
+}
+
+pub(super) fn format_comment_plan_summary(
+    comment_plan: Option<&str>,
+    root: &Path,
+    top_card_id: Option<&str>,
+) -> String {
+    let mut out = String::new();
+    let Some(comment_plan) = comment_plan else {
+        let _ = writeln!(
+            out,
+            "- Reviewer comments: unavailable (inspect comment-plan.json)"
+        );
+        return out;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(comment_plan) else {
+        let _ = writeln!(
+            out,
+            "- Reviewer comments: unavailable (inspect comment-plan.json)"
+        );
+        return out;
+    };
+    let Some(summary) = value.get("summary").and_then(serde_json::Value::as_object) else {
+        let _ = writeln!(
+            out,
+            "- Reviewer comments: unavailable (inspect comment-plan.json)"
+        );
+        return out;
+    };
+    let Some(selected) = summary
+        .get("selected_count")
+        .and_then(serde_json::Value::as_u64)
+    else {
+        let _ = writeln!(
+            out,
+            "- Reviewer comments: unavailable (inspect comment-plan.json)"
+        );
+        return out;
+    };
+    let Some(omitted) = summary
+        .get("not_selected_count")
+        .and_then(serde_json::Value::as_u64)
+    else {
+        let _ = writeln!(
+            out,
+            "- Reviewer comments: unavailable (inspect comment-plan.json)"
+        );
+        return out;
+    };
+
+    let Some(comments) = value.get("comments").and_then(serde_json::Value::as_array) else {
+        let _ = writeln!(
+            out,
+            "- Reviewer comments: unavailable (inspect comment-plan.json)"
+        );
+        return out;
+    };
+    if comments.len() as u64 != selected {
+        let _ = writeln!(
+            out,
+            "- Reviewer comments: unavailable (inspect comment-plan.json)"
+        );
+        return out;
+    }
+
+    let top_reason = value
+        .get("not_selected")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|card| {
+            card.get("selection_reason_code")
+                .and_then(serde_json::Value::as_str)
+        })
+        .fold(BTreeMap::<&str, usize>::new(), |mut counts, reason| {
+            *counts.entry(reason).or_default() += 1;
+            counts
+        })
+        .into_iter()
+        .max_by(|(left_reason, left_count), (right_reason, right_count)| {
+            left_count
+                .cmp(right_count)
+                .then_with(|| right_reason.cmp(left_reason))
+        })
+        .map(|(reason, count)| format!("; top omission `{reason}` ({count})"))
+        .unwrap_or_default();
+
+    let (top_card_reason, additional_comments): (Option<&str>, Vec<&serde_json::Value>) = comments
+        .iter()
+        .fold((None, Vec::new()), |mut result, comment| {
+            let card_id = comment.get("card_id").and_then(serde_json::Value::as_str);
+            if top_card_id == card_id {
+                result.0 = comment
+                    .get("selection_reason")
+                    .and_then(serde_json::Value::as_str);
+            } else {
+                result.1.push(comment);
+            }
+            result
+        });
+    let top_card_selection = top_card_reason
+        .map(|reason| format!("; top card selected because {reason}"))
+        .unwrap_or_default();
+    let _ = writeln!(
+        out,
+        "- Reviewer comments: {selected} selected, {omitted} omitted{top_reason}{top_card_selection}"
+    );
+    if additional_comments.is_empty() {
+        let _ = writeln!(out, "- Additional reviewer actions: none");
+        return out;
+    }
+
+    let shown = additional_comments.len().min(3);
+    let _ = writeln!(
+        out,
+        "Additional reviewer actions (showing {shown} of {}):",
+        additional_comments.len()
+    );
+    for (index, comment) in additional_comments.iter().take(shown).enumerate() {
+        let card_id = comment
+            .get("card_id")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("card unavailable");
+        let location = match (
+            comment.get("path").and_then(serde_json::Value::as_str),
+            comment.get("line").and_then(serde_json::Value::as_u64),
+        ) {
+            (Some(path), Some(line)) => format!("{path}:{line}"),
+            _ => "location unavailable".to_string(),
+        };
+        let operation = comment
+            .get("operation_family")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("operation unavailable");
+        let reason = comment
+            .get("selection_reason")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("selection reason unavailable");
+        let next_action = comment
+            .get("next_action")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("next action unavailable");
+        let verify = comment
+            .get("verify_commands")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|commands| commands.first())
+            .and_then(serde_json::Value::as_str)
+            .map_or_else(
+                || "Verify: unavailable (inspect comment-plan.json)".to_string(),
+                |command| format!("Verify: {command}"),
+            );
+        let _ = writeln!(
+            out,
+            "  {}. {location} `{operation}` — Why: {reason}; Next: {next_action}; Explain: {}; {verify}",
+            index + 1,
+            explain_command(root, &card_id),
+        );
+    }
+    out
+}
+
+fn print_secondary_handoffs(check: &CheckOptions, out_dir: &Path, root: &Path) {
+    println!(
+        "Secondary handoffs: receipts: {} (metadata only; no witness); policy: {} (ReviewCard-only; manual candidates excluded); {}",
+        receipt_audit_command(check),
+        artifact_path_display(out_dir, "policy-report.md"),
+        baseline_handoff(root),
+    );
 }
 
 fn print_manual_candidate_handoff(
@@ -126,8 +499,18 @@ fn print_manual_candidate_handoff(
     root: &Path,
     manual_candidates: &[ManualCandidate],
 ) {
-    let stable_byte_seed_ledger = load_stable_byte_seed_ledger(root);
     println!("Manual candidates:");
+    if manual_candidates.is_empty() {
+        println!(
+            "  none (advisory sidecars: {}, {}, {}; not analyzer ReviewCards; no agent or tokmd run)",
+            artifact_path_display(out_dir, "manual-candidates.json"),
+            artifact_path_display(out_dir, "manual-repair-queue.json"),
+            artifact_path_display(out_dir, "tokmd-packets.json"),
+        );
+        return;
+    }
+
+    let stable_byte_seed_ledger = load_stable_byte_seed_ledger(root);
     println!(
         "  {} (manual/advisory; not analyzer ReviewCards)",
         artifact_path_display(out_dir, "manual-candidates.json")
@@ -159,14 +542,7 @@ fn print_manual_candidate_handoff(
             candidate_witness_plan_command(root, &candidate.id)
         );
     }
-    print_manual_candidate_queue_preview(root, manual_candidates, &stable_byte_seed_ledger);
-    println!(
-        "  Review-kit candidate queue: first {} of {} manual candidate(s)",
-        manual_candidates
-            .len()
-            .min(MANUAL_CANDIDATE_REVIEW_KIT_QUEUE_LIMIT),
-        manual_candidates.len()
-    );
+    print_manual_candidate_queue_preview(manual_candidates);
     println!(
         "  Manual repair queue: {} (copy-only; unsafe-review did not run an agent)",
         artifact_path_display(out_dir, "manual-repair-queue.json")
@@ -180,19 +556,20 @@ fn print_manual_candidate_handoff(
     );
 }
 
-fn print_manual_candidate_queue_preview(
-    root: &Path,
-    manual_candidates: &[ManualCandidate],
-    stable_byte_seed_ledger: &StableByteSeedLedger,
-) {
+fn print_manual_candidate_queue_preview(manual_candidates: &[ManualCandidate]) {
     let queue_len = manual_candidates
         .len()
         .min(MANUAL_CANDIDATE_REVIEW_KIT_QUEUE_LIMIT);
+    let additional_total = manual_candidates.len().saturating_sub(1);
+    let additional_shown = queue_len.saturating_sub(1);
+    if additional_total == 0 {
+        println!("  Additional manual candidates: none; full details in manual-candidates.json");
+        return;
+    }
     println!(
-        "  Manual candidate queue preview: first {queue_len} of {} manual candidate(s)",
-        manual_candidates.len()
+        "  Additional manual candidates: {additional_shown} of {additional_total} shown; full details in manual-candidates.json"
     );
-    for candidate in manual_candidates.iter().take(queue_len) {
+    for candidate in manual_candidates.iter().skip(1).take(additional_shown) {
         println!(
             "    - {} at {} ({}) evidence refs: {}",
             candidate.id,
@@ -203,17 +580,6 @@ fn print_manual_candidate_queue_preview(
         if let Some((label, value)) = manual_candidate_first_guidance_cue(candidate) {
             println!("      {label}: {value}");
         }
-        if let Some(seed) = stable_byte_seed_ledger.by_candidate_id.get(&candidate.id) {
-            println!("      {}", stable_byte_seed_terminal_summary(seed));
-        }
-        println!(
-            "      Agent packet: {}",
-            context_command(root, &candidate.id)
-        );
-        println!(
-            "      Witness plan: {}",
-            candidate_witness_plan_command(root, &candidate.id)
-        );
     }
 }
 
@@ -223,7 +589,7 @@ fn receipt_audit_command(check: &CheckOptions) -> String {
         "receipt".to_string(),
         "audit".to_string(),
         "--root".to_string(),
-        shell_arg(&check.root.display().to_string()),
+        handoff_path_arg(&check.root),
     ];
     if let Some(base) = &check.base {
         parts.push("--base".to_string());
@@ -232,7 +598,7 @@ fn receipt_audit_command(check: &CheckOptions) -> String {
     if let Some(diff) = &check.diff {
         parts.push("--diff".to_string());
         match diff {
-            DiffInput::File(path) => parts.push(shell_arg(&path.display().to_string())),
+            DiffInput::File(path) => parts.push(handoff_path_arg(path)),
             DiffInput::Stdin => parts.push("-".to_string()),
         }
     }
@@ -245,33 +611,136 @@ fn receipt_audit_command(check: &CheckOptions) -> String {
     parts.join(" ")
 }
 
-fn shell_arg(value: &str) -> String {
-    if value.chars().any(char::is_whitespace) {
-        format!("\"{}\"", value.replace('"', "\\\""))
-    } else {
-        value.to_string()
-    }
+/// Shared with `execute` so the no-new-debt diagnostic names the same adoption
+/// command the front-door handoff prints, rather than a second copy that can drift.
+pub(super) fn baseline_init_command(root: &Path) -> String {
+    format!(
+        "unsafe-review baseline init --root {}",
+        handoff_path_arg(root)
+    )
 }
 
-fn print_first_pr_overview(output: &AnalyzeOutput, out_dir: &Path, output_bytes: u64) {
-    println!("unsafe-review first-pr");
-    println!("unsafe-review wrote an advisory PR bundle.");
-    println!("- Artifact directory: {}", card_path_display(out_dir));
-    println!("- Review cards: {}", output.summary.cards);
-    println!(
-        "- Open actionable gaps: {}",
-        output.summary.open_actionable_gaps
+fn baseline_status_command(root: &Path) -> String {
+    format!(
+        "unsafe-review baseline status --root {}",
+        handoff_path_arg(root)
+    )
+}
+
+fn baseline_refresh_command(root: &Path) -> String {
+    format!(
+        "unsafe-review baseline refresh --dry-run --root {}",
+        handoff_path_arg(root)
+    )
+}
+
+fn handoff_path_arg(path: &Path) -> String {
+    shell_arg(&normalize_shell_path(&path.display().to_string()))
+}
+
+fn print_first_pr_overview(
+    terminal_command: &str,
+    output: &AnalyzeOutput,
+    out_dir: &Path,
+    check: &CheckOptions,
+    output_bytes: u64,
+) {
+    print!(
+        "{}",
+        format_first_pr_overview(terminal_command, output, out_dir, check, output_bytes)
     );
+}
+
+pub(super) fn format_first_pr_overview(
+    terminal_command: &str,
+    output: &AnalyzeOutput,
+    out_dir: &Path,
+    check: &CheckOptions,
+    output_bytes: u64,
+) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "unsafe-review {terminal_command}");
+    let _ = writeln!(out, "unsafe-review wrote an advisory PR bundle.");
+    let _ = writeln!(out, "- Artifact directory: {}", card_path_display(out_dir));
+    let _ = writeln!(
+        out,
+        "- Scope: {}, {}, {}",
+        count_label(output.summary.cards, "ReviewCard", "ReviewCards"),
+        count_label(
+            output.summary.changed_files,
+            "changed file",
+            "changed files"
+        ),
+        count_label(
+            output.summary.open_actionable_gaps,
+            "open actionable gap",
+            "open actionable gaps",
+        ),
+    );
+    let scan_status = if output.summary.scan_capped {
+        "partial (card cap reached)"
+    } else {
+        "complete"
+    };
+    let _ = writeln!(
+        out,
+        "- Evidence movement: new {}, worsened {}, improved {}, resolved {}, inherited {}; scan status: {scan_status}",
+        output.summary.new_gaps,
+        output.summary.worsened_gaps,
+        output.summary.improved_gaps,
+        output.summary.resolved_gaps,
+        output.summary.inherited_gaps,
+    );
+    // Without this line a capped run is byte-identical to a complete one that
+    // genuinely found fewer gaps (#2006).
+    if let Some(notice) = output.summary.capped_scan_notice() {
+        let _ = writeln!(out, "- {notice}");
+        let _ = writeln!(
+            out,
+            "- Retry without cap: {}",
+            rerun_without_cap_command(terminal_command, check, out_dir)
+        );
+    }
     // Output bundle disk footprint — diagnostic only; not a coverage claim,
     // proof, UB-free, Miri-clean, site-execution, or performance guarantee.
-    println!("- Output bundle: {output_bytes} bytes");
-    println!("Open:");
-    println!("  {}", artifact_path_display(out_dir, "pr-summary.md"));
-    println!("Agent repair queue:");
-    println!(
+    let _ = writeln!(out, "- Output bundle: {output_bytes} bytes");
+    let _ = writeln!(out, "Open:");
+    let _ = writeln!(out, "  {}", artifact_path_display(out_dir, "pr-summary.md"));
+    let _ = writeln!(out, "Agent repair queue:");
+    let _ = writeln!(
+        out,
         "  {} (copy-only; unsafe-review did not run an agent)",
         artifact_path_display(out_dir, "repair-queue.json")
     );
+    out
+}
+
+fn count_label(count: usize, singular: &str, plural: &str) -> String {
+    format!("{count} {}", if count == 1 { singular } else { plural })
+}
+
+fn rerun_without_cap_command(
+    terminal_command: &str,
+    check: &CheckOptions,
+    out_dir: &Path,
+) -> String {
+    let mut parts = vec!["unsafe-review".to_string(), terminal_command.to_string()];
+    parts.push("--root".to_string());
+    parts.push(shell_arg(&check.root.display().to_string()));
+    if let Some(base) = &check.base {
+        parts.push("--base".to_string());
+        parts.push(shell_arg(base));
+    }
+    if let Some(diff) = &check.diff {
+        parts.push("--diff".to_string());
+        match diff {
+            DiffInput::File(path) => parts.push(shell_arg(&path.display().to_string())),
+            DiffInput::Stdin => parts.push("-".to_string()),
+        }
+    }
+    parts.push("--out-dir".to_string());
+    parts.push(shell_arg(&out_dir.display().to_string()));
+    parts.join(" ")
 }
 
 fn print_top_card_summary(
@@ -280,24 +749,43 @@ fn print_top_card_summary(
     no_changed_gaps_message: &str,
     no_changed_gaps_limitation: &str,
 ) {
+    print!(
+        "{}",
+        format_top_card_summary(
+            output,
+            root,
+            no_changed_gaps_message,
+            no_changed_gaps_limitation
+        )
+    );
+}
+
+pub(super) fn format_top_card_summary(
+    output: &AnalyzeOutput,
+    root: &Path,
+    no_changed_gaps_message: &str,
+    no_changed_gaps_limitation: &str,
+) -> String {
+    let mut out = String::new();
     if output.summary.open_actionable_gaps == 0 {
-        println!("{no_changed_gaps_message}");
-        println!("{no_changed_gaps_limitation}");
-        return;
+        let _ = writeln!(out, "{no_changed_gaps_message}");
+        let _ = writeln!(out, "{no_changed_gaps_limitation}");
+        return out;
     }
 
     let Some(card) = output.cards.first() else {
-        return;
+        return out;
     };
 
-    println!("Top card:");
-    println!(
+    let _ = writeln!(out, "Top card:");
+    let _ = writeln!(
+        out,
         "  {}:{} `{}`",
         card_path_display(&card.site.location.file),
         card.site.location.line,
         card.operation.family.as_str()
     );
-    println!("  Class: `{}`", card.class.as_str());
+    let _ = writeln!(out, "  Class: `{}`", card.class.as_str());
     if !card.missing.is_empty() {
         let missing = card
             .missing
@@ -305,41 +793,59 @@ fn print_top_card_summary(
             .map(|missing| missing.kind.as_str())
             .collect::<Vec<_>>()
             .join(", ");
-        println!("  Missing: {missing}");
+        let _ = writeln!(out, "  Missing: {missing}");
     }
     if let Some(route) = card.routes.first() {
-        println!("  Route: `{}`", route.kind.as_str());
+        let _ = writeln!(out, "  Route: `{}`", route.kind.as_str());
     }
+    // Keep the first-screen card summary action-first. Detailed confirmation
+    // and repro guidance is compacted to one line per required cue, while the
+    // exact explain command and canonical artifacts retain the full detail.
+    let _ = writeln!(out, "  Next: {}", card.next_action.summary);
     let confirmation = project_review_card_confirmation(card);
-    println!("  Hypothesis: {}", confirmation.hypothesis_to_confirm);
-    println!("  Build/run this first: {}", confirmation.build_this_first);
-    println!("  Minimal repro cue:");
-    for step in &confirmation.minimal_repro_steps {
-        println!("    - {step}");
+    let _ = writeln!(out, "  Hypothesis: {}", confirmation.hypothesis_to_confirm);
+    let _ = writeln!(out, "  Verify: {}", confirmation.build_this_first);
+    if let Some(step) = confirmation.minimal_repro_steps.first() {
+        let _ = writeln!(
+            out,
+            "  Minimal repro cue: {}",
+            compact_terminal_minimal_repro_step(step, card)
+        );
     }
-    println!(
-        "    - Limitation: {}",
+    let _ = writeln!(
+        out,
+        "  Limitation: {}",
         confirmation.minimal_repro_limitation
     );
-    println!("  Confirmation step: {}", confirmation.confirmation_step);
-    println!("  Next: {}", card.next_action.summary);
-    println!("Explain top card:");
-    println!("  {}", explain_command(root, &card.id));
-    println!("Agent packet:");
-    println!("  {}", context_command(root, &card.id));
+    let _ = writeln!(out, "Explain top card:");
+    let _ = writeln!(out, "  {}", explain_command(root, &card.id));
+    let _ = writeln!(out, "Agent packet:");
+    let _ = writeln!(out, "  {}", context_command(root, &card.id));
+    out
+}
+
+/// Keep the terminal handoff readable without changing the canonical cue in
+/// ReviewCard projections or artifacts. The exact card identity remains
+/// available in the adjacent Explain/Agent packet commands and artifacts.
+fn compact_terminal_minimal_repro_step(step: &str, card: &ReviewCard) -> String {
+    let prefix = format!("Confirm ReviewCard `{}` still maps to", card.id);
+    step.strip_prefix(&prefix).map_or_else(
+        || step.to_string(),
+        |rest| format!("Confirm this card still maps to{rest}"),
+    )
 }
 
 fn explain_command(root: &Path, card_id: &impl fmt::Display) -> String {
     format!(
         "unsafe-review explain --root {} {card_id}",
-        shell_arg(&root.display().to_string())
+        handoff_path_arg(root)
     )
 }
 
 fn context_command(root: &Path, card_id: &impl fmt::Display) -> String {
     format!(
         "unsafe-review context --root {} {card_id} --json",
-        shell_arg(&root.display().to_string())
+        handoff_path_arg(root)
     )
 }
 
@@ -523,6 +1029,9 @@ fn review_kit_review_card_queue_entry(
                 "reasons": ["missing repair-queue projection"],
             })
         });
+    let repair_candidates = repair_queue
+        .map(|projection| projection.repair_candidates.clone())
+        .unwrap_or_default();
 
     json!({
         "card_id": card.id.to_string(),
@@ -542,6 +1051,7 @@ fn review_kit_review_card_queue_entry(
         "repair_queue_buckets": repair_queue_buckets,
         "repair_queue_bucket_reasons": repair_queue_bucket_reasons,
         "agent_readiness": agent_readiness,
+        "repair_candidates": repair_candidates,
         "explain": explain_command(root, &card.id),
         "context_json": context_command(root, &card.id),
         "trust_boundary": "Static unsafe contract review only; copy-only ReviewCard queue entry projected from cards.json and repair-queue.json; it is not a proof of memory safety, not UB-free status, not Miri-clean status, and not a site-execution claim unless a matching witness receipt says so. unsafe-review did not run agents, run witnesses, edit source, post comments, suppress cards, resolve cards, or enforce blocking policy.",
@@ -567,6 +1077,7 @@ struct ReviewKitRepairQueueProjection {
     buckets: Vec<String>,
     bucket_reasons: Vec<String>,
     agent_readiness: serde_json::Value,
+    repair_candidates: Vec<serde_json::Value>,
 }
 
 fn review_kit_repair_queue_index(
@@ -600,6 +1111,11 @@ fn review_kit_repair_queue_index(
                         .get("agent_readiness")
                         .cloned()
                         .unwrap_or(serde_json::Value::Null),
+                    repair_candidates: entry
+                        .get("repair_candidates")
+                        .and_then(serde_json::Value::as_array)
+                        .cloned()
+                        .unwrap_or_default(),
                 }
             });
             if !projection
@@ -1664,6 +2180,12 @@ pub(super) fn render_tokmd_packets_artifact(
         })
         .count();
     let value = json!({
+        // Canonical tokmd packet-bundle schema id (tokmd-swarm
+        // crates/tokmd/schemas/tokmd-packets.schema.json requires
+        // `schema == "tokmd.packets/v1"`). `schema_version` is retained for
+        // backward-compat with older consumers; the schema allows extra
+        // properties (`additionalProperties: true`).
+        "schema": "tokmd.packets/v1",
         "schema_version": "tokmd-packets/v1",
         "tool": "unsafe-review",
         "tool_version": env!("CARGO_PKG_VERSION"),
@@ -2434,8 +2956,9 @@ fn artifact_schema_version(path: &str) -> Option<&'static str> {
     match path {
         // cards.json was bumped to 0.2 when provenance metadata was added.
         "cards.json" => Some("0.2"),
-        "review-kit.json" | "comment-plan.json" | "lsp.json" | "repair-queue.json"
-        | "policy-report.json" | "receipt-audit.json" => Some("0.1"),
+        "review-kit.json" | "comment-plan.json" | "repair-queue.json" | "policy-report.json"
+        | "receipt-audit.json" => Some("0.1"),
+        "lsp.json" => Some("0.2"),
         "unsafe-review-gate.json" => Some("unsafe-review-gate/v1"),
         "manual-candidates.json" => Some("manual-candidates/v1"),
         "manual-repair-queue.json" => Some("manual-repair-queue/v1"),
@@ -2447,20 +2970,24 @@ fn artifact_schema_version(path: &str) -> Option<&'static str> {
 }
 
 fn print_artifact_paths(out_dir: &Path, artifacts: &[&str]) {
-    println!("Artifacts:");
-    for name in artifacts {
-        println!("  {}", artifact_path_display(out_dir, name));
-    }
+    let front_panel = artifacts
+        .iter()
+        .take(2)
+        .map(|name| artifact_path_display(out_dir, name))
+        .collect::<Vec<_>>()
+        .join(" and ");
+    println!(
+        "Artifacts: {} files indexed by {front_panel}; inspect review-kit.json for the complete bundle inventory",
+        artifacts.len()
+    );
 }
 
 fn print_trust_boundary() {
-    println!("Trust boundary:");
-    println!(
-        "  static unsafe contract review only; not memory-safety proof, not UB-free status, not Miri-clean status, and not a site-execution claim unless a matching witness receipt says so."
-    );
-    println!(
-        "  unsafe-review did not run witnesses, post comments, edit source, or enforce blocking policy."
-    );
+    println!("Trust boundary: {}", trust_boundary_text());
+}
+
+fn trust_boundary_text() -> &'static str {
+    "static unsafe contract review only; not memory-safety proof, not UB-free status, not Miri-clean status, and not a site-execution claim unless a matching witness receipt says so; unsafe-review did not run witnesses, post comments, edit source, or enforce blocking policy."
 }
 
 fn card_path_display(path: &Path) -> String {
@@ -2480,10 +3007,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn top_card_handoff_commands_quote_roots_with_spaces() {
+    fn handoff_commands_quote_roots_with_spaces() {
         let root = Path::new("C:/Code/Rust With Spaces/unsafe-review");
         let card_id = "UR-fixture-src-lib-rs-owner-operation-read-hash-hazard-c1";
 
+        assert_eq!(
+            baseline_init_command(root),
+            "unsafe-review baseline init --root \"C:/Code/Rust With Spaces/unsafe-review\""
+        );
+        assert_eq!(
+            baseline_refresh_command(root),
+            "unsafe-review baseline refresh --dry-run --root \"C:/Code/Rust With Spaces/unsafe-review\""
+        );
         assert_eq!(
             explain_command(root, &card_id),
             "unsafe-review explain --root \"C:/Code/Rust With Spaces/unsafe-review\" UR-fixture-src-lib-rs-owner-operation-read-hash-hazard-c1"
@@ -2491,6 +3026,59 @@ mod tests {
         assert_eq!(
             context_command(root, &card_id),
             "unsafe-review context --root \"C:/Code/Rust With Spaces/unsafe-review\" UR-fixture-src-lib-rs-owner-operation-read-hash-hazard-c1 --json"
+        );
+    }
+
+    #[test]
+    fn first_pr_handoff_commands_normalize_native_windows_paths() {
+        let root = Path::new(r"C:\Code\Rust With Spaces\unsafe-review");
+        let diff = Path::new(r"C:\Code\Rust With Spaces\unsafe-review\change set.diff");
+        let card_id = "UR-fixture-src-lib-rs-owner-operation-read-hash-hazard-c1";
+        let expected_root = if cfg!(windows) {
+            "C:/Code/Rust With Spaces/unsafe-review"
+        } else {
+            r"C:\Code\Rust With Spaces\unsafe-review"
+        };
+        let expected_diff = if cfg!(windows) {
+            "C:/Code/Rust With Spaces/unsafe-review/change set.diff"
+        } else {
+            r"C:\Code\Rust With Spaces\unsafe-review\change set.diff"
+        };
+
+        assert_eq!(
+            baseline_init_command(root),
+            format!("unsafe-review baseline init --root \"{expected_root}\"")
+        );
+        assert_eq!(
+            baseline_status_command(root),
+            format!("unsafe-review baseline status --root \"{expected_root}\"")
+        );
+        assert_eq!(
+            baseline_refresh_command(root),
+            format!("unsafe-review baseline refresh --dry-run --root \"{expected_root}\"")
+        );
+        assert_eq!(
+            explain_command(root, &card_id),
+            format!("unsafe-review explain --root \"{expected_root}\" {card_id}")
+        );
+        assert_eq!(
+            context_command(root, &card_id),
+            format!("unsafe-review context --root \"{expected_root}\" {card_id} --json")
+        );
+        let check = CheckOptions {
+            root: root.to_path_buf(),
+            base: None,
+            diff: Some(DiffInput::File(diff.to_path_buf())),
+            format: crate::command::Format::Human,
+            policy: unsafe_review_core::PolicyMode::Advisory,
+            out: None,
+            max_cards: None,
+        };
+        assert_eq!(
+            receipt_audit_command(&check),
+            format!(
+                "unsafe-review receipt audit --root \"{expected_root}\" --diff \"{expected_diff}\" --format markdown"
+            )
         );
     }
 
@@ -2513,8 +3101,39 @@ mod tests {
     }
 
     #[test]
+    fn first_pr_artifact_identities_cover_the_exact_bundle() {
+        assert_eq!(super::super::FIRST_PR_ARTIFACTS.len(), 18);
+        for path in super::super::FIRST_PR_ARTIFACTS {
+            assert_ne!(artifact_kind(path), "unknown", "unknown kind for {path}");
+            assert_ne!(
+                artifact_format(path),
+                "unknown",
+                "unknown format for {path}"
+            );
+            if path.ends_with(".md") {
+                assert_eq!(
+                    artifact_schema_version(path),
+                    None,
+                    "markdown artifact {path} must remain unversioned"
+                );
+            } else {
+                assert!(
+                    artifact_schema_version(path).is_some(),
+                    "versioned artifact {path} must declare a schema"
+                );
+            }
+        }
+        assert_eq!(artifact_schema_version("lsp.json"), Some("0.2"));
+    }
+
+    #[test]
     fn review_kit_manifest_lists_artifacts_and_boundary() -> Result<(), String> {
         let output = AnalyzeOutput {
+            analysis_identity: unsafe_review_core::AnalysisIdentity::for_test(
+                1,
+                "test-review-kit",
+                "diff",
+            ),
             schema_version: "0.1".to_string(),
             tool: "unsafe-review".to_string(),
             root: Path::new(".").to_path_buf(),
@@ -3110,6 +3729,530 @@ mod tests {
           }],
           "trust_boundary": "manual candidate; not analyzer-discovered; not witness execution; not proof of memory safety; not UB-free status; not Miri-clean status; not site-execution proof; not policy readiness"
         }"#
+    }
+
+    // --- #2121 terminal parity: focused tests locking first-pr terminal ReviewCard parity ---
+
+    #[test]
+    fn pr_terminal_copies_five_movement_counts_from_summary() -> Result<(), String> {
+        // Proves the five movement counts copy canonical Summary values and are distinct from human header.
+        let output = synthetic_output_with_summary(
+            2,
+            1,
+            0,
+            1,
+            3,
+            vec![synthetic_card(
+                "UR-synth-a",
+                "src/a.rs",
+                10,
+                "raw_pointer_read",
+                "guard_missing",
+            )?],
+        );
+        let check = synthetic_check_options();
+        let report = FirstPrReport {
+            terminal_command: "pr",
+            output: &output,
+            out_dir: Path::new("out"),
+            root: Path::new("."),
+            check: &check,
+            manual_candidates: &[],
+            comment_plan: Some(&synthetic_comment_plan_json(&output, 1, 0)),
+            no_changed_gaps_message: "no gaps",
+            no_changed_gaps_limitation: "limitation",
+            artifacts: &["cards.json"],
+            output_bytes: 123,
+        };
+        let rendered = format_pr_front_panel(&report);
+        let expected_movement = format!(
+            "Movement: new {} | worsened {} | improved {} | resolved {} | inherited {}",
+            output.summary.new_gaps,
+            output.summary.worsened_gaps,
+            output.summary.improved_gaps,
+            output.summary.resolved_gaps,
+            output.summary.inherited_gaps
+        );
+        require(
+            rendered.contains(&expected_movement),
+            format!(
+                "pr front panel should contain movement line `{expected_movement}`; actual: {rendered}"
+            ),
+        )?;
+        // Distinct from human header: human starts with "cards:" and never contains "unsafe-review pr"
+        require(
+            rendered.contains("unsafe-review pr"),
+            "pr terminal should start with unsafe-review pr",
+        )?;
+        require(
+            !rendered.contains("\ncards: "),
+            "pr terminal movement line must not be human header `cards:`",
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn pr_terminal_top_card_projects_canonical_fields() -> Result<(), String> {
+        let card = synthetic_card(
+            "UR-synth-top-src-lib-rs-owner-op-raw_pointer_read-hash-c1",
+            "src/lib.rs",
+            42,
+            "raw_pointer_read",
+            "guard_missing",
+        )?;
+        let output = synthetic_output_with_cards(vec![card.clone()]);
+        let check = synthetic_check_options();
+        let report = FirstPrReport {
+            terminal_command: "pr",
+            output: &output,
+            out_dir: Path::new("out"),
+            root: Path::new("fixtures/root"),
+            check: &check,
+            manual_candidates: &[],
+            comment_plan: Some(&synthetic_comment_plan_json(&output, 1, 0)),
+            no_changed_gaps_message: "no gaps",
+            no_changed_gaps_limitation: "limitation",
+            artifacts: &["cards.json"],
+            output_bytes: 456,
+        };
+        let rendered = format_pr_front_panel(&report);
+        // Top action line must contain location, family, class from the ranked ReviewCard
+        let expected_location = format!(
+            "{}:{}",
+            card.site
+                .location
+                .file
+                .display()
+                .to_string()
+                .replace('\\', "/"),
+            card.site.location.line
+        );
+        require(
+            rendered.contains(&expected_location),
+            format!("pr top action should contain location `{expected_location}`"),
+        )?;
+        require(
+            rendered.contains(card.operation.family.as_str()),
+            format!(
+                "pr top action should contain family `{}`",
+                card.operation.family.as_str()
+            ),
+        )?;
+        require(
+            rendered.contains(card.class.as_str()),
+            format!(
+                "pr top action should contain class `{}`",
+                card.class.as_str()
+            ),
+        )?;
+        // Missing evidence kinds are joined from card.missing
+        for missing in &card.missing {
+            require(
+                rendered.contains(missing.kind.as_str()),
+                format!("pr should contain missing kind `{}`", missing.kind.as_str()),
+            )?;
+        }
+        // Next action summary and first verify command (compacted to 180 chars in pr front panel)
+        let compact_next = compact_terminal_text(&card.next_action.summary, 180);
+        require(
+            rendered.contains(&compact_next),
+            format!("pr should contain compact next_action summary `{compact_next}`"),
+        )?;
+        if let Some(verify) = card.next_action.verify_commands.first() {
+            require(
+                rendered.contains(verify),
+                format!("pr should contain verify command `{verify}`"),
+            )?;
+        }
+        // Identity is via explain/context commands, not bare prose
+        let explain = explain_command(Path::new("fixtures/root"), &card.id);
+        let context = context_command(Path::new("fixtures/root"), &card.id);
+        require(
+            rendered.contains(&explain),
+            format!("pr should contain explain command `{explain}`"),
+        )?;
+        require(
+            rendered.contains(&context),
+            format!("pr should contain context command `{context}`"),
+        )?;
+        // Advisory trust boundary present, no safety claim (boundary itself mentions "not UB-free" advisory)
+        require(
+            rendered.contains(trust_boundary_text()),
+            "pr should contain advisory trust boundary",
+        )?;
+        require(
+            rendered.contains("not UB-free status"),
+            "pr trust boundary should be advisory not UB-free",
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn pr_terminal_no_card_path_uses_advisory_wording() -> Result<(), String> {
+        let output = synthetic_output_with_cards(vec![]);
+        let check = synthetic_check_options();
+        let report = FirstPrReport {
+            terminal_command: "pr",
+            output: &output,
+            out_dir: Path::new("out"),
+            root: Path::new("."),
+            check: &check,
+            manual_candidates: &[],
+            comment_plan: Some(&synthetic_comment_plan_json(&output, 0, 0)),
+            no_changed_gaps_message: "no gaps",
+            no_changed_gaps_limitation: "limitation",
+            artifacts: &["cards.json"],
+            output_bytes: 0,
+        };
+        let rendered = format_pr_front_panel(&report);
+        require(
+            rendered.contains("Top action: none; no changed evidence gaps were found."),
+            "pr no-card path should contain none message",
+        )?;
+        require(
+            rendered.contains("Next: open"),
+            "pr no-card path should contain Next: open pr-summary.md",
+        )?;
+        require(
+            !rendered.contains("Explain:"),
+            "pr no-card path must not contain Explain for missing card",
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn first_pr_review_additional_cards_are_capped_at_three_and_preserve_fields()
+    -> Result<(), String> {
+        // Build 5 cards, craft comment_plan with 5 selected comments (beyond budget) to prove cap.
+        let cards: Vec<_> = (0..5)
+            .map(|i| {
+                synthetic_card(
+                    &format!("UR-synth-cap-{i}"),
+                    &format!("src/file{i}.rs"),
+                    10 + i as usize,
+                    "raw_pointer_read",
+                    "guard_missing",
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        // Manually craft comment_plan JSON with 5 comments, top is cards[0]
+        let comment_plan = synthetic_comment_plan_with_comments(&cards);
+        let rendered =
+            format_comment_plan_summary(Some(&comment_plan), Path::new("."), Some(&cards[0].id.0));
+        // Must show 3 of 4 additional (total 5 - top 1 = 4 additional, capped at 3)
+        require(
+            rendered.contains("Additional reviewer actions (showing 3 of 4):"),
+            format!("should cap additional at 3: actual {rendered}"),
+        )?;
+        // Each shown additional must contain preserved fields: location, family, selection reason, next action, first verify
+        for card in cards.iter().skip(1).take(3) {
+            let location = format!(
+                "{}:{}",
+                card.site
+                    .location
+                    .file
+                    .display()
+                    .to_string()
+                    .replace('\\', "/"),
+                card.site.location.line
+            );
+            require(
+                rendered.contains(&location),
+                format!("additional should contain location `{location}`"),
+            )?;
+            require(
+                rendered.contains(card.operation.family.as_str()),
+                "additional should contain family",
+            )?;
+            // selection reason is the synthetic one: "actionable high-priority review card" for our helper
+            // Our synthetic_comment_plan_with_comments uses same reason for all
+            require(
+                rendered.contains("actionable high-priority review card"),
+                "additional should contain selection reason",
+            )?;
+            require(
+                rendered.contains(&card.next_action.summary),
+                "additional should contain next_action",
+            )?;
+            if let Some(verify) = card.next_action.verify_commands.first() {
+                require(
+                    rendered.contains(verify),
+                    format!("additional should contain first verify `{verify}`"),
+                )?;
+            }
+            let explain = explain_command(Path::new("."), &card.id);
+            require(
+                rendered.contains(&explain),
+                "additional should contain explain command with identity",
+            )?;
+        }
+        // The 5th card (index 4) should be omitted beyond cap, but still parked (not printed)
+        let omitted_card = &cards[4];
+        let omitted_location = format!(
+            "{}:{}",
+            omitted_card
+                .site
+                .location
+                .file
+                .display()
+                .to_string()
+                .replace('\\', "/"),
+            omitted_card.site.location.line
+        );
+        // We do not assert its absence strictly because location could collide, but we assert only 3 lines numbered 1.,2.,3.
+        require(
+            rendered.matches("  1. ").count() == 1
+                && rendered.matches("  3. ").count() == 1
+                && !rendered.contains("  4. "),
+            "additional should show exactly 3 numbered entries, not 4",
+        )?;
+        // Use variable to avoid unused warning
+        let _ = omitted_location;
+        Ok(())
+    }
+
+    #[test]
+    fn first_pr_terminal_selection_aggregates_are_copied() -> Result<(), String> {
+        let cards = vec![
+            synthetic_card("UR-synth-sel-0", "src/a.rs", 1, "ffi", "guard_missing")?,
+            synthetic_card("UR-synth-sel-1", "src/b.rs", 2, "ffi", "guard_missing")?,
+        ];
+        let output = synthetic_output_with_cards(cards.clone());
+        let comment_plan = synthetic_comment_plan_json(&output, 2, 1);
+        let top_id = Some(cards[0].id.0.as_str());
+        let rendered = format_comment_plan_summary(Some(&comment_plan), Path::new("."), top_id);
+        require(
+            rendered.contains("- Reviewer comments: 2 selected, 1 omitted"),
+            format!("should copy selected/omitted aggregates: {rendered}"),
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn first_pr_top_card_summary_is_distinct_from_markdown_and_github() -> Result<(), String> {
+        let card = synthetic_card(
+            "UR-synth-distinct",
+            "src/lib.rs",
+            5,
+            "raw_pointer_read",
+            "guard_missing",
+        )?;
+        let output = synthetic_output_with_cards(vec![card.clone()]);
+        let rendered = format_top_card_summary(&output, Path::new("."), "no gaps", "limitation");
+        // Top card summary is plain text with "Top card:" heading, not markdown "##" or github summary "###"
+        require(
+            rendered.contains("Top card:"),
+            "first-pr top card should contain Top card: heading",
+        )?;
+        require(
+            !rendered.contains("## Top card"),
+            "first-pr top card must not use markdown heading",
+        )?;
+        require(
+            rendered.contains(&card.next_action.summary),
+            "top card should contain next_action",
+        )?;
+        // Ensure it does not claim safety
+        require(
+            !rendered.to_lowercase().contains("safe to"),
+            "top card must not claim safety",
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn terminal_trust_boundary_is_advisory_and_not_safety() -> Result<(), String> {
+        let output = synthetic_output_with_cards(vec![]);
+        let check = synthetic_check_options();
+        let report = FirstPrReport {
+            terminal_command: "pr",
+            output: &output,
+            out_dir: Path::new("out"),
+            root: Path::new("."),
+            check: &check,
+            manual_candidates: &[],
+            comment_plan: None,
+            no_changed_gaps_message: "no gaps",
+            no_changed_gaps_limitation: "limitation",
+            artifacts: &["cards.json"],
+            output_bytes: 0,
+        };
+        let rendered = format_pr_front_panel(&report);
+        require(
+            rendered.contains("static unsafe contract review only"),
+            "trust boundary should be advisory",
+        )?;
+        require(
+            rendered.contains("unsafe-review did not run witnesses"),
+            "trust boundary should mention did not run witnesses",
+        )?;
+        Ok(())
+    }
+
+    fn synthetic_card(
+        id: &str,
+        file: &str,
+        line: usize,
+        _family: &str,
+        _class: &str,
+    ) -> Result<unsafe_review_core::ReviewCard, String> {
+        // Clone a fixture card and mutate identity/location to avoid private domain construction.
+        let base = fixture_output("raw_pointer_alignment")?
+            .cards
+            .into_iter()
+            .next()
+            .ok_or("fixture should have a card")?;
+        let mut card = base;
+        card.id = unsafe_review_core::CardId(id.to_string());
+        card.site.location.file = std::path::PathBuf::from(file);
+        card.site.location.line = line;
+        Ok(card)
+    }
+
+    fn synthetic_output_with_summary(
+        new_gaps: usize,
+        worsened: usize,
+        improved: usize,
+        resolved: usize,
+        inherited: usize,
+        cards: Vec<unsafe_review_core::ReviewCard>,
+    ) -> AnalyzeOutput {
+        let summary = unsafe_review_core::api::Summary {
+            new_gaps,
+            worsened_gaps: worsened,
+            improved_gaps: improved,
+            resolved_gaps: resolved,
+            inherited_gaps: inherited,
+            cards: cards.len(),
+            open_actionable_gaps: cards.len(),
+            changed_files: 2,
+            changed_rust_files: 1,
+            ..Default::default()
+        };
+        AnalyzeOutput {
+            analysis_identity: unsafe_review_core::AnalysisIdentity::for_test(1, "test", "diff"),
+            schema_version: "0.1".to_string(),
+            tool: "unsafe-review".to_string(),
+            root: Path::new(".").to_path_buf(),
+            scope: unsafe_review_core::Scope::Diff,
+            mode: unsafe_review_core::AnalysisMode::Draft,
+            policy: unsafe_review_core::PolicyMode::Advisory,
+            summary,
+            cards,
+            diff_scoped_files: std::collections::BTreeSet::new(),
+            coverage_snapshot: std::collections::BTreeMap::new(),
+        }
+    }
+
+    fn synthetic_output_with_cards(cards: Vec<unsafe_review_core::ReviewCard>) -> AnalyzeOutput {
+        synthetic_output_with_summary(1, 0, 0, 0, 0, cards)
+    }
+
+    fn fixture_output(name: &str) -> Result<AnalyzeOutput, String> {
+        use unsafe_review_core::{AnalysisMode, AnalyzeInput, DiffSource, PolicyMode, Scope};
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures")
+            .join(name);
+        unsafe_review_core::analyze(AnalyzeInput {
+            root,
+            scope: Scope::Repo,
+            diff: DiffSource::NoneRepoScan,
+            mode: AnalysisMode::Repo,
+            policy: PolicyMode::Advisory,
+            include_unchanged_tests: true,
+            max_cards: None,
+        })
+        .map_err(|e| format!("fixture {name} analyze failed: {e}"))
+    }
+
+    fn synthetic_check_options() -> CheckOptions {
+        CheckOptions {
+            root: Path::new(".").to_path_buf(),
+            base: None,
+            diff: None,
+            format: crate::command::Format::Human,
+            policy: unsafe_review_core::PolicyMode::Advisory,
+            out: None,
+            max_cards: None,
+        }
+    }
+
+    fn synthetic_comment_plan_json(
+        output: &AnalyzeOutput,
+        selected: usize,
+        omitted: usize,
+    ) -> String {
+        // Minimal comment_plan JSON that first-pr terminal will parse via comment_plan_selection / format_comment_plan_summary
+        // We generate one per card for selected, and omit the rest.
+        let comments: Vec<serde_json::Value> = output
+            .cards
+            .iter()
+            .take(selected)
+            .map(|card| {
+                serde_json::json!({
+                    "card_id": card.id.0,
+                    "path": card.site.location.file.display().to_string().replace('\\', "/"),
+                    "line": card.site.location.line,
+                    "operation_family": card.operation.family.as_str(),
+                    "selection_reason": "actionable high-priority review card",
+                    "selection_reason_code": "top_actionable_card",
+                    "next_action": card.next_action.summary,
+                    "verify_commands": card.next_action.verify_commands,
+                })
+            })
+            .collect();
+        serde_json::json!({
+            "summary": {
+                "selected_count": selected,
+                "not_selected_count": omitted,
+                "budget": 3,
+                "reason": "bounded reviewer noise",
+                "reason_code": "bounded_reviewer_noise"
+            },
+            "comments": comments,
+            "not_selected": [],
+            "trust_boundary": trust_boundary_text(),
+        })
+        .to_string()
+    }
+
+    fn synthetic_comment_plan_with_comments(cards: &[unsafe_review_core::ReviewCard]) -> String {
+        let comments: Vec<serde_json::Value> = cards
+            .iter()
+            .map(|card| {
+                serde_json::json!({
+                    "card_id": card.id.0,
+                    "path": card.site.location.file.display().to_string().replace('\\', "/"),
+                    "line": card.site.location.line,
+                    "operation_family": card.operation.family.as_str(),
+                    "selection_reason": "actionable high-priority review card",
+                    "selection_reason_code": "top_actionable_card",
+                    "next_action": card.next_action.summary,
+                    "verify_commands": card.next_action.verify_commands,
+                })
+            })
+            .collect();
+        serde_json::json!({
+            "summary": {
+                "selected_count": comments.len(),
+                "not_selected_count": 0,
+                "budget": 3,
+                "reason": "bounded reviewer noise",
+                "reason_code": "bounded_reviewer_noise"
+            },
+            "comments": comments,
+            "not_selected": [],
+            "trust_boundary": trust_boundary_text(),
+        })
+        .to_string()
+    }
+
+    fn require(condition: bool, message: impl Into<String>) -> Result<(), String> {
+        if condition {
+            Ok(())
+        } else {
+            Err(message.into())
+        }
     }
 
     #[test]

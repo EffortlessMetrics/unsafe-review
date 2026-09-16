@@ -67,16 +67,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      UNSAFE_REVIEW_VERSION: "0.3.6"
+      UNSAFE_REVIEW_VERSION: "0.3.8"
       BASE_REF: ${{ github.base_ref || github.event.repository.default_branch }}
       BUNDLE_DIR: target/unsafe-review
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 100
           persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: dtolnay/rust-toolchain@1.98
 
       - name: Fetch base ref
         run: git fetch --no-tags --depth=100 origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
@@ -103,11 +103,16 @@ jobs:
             comment-plan.json \
             witness-plan.md \
             receipt-audit.md \
+            receipt-audit.json \
+            policy-report.json \
+            policy-report.md \
             manual-candidates.json \
             manual-repair-queue.json \
             tokmd-packets.json \
+            usefulness-telemetry.json \
             lsp.json \
-            repair-queue.json
+            repair-queue.json \
+            unsafe-review-gate.json
           do
             if [ ! -s "${BUNDLE_DIR}/${required}" ]; then
               echo "::error::unsafe-review review kit is missing ${required}"
@@ -235,7 +240,7 @@ current card identity.
 ## Related Docs
 
 - [Find and fix UB-risk review seams](../FIND_AND_FIX_UB.md)
-- [GitHub Actions guide](github-actions.md)
+- [GitHub Actions guide](github-action.md)
 - [PR and CI model](PR_CI.md)
 - [Comment-plan examples](COMMENT_PLAN_EXAMPLES.md)
 - [Trusted comment poster](TRUSTED_COMMENT_POSTER.md)

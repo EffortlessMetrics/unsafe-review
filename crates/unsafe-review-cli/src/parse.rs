@@ -1,10 +1,14 @@
 use crate::command::{
-    BaselineAddOptions, BaselineCommand, BaselineInitOptions, CandidateCommand,
-    CandidateImportOptions, CandidateLintOptions, CandidateListOptions, CandidateNewOptions,
-    CandidateWitnessPlanOptions, CheckOptions, Command, ContextQuery, DiffInput, FirstPrOptions,
-    Format, OutcomeOptions, RepoOptions, SubcommandHelpTarget,
+    BaselineAddOptions, BaselineCommand, BaselineInitOptions, BaselineRefreshOptions,
+    BaselineStatusOptions, CandidateCommand, CandidateImportOptions, CandidateLintOptions,
+    CandidateListOptions, CandidateNewOptions, CandidateWitnessPlanOptions, CheckOptions, Command,
+    ContextQuery, DiffInput, ExternalPrSetupOptions, FirstPrEntrypoint, FirstPrOptions, Format,
+    InitOptions, OutcomeOptions, RepoOptions, SubcommandHelpTarget,
 };
-use std::path::PathBuf;
+use std::{
+    env,
+    path::{Path, PathBuf},
+};
 use unsafe_review_core::{MANUAL_CANDIDATE_STABLE_BYTE_CLASSES, PolicyMode};
 
 const DEFAULT_CANDIDATE_SKELETON_ID: &str = "R4R2-S000-TODO";
@@ -29,33 +33,44 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, S
         return Ok(Command::RepoHelp);
     }
     if command == "candidate"
-        && (rest.is_empty() || has_help_flag(&rest) || is_candidate_help_word(&rest))
+        && (rest.is_empty()
+            || is_candidate_help_word(&rest)
+            || (has_help_flag(&rest) && is_known_subcommand(command.as_str(), &rest)))
     {
         return Ok(Command::CandidateHelp);
     }
     if command == "baseline"
-        && (rest.is_empty() || has_help_flag(&rest) || is_exact_help_word(&rest))
+        && (rest.is_empty()
+            || is_exact_help_word(&rest)
+            || (has_help_flag(&rest) && is_known_subcommand(command.as_str(), &rest)))
     {
         return Ok(Command::BaselineHelp);
     }
-    if has_help_flag(&rest) {
+    if has_help_flag(&rest)
+        && is_known_command(command.as_str())
+        && is_known_subcommand(command.as_str(), &rest)
+    {
         return Ok(subcommand_help_for(&command));
     }
     match command.as_str() {
         "--version" | "-V" => Ok(Command::Version),
         "support" => parse_support(rest),
         "doctor" => parse_doctor(rest),
+        "init" => parse_init(rest).map(Command::Init),
         "check" => parse_check(rest).map(Command::Check),
         "first-pr" | "review" => parse_first_pr(rest).map(Command::FirstPr),
-        "pr" => parse_first_pr(rest).map(|mut options| {
-            // `pr` is a pure alias for `first-pr`; the only difference is that
-            // execute auto-detects the git root and base ref when the user did
-            // not supply explicit --root/--base/--diff arguments.
-            options.auto_detect = options.check.root == std::path::Path::new(".")
-                && options.check.base.as_deref() == Some("origin/main")
-                && options.check.diff.is_none();
-            Command::FirstPr(options)
-        }),
+        "pr-setup" => parse_pr_setup(rest).map(Command::PrSetup),
+        "pr" => {
+            let auto_detect = !has_explicit_pr_input(&rest);
+            parse_first_pr(rest).map(|mut options| {
+                // `pr` runs the same advisory bundle as `first-pr`; execute
+                // auto-detects the git root and base ref when the user did not
+                // supply explicit --root/--base/--diff arguments.
+                options.entrypoint = FirstPrEntrypoint::Pr;
+                options.auto_detect = auto_detect;
+                Command::FirstPr(options)
+            })
+        }
         "repo" => parse_repo(rest).map(Command::Repo),
         "pilot" => parse_check(rest).map(|mut options| {
             options.max_cards = Some(options.max_cards.unwrap_or(5));
@@ -76,6 +91,88 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, S
             "unknown command `{other}`. Run `unsafe-review --help`."
         )),
     }
+}
+
+fn is_known_command(command: &str) -> bool {
+    matches!(
+        command,
+        "--version"
+            | "-V"
+            | "support"
+            | "doctor"
+            | "init"
+            | "check"
+            | "first-pr"
+            | "review"
+            | "pr-setup"
+            | "pr"
+            | "repo"
+            | "pilot"
+            | "badges"
+            | "explain"
+            | "context"
+            | "candidate"
+            | "baseline"
+            | "confirm"
+            | "outcome"
+            | "policy"
+            | "receipt"
+            | "receipt-template"
+            | "lsp"
+    )
+}
+
+/// Commands with a fixed subcommand vocabulary only take the `--help`
+/// shortcut when the requested subcommand is known (or absent, or the bare
+/// `help` word). An unknown subcommand keeps failing as a usage error even
+/// with `--help`; `--help` excuses flag errors, not a wrong subcommand.
+/// Leaf commands take opaque positionals (card ids, paths), so they are not
+/// gated here.
+fn is_known_subcommand(command: &str, args: &[String]) -> bool {
+    let Some(positional) = args
+        .iter()
+        .find(|arg| !arg.starts_with('-'))
+        .map(String::as_str)
+    else {
+        return true;
+    };
+    if positional == "help" {
+        return true;
+    }
+    match command {
+        "receipt" => matches!(
+            positional,
+            "import-miri"
+                | "import-careful"
+                | "import-cargo-careful"
+                | "import-sanitizer"
+                | "import-concurrency"
+                | "import-proof"
+                | "template"
+                | "validate"
+                | "audit"
+        ),
+        "candidate" => matches!(
+            positional,
+            "new" | "import" | "lint" | "list" | "witness-plan"
+        ),
+        "baseline" => matches!(positional, "init" | "add" | "status" | "refresh"),
+        "policy" => matches!(positional, "report"),
+        _ => true,
+    }
+}
+
+fn has_explicit_pr_input(args: &[String]) -> bool {
+    args.iter().any(|arg| {
+        matches!(
+            arg.as_str(),
+            "--root" | "--base" | "--base-sha" | "--head-sha" | "--diff"
+        ) || arg.starts_with("--root=")
+            || arg.starts_with("--base=")
+            || arg.starts_with("--base-sha=")
+            || arg.starts_with("--head-sha=")
+            || arg.starts_with("--diff=")
+    })
 }
 
 fn parse_candidate(args: Vec<String>) -> Result<CandidateCommand, String> {
@@ -274,7 +371,122 @@ fn parse_baseline(args: Vec<String>) -> Result<BaselineCommand, String> {
     match subcommand.as_str() {
         "init" => parse_baseline_init(rest).map(BaselineCommand::Init),
         "add" => parse_baseline_add(rest).map(BaselineCommand::Add),
+        "status" => parse_baseline_status(rest).map(BaselineCommand::Status),
+        "refresh" => parse_baseline_refresh(rest).map(BaselineCommand::Refresh),
         other => Err(format!("unknown baseline subcommand `{other}`")),
+    }
+}
+
+fn parse_init(args: Vec<String>) -> Result<InitOptions, String> {
+    let mut options = InitOptions::default();
+    let mut idx = 0usize;
+    while idx < args.len() {
+        match args[idx].as_str() {
+            "--root" => {
+                idx += 1;
+                options.root = parse_path_value(&args, idx, "--root")?;
+            }
+            arg if arg.starts_with("--root=") => {
+                options.root = parse_inline_path_value(arg, "--root")?;
+            }
+            "--out" => {
+                idx += 1;
+                options.out = Some(parse_path_value(&args, idx, "--out")?);
+            }
+            arg if arg.starts_with("--out=") => {
+                options.out = Some(parse_inline_path_value(arg, "--out")?);
+            }
+            "--json" => options.format = Format::Json,
+            "--format" => {
+                idx += 1;
+                options.format =
+                    human_or_json_format(parse_format(value(&args, idx, "--format")?)?, "init")?;
+            }
+            arg if arg.starts_with("--format=") => {
+                options.format =
+                    human_or_json_format(parse_format(inline_value(arg, "--format")?)?, "init")?;
+            }
+            other => return Err(format!("unknown init argument `{other}`")),
+        }
+        idx += 1;
+    }
+    Ok(options)
+}
+
+fn parse_baseline_status(args: Vec<String>) -> Result<BaselineStatusOptions, String> {
+    let mut options = BaselineStatusOptions::default();
+    let mut idx = 0usize;
+    while idx < args.len() {
+        match args[idx].as_str() {
+            "--root" => {
+                idx += 1;
+                options.root = parse_path_value(&args, idx, "--root")?;
+            }
+            arg if arg.starts_with("--root=") => {
+                options.root = parse_inline_path_value(arg, "--root")?;
+            }
+            "--format" => {
+                idx += 1;
+                options.format = human_or_json_format(
+                    parse_format(value(&args, idx, "--format")?)?,
+                    "baseline status",
+                )?;
+            }
+            arg if arg.starts_with("--format=") => {
+                options.format = human_or_json_format(
+                    parse_format(inline_value(arg, "--format")?)?,
+                    "baseline status",
+                )?;
+            }
+            "--json" => options.format = Format::Json,
+            other => return Err(format!("unknown baseline status argument `{other}`")),
+        }
+        idx += 1;
+    }
+    Ok(options)
+}
+
+fn parse_baseline_refresh(args: Vec<String>) -> Result<BaselineRefreshOptions, String> {
+    let mut options = BaselineRefreshOptions::default();
+    let mut idx = 0usize;
+    while idx < args.len() {
+        match args[idx].as_str() {
+            "--root" => {
+                idx += 1;
+                options.root = parse_path_value(&args, idx, "--root")?;
+            }
+            arg if arg.starts_with("--root=") => {
+                options.root = parse_inline_path_value(arg, "--root")?;
+            }
+            "--dry-run" => options.dry_run = true,
+            "--out" => {
+                idx += 1;
+                options.out = Some(parse_path_value(&args, idx, "--out")?);
+            }
+            arg if arg.starts_with("--out=") => {
+                options.out = Some(parse_inline_path_value(arg, "--out")?);
+            }
+            other => return Err(format!("unknown baseline refresh argument `{other}`")),
+        }
+        idx += 1;
+    }
+    if !options.dry_run {
+        return Err(
+            "baseline refresh requires --dry-run; there is no apply mode (SPEC-0030 non-goal)"
+                .to_string(),
+        );
+    }
+    Ok(options)
+}
+
+fn human_or_json_format(format: Format, command_name: &str) -> Result<Format, String> {
+    match format {
+        Format::Human => Ok(Format::Human),
+        Format::Json => Ok(Format::Json),
+        other => Err(format!(
+            "{command_name} only supports human or json output, got `{}`",
+            format_name(&other)
+        )),
     }
 }
 
@@ -303,6 +515,21 @@ fn parse_baseline_init(args: Vec<String>) -> Result<BaselineInitOptions, String>
             }
             arg if arg.starts_with("--review-after=") => {
                 options.review_after = Some(parse_inline_iso_date_value(arg, "--review-after")?);
+            }
+            "--dry-run" => options.dry_run = true,
+            "--json" => options.format = Format::Json,
+            "--format" => {
+                idx += 1;
+                options.format = human_or_json_format(
+                    parse_format(value(&args, idx, "--format")?)?,
+                    "baseline init",
+                )?;
+            }
+            arg if arg.starts_with("--format=") => {
+                options.format = human_or_json_format(
+                    parse_format(inline_value(arg, "--format")?)?,
+                    "baseline init",
+                )?;
             }
             other => return Err(format!("unknown baseline init argument `{other}`")),
         }
@@ -424,6 +651,8 @@ fn subcommand_help_for(command: &str) -> Command {
         "receipt" | "receipt-template" => SubcommandHelpTarget::Receipt,
         "outcome" => SubcommandHelpTarget::Outcome,
         "policy" => SubcommandHelpTarget::Policy,
+        "init" => SubcommandHelpTarget::Init,
+        "pr-setup" => SubcommandHelpTarget::PrSetup,
         "doctor" => SubcommandHelpTarget::Doctor,
         "badges" => SubcommandHelpTarget::Badges,
         "lsp" => SubcommandHelpTarget::Lsp,
@@ -431,6 +660,260 @@ fn subcommand_help_for(command: &str) -> Command {
         _ => return Command::Help,
     };
     Command::SubcommandHelp(target)
+}
+
+fn parse_pr_setup(args: Vec<String>) -> Result<ExternalPrSetupOptions, String> {
+    let mut repo = None;
+    let mut number = None;
+    let mut root = PathBuf::from(".");
+    let mut saw_root = false;
+    let mut base_ref = None;
+    let mut base_sha = None;
+    let mut head_sha = None;
+    let mut out_dir = PathBuf::from("target/unsafe-review");
+    let mut saw_out_dir = false;
+    let mut diff_out = PathBuf::from("target/unsafe-review/external-pr.diff");
+    let mut saw_diff_out = false;
+    let mut idx = 0usize;
+    while idx < args.len() {
+        match args[idx].as_str() {
+            "--repo" => {
+                idx += 1;
+                set_once(
+                    &mut repo,
+                    "--repo",
+                    parse_github_repo(value(&args, idx, "--repo")?)?,
+                )?;
+            }
+            arg if arg.starts_with("--repo=") => {
+                set_once(
+                    &mut repo,
+                    "--repo",
+                    parse_github_repo(inline_value(arg, "--repo")?)?,
+                )?;
+            }
+            "--number" => {
+                idx += 1;
+                set_once(
+                    &mut number,
+                    "--number",
+                    parse_pr_number(value(&args, idx, "--number")?)?,
+                )?;
+            }
+            arg if arg.starts_with("--number=") => {
+                set_once(
+                    &mut number,
+                    "--number",
+                    parse_pr_number(inline_value(arg, "--number")?)?,
+                )?;
+            }
+            "--root" => {
+                idx += 1;
+                set_path_once(
+                    &mut root,
+                    &mut saw_root,
+                    "--root",
+                    parse_path_value(&args, idx, "--root")?,
+                )?;
+            }
+            arg if arg.starts_with("--root=") => {
+                set_path_once(
+                    &mut root,
+                    &mut saw_root,
+                    "--root",
+                    parse_inline_path_value(arg, "--root")?,
+                )?;
+            }
+            "--base-ref" => {
+                idx += 1;
+                set_once(
+                    &mut base_ref,
+                    "--base-ref",
+                    parse_git_ref_token(value(&args, idx, "--base-ref")?)?,
+                )?;
+            }
+            arg if arg.starts_with("--base-ref=") => {
+                set_once(
+                    &mut base_ref,
+                    "--base-ref",
+                    parse_git_ref_token(inline_value_allow_empty(arg, "--base-ref")?)?,
+                )?;
+            }
+            "--base-sha" => {
+                idx += 1;
+                set_once(
+                    &mut base_sha,
+                    "--base-sha",
+                    parse_commit_sha(value(&args, idx, "--base-sha")?, "--base-sha")?,
+                )?;
+            }
+            arg if arg.starts_with("--base-sha=") => {
+                set_once(
+                    &mut base_sha,
+                    "--base-sha",
+                    parse_commit_sha(inline_value(arg, "--base-sha")?, "--base-sha")?,
+                )?;
+            }
+            "--head-sha" => {
+                idx += 1;
+                set_once(
+                    &mut head_sha,
+                    "--head-sha",
+                    parse_commit_sha(value(&args, idx, "--head-sha")?, "--head-sha")?,
+                )?;
+            }
+            arg if arg.starts_with("--head-sha=") => {
+                set_once(
+                    &mut head_sha,
+                    "--head-sha",
+                    parse_commit_sha(inline_value(arg, "--head-sha")?, "--head-sha")?,
+                )?;
+            }
+            "--out-dir" => {
+                idx += 1;
+                set_path_once(
+                    &mut out_dir,
+                    &mut saw_out_dir,
+                    "--out-dir",
+                    parse_path_value(&args, idx, "--out-dir")?,
+                )?;
+            }
+            arg if arg.starts_with("--out-dir=") => {
+                set_path_once(
+                    &mut out_dir,
+                    &mut saw_out_dir,
+                    "--out-dir",
+                    parse_inline_path_value(arg, "--out-dir")?,
+                )?;
+            }
+            "--diff-out" => {
+                idx += 1;
+                set_path_once(
+                    &mut diff_out,
+                    &mut saw_diff_out,
+                    "--diff-out",
+                    parse_path_value(&args, idx, "--diff-out")?,
+                )?;
+            }
+            arg if arg.starts_with("--diff-out=") => {
+                set_path_once(
+                    &mut diff_out,
+                    &mut saw_diff_out,
+                    "--diff-out",
+                    parse_inline_path_value(arg, "--diff-out")?,
+                )?;
+            }
+            other => return Err(format!("unknown pr-setup argument `{other}`")),
+        }
+        idx += 1;
+    }
+    let mut options = ExternalPrSetupOptions {
+        repo: repo.ok_or_else(|| "missing --repo".to_string())?,
+        number: number.ok_or_else(|| "missing --number".to_string())?,
+        root,
+        base_ref: base_ref.ok_or_else(|| "missing --base-ref".to_string())?,
+        base_sha: base_sha.ok_or_else(|| "missing --base-sha".to_string())?,
+        head_sha: head_sha.ok_or_else(|| "missing --head-sha".to_string())?,
+        out_dir,
+        diff_out,
+    };
+    reject_control_path(&options.root, "--root")?;
+    options.out_dir = absolute_pr_setup_path(&options.out_dir, "--out-dir")?;
+    reject_control_path(&options.out_dir, "--out-dir")?;
+    options.diff_out = absolute_pr_setup_path(&options.diff_out, "--diff-out")?;
+    reject_control_path(&options.diff_out, "--diff-out")?;
+    Ok(options)
+}
+
+fn set_once<T>(slot: &mut Option<T>, flag: &str, value: T) -> Result<(), String> {
+    if slot.is_some() {
+        return Err(format!("duplicate {flag}"));
+    }
+    *slot = Some(value);
+    Ok(())
+}
+
+fn set_path_once(
+    slot: &mut PathBuf,
+    seen: &mut bool,
+    flag: &str,
+    value: PathBuf,
+) -> Result<(), String> {
+    if *seen {
+        return Err(format!("duplicate {flag}"));
+    }
+    *slot = value;
+    *seen = true;
+    Ok(())
+}
+
+fn absolute_pr_setup_path(path: &Path, flag: &str) -> Result<PathBuf, String> {
+    if path.is_absolute() {
+        return Ok(path.to_path_buf());
+    }
+    let cwd = env::current_dir()
+        .map_err(|err| format!("failed to resolve current directory for {flag}: {err}"))?;
+    Ok(cwd.join(path))
+}
+
+fn parse_github_repo(raw: &str) -> Result<String, String> {
+    let Some((owner, name)) = raw.split_once('/') else {
+        return Err("invalid --repo; expected <owner>/<repo>".to_string());
+    };
+    if owner.is_empty() || name.is_empty() || name.contains('/') {
+        return Err("invalid --repo; expected <owner>/<repo>".to_string());
+    }
+    for part in [owner, name] {
+        if !part
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+        {
+            return Err(
+                "invalid --repo; use only ASCII letters, digits, `-`, `_`, and `.`".to_string(),
+            );
+        }
+    }
+    Ok(raw.to_string())
+}
+
+fn parse_pr_number(raw: &str) -> Result<String, String> {
+    if raw.is_empty() || !raw.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err("invalid --number; expected a positive integer".to_string());
+    }
+    let value = raw
+        .parse::<u64>()
+        .map_err(|_err| "invalid --number; expected a positive integer".to_string())?;
+    if value == 0 {
+        return Err("invalid --number; expected a positive integer".to_string());
+    }
+    Ok(raw.to_string())
+}
+
+fn parse_git_ref_token(raw: &str) -> Result<String, String> {
+    if raw.is_empty() {
+        return Err("invalid --base-ref; value must not be empty".to_string());
+    }
+    if raw.starts_with('-') {
+        return Err("invalid --base-ref; value must not start with `-`".to_string());
+    }
+    if raw.starts_with('+') {
+        return Err("invalid --base-ref; value must not start with `+`".to_string());
+    }
+    if raw.starts_with('@') {
+        return Err("invalid --base-ref; value must not start with `@`".to_string());
+    }
+    if raw.contains("..") {
+        return Err("invalid --base-ref; value must not contain `..`".to_string());
+    }
+    if !raw.bytes().all(|byte| {
+        byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'.' | b'_' | b'-' | b'+' | b'@')
+    }) {
+        return Err(
+            "invalid --base-ref; use only ASCII letters, digits, `/`, `.`, `_`, `-`, `+`, or `@`"
+                .to_string(),
+        );
+    }
+    Ok(raw.to_string())
 }
 
 fn has_help_flag(args: &[String]) -> bool {
@@ -474,11 +957,17 @@ fn parse_doctor(args: Vec<String>) -> Result<Command, String> {
 
 fn parse_first_pr(args: Vec<String>) -> Result<FirstPrOptions, String> {
     let mut options = FirstPrOptions::default();
+    let mut saw_base_ref = false;
+    let mut saw_base_sha = false;
+    let mut saw_head_sha = false;
     let mut idx = 0usize;
     while idx < args.len() {
         // `--out` belongs to `check`/`repo`; `first-pr` uses `--out-dir`.
         // Intercept before try_apply_check_arg silently consumes it.
         let arg = args[idx].as_str();
+        if arg == "--base" || arg.starts_with("--base=") {
+            saw_base_ref = true;
+        }
         if arg == "--out" || arg.starts_with("--out=") {
             return Err(format!(
                 "unknown first-pr argument `{arg}`; did you mean `--out-dir`?"
@@ -501,6 +990,65 @@ fn parse_first_pr(args: Vec<String>) -> Result<FirstPrOptions, String> {
                  bundle to `--out-dir`"
             ));
         }
+        match arg {
+            "--base-sha" => {
+                idx += 1;
+                if saw_base_sha {
+                    return Err("duplicate --base-sha".to_string());
+                }
+                if options.check.base.is_some() {
+                    return Err("choose only one of --base or --base-sha".to_string());
+                }
+                options.check.base = Some(parse_commit_sha(
+                    value(&args, idx, "--base-sha")?,
+                    "--base-sha",
+                )?);
+                saw_base_sha = true;
+                idx += 1;
+                continue;
+            }
+            value if value.starts_with("--base-sha=") => {
+                if saw_base_sha {
+                    return Err("duplicate --base-sha".to_string());
+                }
+                if options.check.base.is_some() {
+                    return Err("choose only one of --base or --base-sha".to_string());
+                }
+                options.check.base = Some(parse_commit_sha(
+                    inline_value(value, "--base-sha")?,
+                    "--base-sha",
+                )?);
+                saw_base_sha = true;
+                idx += 1;
+                continue;
+            }
+            "--head-sha" => {
+                idx += 1;
+                if saw_head_sha {
+                    return Err("duplicate --head-sha".to_string());
+                }
+                options.expected_head_sha = Some(parse_commit_sha(
+                    value(&args, idx, "--head-sha")?,
+                    "--head-sha",
+                )?);
+                saw_head_sha = true;
+                idx += 1;
+                continue;
+            }
+            value if value.starts_with("--head-sha=") => {
+                if saw_head_sha {
+                    return Err("duplicate --head-sha".to_string());
+                }
+                options.expected_head_sha = Some(parse_commit_sha(
+                    inline_value(value, "--head-sha")?,
+                    "--head-sha",
+                )?);
+                saw_head_sha = true;
+                idx += 1;
+                continue;
+            }
+            _ => {}
+        }
         if let Some(consumed) = check_parse::try_apply_check_arg(&args, idx, &mut options.check)? {
             idx += consumed;
             continue;
@@ -520,6 +1068,7 @@ fn parse_first_pr(args: Vec<String>) -> Result<FirstPrOptions, String> {
     if options.check.base.is_none() && options.check.diff.is_none() {
         options.check.base = Some("origin/main".to_string());
     }
+    validate_first_pr_exact_sha_options(&options, saw_base_ref, saw_base_sha)?;
     validate_check_options(&options.check)?;
     Ok(options)
 }
@@ -890,6 +1439,20 @@ fn parse_inline_path_value(arg: &str, flag: &str) -> Result<PathBuf, String> {
     Ok(PathBuf::from(inline_value(arg, flag)?))
 }
 
+fn reject_control_path(path: &Path, flag: &str) -> Result<(), String> {
+    let raw = path.to_string_lossy();
+    if raw.is_empty()
+        || raw
+            .chars()
+            .any(|ch| ch.is_control() || matches!(ch, '"' | '`' | '$'))
+    {
+        return Err(format!(
+            "invalid {flag}; paths printed in pr-setup commands must not be empty or contain control characters, quotes, backticks, or `$`"
+        ));
+    }
+    Ok(())
+}
+
 fn json_or_markdown_format(format: Format, command_name: &str) -> Result<Format, String> {
     match format {
         Format::Json => Ok(Format::Json),
@@ -914,6 +1477,38 @@ fn validate_check_options(options: &CheckOptions) -> Result<(), String> {
         return Err("choose only one of --base or --diff".to_string());
     }
     Ok(())
+}
+
+fn validate_first_pr_exact_sha_options(
+    options: &FirstPrOptions,
+    saw_base_ref: bool,
+    saw_base_sha: bool,
+) -> Result<(), String> {
+    if saw_base_ref && saw_base_sha {
+        return Err("choose only one of --base or --base-sha".to_string());
+    }
+    if saw_base_sha && options.check.diff.is_some() {
+        return Err("choose only one of --base-sha or --diff".to_string());
+    }
+    if options.expected_head_sha.is_some() && options.check.diff.is_some() {
+        return Err("choose only one of --head-sha or --diff".to_string());
+    }
+    if options.expected_head_sha.is_some() && !saw_base_sha {
+        return Err(
+            "--head-sha requires --base-sha so exact external PR inputs stay paired".to_string(),
+        );
+    }
+    Ok(())
+}
+
+fn parse_commit_sha(raw: &str, flag: &str) -> Result<String, String> {
+    if raw.len() == 40 && raw.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        Ok(raw.to_ascii_lowercase())
+    } else {
+        Err(format!(
+            "invalid {flag} `{raw}`: expected a 40-character hex commit SHA"
+        ))
+    }
 }
 
 fn validate_required_cli_value(value: &str, flag: &str) -> Result<(), String> {
@@ -1020,6 +1615,12 @@ fn inline_value<'a>(arg: &'a str, flag: &str) -> Result<&'a str, String> {
     Ok(value)
 }
 
+fn inline_value_allow_empty<'a>(arg: &'a str, flag: &str) -> Result<&'a str, String> {
+    arg.strip_prefix(flag)
+        .and_then(|rest| rest.strip_prefix('='))
+        .ok_or_else(|| format!("missing value for {flag}"))
+}
+
 fn format_name(format: &Format) -> &'static str {
     match format {
         Format::Human => "human",
@@ -1106,6 +1707,10 @@ mod tests {
         assert_eq!(
             parse(args(["unsafe-review", "policy", "--help"]))?,
             Command::SubcommandHelp(SubcommandHelpTarget::Policy)
+        );
+        assert_eq!(
+            parse(args(["unsafe-review", "pr-setup", "--help"]))?,
+            Command::SubcommandHelp(SubcommandHelpTarget::PrSetup)
         );
         assert_eq!(
             parse(args(["unsafe-review", "doctor", "--help"]))?,
@@ -1623,8 +2228,7 @@ mod tests {
 
     #[test]
     fn parse_pr_alias_maps_to_first_pr() -> Result<(), String> {
-        // `pr` is a pure parse-time alias for `first-pr`; it must map to
-        // Command::FirstPr with the same defaults as `first-pr`.
+        // `pr` maps to Command::FirstPr with the same defaults as `first-pr`.
         let command = parse(args(["unsafe-review", "pr"]))?;
         let Command::FirstPr(options) = command else {
             return Err("expected first-pr command from `pr` alias".to_string());
@@ -1642,6 +2246,40 @@ mod tests {
             options.auto_detect,
             "`pr` with no args must set auto_detect = true"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn parse_pr_alias_explicit_default_inputs_disable_auto_detect() -> Result<(), String> {
+        let cases = [
+            (
+                args(["unsafe-review", "pr", "--root", "."]),
+                "explicit --root .",
+            ),
+            (
+                args(["unsafe-review", "pr", "--root=."]),
+                "explicit --root=.",
+            ),
+            (
+                args(["unsafe-review", "pr", "--base", "origin/main"]),
+                "explicit --base origin/main",
+            ),
+            (
+                args(["unsafe-review", "pr", "--base=origin/main"]),
+                "explicit --base=origin/main",
+            ),
+        ];
+
+        for (argv, label) in cases {
+            let command = parse(argv)?;
+            let Command::FirstPr(options) = command else {
+                return Err(format!("expected first-pr command from {label}"));
+            };
+            assert!(
+                !options.auto_detect,
+                "`pr` with {label} must not set auto_detect"
+            );
+        }
         Ok(())
     }
 
@@ -1674,6 +2312,379 @@ mod tests {
             "`pr` with explicit --diff must not set auto_detect"
         );
         Ok(())
+    }
+
+    #[test]
+    fn parse_pr_alias_accepts_exact_external_pr_shas() -> Result<(), String> {
+        let base = "245adff079eb0cb1a706d35bab5f68b2d51919f6";
+        let head = "2f6852ec5295160bc4f1e687ea19847f9cd4e665";
+        let command = parse(args([
+            "unsafe-review",
+            "pr",
+            "--root=fixtures/raw_pointer_alignment",
+            "--base-sha",
+            base,
+            "--head-sha",
+            head,
+        ]))?;
+        let Command::FirstPr(options) = command else {
+            return Err("expected first-pr command from `pr` alias".to_string());
+        };
+        assert_eq!(
+            options.check.root,
+            PathBuf::from("fixtures/raw_pointer_alignment")
+        );
+        assert_eq!(options.check.base, Some(base.to_string()));
+        assert_eq!(options.expected_head_sha, Some(head.to_string()));
+        assert!(
+            !options.auto_detect,
+            "`pr` with explicit external PR SHAs must not auto-detect"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn parse_pr_setup_accepts_exact_external_pr_inputs() -> Result<(), String> {
+        let expected_diff_out = env::current_dir()
+            .map_err(|err| err.to_string())?
+            .join("target/external-pilots/bytes-pr827.diff");
+        let expected_out_dir = env::current_dir()
+            .map_err(|err| err.to_string())?
+            .join("target/external-pilots/bytes-pr827/first-pr");
+        let command = parse(args([
+            "unsafe-review",
+            "pr-setup",
+            "--repo",
+            "tokio-rs/bytes",
+            "--number",
+            "827",
+            "--base-ref",
+            "main",
+            "--base-sha",
+            "245adff079eb0cb1a706d35bab5f68b2d51919f6",
+            "--head-sha",
+            "2f6852ec5295160bc4f1e687ea19847f9cd4e665",
+            "--root",
+            "/tmp/bytes checkout",
+            "--out-dir",
+            "target/external-pilots/bytes-pr827/first-pr",
+            "--diff-out",
+            "target/external-pilots/bytes-pr827.diff",
+        ]))?;
+        let Command::PrSetup(options) = command else {
+            return Err("expected pr-setup command".to_string());
+        };
+        assert_eq!(options.repo, "tokio-rs/bytes");
+        assert_eq!(options.number, "827");
+        assert_eq!(options.base_ref, "main");
+        assert_eq!(options.base_sha, "245adff079eb0cb1a706d35bab5f68b2d51919f6");
+        assert_eq!(options.head_sha, "2f6852ec5295160bc4f1e687ea19847f9cd4e665");
+        assert_eq!(options.root, PathBuf::from("/tmp/bytes checkout"));
+        assert_eq!(options.out_dir, expected_out_dir);
+        assert_eq!(options.diff_out, expected_diff_out);
+        Ok(())
+    }
+
+    #[test]
+    fn pr_setup_accepts_common_github_base_ref_tokens() -> Result<(), String> {
+        for base_ref in ["release+1", "feat@bar"] {
+            let command = parse(args([
+                "unsafe-review",
+                "pr-setup",
+                "--repo",
+                "tokio-rs/bytes",
+                "--number",
+                "827",
+                "--base-ref",
+                base_ref,
+                "--base-sha",
+                "245adff079eb0cb1a706d35bab5f68b2d51919f6",
+                "--head-sha",
+                "2f6852ec5295160bc4f1e687ea19847f9cd4e665",
+            ]))?;
+            let Command::PrSetup(options) = command else {
+                return Err("expected pr-setup command".to_string());
+            };
+            assert_eq!(options.base_ref, base_ref);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn pr_setup_base_ref_errors_identify_rejected_rule() {
+        for (base_ref, expected) in [
+            ("", "invalid --base-ref; value must not be empty"),
+            ("-main", "invalid --base-ref; value must not start with `-`"),
+            ("+main", "invalid --base-ref; value must not start with `+`"),
+            ("@main", "invalid --base-ref; value must not start with `@`"),
+            (
+                "main..next",
+                "invalid --base-ref; value must not contain `..`",
+            ),
+            (
+                "main;echo",
+                "invalid --base-ref; use only ASCII letters, digits, `/`, `.`, `_`, `-`, `+`, or `@`",
+            ),
+        ] {
+            let mut argv = args([
+                "unsafe-review",
+                "pr-setup",
+                "--repo",
+                "tokio-rs/bytes",
+                "--number",
+                "827",
+            ]);
+            argv.push(format!("--base-ref={base_ref}"));
+            argv.extend(args([
+                "--base-sha",
+                "245adff079eb0cb1a706d35bab5f68b2d51919f6",
+                "--head-sha",
+                "2f6852ec5295160bc4f1e687ea19847f9cd4e665",
+            ]));
+
+            let err = parse(argv).err().unwrap_or_default();
+
+            assert_eq!(err, expected);
+        }
+    }
+
+    #[test]
+    fn pr_setup_rejects_duplicate_flags() {
+        for (flag, first, second) in [
+            ("--repo", "tokio-rs/bytes", "tokio-rs/tokio"),
+            ("--number", "827", "828"),
+            ("--root", "/tmp/bytes", "/tmp/tokio"),
+            ("--base-ref", "main", "release+1"),
+            (
+                "--base-sha",
+                "245adff079eb0cb1a706d35bab5f68b2d51919f6",
+                "1111111111111111111111111111111111111111",
+            ),
+            (
+                "--head-sha",
+                "2f6852ec5295160bc4f1e687ea19847f9cd4e665",
+                "2222222222222222222222222222222222222222",
+            ),
+            (
+                "--out-dir",
+                "target/external-pilots/bytes-pr827/first-pr",
+                "target/external-pilots/bytes-pr828/first-pr",
+            ),
+            (
+                "--diff-out",
+                "target/external-pilots/bytes-pr827.diff",
+                "target/external-pilots/bytes-pr828.diff",
+            ),
+        ] {
+            let mut argv = args([
+                "unsafe-review",
+                "pr-setup",
+                "--repo",
+                "tokio-rs/bytes",
+                "--number",
+                "827",
+                "--base-ref",
+                "main",
+                "--base-sha",
+                "245adff079eb0cb1a706d35bab5f68b2d51919f6",
+                "--head-sha",
+                "2f6852ec5295160bc4f1e687ea19847f9cd4e665",
+            ]);
+            argv.push(flag.to_string());
+            argv.push(first.to_string());
+            argv.push(flag.to_string());
+            argv.push(second.to_string());
+
+            let err = parse(argv).err().unwrap_or_default();
+            assert_eq!(err, format!("duplicate {flag}"));
+        }
+    }
+
+    #[test]
+    fn pr_setup_rejects_command_injection_tokens() {
+        for argv in [
+            args([
+                "unsafe-review",
+                "pr-setup",
+                "--repo",
+                "tokio-rs/bytes;rm",
+                "--number",
+                "827",
+                "--base-ref",
+                "main",
+                "--base-sha",
+                "245adff079eb0cb1a706d35bab5f68b2d51919f6",
+                "--head-sha",
+                "2f6852ec5295160bc4f1e687ea19847f9cd4e665",
+            ]),
+            args([
+                "unsafe-review",
+                "pr-setup",
+                "--repo",
+                "tokio-rs/bytes",
+                "--number",
+                "827",
+                "--base-ref",
+                "main;echo",
+                "--base-sha",
+                "245adff079eb0cb1a706d35bab5f68b2d51919f6",
+                "--head-sha",
+                "2f6852ec5295160bc4f1e687ea19847f9cd4e665",
+            ]),
+            args([
+                "unsafe-review",
+                "pr-setup",
+                "--repo",
+                "tokio-rs/bytes",
+                "--number",
+                "827",
+                "--base-ref",
+                "main",
+                "--base-sha",
+                "245adff079eb0cb1a706d35bab5f68b2d51919f6",
+                "--head-sha",
+                "2f6852ec5295160bc4f1e687ea19847f9cd4e665",
+                "--out-dir",
+                "target/`cmd`",
+            ]),
+            args([
+                "unsafe-review",
+                "pr-setup",
+                "--repo",
+                "tokio-rs/bytes",
+                "--number",
+                "827",
+                "--base-ref",
+                "main",
+                "--base-sha",
+                "245adff079eb0cb1a706d35bab5f68b2d51919f6",
+                "--head-sha",
+                "2f6852ec5295160bc4f1e687ea19847f9cd4e665",
+                "--diff-out",
+                "target/evil`cmd`.diff",
+            ]),
+            args([
+                "unsafe-review",
+                "pr-setup",
+                "--repo",
+                "tokio-rs/bytes",
+                "--number",
+                "827",
+                "--base-ref",
+                "main",
+                "--base-sha",
+                "245adff079eb0cb1a706d35bab5f68b2d51919f6",
+                "--head-sha",
+                "2f6852ec5295160bc4f1e687ea19847f9cd4e665",
+                "--diff-out",
+                "target/$(whoami).diff",
+            ]),
+        ] {
+            let err = parse(argv).err().unwrap_or_default();
+            assert!(
+                err.contains("invalid --repo")
+                    || err.contains("invalid --base-ref")
+                    || err.contains("invalid --out-dir")
+                    || err.contains("invalid --diff-out"),
+                "unexpected error: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn first_pr_rejects_head_sha_without_base_sha() {
+        let err = parse(args([
+            "unsafe-review",
+            "first-pr",
+            "--head-sha",
+            "2f6852ec5295160bc4f1e687ea19847f9cd4e665",
+        ]))
+        .err()
+        .unwrap_or_default();
+
+        assert!(
+            err.contains("--head-sha requires --base-sha"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn first_pr_rejects_head_sha_with_diff() {
+        let err = parse(args([
+            "unsafe-review",
+            "first-pr",
+            "--head-sha",
+            "2f6852ec5295160bc4f1e687ea19847f9cd4e665",
+            "--diff=change.diff",
+        ]))
+        .err()
+        .unwrap_or_default();
+
+        assert_eq!(err, "choose only one of --head-sha or --diff");
+    }
+
+    #[test]
+    fn first_pr_rejects_base_sha_with_diff() {
+        let err = parse(args([
+            "unsafe-review",
+            "first-pr",
+            "--base-sha",
+            "245adff079eb0cb1a706d35bab5f68b2d51919f6",
+            "--diff=change.diff",
+        ]))
+        .err()
+        .unwrap_or_default();
+
+        assert_eq!(err, "choose only one of --base-sha or --diff");
+    }
+
+    #[test]
+    fn first_pr_rejects_invalid_exact_sha() {
+        let err = parse(args([
+            "unsafe-review",
+            "first-pr",
+            "--base-sha",
+            "origin/main",
+        ]))
+        .err()
+        .unwrap_or_default();
+
+        assert!(
+            err.contains("invalid --base-sha `origin/main`"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn first_pr_rejects_duplicate_head_sha() {
+        let err = parse(args([
+            "unsafe-review",
+            "first-pr",
+            "--base-sha",
+            "245adff079eb0cb1a706d35bab5f68b2d51919f6",
+            "--head-sha",
+            "2f6852ec5295160bc4f1e687ea19847f9cd4e665",
+            "--head-sha=3f6852ec5295160bc4f1e687ea19847f9cd4e665",
+        ]))
+        .err()
+        .unwrap_or_default();
+
+        assert_eq!(err, "duplicate --head-sha");
+    }
+
+    #[test]
+    fn first_pr_rejects_duplicate_base_sha() {
+        let err = parse(args([
+            "unsafe-review",
+            "first-pr",
+            "--base-sha",
+            "245adff079eb0cb1a706d35bab5f68b2d51919f6",
+            "--base-sha=2f6852ec5295160bc4f1e687ea19847f9cd4e665",
+        ]))
+        .err()
+        .unwrap_or_default();
+
+        assert_eq!(err, "duplicate --base-sha");
     }
 
     #[test]
@@ -2998,5 +4009,188 @@ mod tests {
 
     fn args<const N: usize>(values: [&str; N]) -> Vec<String> {
         values.iter().map(|value| (*value).to_string()).collect()
+    }
+
+    #[test]
+    fn parses_baseline_status_defaults_to_human_format() -> Result<(), String> {
+        let command = parse(args(["unsafe-review", "baseline", "status"]))?;
+        let Command::Baseline(BaselineCommand::Status(options)) = command else {
+            return Err("expected baseline status command".to_string());
+        };
+        assert_eq!(options.root, PathBuf::from("."));
+        assert_eq!(options.format, Format::Human);
+        Ok(())
+    }
+
+    #[test]
+    fn parses_baseline_init_preview_and_json_format() -> Result<(), String> {
+        let command = parse(args([
+            "unsafe-review",
+            "baseline",
+            "init",
+            "--dry-run",
+            "--format",
+            "json",
+        ]))?;
+        let Command::Baseline(BaselineCommand::Init(options)) = command else {
+            return Err("expected baseline init command".to_string());
+        };
+        assert!(options.dry_run);
+        assert_eq!(options.format, Format::Json);
+        Ok(())
+    }
+
+    #[test]
+    fn baseline_init_rejects_non_human_json_format() {
+        let err = parse(args([
+            "unsafe-review",
+            "baseline",
+            "init",
+            "--format",
+            "sarif",
+        ]))
+        .err()
+        .unwrap_or_default();
+        assert!(
+            err.contains("baseline init only supports human or json output"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn parses_baseline_status_root_and_json_format() -> Result<(), String> {
+        let command = parse(args([
+            "unsafe-review",
+            "baseline",
+            "status",
+            "--root",
+            "fixtures/example",
+            "--format",
+            "json",
+        ]))?;
+        let Command::Baseline(BaselineCommand::Status(options)) = command else {
+            return Err("expected baseline status command".to_string());
+        };
+        assert_eq!(options.root, PathBuf::from("fixtures/example"));
+        assert_eq!(options.format, Format::Json);
+        Ok(())
+    }
+
+    #[test]
+    fn parses_baseline_status_json_flag_shorthand() -> Result<(), String> {
+        let command = parse(args(["unsafe-review", "baseline", "status", "--json"]))?;
+        let Command::Baseline(BaselineCommand::Status(options)) = command else {
+            return Err("expected baseline status command".to_string());
+        };
+        assert_eq!(options.format, Format::Json);
+        Ok(())
+    }
+
+    #[test]
+    fn baseline_status_rejects_non_human_json_format() {
+        let err = parse(args([
+            "unsafe-review",
+            "baseline",
+            "status",
+            "--format",
+            "sarif",
+        ]))
+        .err()
+        .unwrap_or_default();
+        assert!(
+            err.contains("baseline status only supports human or json output"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn baseline_status_rejects_unknown_argument() {
+        let err = parse(args(["unsafe-review", "baseline", "status", "--bogus"]))
+            .err()
+            .unwrap_or_default();
+        assert!(
+            err.contains("unknown baseline status argument `--bogus`"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn parses_baseline_refresh_requires_dry_run_flag() {
+        let err = parse(args([
+            "unsafe-review",
+            "baseline",
+            "refresh",
+            "--root",
+            ".",
+        ]))
+        .err()
+        .unwrap_or_default();
+        assert!(err.contains("baseline refresh requires --dry-run"), "{err}");
+        assert!(err.contains("no apply mode"), "{err}");
+    }
+
+    #[test]
+    fn parses_baseline_refresh_dry_run_with_root_and_out() -> Result<(), String> {
+        let command = parse(args([
+            "unsafe-review",
+            "baseline",
+            "refresh",
+            "--root",
+            "fixtures/example",
+            "--dry-run",
+            "--out",
+            "target/baseline-refresh",
+        ]))?;
+        let Command::Baseline(BaselineCommand::Refresh(options)) = command else {
+            return Err("expected baseline refresh command".to_string());
+        };
+        assert_eq!(options.root, PathBuf::from("fixtures/example"));
+        assert!(options.dry_run);
+        assert_eq!(options.out, Some(PathBuf::from("target/baseline-refresh")));
+        Ok(())
+    }
+
+    #[test]
+    fn parses_baseline_refresh_dry_run_without_out() -> Result<(), String> {
+        let command = parse(args(["unsafe-review", "baseline", "refresh", "--dry-run"]))?;
+        let Command::Baseline(BaselineCommand::Refresh(options)) = command else {
+            return Err("expected baseline refresh command".to_string());
+        };
+        assert_eq!(options.root, PathBuf::from("."));
+        assert!(options.dry_run);
+        assert_eq!(options.out, None);
+        Ok(())
+    }
+
+    #[test]
+    fn baseline_refresh_rejects_unknown_argument() {
+        let err = parse(args([
+            "unsafe-review",
+            "baseline",
+            "refresh",
+            "--dry-run",
+            "--bogus",
+        ]))
+        .err()
+        .unwrap_or_default();
+        assert!(
+            err.contains("unknown baseline refresh argument `--bogus`"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn parses_baseline_help_still_covers_status_and_refresh_subcommands() -> Result<(), String> {
+        // `baseline` with no subcommand and `baseline help` remain the help path;
+        // status/refresh are only reached via their explicit subcommand name.
+        assert_eq!(
+            parse(args(["unsafe-review", "baseline"]))?,
+            Command::BaselineHelp
+        );
+        assert_eq!(
+            parse(args(["unsafe-review", "baseline", "help"]))?,
+            Command::BaselineHelp
+        );
+        Ok(())
     }
 }

@@ -40,6 +40,11 @@ source of analyzer truth. It carries:
 - missing evidence
 - allowed repairs scoped to the current card, derived from the ReviewCard
   operation family and missing obligation evidence
+- `repair_candidates`, an optional typed projection of bounded repair intent;
+  each candidate has a stable repair ID and kind, exact card target, explicit
+  preconditions, allowed change, forbidden substitutes, verification commands,
+  expected evidence movement, closed-vocabulary applicability, and a claim
+  boundary
 - `agent_readiness`, an advisory classification of whether this card is a
   bounded repair-delegation candidate
 - `repair_queue`, a compact card-scoped grouping such as
@@ -50,9 +55,36 @@ source of analyzer truth. It carries:
 - stop conditions
 - the static-review trust boundary
 
+When the selected card belongs to a repetitive `target_feature` group, the
+packet also carries the presentation-only canonical group projection: stable
+group identity, total, bounded representatives, feature metadata, and every
+underlying card ID with its exact `unsafe-review context <card-id> --json`
+lookup command. The enclosing packet still authorizes work on only its own
+card/site. Editing a representative does not repair, discharge, or resolve any
+sibling card, and group metadata never changes readiness or allowed repairs.
+
 For compatibility with the initial context-packet scaffold, the packet keeps
 top-level `card_id`, `required_safety_conditions`, `missing`, and string-array
-`allowed_repairs` fields while adding richer structured fields.
+`allowed_repairs` fields while adding richer structured fields. `allowed_repairs`
+and aggregate `applicable_edit` remain compatibility projections; consumers must
+not parse their prose to recover typed repair intent.
+
+The typed candidate projection is deliberately narrow. It is derived
+from the same ReviewCard operation family and obligation evidence as the legacy
+repair projection, and it does not parse `allowed_repairs` prose. Candidate
+`kind` values are `safety_docs`, `guard`, `test`, and `witness_route`.
+Applicability is one of `candidate`, `human_only`, or `requires_witness`.
+Public unsafe-declaration contract gaps may emit a `safety_docs` candidate, but
+their applicability is always `human_only`; this makes the review boundary
+explicit without presenting the declaration as an automatic repair task.
+Ambiguous FFI, assembly, concurrency, ownership, and semantic families remain
+without typed candidates until a later representative-family lane establishes
+their evidence contract. A typed candidate is still advisory intent: it never
+authorizes a source edit, WorkspaceEdit, witness execution, proof claim, or
+automatic resolution. The agent packet, aggregate repair queue, saved/live LSP
+agent action, and bounded review-kit card queue project the same candidate
+objects. These consumers must preserve candidate identity and applicability
+without reclassifying or parsing the compatibility prose fields.
 
 `source_context` is intentionally bounded. It may include the unsafe site
 snippet, ReviewCard-derived summaries for nearby contract and guard evidence,
@@ -156,6 +188,11 @@ auto-application is safe. Cards may appear in more than
 one bucket only when the reasons are distinct and card-scoped, such as a card
 that is repairable by guard evidence but still requires a witness receipt for a
 stronger review signal. A card must not repeat within the same bucket.
+Entries also carry `repair_candidates`, the canonical typed candidate array
+from the card-scoped agent projection. The saved/live LSP `agent-packet`
+action payload and bounded `review-kit.json` card queue preserve this same
+array. Human-only and witness-required applicability values remain visible;
+these fields do not authorize edits or witness execution.
 The aggregate summary must also project the canonical input diff file counts
 from `cards.json`, so mixed-language scope remains visible without creating
 non-Rust repair tasks.

@@ -1,14 +1,21 @@
 use crate::api::{AnalyzeOutput, Scope};
-use crate::domain::{EvidenceState, ObligationEvidence, Priority, ReviewCard, WitnessRoute};
-use crate::output::REVIEWCARD_TRUST_BOUNDARY as TRUST_BOUNDARY;
+use crate::domain::{
+    CommentPlanStatus, CoverageBlock, EvidenceState, ObligationEvidence, Priority, ReviewCard,
+    WitnessRoute,
+};
+use crate::freshness::AnalysisIdentity;
+use crate::output::{
+    REVIEWCARD_TRUST_BOUNDARY as TRUST_BOUNDARY, agent::card_has_scoped_repairs, comment_plan,
+};
+use crate::policy::SnapshotCoverage;
 use crate::util::path_display;
 use serde::{Deserialize, Serialize};
 
-mod code_actions;
 mod hover;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EditorProjection {
+    pub analysis: AnalysisIdentity,
     pub schema_version: String,
     pub tool: String,
     pub mode: String,
@@ -17,7 +24,7 @@ pub struct EditorProjection {
     pub status: EditorStatus,
     pub diagnostics: Vec<EditorDiagnostic>,
     pub hovers: Vec<EditorHover>,
-    pub code_actions: Vec<EditorCodeAction>,
+    pub code_actions: Vec<super::EditorActionContract>,
     pub trust_boundary: String,
 }
 
@@ -31,9 +38,7 @@ pub struct EditorStatus {
     pub trust_boundary: String,
 }
 
-pub type EditorDiagnostic = serde_json::Value;
 pub type EditorHover = serde_json::Value;
-pub type EditorCodeAction = serde_json::Value;
 
 /// Render the rich hover markdown for a single [`ReviewCard`].
 ///
@@ -47,6 +52,7 @@ pub(crate) fn render_hover(card: &ReviewCard) -> String {
 pub(crate) fn project_editor(output: &AnalyzeOutput) -> EditorProjection {
     let projection = LspProjection::from(output);
     EditorProjection {
+        analysis: projection.analysis.clone(),
         schema_version: projection.schema_version.to_string(),
         tool: projection.tool.to_string(),
         mode: projection.mode.to_string(),
@@ -60,237 +66,343 @@ pub(crate) fn project_editor(output: &AnalyzeOutput) -> EditorProjection {
             message: projection.status.message,
             trust_boundary: projection.status.trust_boundary.to_string(),
         },
-        diagnostics: projection
-            .diagnostics
-            .iter()
-            .map(|item| serde_json::to_value(item).unwrap_or(serde_json::Value::Null))
-            .collect(),
+        diagnostics: projection.diagnostics,
         hovers: projection
             .hovers
             .iter()
             .map(|item| serde_json::to_value(item).unwrap_or(serde_json::Value::Null))
             .collect(),
-        code_actions: projection
-            .code_actions
-            .iter()
-            .map(|item| serde_json::to_value(item).unwrap_or(serde_json::Value::Null))
-            .collect(),
+        code_actions: projection.code_actions,
         trust_boundary: projection.trust_boundary.to_string(),
     }
 }
 
+pub(crate) fn project_editor_diagnostics(output: &AnalyzeOutput) -> Vec<EditorDiagnostic> {
+    diagnostics_for(output)
+}
+
+pub(crate) fn project_actionable_editor_diagnostics(
+    output: &AnalyzeOutput,
+) -> Vec<EditorDiagnostic> {
+    let statuses = comment_plan::card_statuses(output);
+    diagnostics_for_with_status(output, &statuses, true)
+}
+
 #[derive(Serialize)]
 struct LspProjection<'a> {
-    schema_version: &'a str,
+    analysis: &'a AnalysisIdentity,
+    schema_version: &'static str,
     tool: &'a str,
     mode: &'static str,
     policy: &'static str,
     scope: &'static str,
     status: LspStatus,
-    diagnostics: Vec<LspDiagnostic<'a>>,
+    diagnostics: Vec<EditorDiagnostic>,
     hovers: Vec<LspHover<'a>>,
-    code_actions: Vec<LspCodeAction<'a>>,
+    code_actions: Vec<super::EditorActionContract>,
     trust_boundary: &'static str,
 }
 
+#[allow(
+    clippy::panic,
+    reason = "a card already owned by AnalyzeOutput must have a canonical diagnostic and action projection; silently dropping it would corrupt the saved artifact"
+)]
 impl<'a> From<&'a AnalyzeOutput> for LspProjection<'a> {
     fn from(output: &'a AnalyzeOutput) -> Self {
         Self {
-            schema_version: &output.schema_version,
+            analysis: &output.analysis_identity,
+            schema_version: "0.2",
             tool: &output.tool,
             mode: "read_only_projection",
             policy: output.policy.as_str(),
             scope: scope_label(output),
             status: status_for(output),
-            diagnostics: output.cards.iter().map(LspDiagnostic::from).collect(),
-            hovers: output.cards.iter().map(LspHover::from).collect(),
+            diagnostics: diagnostics_for(output),
+            hovers: output
+                .cards
+                .iter()
+                .map(|card| LspHover::from_card(card, &output.analysis_identity))
+                .collect(),
             code_actions: output
                 .cards
                 .iter()
-                .flat_map(code_actions::for_card)
+                .flat_map(|card| {
+                    super::actions_for_card(output, &card.id.0).unwrap_or_else(|error| {
+                        panic!(
+                            "canonical saved LSP actions must project for card `{}`: {error}",
+                            card.id.0
+                        )
+                    })
+                })
                 .collect(),
             trust_boundary: TRUST_BOUNDARY,
         }
     }
 }
 
-#[derive(Serialize)]
-struct LspDiagnostic<'a> {
-    card_id: &'a str,
-    path: String,
-    range: LspRange,
-    severity: usize,
-    source: &'static str,
-    code: &'static str,
-    message: String,
-    operation: &'a str,
-    operation_family: &'static str,
-    proof_path: &'static str,
-    hazards: Vec<&'static str>,
-    required_safety_conditions: Vec<LspSafetyCondition<'a>>,
-    evidence_summary: LspEvidenceSummary<'a>,
-    obligation_evidence: Vec<LspObligationEvidence<'a>>,
-    missing_evidence: Vec<&'a str>,
-    next_action: &'a str,
-    witness_routes: Vec<LspWitnessRoute<'a>>,
-    verify_commands: &'a [String],
-    trust_boundary: &'static str,
+fn diagnostics_for(output: &AnalyzeOutput) -> Vec<EditorDiagnostic> {
+    let statuses = comment_plan::card_statuses(output);
+    diagnostics_for_with_status(output, &statuses, false)
 }
 
-impl<'a> From<&'a ReviewCard> for LspDiagnostic<'a> {
-    fn from(card: &'a ReviewCard) -> Self {
+fn diagnostics_for_with_status(
+    output: &AnalyzeOutput,
+    statuses: &std::collections::HashMap<crate::domain::CardId, CommentPlanStatus>,
+    actionable_only: bool,
+) -> Vec<EditorDiagnostic> {
+    output
+        .cards
+        .iter()
+        .filter(|card| !actionable_only || card.class.is_actionable())
+        .map(|card| {
+            let status = statuses
+                .get(&card.id)
+                .copied()
+                .unwrap_or(CommentPlanStatus::NotEligible);
+            let snapshot = output.coverage_snapshot.get(&card.id.0);
+            EditorDiagnostic::from_with_status(card, status, snapshot)
+        })
+        .collect()
+}
+
+/// Canonical, card-scoped diagnostic data for editor and agent projections.
+///
+/// This owned DTO deliberately contains review semantics rather than LSP
+/// transport details.  Saved LSP, live LSP, VS Code, and agent adapters can
+/// consume the same fields without independently deriving class, range,
+/// evidence, or readiness.  The DTO remains read-only and advisory.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EditorDiagnostic {
+    pub card_id: String,
+    pub code: String,
+    pub coverage: EditorCoverageBlock,
+    pub evidence_summary: EditorEvidenceSummary,
+    pub hazards: Vec<String>,
+    pub message: String,
+    pub missing_evidence: Vec<String>,
+    pub next_action: String,
+    pub obligation_evidence: Vec<EditorObligationEvidence>,
+    pub operation: String,
+    pub operation_family: String,
+    pub path: String,
+    pub proof_path: String,
+    pub range: EditorRange,
+    pub required_safety_conditions: Vec<EditorSafetyCondition>,
+    pub severity: usize,
+    pub source: String,
+    pub trust_boundary: String,
+    pub verify_commands: Vec<String>,
+    pub witness_routes: Vec<EditorWitnessRoute>,
+}
+
+impl EditorDiagnostic {
+    pub(crate) fn from_with_status(
+        card: &ReviewCard,
+        comment_plan_status: CommentPlanStatus,
+        snapshot: Option<&SnapshotCoverage>,
+    ) -> Self {
+        let mut coverage_block = card.coverage_block();
+        coverage_block.comment_plan_status = comment_plan_status;
+        if let Some(snap) = snapshot {
+            coverage_block.apply_snapshot_slots(
+                &snap.contract_coverage,
+                &snap.guard_coverage,
+                &snap.test_reach_coverage,
+                &snap.witness_receipt_coverage,
+            );
+        }
+        coverage_block.agent_lsp_readiness = crate::domain::coverage::compute_agent_lsp_readiness(
+            card,
+            card_has_scoped_repairs(card),
+        )
+        .state;
         Self {
-            card_id: &card.id.0,
-            path: path_display(&card.site.location.file),
-            range: range_for(card),
-            severity: severity_for(card),
-            source: "unsafe-review",
-            code: card.class.as_str(),
+            card_id: card.id.0.clone(),
+            code: card.class.as_str().to_string(),
+            coverage: EditorCoverageBlock::from(coverage_block),
+            evidence_summary: EditorEvidenceSummary::from(card),
+            hazards: card
+                .hazards
+                .iter()
+                .map(|hazard| hazard.as_str().to_string())
+                .collect(),
             message: format!(
                 "{}: {}",
                 card.operation.family.as_str(),
                 card.next_action.summary
             ),
-            operation: &card.operation.expression,
-            operation_family: card.operation.family.as_str(),
-            proof_path: card.proof_path.as_str(),
-            hazards: card.hazards.iter().map(|hazard| hazard.as_str()).collect(),
-            required_safety_conditions: card
-                .obligations
-                .iter()
-                .map(|obligation| LspSafetyCondition {
-                    key: &obligation.key,
-                    description: &obligation.description,
-                })
-                .collect(),
-            evidence_summary: LspEvidenceSummary::from(card),
-            obligation_evidence: card
-                .obligation_evidence
-                .iter()
-                .map(LspObligationEvidence::from)
-                .collect(),
             missing_evidence: card
                 .missing
                 .iter()
-                .map(|missing| missing.message.as_str())
+                .map(|missing| missing.message.clone())
                 .collect(),
-            next_action: &card.next_action.summary,
-            witness_routes: card.routes.iter().map(LspWitnessRoute::from).collect(),
-            verify_commands: &card.next_action.verify_commands,
-            trust_boundary: TRUST_BOUNDARY,
+            next_action: card.next_action.summary.clone(),
+            obligation_evidence: card
+                .obligation_evidence
+                .iter()
+                .map(EditorObligationEvidence::from)
+                .collect(),
+            operation: card.operation.expression.clone(),
+            operation_family: card.operation.family.as_str().to_string(),
+            path: path_display(&card.site.location.file),
+            proof_path: card.proof_path.as_str().to_string(),
+            range: range_for(card),
+            required_safety_conditions: card
+                .obligations
+                .iter()
+                .map(|obligation| EditorSafetyCondition {
+                    key: obligation.key.clone(),
+                    description: obligation.description.clone(),
+                })
+                .collect(),
+            severity: severity_for(card),
+            source: "unsafe-review".to_string(),
+            trust_boundary: TRUST_BOUNDARY.to_string(),
+            verify_commands: card.next_action.verify_commands.clone(),
+            witness_routes: card.routes.iter().map(EditorWitnessRoute::from).collect(),
         }
     }
 }
 
-#[derive(Serialize)]
-struct LspSafetyCondition<'a> {
-    key: &'a str,
-    description: &'a str,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EditorCoverageBlock {
+    pub agent_lsp_readiness: String,
+    pub baseline_state: String,
+    pub comment_plan_status: String,
+    pub contract_coverage: String,
+    pub guard_coverage: String,
+    pub manual_context: String,
+    pub outcome_movement: String,
+    pub test_reach_coverage: String,
+    pub witness_receipt_coverage: String,
 }
 
-#[derive(Serialize)]
-struct LspEvidenceSummary<'a> {
-    contract: LspSimpleEvidence<'a>,
-    discharge: LspSimpleEvidence<'a>,
-    reach: LspReachEvidence<'a>,
-    witness: LspSimpleEvidence<'a>,
-    reach_limitation: &'static str,
-}
-
-impl<'a> From<&'a ReviewCard> for LspEvidenceSummary<'a> {
-    fn from(card: &'a ReviewCard) -> Self {
+impl From<CoverageBlock> for EditorCoverageBlock {
+    fn from(block: CoverageBlock) -> Self {
         Self {
-            contract: LspSimpleEvidence {
+            contract_coverage: block.contract_coverage.as_str().to_string(),
+            guard_coverage: block.guard_coverage.as_str().to_string(),
+            test_reach_coverage: block.test_reach_coverage.as_str().to_string(),
+            witness_receipt_coverage: block.witness_receipt_coverage.as_str().to_string(),
+            manual_context: block.manual_context.as_str().to_string(),
+            baseline_state: block.baseline_state.as_str().to_string(),
+            outcome_movement: block.outcome_movement.as_str().to_string(),
+            comment_plan_status: block.comment_plan_status.as_str().to_string(),
+            agent_lsp_readiness: block.agent_lsp_readiness.as_str().to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EditorSafetyCondition {
+    pub description: String,
+    pub key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EditorEvidenceSummary {
+    pub contract: EditorSimpleEvidence,
+    pub discharge: EditorSimpleEvidence,
+    pub reach: EditorReachEvidence,
+    pub reach_limitation: String,
+    pub witness: EditorSimpleEvidence,
+}
+
+impl From<&ReviewCard> for EditorEvidenceSummary {
+    fn from(card: &ReviewCard) -> Self {
+        Self {
+            contract: EditorSimpleEvidence {
                 present: card.contract.present,
-                state: present_label(card.contract.present),
-                summary: &card.contract.summary,
+                state: present_label(card.contract.present).to_string(),
+                summary: card.contract.summary.clone(),
             },
-            discharge: LspSimpleEvidence {
+            discharge: EditorSimpleEvidence {
                 present: card.discharge.present,
-                state: present_label(card.discharge.present),
-                summary: &card.discharge.summary,
+                state: present_label(card.discharge.present).to_string(),
+                summary: card.discharge.summary.clone(),
             },
-            reach: LspReachEvidence {
-                state: &card.reach.state,
-                summary: &card.reach.summary,
+            reach: EditorReachEvidence {
+                state: card.reach.state.clone(),
+                summary: card.reach.summary.clone(),
             },
-            witness: LspSimpleEvidence {
+            witness: EditorSimpleEvidence {
                 present: card.witness.present,
-                state: present_label(card.witness.present),
-                summary: &card.witness.summary,
+                state: present_label(card.witness.present).to_string(),
+                summary: card.witness.summary.clone(),
             },
-            reach_limitation: "static reach evidence is not proof that the unsafe site executed",
+            reach_limitation: "static reach evidence is not proof that the unsafe site executed"
+                .to_string(),
         }
     }
 }
 
-#[derive(Serialize)]
-struct LspSimpleEvidence<'a> {
-    present: bool,
-    state: &'static str,
-    summary: &'a str,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EditorSimpleEvidence {
+    pub present: bool,
+    pub state: String,
+    pub summary: String,
 }
 
-#[derive(Serialize)]
-struct LspReachEvidence<'a> {
-    state: &'a str,
-    summary: &'a str,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EditorReachEvidence {
+    pub state: String,
+    pub summary: String,
 }
 
-#[derive(Serialize)]
-struct LspObligationEvidence<'a> {
-    key: &'a str,
-    description: &'a str,
-    contract: LspEvidenceState<'a>,
-    discharge: LspEvidenceState<'a>,
-    reach: LspEvidenceState<'a>,
-    witness: LspEvidenceState<'a>,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EditorObligationEvidence {
+    pub contract: EditorEvidenceState,
+    pub description: String,
+    pub discharge: EditorEvidenceState,
+    pub key: String,
+    pub reach: EditorEvidenceState,
+    pub witness: EditorEvidenceState,
 }
 
-impl<'a> From<&'a ObligationEvidence> for LspObligationEvidence<'a> {
-    fn from(evidence: &'a ObligationEvidence) -> Self {
+impl From<&ObligationEvidence> for EditorObligationEvidence {
+    fn from(evidence: &ObligationEvidence) -> Self {
         Self {
-            key: &evidence.obligation.key,
-            description: &evidence.obligation.description,
-            contract: LspEvidenceState::from(&evidence.contract),
-            discharge: LspEvidenceState::from(&evidence.discharge),
-            reach: LspEvidenceState::from(&evidence.reach),
-            witness: LspEvidenceState::from(&evidence.witness),
+            key: evidence.obligation.key.clone(),
+            description: evidence.obligation.description.clone(),
+            contract: EditorEvidenceState::from(&evidence.contract),
+            discharge: EditorEvidenceState::from(&evidence.discharge),
+            reach: EditorEvidenceState::from(&evidence.reach),
+            witness: EditorEvidenceState::from(&evidence.witness),
         }
     }
 }
 
-#[derive(Serialize)]
-struct LspEvidenceState<'a> {
-    present: bool,
-    state: &'a str,
-    summary: &'a str,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EditorEvidenceState {
+    pub present: bool,
+    pub state: String,
+    pub summary: String,
 }
 
-impl<'a> From<&'a EvidenceState> for LspEvidenceState<'a> {
-    fn from(state: &'a EvidenceState) -> Self {
+impl From<&EvidenceState> for EditorEvidenceState {
+    fn from(state: &EvidenceState) -> Self {
         Self {
             present: state.present,
-            state: &state.state,
-            summary: &state.summary,
+            state: state.state.clone(),
+            summary: state.summary.clone(),
         }
     }
 }
 
-#[derive(Serialize)]
-struct LspWitnessRoute<'a> {
-    kind: &'static str,
-    reason: &'a str,
-    command: Option<&'a str>,
-    required: bool,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EditorWitnessRoute {
+    pub command: Option<String>,
+    pub kind: String,
+    pub reason: String,
+    pub required: bool,
 }
 
-impl<'a> From<&'a WitnessRoute> for LspWitnessRoute<'a> {
-    fn from(route: &'a WitnessRoute) -> Self {
+impl From<&WitnessRoute> for EditorWitnessRoute {
+    fn from(route: &WitnessRoute) -> Self {
         Self {
-            kind: route.kind.as_str(),
-            reason: &route.reason,
-            command: route.command.as_deref(),
+            kind: route.kind.as_str().to_string(),
+            reason: route.reason.clone(),
+            command: route.command.clone(),
             required: route.required,
         }
     }
@@ -298,51 +410,27 @@ impl<'a> From<&'a WitnessRoute> for LspWitnessRoute<'a> {
 
 #[derive(Serialize)]
 struct LspHover<'a> {
+    analysis: &'a AnalysisIdentity,
     card_id: &'a str,
     path: String,
-    position: LspPosition,
+    position: EditorPosition,
+    range: EditorRange,
     contents: String,
     trust_boundary: &'static str,
 }
 
-impl<'a> From<&'a ReviewCard> for LspHover<'a> {
-    fn from(card: &'a ReviewCard) -> Self {
+impl<'a> LspHover<'a> {
+    fn from_card(card: &'a ReviewCard, analysis: &'a AnalysisIdentity) -> Self {
         Self {
+            analysis,
             card_id: &card.id.0,
             path: path_display(&card.site.location.file),
             position: position_for(card),
+            range: range_for(card),
             contents: hover::contents(card),
             trust_boundary: TRUST_BOUNDARY,
         }
     }
-}
-
-#[derive(Serialize)]
-struct LspCodeAction<'a> {
-    card_id: &'a str,
-    path: String,
-    range: LspRange,
-    title: String,
-    kind: &'static str,
-    command: &'static str,
-    payload: LspCodeActionPayload<'a>,
-    arguments: Vec<String>,
-}
-
-#[derive(Serialize)]
-struct LspCodeActionPayload<'a> {
-    kind: &'static str,
-    card_id: &'a str,
-    proof_path: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    file: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    line: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    name: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    command: Option<&'a str>,
-    trust_boundary: &'static str,
 }
 
 #[derive(Serialize)]
@@ -355,38 +443,46 @@ struct LspStatus {
     trust_boundary: &'static str,
 }
 
-#[derive(Serialize, Clone)]
-struct LspRange {
-    start: LspPosition,
-    end: LspPosition,
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EditorRange {
+    pub end: EditorPosition,
+    pub start: EditorPosition,
 }
 
-#[derive(Serialize, Clone)]
-struct LspPosition {
-    line: usize,
-    character: usize,
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EditorPosition {
+    pub character: usize,
+    pub line: usize,
 }
 
 fn present_label(present: bool) -> &'static str {
     if present { "present" } else { "missing" }
 }
 
-fn range_for(card: &ReviewCard) -> LspRange {
+pub(crate) fn range_for(card: &ReviewCard) -> EditorRange {
     let start = position_for(card);
-    let end = LspPosition {
+    let end = EditorPosition {
         line: start.line,
         character: start
             .character
-            .saturating_add(card.site.snippet.chars().count().max(1)),
+            .saturating_add(utf16_width(&card.site.snippet).max(1)),
     };
-    LspRange { start, end }
+    EditorRange { start, end }
 }
 
-fn position_for(card: &ReviewCard) -> LspPosition {
-    LspPosition {
+fn position_for(card: &ReviewCard) -> EditorPosition {
+    EditorPosition {
         line: card.site.location.line.saturating_sub(1),
         character: card.site.location.column.saturating_sub(1),
     }
+}
+
+/// Return the number of UTF-16 code units in `text`, as required by LSP
+/// positions.  Keeping this conversion beside the canonical editor range
+/// prevents saved projections and their future adapters from counting scalar
+/// values or bytes independently.
+pub(crate) fn utf16_width(text: &str) -> usize {
+    text.encode_utf16().count()
 }
 
 /// Return the LSP `DiagnosticSeverity` integer derived from the card's class.

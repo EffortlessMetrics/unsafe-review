@@ -4,14 +4,22 @@ Add `unsafe-review` PR coverage to any Rust repository in two steps.
 
 ## Adoption
 
+> The `EffortlessMetrics/unsafe-review@v1` reference below is the intended
+> published adoption surface. It does not resolve yet: the composite action
+> currently lives only as the development copy at
+> `.github/actions/unsafe-review-first-pr/action.yml`, and no `v1` tag exists
+> in the source repository. Promotion is an explicit owner decision (see
+> [Action Promotion Decision](../handoffs/2026-06-13-action-promotion-decision.md)).
+> Do not reference the swarm repository from external callers.
+
 ```yaml
-- uses: actions/checkout@v6
+- uses: actions/checkout@v7
   with:
     fetch-depth: 100
     persist-credentials: false
 - uses: EffortlessMetrics/unsafe-review@v1
   with:
-    version: "0.3.6"
+    version: "0.3.8"
 ```
 
 That is the full integration. The action installs `unsafe-review` from
@@ -30,7 +38,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 100
           persist-credentials: false
@@ -40,7 +48,7 @@ jobs:
       - uses: EffortlessMetrics/unsafe-review@v1
         id: ur
         with:
-          version: "0.3.6"
+          version: "0.3.8"
 
       - uses: actions/upload-artifact@v7
         if: always()
@@ -58,7 +66,7 @@ anything.
 | Input | Default | Description |
 |---|---|---|
 | `base_ref` | repo default branch | Base ref to diff against |
-| `version` | `0.3.6` | `unsafe-review` version from crates.io |
+| `version` | `0.3.8` | `unsafe-review` version from crates.io |
 | `fetch_depth` | `100` | Depth passed to `git fetch --depth` when fetching the base ref. Increase for repositories with very long histories. |
 | `out_dir` | `target/unsafe-review` | Bundle output directory |
 | `fail_on_new_debt` | `false` | When `true`, fail the job on new or worsened coverage gaps (never on inherited gaps). Advisory by default. |
@@ -83,6 +91,9 @@ cards.sarif                — SARIF projection for GitHub code scanning
 comment-plan.json          — plan-only comment budget (not posted)
 witness-plan.md            — external witness routes per card
 receipt-audit.md           — saved receipt metadata summary
+receipt-audit.json         — machine-readable saved receipt metadata audit
+policy-report.json         — machine-readable advisory policy simulation
+policy-report.md           — reviewer-facing advisory policy simulation
 manual-candidates.json     — manual review candidates
 manual-repair-queue.json   — manual repair queue sidecar
 tokmd-packets.json         — formatting input sidecar
@@ -159,11 +170,13 @@ To upload the bundle as a workflow artifact, add `actions: write` (or use
 
 ## Published action vs. development copy
 
-The published action lives in `EffortlessMetrics/unsafe-review` and is
-referenced as `uses: EffortlessMetrics/unsafe-review@v1`. The development
-copy in `unsafe-review-swarm` at
-`.github/actions/unsafe-review-first-pr/action.yml` is not the published
-surface; do not reference the swarm repository from external callers.
+The intended published action lives in `EffortlessMetrics/unsafe-review` and
+will be referenced as `uses: EffortlessMetrics/unsafe-review@v1` once the
+owner promotes it and creates the tag. Until then, the development copy in
+`unsafe-review-swarm` at
+`.github/actions/unsafe-review-first-pr/action.yml` is the only copy and is
+not the published surface; do not reference the swarm repository from external
+callers.
 
 ## Spec reference
 

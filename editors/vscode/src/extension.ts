@@ -7,11 +7,18 @@ import {
   BundleDiagnostic,
   BundleHover,
   BundleParseError,
+  BundleRange,
+  BundleStructuredObject,
+  diagnosticCapSummaries,
   ParsedBundle,
   capDiagnosticsPerFile,
   diagnosticsByFile,
   parseBundle,
+  positionInRange,
+  rangesEqual,
+  rangesIntersect,
   resolveWorkspaceFilePath,
+  supportedDiagnosticSeverity,
 } from "./bundle";
 
 const EXTENSION_ID = "unsafe-review";
@@ -28,6 +35,7 @@ interface AdapterState {
   bundle: ParsedBundle | undefined;
   bundleRoot: string | undefined;
   diagnosticsCollection: vscode.DiagnosticCollection;
+  diagnosticsByCardId: Map<string, vscode.Diagnostic>;
   hoversByPath: Map<string, BundleHover[]>;
   codeActionsByPath: Map<string, BundleCodeAction[]>;
   statusBar: vscode.StatusBarItem;
@@ -49,6 +57,7 @@ export function activate(context: vscode.ExtensionContext): void {
     bundle: undefined,
     bundleRoot: undefined,
     diagnosticsCollection,
+    diagnosticsByCardId: new Map(),
     hoversByPath: new Map(),
     codeActionsByPath: new Map(),
     statusBar,
@@ -66,7 +75,15 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.languages.registerCodeActionsProvider(
       [{ language: "rust" }, { pattern: "**/*.rs" }],
       new BundleCodeActionProvider(),
-      { providedCodeActionKinds: [vscode.CodeActionKind.Empty] },
+      {
+        providedCodeActionKinds: [
+          vscode.CodeActionKind.Empty.append("quickfix.unsafeReview.agentPacket"),
+          vscode.CodeActionKind.Empty.append("source.unsafeReview.reviewContext"),
+          vscode.CodeActionKind.Empty.append("source.unsafeReview.witnessRoute"),
+          vscode.CodeActionKind.Empty.append("source.unsafeReview.witnessCommand"),
+          vscode.CodeActionKind.Empty.append("source.unsafeReview.relatedTest"),
+        ],
+      },
     ),
     vscode.commands.registerCommand(`${EXTENSION_ID}.refreshBundle`, refreshBundle),
     vscode.commands.registerCommand(`${EXTENSION_ID}.openPrSummary`, openPrSummary),
@@ -74,6 +91,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(`${EXTENSION_ID}.openRelatedTest`, openRelatedTest),
     vscode.commands.registerCommand(`${EXTENSION_ID}.copyAgentPacket`, copyAgentPacket),
     vscode.commands.registerCommand(`${EXTENSION_ID}.copyWitnessCommand`, copyWitnessCommand),
+    vscode.commands.registerCommand(`${EXTENSION_ID}.explainWitnessRoute`, explainWitnessRoute),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration("unsafeReview")) {
         rewireBundleWatcher();
@@ -203,24 +221,38 @@ async function refreshBundle(): Promise<void> {
 
   adapter.bundle = parsed;
   adapter.bundleRoot = folder.uri.fsPath;
-  applyDiagnostics(parsed, settings, folder);
+  const hiddenDiagnostics = applyDiagnostics(parsed, settings, folder);
   applyHovers(parsed, folder);
   applyCodeActions(parsed, folder);
 
-  setStatus(parsed.status.message, parsed.status.trustBoundary);
+  const capNotice = hiddenDiagnostics === 0
+    ? ""
+    : ` (${hiddenDiagnostics} diagnostic(s) hidden by per-file cap; complete bundle: ${settings.bundlePath})`;
+  setStatus(`${parsed.status.message}${capNotice}`, parsed.status.trustBoundary);
 }
 
 function applyDiagnostics(
   bundle: ParsedBundle,
   settings: AdapterSettings,
   folder: vscode.WorkspaceFolder,
-): void {
+): number {
   if (adapter === undefined) {
-    return;
+    return 0;
   }
   adapter.diagnosticsCollection.clear();
+  adapter.diagnosticsByCardId.clear();
 
   const capped = capDiagnosticsPerFile(bundle.diagnostics, settings.maxDiagnosticsPerFile);
+  const capSummaries = diagnosticCapSummaries(bundle.diagnostics, settings.maxDiagnosticsPerFile);
+  for (const summary of capSummaries) {
+    if (summary.hidden === 0) {
+      continue;
+    }
+    adapter.output.appendLine(
+      `bundle warning: ${summary.hidden} diagnostic(s) hidden for ${summary.path} by ` +
+      `maxDiagnosticsPerFile=${settings.maxDiagnosticsPerFile}; complete set remains in ${settings.bundlePath}`,
+    );
+  }
   const grouped = diagnosticsByFile(capped);
   for (const [relativePath, list] of grouped) {
     const absolute = resolveWorkspaceFile(folder, relativePath);
@@ -229,9 +261,20 @@ function applyDiagnostics(
       continue;
     }
     const uri = vscode.Uri.file(absolute);
-    const diags = list.map((entry) => toVscodeDiagnostic(entry));
+    const diags = list.flatMap((entry) => {
+      const diagnostic = toVscodeDiagnostic(entry);
+      if (diagnostic === undefined) {
+        adapter?.output.appendLine(
+          `bundle warning: diagnostic ${entry.cardId} has unsupported severity ${String(entry.severity)}`,
+        );
+        return [];
+      }
+      adapter?.diagnosticsByCardId.set(entry.cardId, diagnostic);
+      return [diagnostic];
+    });
     adapter.diagnosticsCollection.set(uri, diags);
   }
+  return capSummaries.reduce((hidden, summary) => hidden + summary.hidden, 0);
 }
 
 function applyHovers(bundle: ParsedBundle, folder: vscode.WorkspaceFolder): void {
@@ -295,32 +338,34 @@ function clearBundleState(): void {
   adapter.codeActionsByPath = new Map();
 }
 
-function toVscodeDiagnostic(entry: BundleDiagnostic): vscode.Diagnostic {
+function toVscodeDiagnostic(entry: BundleDiagnostic): vscode.Diagnostic | undefined {
   const range = new vscode.Range(
     new vscode.Position(entry.range.start.line, entry.range.start.character),
     new vscode.Position(entry.range.end.line, entry.range.end.character),
   );
   const severity = severityFromBundle(entry.severity);
+  if (severity === undefined) {
+    return undefined;
+  }
   const diagnostic = new vscode.Diagnostic(range, entry.message, severity);
   diagnostic.source = entry.source ?? "unsafe-review";
   diagnostic.code = {
-    value: entry.cardId,
+    value: entry.code,
     target: vscode.Uri.parse("https://crates.io/crates/unsafe-review"),
   };
   return diagnostic;
 }
 
-function severityFromBundle(value: number | undefined): vscode.DiagnosticSeverity {
-  switch (value) {
-    case 1:
-      return vscode.DiagnosticSeverity.Error;
+function severityFromBundle(value: number | undefined): vscode.DiagnosticSeverity | undefined {
+  switch (supportedDiagnosticSeverity(value)) {
     case 2:
       return vscode.DiagnosticSeverity.Warning;
     case 4:
       return vscode.DiagnosticSeverity.Hint;
     case 3:
-    default:
       return vscode.DiagnosticSeverity.Information;
+    default:
+      return undefined;
   }
 }
 
@@ -344,16 +389,15 @@ class BundleHoverProvider implements vscode.HoverProvider {
     if (candidates === undefined || candidates.length === 0) {
       return undefined;
     }
-    let chosen: BundleHover | undefined;
-    let chosenDelta = Number.MAX_SAFE_INTEGER;
-    for (const hover of candidates) {
-      const delta = Math.abs(hover.position.line - position.line);
-      if (delta < chosenDelta) {
-        chosen = hover;
-        chosenDelta = delta;
-      }
-    }
-    if (chosen === undefined || chosenDelta > 3) {
+    const chosen = candidates.find((hover) =>
+      hover.range === undefined
+        ? hover.position.line === position.line && hover.position.character === position.character
+        : positionInRange(
+            { line: position.line, character: position.character },
+            hover.range,
+          ),
+    );
+    if (chosen === undefined) {
       return undefined;
     }
     const md = new vscode.MarkdownString();
@@ -378,55 +422,108 @@ class BundleCodeActionProvider implements vscode.CodeActionProvider {
     }
     const actions: vscode.CodeAction[] = [];
     for (const candidate of candidates) {
-      if (candidate.range !== undefined) {
-        const cardLine = candidate.range.start.line;
-        if (Math.abs(cardLine - range.start.line) > 5) {
-          continue;
-        }
+      if (candidate.range === undefined || candidate.payload?.cardId === undefined) {
+        continue;
+      }
+      const matchingDiagnostic = adapter.bundle?.diagnostics.find((entry) =>
+        entry.cardId === candidate.payload?.cardId && entry.path === candidate.path &&
+        rangesEqual(entry.range, candidate.range!),
+      );
+      if (matchingDiagnostic === undefined || !rangesIntersect(candidate.range, toBundleRange(range))) {
+        continue;
       }
       const action = new vscode.CodeAction(
-        decorateCodeActionTitle(candidate),
-        vscode.CodeActionKind.Empty,
+        candidate.actionId === undefined ? decorateCodeActionTitle(candidate) : candidate.title,
+        candidate.kind === undefined
+          ? vscode.CodeActionKind.Empty
+          : vscode.CodeActionKind.Empty.append(candidate.kind),
       );
-      action.command = {
-        title: candidate.title,
-        command: extensionCommandFor(candidate.command),
-        arguments: [candidate.payload ?? {}],
-      };
+      action.isPreferred = candidate.isPreferred ?? false;
+      const diagnostic = adapter.diagnosticsByCardId.get(matchingDiagnostic.cardId);
+      if (diagnostic !== undefined) {
+        action.diagnostics = [diagnostic];
+      }
+      if (candidate.disabled !== undefined) {
+        action.disabled = { reason: candidate.disabled.reason };
+      } else if (candidate.command !== undefined) {
+        const extensionCommand = extensionCommandFor(candidate.command);
+        if (extensionCommand === undefined) {
+          continue;
+        }
+        action.command = {
+          title: candidate.title,
+          command: extensionCommand,
+          arguments: [commandArgumentsFor(candidate)],
+        };
+      }
       actions.push(action);
     }
     return actions;
   }
 }
 
+function commandArgumentsFor(candidate: BundleCodeAction): BundleStructuredObject {
+  const argumentsValue: BundleStructuredObject = candidate.commandArguments ??
+    (candidate.payload === undefined ? {} : { ...candidate.payload });
+  if (candidate.actionId !== "agent-packet") {
+    return argumentsValue;
+  }
+  return {
+    ...argumentsValue,
+    agent_packet: candidate.payload?.agentPacket,
+  };
+}
+
+function toBundleRange(range: vscode.Range): BundleRange {
+  return {
+    start: { line: range.start.line, character: range.start.character },
+    end: { line: range.end.line, character: range.end.character },
+  };
+}
+
 function decorateCodeActionTitle(action: BundleCodeAction): string {
   if (/\((copy|open)\)$/.test(action.title)) {
     return action.title;
   }
-  if (action.command.includes("copy")) {
+  if (action.command?.includes("copy")) {
     return `${action.title} (copy)`;
   }
-  if (action.command.includes("open") || action.command.includes("Open")) {
+  if (action.command?.includes("open") || action.command?.includes("Open")) {
     return `${action.title} (open)`;
   }
   return action.title;
 }
 
-function extensionCommandFor(bundleCommand: string): string {
+function extensionCommandFor(bundleCommand: string): string | undefined {
   switch (bundleCommand) {
     case "unsafe-review.copyAgentPacket":
+    case "unsafe-review.collectAgentPacket":
       return `${EXTENSION_ID}.copyAgentPacket`;
     case "unsafe-review.copyWitnessCommand":
+    case "unsafe-review.collectWitnessCommand":
       return `${EXTENSION_ID}.copyWitnessCommand`;
     case "unsafe-review.openRelatedTest":
       return `${EXTENSION_ID}.openRelatedTest`;
+    case "unsafe-review.explainWitnessRoute":
+      return `${EXTENSION_ID}.explainWitnessRoute`;
     case "unsafe-review.openPrSummary":
       return `${EXTENSION_ID}.openPrSummary`;
     case "unsafe-review.openWitnessPlan":
       return `${EXTENSION_ID}.openWitnessPlan`;
     default:
-      return `${EXTENSION_ID}.refreshBundle`;
+      return undefined;
   }
+}
+
+async function explainWitnessRoute(payload: unknown): Promise<void> {
+  const cardId = pickCardId(payload);
+  const diagnostic = adapter?.bundle?.diagnostics.find((item) => item.cardId === cardId);
+  const route = diagnostic?.witnessRoutes?.[0];
+  if (route === undefined) {
+    void vscode.window.showWarningMessage("No unsafe-review witness route is available.");
+    return;
+  }
+  await vscode.env.clipboard.writeText(JSON.stringify(route, undefined, 2));
 }
 
 async function openPrSummary(): Promise<void> {
@@ -490,17 +587,18 @@ async function openWorkspaceFile(
 }
 
 async function copyAgentPacket(payload: unknown): Promise<void> {
-  const cardId = pickCardId(payload);
-  if (cardId === undefined) {
+  const packet = isRecord(payload) && typeof payload["agent_packet"] === "string"
+    ? payload["agent_packet"]
+    : undefined;
+  if (packet === undefined || packet.length === 0) {
     void vscode.window.showInformationMessage(
-      "unsafe-review: no card id in selection; right-click an unsafe-review diagnostic and select Copy Agent Packet.",
+      "unsafe-review: this saved bundle has no valid bounded agent packet; refresh it with schema 0.2.",
     );
     return;
   }
-  const command = `unsafe-review context ${shellQuote(cardId)} --json`;
-  await vscode.env.clipboard.writeText(command);
+  await vscode.env.clipboard.writeText(packet);
   void vscode.window.showInformationMessage(
-    `unsafe-review: copied \`${command}\`. Run it in your terminal to print the bounded agent packet.`,
+    "unsafe-review: copied the bounded agent packet for the selected card.",
   );
 }
 

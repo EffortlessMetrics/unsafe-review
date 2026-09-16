@@ -21,6 +21,8 @@ test, or witness. It does not prove the code free of UB.
 - Loads `${workspace}/target/unsafe-review/lsp.json` on activation and on
   request.
 - Publishes diagnostics from the saved `diagnostics[]` entries.
+- Reports any per-file diagnostic cap in the status bar and Output channel,
+  including the configured bundle path containing the complete set.
 - Renders hovers from the saved `hovers[]` entries, ensuring the trust boundary
   is present as a footer.
 - Registers per-card command-only actions from the saved `code_actions[]` and
@@ -30,8 +32,9 @@ test, or witness. It does not prove the code free of UB.
     `target/unsafe-review/pr-summary.md` in the editor.
   - **Unsafe Review: Open Witness Plan (open)** — open
     `target/unsafe-review/witness-plan.md` in the editor.
-  - **Unsafe Review: Copy Agent Packet Command (copy)** — copy
-    `unsafe-review context <card-id> --json` to the clipboard.
+  - **Unsafe Review: Copy Agent Packet (copy)** — copy the bounded JSON packet
+    embedded in the canonical saved bundle to the clipboard. Legacy bundles
+    without a matching packet are refused.
   - **Unsafe Review: Copy Witness Command (copy)** — copy the saved
     witness command (e.g. `cargo +nightly miri test ...`) to the
     clipboard.
@@ -61,7 +64,7 @@ for the long-form contract for the eventual live-LSP extension.
 |---|---|---|
 | `unsafeReview.bundlePath` | `target/unsafe-review/lsp.json` | Workspace-relative path to the saved bundle. |
 | `unsafeReview.autoRefreshOnSave` | `false` | Re-read the bundle when it changes on disk. |
-| `unsafeReview.maxDiagnosticsPerFile` | `200` | Discards extras for editor UI responsiveness. The full bundle remains on disk. |
+| `unsafeReview.maxDiagnosticsPerFile` | `200` | Discards extras for editor UI responsiveness, reports the hidden count, and keeps the full bundle on disk. |
 
 ## Refresh flow
 
@@ -81,6 +84,7 @@ unsafe-review first-pr --base origin/main
 npm ci
 npm run compile
 npm test
+npm run smoke:extension-host
 npx @vscode/vsce package --out ../../target/unsafe-review-vscode.vsix
 ```
 

@@ -1,6 +1,6 @@
 # UNSAFE-REVIEW-SPEC-0038: Low-Noise Usefulness Telemetry
 
-Status: proposed
+Status: accepted
 Owner: product / output
 Created: 2026-06-12
 Linked proposal: UNSAFE-REVIEW-PROP-0002-source-of-truth-stack
@@ -11,7 +11,9 @@ Linked plan:
 Linked issues:
 - none
 Linked PRs:
-- TBD
+- https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/1630
+- https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/1634
+- https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/1647
 Support-tier impact: output projection only
 
 ## Problem
@@ -41,6 +43,12 @@ surfaces — not the quality or correctness of those findings. Specifically:
 ## Artifact
 
 `usefulness-telemetry.json` is emitted alongside all other `first-pr` artifacts.
+The first-pr artifact verifier cross-checks its summary projections against the
+canonical bundle sources: `card_inventory` must match `cards.json` summary
+movement counts, `comment_selection` counts and not-selected histograms must
+match `comment-plan.json`, and `agent_readiness` must match the checked
+`repair-queue.json` readiness projection. A telemetry drift is an
+artifact-integrity failure, not an unsafe-code policy result.
 
 ### Schema version
 
@@ -130,7 +138,9 @@ Object. Confidence histogram over all cards.
 #### `actionability_distribution`
 
 Object (BTreeMap). Histogram over all cards, keyed by actionability label.
-Mirrors the `actionability()` logic in `output/comment_plan/selection.rs`.
+Both this histogram and comment-plan selection project the canonical
+`ReviewClass::actionability_label()` derivation; neither consumer reclassifies
+cards or owns an independent label mapping.
 Only keys with count > 0 are emitted.
 
 Known keys: `specific_guard_missing`, `specific_contract_missing`,

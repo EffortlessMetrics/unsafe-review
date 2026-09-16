@@ -1,10 +1,11 @@
 # Dogfood outcome index
 
-Date: 2026-06-15
+Date: 2026-08-10
 Status: experimental selected-corpus evidence
 Source manifest: [`corpus.toml`](corpus.toml)
 Machine-readable index: [`index.json`](index.json)
 Usefulness notes: [`usefulness-notes.md`](usefulness-notes.md)
+External pilot usefulness: [rollup](reports/external-pilot-usefulness-rollup.md)
 Bun stable-byte seeds: [`stable-byte-follow-up-seeds.md`](stable-byte-follow-up-seeds.md)
 
 This index is a front panel for the real-crate dogfood corpus. It summarizes
@@ -21,17 +22,20 @@ calibrated precision or recall.
 
 Generated scan outputs are intentionally recorded as `local_untracked` artifacts
 under `target/dogfood-work/`. Re-run the command in `corpus.toml` when a fresh
-local artifact is needed.
+local artifact is needed. `check-dogfood` enforces this: every `repo-snapshot`
+and `pr-diff` target must declare `artifact_status = "local_untracked"`, so
+external snapshots and diffs are never checked into the swarm repo.
 
 ## Corpus Summary
 
 | Measure | Count |
 |---|---:|
-| Repositories | 15 |
-| Total targets | 40 |
-| Capped repo snapshots | 15 |
+| Repositories | 19 |
+| Total targets | 47 |
+| Capped repo snapshots | 22 |
 | PR diff targets | 23 |
 | Fixture control targets | 2 |
+| Holdout targets | 7 |
 | Checked-in scan outputs | 0 |
 
 ## Selected Judgment Sample
@@ -77,7 +81,9 @@ Selected real-crate targets:
 | `BurntSushi/memchr` | 1 | 1 | SIMD target-feature contracts, pointer arithmetic, unchecked constructors |
 | `rust-lang/hashbrown` | 1 | 8 | Large-file syntax scanning, `MaybeUninit`, pointer arithmetic, unchecked/infallible operations, unsafe-call contract gaps, dedupe |
 | `tokio-rs/bytes` | 1 | 1 | `Vec::from_raw_parts`, slice construction, ownership-transfer review cards |
-| `crossbeam-rs/crossbeam` | 1 | 2 | Unsafe Send/Sync, atomics, raw pointer, ownership-transfer, strict-provenance Miri cfg cards, and atomic pointer state transitions |
+| `crossbeam-rs/crossbeam` | 2 | 2 | Unsafe Send/Sync, atomics, raw pointer, ownership-transfer, strict-provenance Miri cfg cards, atomic pointer state transitions, and release-readiness holdout |
+| `rkyv/rkyv` | 1 | 0 | Macro-heavy generated code, allocation, raw pointers, byte casts, and release-readiness holdout |
+| `tokio-rs/slab` | 2 | 0 | Pointer arithmetic, unsafe fn calls, unsafe impls, and a comparatively quiet release-readiness holdout |
 | `tokio-rs/mio` | 1 | 1 | Unsafe function call contracts, `Vec::set_len`, zeroed values, pointer operations, socket address layout conversions, and unsafe Send/Sync route cards |
 | `fitzgen/bumpalo` | 1 | 0 | Pointer arithmetic, slice construction, `str_from_utf8_unchecked`, unsafe fn call, and unsafe impl cards; fresh-crate capstone |
 | `tokio-rs/slab` | 1 | 0 | Pointer arithmetic, unsafe fn call, and unsafe impl cards; fresh-crate capstone |
@@ -85,8 +91,10 @@ Selected real-crate targets:
 | `matklad/once_cell` | 1 | 0 | Unsafe fn call, raw pointer dereference, and unsafe impl cards including witness-receipt-routing cases; fresh-crate capstone |
 | `Amanieu/parking_lot` | 1 | 0 | Unsafe fn call, unsafe impl, raw pointer dereference, and pointer arithmetic cards; fresh-crate capstone |
 | `nix-rust/nix` | 1 | 0 | FFI/extern unsafe fn call and cfg-gated platform-branch cards; control-plane validation |
-| `rusticstuff/simdutf8` | 1 | 0 | SIMD `target_feature` unsafe fn call and intrinsic cards; control-plane validation |
+| `rusticstuff/simdutf8` | 2 | 0 | SIMD `target_feature` unsafe fn call, intrinsic, and unchecked UTF-8 cards; control-plane validation and release-readiness holdout |
 | `google/zerocopy` | 1 | 0 | Raw pointer dereference, `transmute`, and byte-cast cards; control-plane validation |
+| `rust-random/getrandom` | 1 | 0 | Release-readiness holdout for platform RNG unsafe declarations, FFI-style bindings, and raw pointer cards; recorded before tuning |
+| `serde-rs/serde` | 1 | 0 | Release-readiness holdout for a multi-crate workspace with derive macro-generated code and a modest core unsafe surface; recorded before tuning |
 
 ## Recorded Outcome Movement
 
@@ -113,6 +121,13 @@ Selected real-crate targets:
 - `nix-capped`
 - `simdutf8-capped`
 - `zerocopy-capped`
+- `getrandom-holdout` (holdout; run only with explicit release-readiness opt-in)
+- `portable-atomic-holdout` (holdout; run only with explicit release-readiness opt-in)
+- `simdutf8-holdout` (holdout; run only with explicit release-readiness opt-in)
+- `crossbeam-holdout` (holdout; run only with explicit release-readiness opt-in)
+- `rkyv-holdout` (holdout; run only with explicit release-readiness opt-in)
+- `slab-holdout` (holdout; run only with explicit release-readiness opt-in)
+- `serde-holdout` (holdout; run only with explicit release-readiness opt-in)
 
 ### PR Diffs
 
@@ -168,6 +183,14 @@ cargo run --locked -p unsafe-review -- outcome \
   --after target/dogfood-work/after.json \
   --format markdown \
   --out target/dogfood-work/outcome.md
+```
+
+Holdout repo snapshots are release-readiness diagnostics. `dogfood-exec` skips
+them by default; run a holdout target only with an explicit opt-in:
+
+```bash
+cargo run --locked -p xtask -- dogfood-exec \
+  --target serde-holdout --include-holdout --strict
 ```
 
 Update this index only when the corpus manifest or recorded outcome evidence

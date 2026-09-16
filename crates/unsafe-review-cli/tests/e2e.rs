@@ -66,6 +66,7 @@ fn cargo_subcommand_alias_writes_pr_summary_artifact() -> Result<(), Box<dyn Err
 #[test]
 fn first_pr_stdout_points_to_top_card_handoff() -> Result<(), Box<dyn Error>> {
     let fixture = fixture_root("raw_pointer_alignment");
+    let diff_path = fixture.join("change.diff");
     let temp = TempDir::new("unsafe-review-first-pr-stdout-e2e")?;
     let out_dir = temp.path().join("review-kit");
 
@@ -76,13 +77,16 @@ fn first_pr_stdout_points_to_top_card_handoff() -> Result<(), Box<dyn Error>> {
             .arg("--root")
             .arg(&fixture)
             .arg("--diff")
-            .arg(fixture.join("change.diff"))
+            .arg(&diff_path)
             .arg("--out-dir")
             .arg(&out_dir),
     )?;
     let stdout = String::from_utf8(output.stdout)?;
 
-    assert_contains(&stdout, "unsafe-review first-pr");
+    assert!(
+        stdout.starts_with("unsafe-review first-pr\n"),
+        "first-pr stdout must start with the invoked command label: {stdout}"
+    );
     assert_contains(&stdout, "unsafe-review wrote an advisory PR bundle.");
     // Artifact paths in console output are normalised to forward slashes on all
     // platforms; compare against the normalised form.
@@ -100,42 +104,154 @@ fn first_pr_stdout_points_to_top_card_handoff() -> Result<(), Box<dyn Error>> {
             path_display_fwd(&out_dir.join("repair-queue.json"))
         ),
     );
-    assert_contains(&stdout, "Audit saved receipts:");
-    assert_contains(
-        &stdout,
-        "saved receipt metadata only; unsafe-review did not run a witness",
-    );
     assert_contains(&stdout, "Top card:");
     assert_contains(&stdout, "src/lib.rs:8 `raw_pointer_read`");
     assert_contains(&stdout, "Class: `guard_missing`");
     assert_contains(&stdout, "Missing: guard, witness");
-    assert_contains(&stdout, "Explain top card:");
     assert_contains(
         &stdout,
-        &format!("unsafe-review explain --root {}", fixture.display()),
+        "- Reviewer comments: 1 selected, 0 omitted; top card selected because guard_coverage: missing — actionable high-priority card",
+    );
+    assert_contains(&stdout, "- Additional reviewer actions: none");
+    let cards: Value = serde_json::from_str(&fs::read_to_string(out_dir.join("cards.json"))?)?;
+    let card_id = cards["cards"][0]["id"]
+        .as_str()
+        .ok_or("missing cards[0].id")?;
+    let canonical_repro = cards["cards"][0]["confirmation_cue"]["minimal_repro"]["steps"][0]
+        .as_str()
+        .ok_or("missing canonical minimal repro cue")?;
+    assert!(canonical_repro.contains(card_id));
+    assert_contains(
+        &stdout,
+        "Minimal repro cue: Confirm this card still maps to",
+    );
+    assert_not_contains(
+        &stdout,
+        &format!("Minimal repro cue: Confirm ReviewCard `{card_id}`"),
+    );
+    let rendered_root = rendered_shell_path(&fixture);
+    let rendered_diff = rendered_shell_path(&diff_path);
+    assert_contains(
+        &stdout,
+        &format!("Explain top card:\n  unsafe-review explain --root {rendered_root} {card_id}"),
+    );
+    assert_contains(
+        &stdout,
+        "Verify: Build/run `cargo +nightly miri test read_header` first",
+    );
+    let selected_actions = stdout
+        .lines()
+        .skip_while(|line| !line.starts_with("- Additional reviewer actions:"))
+        .take(1)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        selected_actions,
+        vec!["- Additional reviewer actions: none"]
+    );
+    assert_contains(&stdout, "Explain top card:");
+    let top_card = stdout
+        .lines()
+        .skip_while(|line| *line != "Top card:")
+        .take_while(|line| !line.starts_with("- Additional reviewer actions:"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_contains(&top_card, "Route:");
+    assert_contains(&top_card, "Next:");
+    assert_contains(&top_card, "Hypothesis:");
+    assert_contains(&top_card, "Verify:");
+    assert_contains(&top_card, "Minimal repro cue:");
+    assert_contains(&top_card, "Limitation: Minimal repro cue only;");
+    assert_not_contains(&top_card, "Confirmation step:");
+    assert_not_contains(&top_card, "    - Confirm ReviewCard");
+    assert_order(&stdout, "Top card:", "Additional reviewer actions: none");
+    assert_order(
+        &stdout,
+        "Additional reviewer actions: none",
+        "Secondary handoffs:",
+    );
+    assert_contains(
+        &stdout,
+        &format!("unsafe-review explain --root {rendered_root}"),
     );
     assert_contains(&stdout, "Agent packet:");
     assert_contains(
         &stdout,
-        &format!("unsafe-review context --root {}", fixture.display()),
+        &format!("unsafe-review context --root {rendered_root}"),
     );
     assert_contains(&stdout, "--json");
-    assert_contains(&stdout, "Artifacts:");
-    assert_contains(&stdout, &path_display_fwd(&out_dir.join("review-kit.json")));
+    assert_contains(&stdout, "receipts:");
     assert_contains(
+        &stdout,
+        &format!(
+            "receipts: unsafe-review receipt audit --root {rendered_root} --diff {rendered_diff} --format markdown"
+        ),
+    );
+    assert_contains(&stdout, "receipts: unsafe-review receipt audit --root");
+    assert_contains(
+        &stdout,
+        &format!(
+            "policy: {} (ReviewCard-only; manual candidates excluded)",
+            path_display_fwd(&out_dir.join("policy-report.md"))
+        ),
+    );
+    assert_contains(&stdout, "baseline new:");
+    assert_contains(
+        &stdout,
+        &format!(
+            "baseline new: unsafe-review baseline init --root {} (clean base/default branch only; records pre-existing debt)",
+            rendered_root
+        ),
+    );
+    assert_contains(
+        &stdout,
+        "clean base/default branch only; records pre-existing debt",
+    );
+    assert_contains(&stdout, "Manual candidates:");
+    assert_contains(
+        &stdout,
+        &format!(
+            "none (advisory sidecars: {}, {}, {}; not analyzer ReviewCards; no agent or tokmd run)",
+            path_display_fwd(&out_dir.join("manual-candidates.json")),
+            path_display_fwd(&out_dir.join("manual-repair-queue.json")),
+            path_display_fwd(&out_dir.join("tokmd-packets.json")),
+        ),
+    );
+    assert!(
+        !stdout.contains("Manual candidate queue preview:"),
+        "zero manual candidates should not print a queue preview:\n{stdout}"
+    );
+    assert_order(&stdout, "Top card:", "Secondary handoffs:");
+    assert_order(&stdout, "receipts:", "policy:");
+    assert_order(&stdout, "policy:", "baseline new:");
+    assert_order(&stdout, "baseline new:", "Manual candidates:");
+    assert_order(&stdout, "Manual candidates:", "Artifacts:");
+    assert_contains(
+        &stdout,
+        &format!(
+            "Artifacts: 18 files indexed by {} and {}; inspect review-kit.json for the complete bundle inventory",
+            path_display_fwd(&out_dir.join("review-kit.json")),
+            path_display_fwd(&out_dir.join("unsafe-review-gate.json")),
+        ),
+    );
+    assert_not_contains(&stdout, &path_display_fwd(&out_dir.join("cards.json")));
+    assert_not_contains(
         &stdout,
         &path_display_fwd(&out_dir.join("github-summary.md")),
     );
-    assert_contains(
+    assert_not_contains(
         &stdout,
         &path_display_fwd(&out_dir.join("comment-plan.json")),
     );
-    assert_contains(
+    assert_not_contains(
         &stdout,
         &path_display_fwd(&out_dir.join("receipt-audit.md")),
     );
     assert_contains(&stdout, "Trust boundary:");
     assert_contains(&stdout, "static unsafe contract review only");
+    assert_contains(
+        &stdout,
+        "Trust boundary: static unsafe contract review only; not memory-safety proof, not UB-free status, not Miri-clean status, and not a site-execution claim unless a matching witness receipt says so; unsafe-review did not run witnesses, post comments, edit source, or enforce blocking policy.",
+    );
     assert_contains(&stdout, "not memory-safety proof");
     assert_contains(
         &stdout,
@@ -166,11 +282,36 @@ fn pr_alias_with_explicit_flags_produces_same_bundle_as_first_pr() -> Result<(),
     )?;
     let stdout = String::from_utf8(output.stdout)?;
 
-    // `pr` must produce the same advisory bundle header as `first-pr`.
-    assert_contains(&stdout, "unsafe-review first-pr");
-    assert_contains(&stdout, "unsafe-review wrote an advisory PR bundle.");
-    assert_contains(&stdout, "Top card:");
-    assert_contains(&stdout, "Class: `guard_missing`");
+    // `pr` produces the same advisory bundle while presenting a bounded,
+    // action-first front panel for the command the user typed.
+    assert!(
+        stdout.starts_with("unsafe-review pr\n"),
+        "pr stdout must start with the invoked command label: {stdout}"
+    );
+    assert_contains(&stdout, "Result: advisory");
+    assert_contains(&stdout, "Scope: diff; scan status: complete;");
+    assert_contains(
+        &stdout,
+        "Movement: new 1 | worsened 0 | improved 0 | resolved 0 | inherited 0",
+    );
+    assert_contains(&stdout, "Reviewer actions: selected 1, omitted 0");
+    assert_contains(
+        &stdout,
+        "Top action: src/lib.rs:8 raw_pointer_read [guard_missing]",
+    );
+    assert_contains(&stdout, "Missing: guard, witness");
+    assert_contains(&stdout, "Explain: unsafe-review explain --root");
+    assert_contains(&stdout, "Agent packet: unsafe-review context --root");
+    assert_contains(&stdout, "Bundle:");
+    assert_contains(
+        &stdout,
+        "Trust: static unsafe contract review only; not memory-safety proof, not UB-free status, not Miri-clean status, and not a site-execution claim unless a matching witness receipt says so; unsafe-review did not run witnesses, post comments, edit source, or enforce blocking policy.",
+    );
+    assert!(
+        stdout.lines().count() <= 20,
+        "pr front panel should remain bounded; got {} lines:\n{stdout}",
+        stdout.lines().count()
+    );
     // The advisory bundle files must be on disk.
     assert!(
         out_dir.join("pr-summary.md").exists(),
@@ -184,6 +325,198 @@ fn pr_alias_with_explicit_flags_produces_same_bundle_as_first_pr() -> Result<(),
         out_dir.join("review-kit.json").exists(),
         "review-kit.json must be written by `pr` alias"
     );
+
+    Ok(())
+}
+
+#[test]
+fn pr_alias_accepts_exact_base_and_head_sha_inputs() -> Result<(), Box<dyn Error>> {
+    let repo = exact_pr_fixture_repo("unsafe-review-exact-pr-e2e")?;
+    let out_dir = repo.temp.path().join("review-kit");
+
+    let output = checked_output(
+        Command::new(env!("CARGO_BIN_EXE_cargo-unsafe-review"))
+            .arg("unsafe-review")
+            .arg("pr")
+            .arg("--root")
+            .arg(&repo.root)
+            .arg("--base-sha")
+            .arg(&repo.base_sha)
+            .arg("--head-sha")
+            .arg(&repo.head_sha)
+            .arg("--out-dir")
+            .arg(&out_dir),
+    )?;
+    let stdout = String::from_utf8(output.stdout)?;
+
+    assert!(
+        stdout.starts_with("unsafe-review pr\n"),
+        "exact SHA PR path must preserve the pr entrypoint label: {stdout}"
+    );
+    let cards_text = fs::read_to_string(out_dir.join("cards.json"))?;
+    let cards: Value = serde_json::from_str(&cards_text)?;
+    assert_eq!(cards["scope"], "diff");
+    assert_eq!(cards["provenance"]["base_sha"], repo.base_sha);
+    assert_eq!(cards["provenance"]["head_sha"], repo.head_sha);
+    let families = cards["cards"]
+        .as_array()
+        .ok_or_else(|| "cards.json cards field must be an array".to_string())?
+        .iter()
+        .filter_map(|card| card["operation_family"].as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        families.contains(&"raw_pointer_deref"),
+        "exact SHA path must preserve normal analyzer output; families={families:?}"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn pr_alias_rejects_exact_head_sha_mismatch() -> Result<(), Box<dyn Error>> {
+    let repo = exact_pr_fixture_repo("unsafe-review-exact-pr-mismatch-e2e")?;
+    let out_dir = repo.temp.path().join("review-kit");
+    let stale_head_sha = "1111111111111111111111111111111111111111";
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cargo-unsafe-review"))
+        .arg("unsafe-review")
+        .arg("pr")
+        .arg("--root")
+        .arg(&repo.root)
+        .arg("--base-sha")
+        .arg(&repo.base_sha)
+        .arg("--head-sha")
+        .arg(stale_head_sha)
+        .arg("--out-dir")
+        .arg(&out_dir)
+        .output()?;
+
+    assert!(
+        !output.status.success(),
+        "stale exact-head input must fail before analysis"
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "exact-head mismatch must be a tool/input error"
+    );
+    let stderr = String::from_utf8(output.stderr)?;
+    assert!(
+        stderr.contains("--head-sha expected"),
+        "stderr must name the expected head SHA mismatch: {stderr}"
+    );
+    assert!(
+        stderr.contains("before running pr"),
+        "stderr must name the command the user ran: {stderr}"
+    );
+    assert!(
+        stderr.contains("git -C"),
+        "stderr must include a copyable git command: {stderr}"
+    );
+    assert!(
+        stderr.contains("fetch origin"),
+        "stderr must show the exact fetch step: {stderr}"
+    );
+    assert!(
+        stderr.contains("baseRefName,baseRefOid,headRefOid"),
+        "stderr must tell users to capture the base branch name plus exact SHAs: {stderr}"
+    );
+    assert!(
+        stderr.contains("pull/<number>/head") && stderr.contains("<base-ref-name>"),
+        "stderr must use the public PR pull ref and base branch for checkout recovery: {stderr}"
+    );
+    assert!(
+        stderr.contains(&repo.base_sha) && stderr.contains(stale_head_sha),
+        "stderr must keep exact base/head SHAs visible: {stderr}"
+    );
+    assert!(
+        stderr.contains("checkout --detach"),
+        "stderr must show the detach checkout step: {stderr}"
+    );
+    assert!(
+        !out_dir.join("cards.json").exists(),
+        "stale exact-head input must not write PR artifacts"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn pr_alias_rejects_dirty_worktree_with_exact_head_sha() -> Result<(), Box<dyn Error>> {
+    let repo = exact_pr_fixture_repo("unsafe-review-exact-pr-dirty-e2e")?;
+    let out_dir = repo.temp.path().join("review-kit");
+    fs::write(
+        repo.root.join("src/lib.rs"),
+        "pub unsafe fn read_byte(ptr: *const u8) -> u8 {\n    unsafe { *ptr.add(1) }\n}\n",
+    )?;
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cargo-unsafe-review"))
+        .arg("unsafe-review")
+        .arg("pr")
+        .arg("--root")
+        .arg(&repo.root)
+        .arg("--base-sha")
+        .arg(&repo.base_sha)
+        .arg("--head-sha")
+        .arg(&repo.head_sha)
+        .arg("--out-dir")
+        .arg(&out_dir)
+        .output()?;
+
+    assert!(
+        !output.status.success(),
+        "dirty exact-head worktree must fail before analysis"
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "dirty exact-head worktree must be a tool/input error"
+    );
+    let stderr = String::from_utf8(output.stderr)?;
+    assert!(
+        stderr.contains("dirty worktree"),
+        "stderr must explain that exact-head mode requires a clean worktree: {stderr}"
+    );
+    assert!(
+        !out_dir.join("cards.json").exists(),
+        "dirty exact-head input must not write PR artifacts"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn pr_alias_missing_base_prints_fetch_remediation() -> Result<(), Box<dyn Error>> {
+    let repo = exact_pr_fixture_repo("unsafe-review-missing-base-remediation-e2e")?;
+    let out_dir = repo.temp.path().join("review-kit");
+    let missing_base = "origin/missing-base";
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cargo-unsafe-review"))
+        .arg("unsafe-review")
+        .arg("pr")
+        .arg("--root")
+        .arg(&repo.root)
+        .arg("--base")
+        .arg(missing_base)
+        .arg("--out-dir")
+        .arg(&out_dir)
+        .output()?;
+
+    assert!(
+        !output.status.success(),
+        "missing base must fail before analysis"
+    );
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8(output.stderr)?;
+    assert!(stderr.contains("base ref 'origin/missing-base' could not be resolved"));
+    assert!(stderr.contains("Recovery:"));
+    assert!(stderr.contains("git fetch --no-tags origin"));
+    assert!(stderr.contains("git fetch --unshallow origin"));
+    assert!(stderr.contains(&format!(
+        "unsafe-review pr --root \"{}\" --base {missing_base}",
+        repo.root.display()
+    )));
+    assert!(!out_dir.join("cards.json").exists());
 
     Ok(())
 }
@@ -235,12 +568,441 @@ fn help_output_mentions_pr_alias() -> Result<(), Box<dyn Error>> {
     let stdout = String::from_utf8(output.stdout)?;
 
     assert!(
-        stdout.contains("  pr      zero-config"),
-        "help must mention the `pr` zero-config entry point: {stdout}"
+        stdout.contains("  pr        first-run PR review bundle"),
+        "help must mention the `pr` first-run entry point: {stdout}"
     );
     assert!(
-        stdout.contains("alias for first-pr"),
-        "help must say pr is an alias for first-pr: {stdout}"
+        stdout.contains("auto-detects root and base ref"),
+        "help must say pr auto-detects first-run inputs: {stdout}"
+    );
+    assert!(
+        stdout.contains(
+            "pr-setup  print read-only external GitHub PR checkout and raw-diff commands"
+        ),
+        "help must mention the read-only external PR setup helper: {stdout}"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn help_output_routes_to_per_command_help() -> Result<(), Box<dyn Error>> {
+    // The top-level help is an overview, so it must tell the reader where the
+    // full flag list for a single command lives.
+    let output = checked_output(
+        Command::new(env!("CARGO_BIN_EXE_cargo-unsafe-review"))
+            .arg("unsafe-review")
+            .arg("--help"),
+    )?;
+    let stdout = String::from_utf8(output.stdout)?;
+
+    assert!(
+        stdout.contains("unsafe-review <command> --help"),
+        "top-level help must point at per-command help: {stdout}"
+    );
+    assert!(
+        stdout.contains("Start here:"),
+        "top-level help must offer a first-run entry point: {stdout}"
+    );
+    assert!(
+        stdout.contains(
+            "unsafe-review finds unsafe Rust changes missing a safety contract, guard, test, or witness."
+        ),
+        "top-level help must state the product sentence: {stdout}"
+    );
+    assert!(
+        stdout.contains(
+            "unsafe-review does not run witnesses, post comments, edit source, or block by default."
+        ),
+        "top-level help must state the advisory default posture: {stdout}"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn help_output_groups_and_lists_every_routable_command() -> Result<(), Box<dyn Error>> {
+    let output = checked_output(
+        Command::new(env!("CARGO_BIN_EXE_cargo-unsafe-review"))
+            .arg("unsafe-review")
+            .arg("--help"),
+    )?;
+    let stdout = String::from_utf8(output.stdout)?;
+
+    let groups = [
+        "Review a change:",
+        "Inspect a finding:",
+        "Track and discharge coverage debt:",
+        "Repository posture:",
+    ];
+    for group in groups {
+        assert!(
+            stdout.contains(group),
+            "top-level help must group commands by task, missing `{group}`: {stdout}"
+        );
+    }
+
+    // Collect the command entries listed inside the task groups. A group runs
+    // from its header to the next blank line; an entry is a line indented by
+    // exactly two spaces (continuation lines are indented further).
+    let mut listed: Vec<&str> = Vec::new();
+    let mut group_text = String::new();
+    let mut in_group = false;
+    for line in stdout.lines() {
+        if groups.contains(&line) {
+            in_group = true;
+            continue;
+        }
+        if line.trim().is_empty() {
+            in_group = false;
+            continue;
+        }
+        if !in_group {
+            continue;
+        }
+        group_text.push_str(line);
+        group_text.push('\n');
+        let Some(rest) = line.strip_prefix("  ") else {
+            continue;
+        };
+        if rest.starts_with(' ') {
+            continue;
+        }
+        let name = rest.split(' ').next().unwrap_or_default();
+        listed.push(name);
+
+        // Descriptions share one column so each group reads as a table.
+        let description_column = line.len() - rest.trim_start_matches(name).trim_start().len();
+        assert_eq!(
+            description_column, HELP_DESCRIPTION_COLUMN,
+            "command `{name}` description must start at column {HELP_DESCRIPTION_COLUMN}: {line:?}"
+        );
+    }
+
+    // Every command the parser routes appears in exactly one task group,
+    // including the editor entrypoint, and the groups list nothing else.
+    // Compatibility aliases that route into another command's entry are named
+    // in that entry's text rather than taking a line of their own.
+    assert!(
+        group_text.contains("`receipt-template` is a compatibility name"),
+        "the routed `receipt-template` alias must be named in the receipt entry: {stdout}"
+    );
+
+    let mut expected = vec![
+        "check",
+        "repo",
+        "pr",
+        "pr-setup",
+        "first-pr",
+        "review",
+        "pilot",
+        "badges",
+        "explain",
+        "context",
+        "lsp",
+        "candidate",
+        "baseline",
+        "confirm",
+        "support",
+        "outcome",
+        "policy",
+        "receipt",
+        "doctor",
+        "init",
+    ];
+    expected.sort_unstable();
+    let mut actual = listed.clone();
+    actual.sort_unstable();
+    assert_eq!(
+        actual, expected,
+        "task groups must list every routed command exactly once: {stdout}"
+    );
+
+    Ok(())
+}
+
+/// Column (0-indexed) where every top-level help command description starts.
+const HELP_DESCRIPTION_COLUMN: usize = 12;
+
+#[test]
+fn first_pr_help_lists_current_bundle_artifacts() -> Result<(), Box<dyn Error>> {
+    let output = checked_output(
+        Command::new(env!("CARGO_BIN_EXE_cargo-unsafe-review"))
+            .arg("unsafe-review")
+            .arg("first-pr")
+            .arg("--help"),
+    )?;
+    let stdout = String::from_utf8(output.stdout)?;
+
+    for artifact in [
+        "review-kit.json",
+        "unsafe-review-gate.json",
+        "cards.json",
+        "pr-summary.md",
+        "github-summary.md",
+        "cards.sarif",
+        "comment-plan.json",
+        "witness-plan.md",
+        "receipt-audit.md",
+        "receipt-audit.json",
+        "policy-report.json",
+        "policy-report.md",
+        "manual-candidates.json",
+        "manual-repair-queue.json",
+        "tokmd-packets.json",
+        "usefulness-telemetry.json",
+        "lsp.json",
+        "repair-queue.json",
+    ] {
+        assert!(
+            stdout.contains(artifact),
+            "first-pr help must list bundle artifact `{artifact}`\nstdout:\n{stdout}"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn first_pr_artifact_write_failure_prints_recovery() -> Result<(), Box<dyn Error>> {
+    let fixture = fixture_root("raw_pointer_alignment");
+    let temp = TempDir::new("unsafe-review-pr-artifact-write-failure")?;
+    let blocked = temp.path().join("blocked-output");
+    fs::write(&blocked, "not a directory\n")?;
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cargo-unsafe-review"))
+        .arg("unsafe-review")
+        .arg("pr")
+        .arg("--root")
+        .arg(&fixture)
+        .arg("--diff")
+        .arg(fixture.join("change.diff"))
+        .arg("--out-dir")
+        .arg(&blocked)
+        .output()?;
+
+    assert!(!output.status.success());
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8(output.stderr)?;
+    assert!(stderr.contains("create"));
+    assert!(stderr.contains("blocked-output"));
+    assert!(stderr.contains("Recovery:"));
+    assert!(stderr.contains("unsafe-review doctor --root ."));
+    assert!(stderr.contains("choose a writable output directory or parent"));
+    assert!(String::from_utf8(output.stdout)?.is_empty());
+
+    Ok(())
+}
+
+#[test]
+fn first_pr_help_shows_exact_external_pr_setup_cue() -> Result<(), Box<dyn Error>> {
+    let output = checked_output(
+        Command::new(env!("CARGO_BIN_EXE_cargo-unsafe-review"))
+            .arg("unsafe-review")
+            .arg("first-pr")
+            .arg("--help"),
+    )?;
+    let stdout = String::from_utf8(output.stdout)?;
+
+    for expected in [
+        "External PR setup:",
+        "gh pr view <number> --repo <owner>/<repo> --json baseRefName,baseRefOid,headRefOid",
+        "unsafe-review pr-setup --repo <owner>/<repo> --number <number> --base-ref <base-ref-name> --base-sha <base-sha> --head-sha <head-sha> --root /path/to/repo --out-dir /path/to/review-kit --diff-out /path/to/change.diff",
+        "git -C /path/to/repo fetch origin <base-ref-name> pull/<number>/head && git -C /path/to/repo checkout --detach <head-sha> && unsafe-review pr --root /path/to/repo --base-sha <base-sha> --head-sha <head-sha> --out-dir /path/to/review-kit",
+        "mkdir -p /path/to && git -C /path/to/repo diff --binary --full-index --output=/path/to/change.diff <base-sha>...<head-sha> && unsafe-review pr --root /path/to/repo --diff /path/to/change.diff --out-dir /path/to/review-kit",
+    ] {
+        assert!(
+            stdout.contains(expected),
+            "first-pr help must include exact external PR setup cue `{expected}`\nstdout:\n{stdout}"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn pr_setup_prints_read_only_external_pr_commands() -> Result<(), Box<dyn Error>> {
+    let diff_out = std::env::current_dir()?.join("target/external-pilots/bytes-pr827.diff");
+    let out_dir = std::env::current_dir()?.join("target/external-pilots/bytes-pr827/first-pr");
+    let diff_out_parent = diff_out
+        .parent()
+        .ok_or("expected diff output path to have a parent")?;
+    let diff_out_arg = rendered_pr_setup_path(&diff_out);
+    let out_dir_arg = rendered_pr_setup_path(&out_dir);
+    let diff_out_parent_arg = rendered_pr_setup_path(diff_out_parent);
+    let output = checked_output(
+        Command::new(env!("CARGO_BIN_EXE_cargo-unsafe-review"))
+            .arg("unsafe-review")
+            .arg("pr-setup")
+            .arg("--repo")
+            .arg("tokio-rs/bytes")
+            .arg("--number")
+            .arg("827")
+            .arg("--base-ref")
+            .arg("main")
+            .arg("--base-sha")
+            .arg("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+            .arg("--head-sha")
+            .arg("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+            .arg("--root")
+            .arg("/tmp/bytes checkout")
+            .arg("--out-dir")
+            .arg("target/external-pilots/bytes-pr827/first-pr")
+            .arg("--diff-out")
+            .arg("target/external-pilots/bytes-pr827.diff"),
+    )?;
+    let stdout = String::from_utf8(output.stdout)?;
+
+    for expected in [
+        "unsafe-review pr-setup".to_string(),
+        "Read-only setup commands for external GitHub PR tokio-rs/bytes#827.".to_string(),
+        "This command did not fetch, checkout, run unsafe-review, execute witnesses, post comments, or edit source.".to_string(),
+        "gh pr view 827 --repo tokio-rs/bytes --json baseRefName,baseRefOid,headRefOid".to_string(),
+        format!("git -C \"/tmp/bytes checkout\" fetch origin main pull/827/head && git -C \"/tmp/bytes checkout\" checkout --detach bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb && unsafe-review pr --root \"/tmp/bytes checkout\" --base-sha aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --head-sha bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb --out-dir {out_dir_arg}"),
+        format!("mkdir -p {diff_out_parent_arg} && git -C \"/tmp/bytes checkout\" diff --binary --full-index --output={diff_out_arg} aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb && unsafe-review pr --root \"/tmp/bytes checkout\" --diff {diff_out_arg} --out-dir {out_dir_arg}"),
+        "baseRefName: main".to_string(),
+        "baseRefOid: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+        "headRefOid: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string(),
+        format!("out_dir: {}", out_dir.display()),
+        "Trust boundary: always advisory;".to_string(),
+    ] {
+        assert_contains(&stdout, &expected);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn pr_setup_rejects_injected_repo_token() -> Result<(), Box<dyn Error>> {
+    let output = Command::new(env!("CARGO_BIN_EXE_cargo-unsafe-review"))
+        .arg("unsafe-review")
+        .arg("pr-setup")
+        .arg("--repo")
+        .arg("tokio-rs/bytes;rm")
+        .arg("--number")
+        .arg("827")
+        .arg("--base-ref")
+        .arg("main")
+        .arg("--base-sha")
+        .arg("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        .arg("--head-sha")
+        .arg("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+        .output()?;
+
+    assert!(
+        !output.status.success(),
+        "malformed repo token must be rejected"
+    );
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8(output.stderr)?;
+    assert_contains(&stderr, "invalid --repo");
+    let stdout = String::from_utf8(output.stdout)?;
+    assert!(
+        !stdout.contains("git -C"),
+        "rejected input must not print a command plan: {stdout}"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn pr_setup_rejects_injected_base_ref() -> Result<(), Box<dyn Error>> {
+    let output = Command::new(env!("CARGO_BIN_EXE_cargo-unsafe-review"))
+        .arg("unsafe-review")
+        .arg("pr-setup")
+        .arg("--repo")
+        .arg("tokio-rs/bytes")
+        .arg("--number")
+        .arg("827")
+        .arg("--base-ref")
+        .arg("main;echo")
+        .arg("--base-sha")
+        .arg("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        .arg("--head-sha")
+        .arg("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+        .output()?;
+
+    assert!(
+        !output.status.success(),
+        "malformed base ref must be rejected"
+    );
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8(output.stderr)?;
+    assert_contains(&stderr, "invalid --base-ref");
+    let stdout = String::from_utf8(output.stdout)?;
+    assert!(
+        !stdout.contains("git -C"),
+        "rejected input must not print a command plan: {stdout}"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn pr_setup_rejects_shell_expanding_diff_path() -> Result<(), Box<dyn Error>> {
+    let output = Command::new(env!("CARGO_BIN_EXE_cargo-unsafe-review"))
+        .arg("unsafe-review")
+        .arg("pr-setup")
+        .arg("--repo")
+        .arg("tokio-rs/bytes")
+        .arg("--number")
+        .arg("827")
+        .arg("--base-ref")
+        .arg("main")
+        .arg("--base-sha")
+        .arg("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        .arg("--head-sha")
+        .arg("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+        .arg("--diff-out")
+        .arg("target/$(whoami).diff")
+        .output()?;
+
+    assert!(
+        !output.status.success(),
+        "shell-expanding diff path must be rejected"
+    );
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8(output.stderr)?;
+    assert_contains(&stderr, "invalid --diff-out");
+    let stdout = String::from_utf8(output.stdout)?;
+    assert!(
+        !stdout.contains("git -C"),
+        "rejected input must not print a command plan: {stdout}"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn pr_setup_rejects_shell_expanding_out_dir() -> Result<(), Box<dyn Error>> {
+    let output = Command::new(env!("CARGO_BIN_EXE_cargo-unsafe-review"))
+        .arg("unsafe-review")
+        .arg("pr-setup")
+        .arg("--repo")
+        .arg("tokio-rs/bytes")
+        .arg("--number")
+        .arg("827")
+        .arg("--base-ref")
+        .arg("main")
+        .arg("--base-sha")
+        .arg("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        .arg("--head-sha")
+        .arg("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+        .arg("--out-dir")
+        .arg("target/$(whoami)")
+        .output()?;
+
+    assert!(
+        !output.status.success(),
+        "shell-expanding out dir must be rejected"
+    );
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8(output.stderr)?;
+    assert_contains(&stderr, "invalid --out-dir");
+    let stdout = String::from_utf8(output.stdout)?;
+    assert!(
+        !stdout.contains("git -C"),
+        "rejected input must not print a command plan: {stdout}"
     );
 
     Ok(())
@@ -291,6 +1053,7 @@ fn subcommand_help_is_command_specific() -> Result<(), Box<dyn Error>> {
         (&["receipt", "audit", "-h"], "unsafe-review receipt:"),
         (&["outcome", "--help"], "unsafe-review outcome:"),
         (&["policy", "--help"], "unsafe-review policy:"),
+        (&["pr-setup", "--help"], "unsafe-review pr-setup:"),
         (&["doctor", "--help"], "unsafe-review doctor:"),
         (&["badges", "--help"], "unsafe-review badges:"),
         (&["lsp", "--help"], "unsafe-review lsp:"),
@@ -323,6 +1086,71 @@ fn subcommand_help_is_command_specific() -> Result<(), Box<dyn Error>> {
             subargs
         );
     }
+
+    Ok(())
+}
+
+#[test]
+fn init_is_preview_only_deterministic_and_conflict_visible() -> Result<(), Box<dyn Error>> {
+    let temp = TempDir::new("unsafe-review-init-e2e")?;
+    let root = temp.path().join("repo");
+    let workflow = root.join(".github/workflows/unsafe-review-first-pr.yml");
+    fs::create_dir_all(workflow.parent().ok_or("workflow path has no parent")?)?;
+    fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"init-fixture\"\n",
+    )?;
+    fs::write(root.join(".gitignore"), "target/\n")?;
+    fs::write(&workflow, "name: owner-managed-workflow\n")?;
+    let proposal_dir = temp.path().join("proposal");
+
+    let run_init = || {
+        Command::new(env!("CARGO_BIN_EXE_cargo-unsafe-review"))
+            .arg("unsafe-review")
+            .arg("init")
+            .arg("--root")
+            .arg(&root)
+            .arg("--format")
+            .arg("json")
+            .arg("--out")
+            .arg(&proposal_dir)
+            .output()
+    };
+
+    let first = run_init()?;
+    assert!(first.status.success(), "init failed: {:?}", first.status);
+    let first_stdout = String::from_utf8(first.stdout)?;
+    let first_json: Value = serde_json::from_str(&first_stdout)?;
+    assert_eq!(first_json["mode"], "preview_only");
+    assert_eq!(first_json["writes_repository"], false);
+    assert_eq!(first_json["proposed_files"][0]["status"], "conflict");
+    assert!(first_json["proposed_files"][0]["diff"]
+        .as_str()
+        .is_some_and(|diff| diff.contains("--- a/.github/workflows/unsafe-review-first-pr.yml")));
+    assert_eq!(first_json["warnings"][0]["code"], "missing_git");
+    assert!(String::from_utf8(first.stderr)?.contains("Proposal written:"));
+    assert_eq!(
+        fs::read_to_string(&workflow)?,
+        "name: owner-managed-workflow\n"
+    );
+
+    let second = run_init()?;
+    assert_eq!(first_stdout, String::from_utf8(second.stdout)?);
+    assert!(proposal_dir.join("unsafe-review-init.json").is_file());
+
+    let default_preview = Command::new(env!("CARGO_BIN_EXE_cargo-unsafe-review"))
+        .arg("unsafe-review")
+        .arg("init")
+        .arg("--root")
+        .arg(&root)
+        .output()?;
+    assert!(default_preview.status.success());
+    let human = String::from_utf8(default_preview.stdout)?;
+    assert!(human.contains("Recommendations:"));
+    assert!(human.contains("optional_snippet"));
+    assert!(human.contains("target/unsafe-review/unsafe-review-gate.json"));
+    assert!(human.contains("<verified-release-ref>"));
+    assert!(!root.join("unsafe-review-init.json").exists());
 
     Ok(())
 }
@@ -361,6 +1189,197 @@ fn cargo_bin_policy_violation_exits_1_not_2() -> Result<(), Box<dyn Error>> {
     assert!(
         stderr.contains("policy:"),
         "stderr must carry the 'policy:' category prefix: {stderr}"
+    );
+
+    Ok(())
+}
+
+/// #2006 regression: a `--max-cards` capped `first-pr` run must not be
+/// indistinguishable from a complete one on the front door.
+///
+/// Before the fix the capped run printed a smaller "Review cards" / "Open
+/// actionable gaps" pair and nothing else, so it was byte-shaped exactly like a
+/// genuine smaller result. The same root is run twice — capped and complete —
+/// and only the capped run may carry the disclosure.
+///
+/// Drift-lock: drop the `capped_scan_notice` print in `print_first_pr_overview` → RED.
+#[test]
+fn capped_first_pr_run_discloses_the_cap_on_the_terminal() -> Result<(), Box<dyn Error>> {
+    let temp = TempDir::new("unsafe-review-cli-capped-disclosure-e2e")?;
+    let scan_root = temp.path().join("fixture");
+    fs::create_dir_all(scan_root.join("src"))?;
+    fs::write(
+        scan_root.join("Cargo.toml"),
+        "[package]\nname = \"capped-disclosure-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+    )?;
+    fs::write(
+        scan_root.join("src/lib.rs"),
+        "pub unsafe fn alpha(ptr: *const u8) -> u8 { unsafe { *ptr } }\n\
+         pub unsafe fn bravo(ptr: *const u8) -> u8 { unsafe { *ptr } }\n",
+    )?;
+    // first-pr is diff-scoped; supply the change that introduced both sites so the
+    // run does not fall back to `git diff` against a non-repository.
+    let diff_path = scan_root.join("change.diff");
+    fs::write(
+        &diff_path,
+        "diff --git a/src/lib.rs b/src/lib.rs\n\
+         --- a/src/lib.rs\n\
+         +++ b/src/lib.rs\n\
+         @@ -1,0 +1,2 @@\n\
+         +pub unsafe fn alpha(ptr: *const u8) -> u8 { unsafe { *ptr } }\n\
+         +pub unsafe fn bravo(ptr: *const u8) -> u8 { unsafe { *ptr } }\n",
+    )?;
+
+    let run = |out_dir: &Path, cap: Option<&str>| -> Result<String, Box<dyn Error>> {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_cargo-unsafe-review"));
+        command
+            .arg("unsafe-review")
+            .arg("first-pr")
+            .arg("--root")
+            .arg(&scan_root)
+            .arg("--diff")
+            .arg(&diff_path)
+            .arg("--out-dir")
+            .arg(out_dir);
+        if let Some(cap) = cap {
+            command.arg("--max-cards").arg(cap);
+        }
+        let output = command.output()?;
+        assert!(
+            output.status.success(),
+            "first-pr run must exit 0: status={:?}\nstderr:\n{}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    };
+
+    let capped = run(&temp.path().join("capped"), Some("1"))?;
+    let complete = run(&temp.path().join("complete"), None)?;
+
+    assert!(
+        capped.contains("Partial scan:"),
+        "a capped run must disclose the cap on the terminal, got:\n{capped}"
+    );
+    assert!(
+        capped.contains("--max-cards 1"),
+        "the disclosure must name the cap that bound the run, got:\n{capped}"
+    );
+    assert!(
+        capped.contains("Retry without cap: unsafe-review first-pr")
+            && capped.contains("--root")
+            && capped.contains("--diff")
+            && capped.contains("--out-dir"),
+        "a capped run must provide an exact retry command, got:\n{capped}"
+    );
+    assert!(
+        !complete.contains("Partial scan:"),
+        "a complete run must not claim to be partial, got:\n{complete}"
+    );
+    // The disclosure is the ONLY thing distinguishing the two headline blocks —
+    // that is precisely the bug, so assert the counts really do differ.
+    assert!(
+        capped.contains("- Scope: 1 ReviewCard"),
+        "capped run must report the reduced card count, got:\n{capped}"
+    );
+    assert!(
+        !complete.contains("- Scope: 1 ReviewCard"),
+        "fixture must yield more than one card uncapped, got:\n{complete}"
+    );
+
+    Ok(())
+}
+
+/// #2006 regression: the capped state must reach the structured artifacts too,
+/// so a machine consumer cannot read a truncated bundle as a complete inventory.
+///
+/// Drift-lock: stop projecting `scan_capped` into `cards.json` or the gate
+/// manifest → RED.
+#[test]
+fn capped_first_pr_run_marks_cards_json_and_gate_manifest() -> Result<(), Box<dyn Error>> {
+    let temp = TempDir::new("unsafe-review-cli-capped-artifacts-e2e")?;
+    let scan_root = temp.path().join("fixture");
+    fs::create_dir_all(scan_root.join("src"))?;
+    fs::write(
+        scan_root.join("Cargo.toml"),
+        "[package]\nname = \"capped-artifacts-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+    )?;
+    fs::write(
+        scan_root.join("src/lib.rs"),
+        "pub unsafe fn alpha(ptr: *const u8) -> u8 { unsafe { *ptr } }\n\
+         pub unsafe fn bravo(ptr: *const u8) -> u8 { unsafe { *ptr } }\n",
+    )?;
+    // first-pr is diff-scoped; supply the change that introduced both sites so the
+    // run does not fall back to `git diff` against a non-repository.
+    let diff_path = scan_root.join("change.diff");
+    fs::write(
+        &diff_path,
+        "diff --git a/src/lib.rs b/src/lib.rs\n\
+         --- a/src/lib.rs\n\
+         +++ b/src/lib.rs\n\
+         @@ -1,0 +1,2 @@\n\
+         +pub unsafe fn alpha(ptr: *const u8) -> u8 { unsafe { *ptr } }\n\
+         +pub unsafe fn bravo(ptr: *const u8) -> u8 { unsafe { *ptr } }\n",
+    )?;
+
+    let out_dir = temp.path().join("bundle");
+    let output = Command::new(env!("CARGO_BIN_EXE_cargo-unsafe-review"))
+        .arg("unsafe-review")
+        .arg("first-pr")
+        .arg("--root")
+        .arg(&scan_root)
+        .arg("--diff")
+        .arg(&diff_path)
+        .arg("--out-dir")
+        .arg(&out_dir)
+        .arg("--max-cards")
+        .arg("1")
+        .output()?;
+    assert!(
+        output.status.success(),
+        "capped first-pr must exit 0: {:?}\nstderr:\n{}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr),
+    );
+
+    let cards: Value = serde_json::from_str(&fs::read_to_string(out_dir.join("cards.json"))?)?;
+    assert_eq!(
+        cards["summary"]["scan_capped"], true,
+        "cards.json summary must mark the run capped: {}",
+        cards["summary"]
+    );
+    assert_eq!(
+        cards["summary"]["card_cap"], 1,
+        "cards.json summary must carry the cap: {}",
+        cards["summary"]
+    );
+    assert!(
+        cards["summary"]["unsafe_sites"].as_u64() > cards["summary"]["cards"].as_u64(),
+        "a capped run must show more discovered sites than emitted cards: {}",
+        cards["summary"]
+    );
+
+    let gate: Value = serde_json::from_str(&fs::read_to_string(
+        out_dir.join("unsafe-review-gate.json"),
+    )?)?;
+    assert_eq!(
+        gate["scan_capped"], true,
+        "the gate manifest must disclose the cap alongside its movement counts: {gate}"
+    );
+    assert_eq!(
+        gate["card_cap"], 1,
+        "the gate manifest must carry the cap value: {gate}"
+    );
+    // The manifest stays advisory — disclosure is not a verdict.
+    assert_eq!(
+        gate["status"], "advisory",
+        "cap disclosure must not change the advisory posture: {gate}"
+    );
+
+    let pr_summary = fs::read_to_string(out_dir.join("pr-summary.md"))?;
+    assert!(
+        pr_summary.contains("Partial scan:"),
+        "the PR summary must disclose the cap next to its counts:\n{pr_summary}"
     );
 
     Ok(())
@@ -528,10 +1547,106 @@ fn repo_capped_scan_operator_json_uses_card_level_wording() -> Result<(), Box<dy
     Ok(())
 }
 
+/// Hostile source-shape regression: a large but valid Rust file must remain a
+/// truthful repo scan input rather than panic, silently fall back, or emit an
+/// empty success report.
+#[test]
+fn repo_huge_source_file_scans_without_panic_or_scope_fallback() -> Result<(), Box<dyn Error>> {
+    let temp = TempDir::new("unsafe-review-cli-huge-source-e2e")?;
+    let scan_root = temp.path().join("fixture");
+    fs::create_dir_all(scan_root.join("src"))?;
+    fs::write(
+        scan_root.join("Cargo.toml"),
+        "[package]\nname = \"huge-source-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+    )?;
+    let padding = "// bounded hostile-source padding for scan coverage\n".repeat(24_000);
+    let source = format!(
+        "{padding}pub unsafe fn read_byte(ptr: *const u8) -> u8 {{\n    unsafe {{ *ptr }}\n}}\n"
+    );
+    assert!(
+        source.len() > 1_000_000,
+        "fixture must exercise a large source file"
+    );
+    fs::write(scan_root.join("src/lib.rs"), source)?;
+
+    let report_path = temp.path().join("repo.json");
+    let output = Command::new(env!("CARGO_BIN_EXE_cargo-unsafe-review"))
+        .arg("unsafe-review")
+        .arg("repo")
+        .arg("--root")
+        .arg(&scan_root)
+        .arg("--format")
+        .arg("json")
+        .arg("--out")
+        .arg(&report_path)
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "large source scan must not panic or fail: status={:?}\nstderr:\n{}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    let report: Value = serde_json::from_str(&fs::read_to_string(&report_path)?)?;
+    assert_eq!(report["scope"], "repo");
+    assert_eq!(report["summary"]["rust_files"], 1);
+    assert!(report["summary"]["cards"].as_u64().unwrap_or(0) >= 1);
+    assert!(
+        report["cards"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|card| card["operation_family"] == "raw_pointer_deref"),
+        "large source scan must preserve the raw-pointer dereference card: {report}"
+    );
+    Ok(())
+}
+
 fn assert_contains(haystack: &str, needle: &str) {
     assert!(
         haystack.contains(needle),
         "expected stdout to contain `{needle}`\nstdout:\n{haystack}"
+    );
+}
+
+fn assert_not_contains(haystack: &str, needle: &str) {
+    assert!(
+        !haystack.contains(needle),
+        "expected stdout not to contain `{needle}`\nstdout:\n{haystack}"
+    );
+}
+
+fn rendered_shell_path(path: &Path) -> String {
+    let raw = if cfg!(windows) {
+        path.display().to_string().replace('\\', "/")
+    } else {
+        path.display().to_string()
+    };
+    if raw
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'.' | b'_' | b'-'))
+    {
+        raw
+    } else {
+        format!("\"{}\"", raw.replace('"', "\\\""))
+    }
+}
+
+fn rendered_pr_setup_path(path: &Path) -> String {
+    let raw = path.display().to_string();
+    if cfg!(windows) {
+        format!("\"{}\"", raw.replace('\\', "/"))
+    } else {
+        format!("\"{}\"", raw)
+    }
+}
+
+fn assert_order(haystack: &str, before: &str, after: &str) {
+    let before_idx = haystack.find(before);
+    let after_idx = haystack.find(after);
+    assert!(
+        matches!((before_idx, after_idx), (Some(left), Some(right)) if left < right),
+        "expected `{before}` to appear before `{after}`\nstdout:\n{haystack}"
     );
 }
 
@@ -559,6 +1674,67 @@ fn fixture_root(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../fixtures")
         .join(name)
+}
+
+struct ExactPrFixtureRepo {
+    temp: TempDir,
+    root: PathBuf,
+    base_sha: String,
+    head_sha: String,
+}
+
+fn exact_pr_fixture_repo(prefix: &str) -> Result<ExactPrFixtureRepo, Box<dyn Error>> {
+    let temp = TempDir::new(prefix)?;
+    let root = temp.path().join("repo");
+    fs::create_dir_all(root.join("src"))?;
+    run_git(&root, &["init"])?;
+    run_git(
+        &root,
+        &["config", "user.email", "unsafe-review@example.test"],
+    )?;
+    run_git(&root, &["config", "user.name", "unsafe-review test"])?;
+    fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"exact-pr-fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+    )?;
+    fs::write(root.join("src/lib.rs"), "pub fn read_byte() -> u8 { 0 }\n")?;
+    run_git(&root, &["add", "."])?;
+    run_git(&root, &["commit", "-m", "base"])?;
+    let base_sha = run_git(&root, &["rev-parse", "HEAD"])?;
+
+    fs::write(
+        root.join("src/lib.rs"),
+        "pub unsafe fn read_byte(ptr: *const u8) -> u8 {\n    unsafe { *ptr }\n}\n",
+    )?;
+    run_git(&root, &["add", "."])?;
+    run_git(&root, &["commit", "-m", "head"])?;
+    let head_sha = run_git(&root, &["rev-parse", "HEAD"])?;
+
+    Ok(ExactPrFixtureRepo {
+        temp,
+        root,
+        base_sha,
+        head_sha,
+    })
+}
+
+fn run_git(repo: &Path, args: &[&str]) -> Result<String, Box<dyn Error>> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .output()?;
+    if !output.status.success() {
+        return Err(format!(
+            "git {:?} failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
+            args,
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
+        .into());
+    }
+    Ok(String::from_utf8(output.stdout)?.trim().to_string())
 }
 
 struct TempDir {

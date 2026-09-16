@@ -9,7 +9,7 @@ Linked ADRs:
 Linked plan:
 - plans/0.2.0/implementation-plan.md
 Linked issues:
-- none
+- https://github.com/EffortlessMetrics/unsafe-review-swarm/issues/2116
 Linked PRs:
 - TBD
 Support-tier impact: ub-review integration surface (meta-orchestration projection)
@@ -18,13 +18,12 @@ Policy impact:
 
 ## Problem
 
-`ub-review` already runs `unsafe-review first-pr --root --base` as one of its
-sensor lanes, but it captures only stdout/stderr and discards the structured
-artifacts the run produced — `cards.json`, `comment-plan.json`,
-`witness-plan.md`, `review-kit.json`. Its model lanes then consume flat text.
-The instrument's richest output (the per-card coverage block of
-UNSAFE-REVIEW-SPEC-0029, the baseline movement of UNSAFE-REVIEW-SPEC-0030) never
-reaches the orchestrator except as prose to scrape.
+`ub-review` runs `unsafe-review first-pr --root --base --out-dir` as one of its
+sensor lanes and retains the structured artifact bundle. The consumer must
+still prove that it can route the exact producer schema and semantically ingest
+the fields it claims to use. Merely retaining `cards.json`,
+`comment-plan.json`, `repair-queue.json`, and the other pointed-to files does
+not prove that their current shapes were parsed or joined.
 
 The sibling sensors already solved this with routable manifests: `ripr` ships
 `gate-decision.json` (`schema_version` 0.1, `status`, `decisions[]`) plus
@@ -53,6 +52,7 @@ movement summary; it recomputes nothing.
   "dialect": "unsafe-review",
   "status": "advisory",
   "summary": { "new_gaps": 2, "worsened_gaps": 1, "resolved_gaps": 3, "inherited_gaps": 91 },
+  "scan_capped": false,
   "artifacts": {
     "cards": "cards.json",
     "comment_plan": "comment-plan.json",
@@ -73,6 +73,16 @@ movement summary; it recomputes nothing.
 - `summary` is the four-bucket movement block of UNSAFE-REVIEW-SPEC-0030, copied
   verbatim, not re-derived. `status` is always `advisory` here; the manifest
   carries posture, never a block verdict.
+- `scan_capped` reports whether the `max_cards` cap dropped cards from this run,
+  with `card_cap` carrying the cap value when it did (omitted otherwise). It
+  sits beside `summary` rather than inside it because the movement block is
+  SPEC-0030's counters copied verbatim, and completeness is a property of the
+  run, not a movement counter. When `scan_capped` is `true` every count in
+  `summary` is understated, so a router must not read the manifest as a complete
+  inventory. The value is projected from the same cap decision as the SPEC-0035
+  status sidecar (`stop_reason: "max_cards"`), not re-derived. Both fields are
+  additive within `unsafe-review-gate/v1`: a reader that ignores them sees the
+  v1 envelope unchanged, and `schema_version`/`dialect` routing is untouched.
 - `artifacts` are relative pointers to the structured files the run already
   wrote (UNSAFE-REVIEW-SPEC-0029 projections). Missing optional artifacts are
   omitted, not faked.
@@ -107,6 +117,33 @@ human-rendered surface. "Easy" for this surface means no markdown scraping: one
 file, one schema, one route. The human and markdown surfaces remain unchanged
 and advisory; they are not the orchestrator's input.
 
+### Pinned consumer compatibility status
+
+The bounded 2026-08-20 smoke in
+[`docs/dogfood/reports/2026-08-20-ub-review-consumer-smoke.md`](../dogfood/reports/2026-08-20-ub-review-consumer-smoke.md)
+exercised a detached `ub-review run` at exact commit
+`9de43c5215c8e4278cce9421b55991ced4f66065`, with locally built
+`unsafe-review` 0.3.8 from exact swarm commit
+`672a4c259dd9ddf8e4fa81d861b57d0d5e1254e1` first on `PATH`. It did not run
+the composite GitHub Action; that Action's default installer remains pinned to
+unsafe-review 0.3.4, so Action-route compatibility remains unproven.
+
+That pin correctly routes `unsafe-review-gate/v1`, surfaces its advisory
+status, movement, tool provenance, and manifest trust boundary, and retains the
+nested producer artifacts. For an unsupported `unsafe-review-gate/v999`, it
+records a typed `artifact-gap` naming both the found and known schemas and does
+not ingest a structured candidate or fall back to Markdown; the advisory
+consumer command still exits `0`.
+
+The positive handoff is not fully compatible: unsafe-review 0.3.8 emits
+`comment-plan.json` as an object containing `comments`, while the pinned
+consumer attempts to deserialize the whole file as an array. The producer
+selected one card, but the consumer reported zero comment-plan candidates, so
+semantic card/comment ingestion and the dependent repair-queue join remain
+not proven. `operation_family` survives in the retained nested artifacts but
+is not a field bound by this consumer pin. Raw retention must not be reported
+as semantic ingestion.
+
 ## Non-goals
 
 This spec does not:
@@ -136,8 +173,16 @@ merge or posts a comment is `ub-review`, never the manifest.
   files; fixed advisory `trust_boundary` and `status`.
 - `cargo test -p unsafe-review` — `first-pr`/`repo` emits exactly one
   `unsafe-review-gate.json` whose pointers resolve to the run's artifacts.
+- `cargo test -p xtask first_pr_artifact_checker_rejects_gate_manifest` —
+  first-pr bundle verification fails if the gate manifest drifts from
+  `cards.json` movement, advisory status, required artifact pointers, or the
+  deterministic no-volatile-fields contract.
 - schema-alignment fixture checked in `check-pr` — `schema_version` form and
   `dialect` marker match the shapes recorded in `docs/interop/sibling-tools.md`.
+- a bounded exact-version producer-to-consumer smoke records the commands,
+  commits, binary and artifact hashes, positive semantic joins, and an
+  incompatible-schema negative control. A retained raw artifact is not by
+  itself evidence that a consumer parsed its fields.
 - `cargo run --locked -p xtask -- check-pr`.
 
 ## Machine check

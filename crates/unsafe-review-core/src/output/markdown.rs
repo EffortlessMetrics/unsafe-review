@@ -4,6 +4,8 @@ use crate::domain::{OperationFamily, ReviewCard};
 use crate::output::confirmation::{
     build_this_first, confirmation_step, hypothesis_to_confirm, minimal_repro,
 };
+use crate::output::declaration_summary::{self, DeclarationGroup};
+use crate::output::target_feature_summary::{self, TargetFeatureGroup};
 use crate::output::{
     NO_CHANGED_GAPS_LIMITATION, NO_CHANGED_GAPS_MESSAGE, REVIEWCARD_TRUST_BOUNDARY, UNKNOWN_OWNER,
 };
@@ -100,6 +102,8 @@ fn render_repo_posture(output: &AnalyzeOutput) -> String {
     render_counts_table(&mut out, "Route", route_counts(output));
 
     render_related_sink_clusters(&mut out, output);
+    render_declaration_summary(&mut out, output);
+    render_target_feature_summary(&mut out, output);
 
     out.push_str("## Cards\n\n");
     if output.cards.is_empty() {
@@ -370,9 +374,126 @@ pub(crate) fn render_pr_summary(output: &AnalyzeOutput) -> String {
     render_pr_summary_build_this_first_lead(&mut out, ranked.first().copied());
     render_pr_summary_reviewer_cockpit(&mut out, ranked.first().copied());
     render_pr_summary_card_table(&mut out, &ranked);
+    render_declaration_summary(&mut out, output);
+    render_target_feature_summary(&mut out, output);
     render_pr_summary_witness_plan(&mut out, &ranked);
     render_pr_summary_trust_boundary(&mut out);
     out
+}
+
+/// Bounded, deterministic volume summary for `unsafe_declaration`-family
+/// owner/contract cards (issue #1895).
+///
+/// This is a presentation-only grouping projected from the same
+/// `ReviewCard`/`CoverageBlock` data as every other surface -- it does not
+/// mutate, drop, or reclassify a card, and it is not a second truth surface.
+/// The complete per-declaration inventory (every id and its metadata) stays in
+/// `cards.json`; the card table above already groups owner/contract cards, so it
+/// is not the full per-declaration listing. Renders nothing when there are no
+/// `unsafe_declaration` cards, so quiet PRs stay quiet.
+fn render_declaration_summary(out: &mut String, output: &AnalyzeOutput) {
+    let groups = declaration_summary::declaration_groups(output);
+    if groups.is_empty() {
+        return;
+    }
+
+    out.push_str("\n## Declaration summary\n\n");
+    out.push_str(
+        "Grouped from existing `unsafe_declaration` ReviewCards by source file. This is a report-only volume summary, not a new classifier and not a discharge -- every declaration keeps its own card, class, and policy status in `cards.json` (the complete per-declaration inventory). Files with a new or worsened declaration are always listed ahead of inherited-only files.\n\n",
+    );
+    out.push_str(
+        "| File | Total | New/worsened | Inherited | Contract missing/weak | Contract present | Representative cards |\n",
+    );
+    out.push_str("|---|---:|---:|---:|---:|---:|---|\n");
+    for group in &groups {
+        out.push_str(&format!(
+            "| `{}` | {} | {} | {} | {} | {} | {} |\n",
+            md_cell(&group.module_or_file),
+            group.total,
+            group.new_or_worsened,
+            group.inherited,
+            group.contract_missing,
+            group.contract_present,
+            render_declaration_representatives(group),
+        ));
+    }
+    out.push('\n');
+}
+
+/// Render a group's bounded representative card IDs plus a "+N more" pointer
+/// to the full membership when the group exceeds the representative cap.
+/// Never dumps the complete `underlying_card_ids` list inline.
+fn render_declaration_representatives(group: &DeclarationGroup) -> String {
+    if group.representatives.is_empty() {
+        return "`none`".to_string();
+    }
+    let mut rendered = group
+        .representatives
+        .iter()
+        .map(|id| format!("`{}`", md_cell(id)))
+        .collect::<Vec<_>>();
+    let remaining = group.total.saturating_sub(group.representatives.len());
+    if remaining > 0 {
+        rendered.push(format!("+{remaining} more (see `cards.json`)"));
+    }
+    rendered.join(", ")
+}
+
+/// Bounded, deterministic grouping summary for `target_feature`-family
+/// `ReviewCard`s (issue #1894).
+///
+/// This is a presentation-only projection derived from the same
+/// `ReviewCard`/`CoverageBlock` data as every other surface -- it does not
+/// mutate, drop, or reclassify a card, and it is not a second truth surface.
+/// The complete per-site inventory (every id, class, and policy status)
+/// stays in `cards.json`. Renders nothing when there are no `target_feature`
+/// cards, so quiet PRs stay quiet. Grouping is report-only volume reduction:
+/// it is not a classifier, not a discharge, and not a soundness claim about
+/// the grouped sites -- architecture/feature literals are metadata, not
+/// group identity, and cards whose obligation, class, movement, baseline
+/// state, receipt state, or next action differ never collapse together.
+fn render_target_feature_summary(out: &mut String, output: &AnalyzeOutput) {
+    let groups = target_feature_summary::target_feature_groups(output);
+    if groups.is_empty() {
+        return;
+    }
+
+    out.push_str("\n## Target-feature summary\n\n");
+    out.push_str(
+        "Grouped from existing `target_feature` ReviewCards by source file, review class, and a normalized attribute shape (architecture/feature literals such as `avx2` or `neon` are metadata, not group identity). This is a report-only volume summary, not a new classifier and not a discharge -- every site keeps its own card, class, and policy status in `cards.json` (the complete per-site inventory). Cards whose obligation, class, movement, baseline state, receipt state, or next action differ never collapse into the same group.\n\n",
+    );
+    out.push_str("| File | Class | Sites | Feature variants | Representative cards |\n");
+    out.push_str("|---|---|---:|---|---|\n");
+    for group in &groups {
+        out.push_str(&format!(
+            "| `{}` | `{}` | {} | {} | {} |\n",
+            md_cell(&group.module_or_file),
+            group.class,
+            group.total,
+            render_backtick_string_list(&group.features, 4),
+            render_target_feature_representatives(group),
+        ));
+    }
+    out.push('\n');
+}
+
+/// Render a group's bounded representative card IDs plus a "+N more" pointer
+/// to the full membership when the group exceeds the representative cap.
+/// Never dumps the complete `underlying_card_ids` list inline.
+fn render_target_feature_representatives(group: &TargetFeatureGroup) -> String {
+    if group.representatives.is_empty() {
+        return "`none`".to_string();
+    }
+    let mut rendered = group
+        .representatives
+        .iter()
+        .map(|id| format!("`{}`", md_cell(id)))
+        .collect::<Vec<_>>();
+    let remaining = group.total.saturating_sub(group.representatives.len());
+    if remaining > 0 {
+        rendered.push(format!("+{remaining} more (see `cards.json`)"));
+    }
+    rendered.join(", ")
 }
 
 /// Presentation-only ranking for pr-summary: cards that are one executable
@@ -480,6 +601,11 @@ fn render_pr_summary_header_bullets(out: &mut String, output: &AnalyzeOutput) {
         "- Open actionable gaps: {}\n",
         output.summary.open_actionable_gaps
     ));
+    // A capped run understates every count above it, so the disclosure is rendered
+    // adjacent to the counts rather than in a footer a reader can miss.
+    if let Some(notice) = output.summary.capped_scan_notice() {
+        out.push_str(&format!("- {notice}\n"));
+    }
     // Render coverage movement when any movement signal is present.
     let s = &output.summary;
     let has_movement = s.new_gaps > 0
@@ -1046,6 +1172,7 @@ fn one_line(value: &str) -> String {
 mod tests {
     use super::*;
     use crate::api::{AnalysisMode, AnalyzeInput, DiffSource, PolicyMode, Scope, analyze};
+    use crate::domain::MissingEvidence;
     use std::path::PathBuf;
 
     #[test]
@@ -1479,20 +1606,31 @@ mod tests {
             "operation card must be listed individually in the card table; rendered:\n{rendered}"
         );
 
-        // Owner card is NOT listed individually — it is grouped. The owner card's
-        // card ID must not appear as a standalone table row (it appears in the
-        // grouped summary row instead). We check the owner card ID is absent as
-        // an individual row entry rather than checking for the family name, which
-        // legitimately appears in the grouped row.
+        // Owner card is NOT listed individually in the CARD TABLE — it is
+        // grouped there. The owner card's card ID must not appear as a
+        // standalone table row within that section (it appears in the
+        // grouped summary row instead). We check the owner card ID is absent
+        // as an individual row entry rather than checking for the family
+        // name, which legitimately appears in the grouped row. Scoped to the
+        // "## Card table" section only: the "## Declaration summary" section
+        // (issue #1895) legitimately prints the same owner card ID as a
+        // bounded representative, which is a different, intentional surface.
         let owner_card_id = output
             .cards
             .iter()
             .find(|c| is_owner_contract_card(c))
             .map(|c| c.id.to_string())
             .ok_or_else(|| "fixture must have an owner card".to_string())?;
+        let card_table_section = rendered
+            .split("## Card table")
+            .nth(1)
+            .and_then(|rest| rest.split("\n## ").next())
+            .ok_or_else(|| {
+                "rendered pr-summary must contain a ## Card table section".to_string()
+            })?;
         assert!(
-            !rendered.contains(&format!("| `{owner_card_id}` |")),
-            "owner card must not appear as an individual table row; rendered:\n{rendered}"
+            !card_table_section.contains(&format!("| `{owner_card_id}` |")),
+            "owner card must not appear as an individual table row in the card table; card table section:\n{card_table_section}"
         );
 
         // The grouped summary line must be present in the card table.
@@ -1572,6 +1710,1005 @@ mod tests {
             "operation card family must appear in pr-summary cockpit; rendered:\n{rendered}"
         );
 
+        Ok(())
+    }
+
+    // issue #1895 review (CodeRabbit): the calibration case only asserts the
+    // per-card inventory, which cannot fail if the grouping or markdown rendering
+    // disappears. This ties the `unsafe_declaration_volume_summary` fixture to the
+    // rendered grouped projection end-to-end so a regression in either surface is
+    // caught.
+    #[test]
+    fn declaration_volume_summary_renders_grouped_projection_for_the_fixture() -> Result<(), String>
+    {
+        let pr = render_pr_summary(&fixture_output("unsafe_declaration_volume_summary")?);
+        assert!(
+            pr.contains("## Declaration summary"),
+            "pr-summary must render the declaration summary section:\n{pr}"
+        );
+        // Exact grouped row: 4 declaration cards in src/lib.rs, all new/worsened,
+        // 2 contract-missing + 2 contract-present.
+        assert!(
+            pr.contains("| `src/lib.rs` | 4 | 4 | 0 | 2 | 2 |"),
+            "grouped src/lib.rs row must report totals 4/4/0 and contract 2/2:\n{pr}"
+        );
+        // The group exceeds the representative cap, so the bounded inventory
+        // pointer must appear rather than a full dump of every card id.
+        assert!(
+            pr.contains("+1 more (see `cards.json`)"),
+            "over-cap group must render the inventory pointer:\n{pr}"
+        );
+
+        // The same projection appears on the repo-posture surface.
+        let repo = render_repo_posture(&repo_fixture_output("unsafe_declaration_volume_summary")?);
+        assert!(
+            repo.contains("## Declaration summary"),
+            "repo posture must render the declaration summary section:\n{repo}"
+        );
+
+        // Quiet PRs (no unsafe_declaration cards) must not gain the section.
+        let quiet = render_pr_summary(&fixture_output("raw_pointer_alignment")?);
+        assert!(
+            !quiet.contains("## Declaration summary"),
+            "a fixture with no declaration cards must not render the section:\n{quiet}"
+        );
+        Ok(())
+    }
+
+    // issue #1894: ties the `target_feature_simd_dispatch_repetition` fixture
+    // to the rendered grouped projection AND the comment-plan's
+    // `grouped_repetition` selection end-to-end, so a regression in either
+    // surface (or in the post-eligibility representative-selection refactor,
+    // finding 1) is caught by a real run rather than only by synthetic unit
+    // fixtures.
+    #[test]
+    fn target_feature_summary_renders_grouped_projection_for_the_fixture() -> Result<(), String> {
+        let pr = render_pr_summary(&fixture_output("target_feature_simd_dispatch_repetition")?);
+        assert!(
+            pr.contains("## Target-feature summary"),
+            "pr-summary must render the target-feature summary section:\n{pr}"
+        );
+        // Three undocumented arch variants (avx2/sse2/neon) share file, class,
+        // coverage state, and normalized shape -> one grouped row, 3 sites.
+        assert!(
+            pr.contains("| `src/lib.rs` | `contract_missing` | 3 |"),
+            "grouped contract_missing row must report 3 sites:\n{pr}"
+        );
+        for feature in ["avx2", "sse2", "neon"] {
+            assert!(
+                pr.contains(feature),
+                "feature-variant metadata must list `{feature}`:\n{pr}"
+            );
+        }
+        // The documented avx512 site has a different class (unsafe_unreached)
+        // and a satisfied obligation; it must never collapse into the
+        // contract_missing group.
+        assert!(
+            pr.contains("| `src/lib.rs` | `unsafe_unreached` | 1 |"),
+            "the differently-classed site must render its own singleton row:\n{pr}"
+        );
+        assert!(
+            pr.contains("avx512f"),
+            "the singleton row must list its own feature variant:\n{pr}"
+        );
+
+        let repo = render_repo_posture(&repo_fixture_output(
+            "target_feature_simd_dispatch_repetition",
+        )?);
+        assert!(
+            repo.contains("## Target-feature summary"),
+            "repo posture must render the target-feature summary section:\n{repo}"
+        );
+
+        let quiet = render_pr_summary(&fixture_output("raw_pointer_alignment")?);
+        assert!(
+            !quiet.contains("## Target-feature summary"),
+            "a fixture with no target_feature cards must not render the section:\n{quiet}"
+        );
+
+        // Issue #1894 finding 1: grouping is applied strictly after
+        // eligibility, on the eligible members' importance-rank order --
+        // exactly one representative (avx2, the only tiebreak-relevant
+        // ordering here is line order since priority/confidence/coverage
+        // are tied) is selected; the other two equivalent sites are
+        // recorded `grouped_repetition`; the differently-classed avx512
+        // site is excluded for its own unrelated reason.
+        let output = fixture_output("target_feature_simd_dispatch_repetition")?;
+        let plan_json = crate::output::comment_plan::render(&output);
+        let plan: serde_json::Value = serde_json::from_str(&plan_json)
+            .map_err(|err| format!("comment-plan JSON parse failed: {err}"))?;
+        let comments = plan["comments"]
+            .as_array()
+            .ok_or_else(|| "comments should be an array".to_string())?;
+        assert_eq!(
+            comments.len(),
+            1,
+            "exactly one representative must be selected: {plan_json}"
+        );
+        assert!(
+            comments[0]["operation"]
+                .as_str()
+                .unwrap_or("")
+                .contains("avx2"),
+            "the representative must be the avx2 site: {}",
+            comments[0]
+        );
+        let not_selected = plan["not_selected"]
+            .as_array()
+            .ok_or_else(|| "not_selected should be an array".to_string())?;
+        let grouped: Vec<&serde_json::Value> = not_selected
+            .iter()
+            .filter(|card| card["reason_code"] == "grouped_repetition")
+            .collect();
+        assert_eq!(
+            grouped.len(),
+            2,
+            "sse2 and neon must be recorded grouped_repetition, and nothing else: {not_selected:?}"
+        );
+        for entry in &grouped {
+            let operation = entry["operation"].as_str().unwrap_or("");
+            assert!(
+                operation.contains("sse2") || operation.contains("neon"),
+                "unexpected grouped_repetition entry: {entry}"
+            );
+        }
+        let avx512_entry = not_selected
+            .iter()
+            .find(|card| {
+                card["operation"]
+                    .as_str()
+                    .is_some_and(|op| op.contains("avx512"))
+            })
+            .ok_or_else(|| "avx512 site must be in not_selected".to_string())?;
+        assert_ne!(
+            avx512_entry["reason_code"], "grouped_repetition",
+            "the differently-classed avx512 site must never be tagged grouped_repetition: {avx512_entry}"
+        );
+
+        Ok(())
+    }
+
+    /// Phrases that would strengthen the advisory boundary into a safety,
+    /// UB-freedom, Miri-cleanliness, or site-execution claim. A renderer may
+    /// narrow the boundary; it may never assert any of these.
+    ///
+    /// Kept lowercase and matched against lowercased render output by
+    /// [`assert_no_claim_strengthening`], so a capitalized or title-cased
+    /// overclaim cannot slip past the scan. This list covers common
+    /// inflections of each prohibited claim class; it is the cheap half of
+    /// the check, and [`assert_claim_tokens_stay_negated`] covers rewordings
+    /// the list cannot anticipate.
+    const CLAIM_STRENGTHENING_PHRASES: [&str; 17] = [
+        // Safety claims.
+        "proven safe",
+        "guaranteed safe",
+        "verified safe",
+        "this code is safe",
+        "proves safety",
+        "proves memory safety",
+        "proof of memory safety",
+        "is memory-safety proof",
+        // UB-freedom claims.
+        "is ub-free",
+        "free of ub",
+        "free of undefined behavior",
+        "no undefined behavior",
+        // Miri-cleanliness claims.
+        "is miri-clean",
+        "miri verified",
+        "miri-verified",
+        "verified by miri",
+        // Site-execution claims.
+        "proves site execution",
+    ];
+
+    /// Claim tokens that may appear in a render only inside a negation.
+    ///
+    /// A denylist of exact phrases cannot anticipate every rewording, and the
+    /// most dangerous rewording is to the shared boundary constant itself:
+    /// dropping one `not` turns the disclaimer into the claim while every
+    /// phrase in [`CLAIM_STRENGTHENING_PHRASES`] still passes. These tokens
+    /// are therefore checked positionally instead — each occurrence must sit
+    /// inside a negating clause.
+    const NEGATION_REQUIRED_CLAIM_TOKENS: [&str; 4] = [
+        "memory-safety proof",
+        "ub-free",
+        "miri-clean",
+        "site-execution claim",
+    ];
+
+    /// Clause separators. The negation must appear in the claim token's own
+    /// clause: the advisory boundary is a comma-separated list of negated
+    /// items, so a fixed-width lookback would happily borrow the `not` from
+    /// the item before and pass a boundary that had lost its own.
+    const CLAUSE_SEPARATORS: [char; 5] = [';', ',', '.', '\n', ':'];
+
+    /// Case-insensitive assertion that `rendered` strengthens no claim.
+    fn assert_no_claim_strengthening(label: &str, rendered: &str) {
+        let lowered = rendered.to_lowercase();
+        for forbidden in CLAIM_STRENGTHENING_PHRASES {
+            assert!(
+                !lowered.contains(forbidden),
+                "{label} must not strengthen the advisory boundary with `{forbidden}` (matched case-insensitively):\n{rendered}"
+            );
+        }
+        assert_claim_tokens_stay_negated(label, rendered);
+    }
+
+    /// Assert every occurrence of a prohibited claim token is negated.
+    fn assert_claim_tokens_stay_negated(label: &str, rendered: &str) {
+        let lowered = rendered.to_lowercase();
+        for token in NEGATION_REQUIRED_CLAIM_TOKENS {
+            let mut search_from = 0usize;
+            while let Some(offset) = lowered[search_from..].find(token) {
+                let at = search_from + offset;
+                let clause_start = lowered[..at]
+                    .rfind(CLAUSE_SEPARATORS)
+                    .map_or(0, |sep| sep + 1);
+                let clause = &lowered[clause_start..at];
+                assert!(
+                    clause.contains("not") || clause.contains("never"),
+                    "{label} may state `{token}` only inside a negation, and the negation must be in the token's own clause; it is asserted here:\n  ...[{clause}][{token}]...\nfull render:\n{rendered}"
+                );
+                search_from = at + token.len();
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // issue #2119: direct `--format markdown` ReviewCard field parity.
+    //
+    // These lock the direct-markdown consumer on its own, separately from
+    // the human, PR-summary, and GitHub-summary renderers. They assert the
+    // whole emitted row rather than isolated substrings, so a column
+    // reorder, a dropped column, or a silently substituted producer fails
+    // here instead of drifting. Scope-dependent omissions stay asserted as
+    // omissions: proving what diff scope does *not* emit is what keeps the
+    // consumer honestly `partial` rather than mistaken for full parity.
+    // ------------------------------------------------------------------
+
+    // The expected rows below are an independent oracle: they are built from
+    // raw `ReviewCard` fields with test-local formatting, and deliberately do
+    // NOT call the renderer's `md_cell`, `one_line`, `card_location`,
+    // `missing_summary`, or route-selection helpers. Reusing those would move
+    // both sides of the comparison together whenever a helper drifted, so the
+    // lock could not see the drift it exists to catch.
+
+    /// Test-local restatement of the table-cell contract: collapse every run
+    /// of whitespace to one space, then escape pipes so a card value cannot
+    /// forge a column.
+    fn oracle_cell(value: &str) -> String {
+        value
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .replace('|', "\\|")
+    }
+
+    /// Test-local restatement of the rendered location contract.
+    fn oracle_location(card: &ReviewCard) -> String {
+        format!(
+            "{}:{}",
+            path_display(&card.site.location.file),
+            card.site.location.line
+        )
+    }
+
+    /// Test-local restatement of the joined missing-evidence contract.
+    fn oracle_missing_summary(card: &ReviewCard) -> String {
+        if card.missing.is_empty() {
+            return "No missing evidence recorded".to_string();
+        }
+        card.missing
+            .iter()
+            .map(|missing| missing.message.as_str())
+            .collect::<Vec<_>>()
+            .join("; ")
+    }
+
+    /// Test-local restatement of primary-route selection: the first recorded
+    /// route, else the default review route.
+    fn oracle_primary_route(card: &ReviewCard) -> &str {
+        card.routes
+            .first()
+            .map_or(DEFAULT_REVIEW_ROUTE, |route| route.kind.as_str())
+    }
+
+    /// Exact diff-scope card row, rebuilt from raw `ReviewCard` fields.
+    fn expected_diff_card_row(card: &ReviewCard) -> String {
+        format!(
+            "| `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | {} |",
+            oracle_cell(&card.id.to_string()),
+            card.class.as_str(),
+            card.proof_path.as_str(),
+            oracle_cell(&card.operation.expression),
+            card.hazards.first().map_or("unknown", |h| h.as_str()),
+            card.missing.first().map_or("", |m| m.kind.as_str()),
+            oracle_primary_route(card),
+            oracle_cell(&card.next_action.summary)
+        )
+    }
+
+    /// Exact repo-scope card row, rebuilt from raw `ReviewCard` fields.
+    fn expected_repo_card_row(card: &ReviewCard) -> String {
+        format!(
+            "| `{}` | `{}` | `{}` | {} | `{}` | `{}` | {} | `{}` | {} |",
+            oracle_cell(&card.id.to_string()),
+            card.class.as_str(),
+            card.proof_path.as_str(),
+            oracle_cell(&oracle_location(card)),
+            card.operation.family.as_str(),
+            oracle_cell(&card.operation.expression),
+            oracle_cell(&oracle_missing_summary(card)),
+            oracle_primary_route(card),
+            oracle_cell(&card.next_action.summary)
+        )
+    }
+
+    #[test]
+    fn direct_markdown_diff_scope_projects_every_canonical_card_row() -> Result<(), String> {
+        for fixture in [
+            "raw_pointer_alignment",
+            "attributed_unsafe_fn_no_duplicate",
+            "unsafe_declaration_volume_summary",
+        ] {
+            let output = fixture_output(fixture)?;
+            assert!(
+                !output.cards.is_empty(),
+                "fixture `{fixture}` must emit at least one card to lock parity"
+            );
+            let rendered = render(&output);
+            for card in &output.cards {
+                let row = expected_diff_card_row(card);
+                assert!(
+                    rendered.contains(&row),
+                    "diff-scope direct markdown must project card `{}` from `{fixture}` as the canonical row\n  expected: {row}\n  rendered:\n{rendered}",
+                    card.id
+                );
+                // Identity and class/code are the two fields the issue calls
+                // out for both scopes; assert them unwrapped as well so a
+                // change to row assembly cannot hide their loss.
+                assert!(
+                    rendered.contains(&card.id.to_string()),
+                    "diff-scope direct markdown must carry canonical card identity `{}`",
+                    card.id
+                );
+                assert!(
+                    rendered.contains(card.class.as_str()),
+                    "diff-scope direct markdown must carry canonical class/code `{}`",
+                    card.class.as_str()
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn direct_markdown_repo_scope_projects_every_canonical_card_row() -> Result<(), String> {
+        for fixture in [
+            "raw_pointer_alignment",
+            "attributed_unsafe_fn_no_duplicate",
+            "unsafe_declaration_volume_summary",
+        ] {
+            let output = repo_fixture_output(fixture)?;
+            assert!(
+                !output.cards.is_empty(),
+                "repo fixture `{fixture}` must emit at least one card to lock parity"
+            );
+            assert!(
+                matches!(output.scope, Scope::Repo),
+                "repo fixture `{fixture}` must analyze in repo scope"
+            );
+            let rendered = render(&output);
+            for card in &output.cards {
+                let row = expected_repo_card_row(card);
+                assert!(
+                    rendered.contains(&row),
+                    "repo-scope direct markdown must project card `{}` from `{fixture}` as the canonical row\n  expected: {row}\n  rendered:\n{rendered}",
+                    card.id
+                );
+                assert!(
+                    rendered.contains(&card.id.to_string()),
+                    "repo-scope direct markdown must carry canonical card identity `{}`",
+                    card.id
+                );
+                assert!(
+                    rendered.contains(card.class.as_str()),
+                    "repo-scope direct markdown must carry canonical class/code `{}`",
+                    card.class.as_str()
+                );
+                assert!(
+                    rendered.contains(card.operation.family.as_str()),
+                    "repo-scope direct markdown must carry canonical operation family `{}`",
+                    card.operation.family.as_str()
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// The two scopes emit different column sets on purpose. This asserts the
+    /// omissions directly so they stay a recorded limitation instead of
+    /// quietly becoming complete coverage (or quietly getting worse).
+    #[test]
+    fn direct_markdown_scope_dependent_omissions_stay_explicit() -> Result<(), String> {
+        let mut output = fixture_output("raw_pointer_alignment")?;
+        let card = output
+            .cards
+            .first_mut()
+            .ok_or_else(|| "fixture should emit one card".to_string())?;
+        // Give the card a second missing-evidence entry so the diff-scope
+        // "first kind only" narrowing is observable rather than incidental.
+        let first_kind = card
+            .missing
+            .first()
+            .map(|missing| missing.kind.clone())
+            .ok_or_else(|| "fixture card should record missing evidence".to_string())?;
+        card.missing.push(MissingEvidence::new(
+            "second_missing_kind",
+            "Second missing evidence message for parity coverage",
+        ));
+        let card_missing_summary = oracle_missing_summary(card);
+
+        let diff_rendered = render(&output);
+        let mut repo_output = output.clone();
+        repo_output.scope = Scope::Repo;
+        let repo_rendered = render(&repo_output);
+
+        // Diff scope has no Location or Operation family column; repo does.
+        assert!(
+            diff_rendered.contains(
+                "| ID | Class | Proof path | Operation | Hazard | Missing | Route | Next action |"
+            ),
+            "diff-scope header must stay the recorded narrower column set:\n{diff_rendered}"
+        );
+        assert!(
+            !diff_rendered.contains("| Location |"),
+            "diff-scope direct markdown must not gain a Location column without re-mapping the consumer:\n{diff_rendered}"
+        );
+        assert!(
+            !diff_rendered.contains("| Operation family |"),
+            "diff-scope direct markdown must not gain an Operation family column without re-mapping the consumer:\n{diff_rendered}"
+        );
+        assert!(
+            repo_rendered.contains(
+                "| ID | Class | Proof path | Location | Operation family | Operation | Missing evidence | Route | Next action |"
+            ),
+            "repo-scope header must keep location and operation family:\n{repo_rendered}"
+        );
+
+        // Missing evidence: diff scope emits only the first kind, repo scope
+        // emits the joined canonical summary.
+        assert!(
+            diff_rendered.contains(&format!("| `{first_kind}` |")),
+            "diff-scope direct markdown must emit the first missing kind `{first_kind}`:\n{diff_rendered}"
+        );
+        assert!(
+            !diff_rendered.contains("second_missing_kind"),
+            "diff-scope direct markdown emits only the first missing kind; a second kind means the recorded omission changed:\n{diff_rendered}"
+        );
+        assert!(
+            repo_rendered.contains(&oracle_cell(&card_missing_summary)),
+            "repo-scope direct markdown must emit the joined canonical missing-evidence summary:\n{repo_rendered}"
+        );
+        Ok(())
+    }
+
+    /// Repo scope additionally projects the declaration and target-feature
+    /// aggregates. Assert they match their canonical producers row for row.
+    #[test]
+    fn direct_markdown_repo_scope_projects_canonical_group_aggregates() -> Result<(), String> {
+        let declaration_output = repo_fixture_output("unsafe_declaration_volume_summary")?;
+        let declaration_rendered = render(&declaration_output);
+        let declaration_groups = declaration_summary::declaration_groups(&declaration_output);
+        assert!(
+            !declaration_groups.is_empty(),
+            "declaration fixture must produce canonical groups"
+        );
+        assert!(
+            declaration_rendered.contains("## Declaration summary"),
+            "repo-scope direct markdown must render the declaration summary section:\n{declaration_rendered}"
+        );
+        for group in &declaration_groups {
+            let row = format!(
+                "| `{}` | {} | {} | {} | {} | {} | {} |",
+                oracle_cell(&group.module_or_file),
+                group.total,
+                group.new_or_worsened,
+                group.inherited,
+                group.contract_missing,
+                group.contract_present,
+                render_declaration_representatives(group),
+            );
+            assert!(
+                declaration_rendered.contains(&row),
+                "repo-scope direct markdown must project the canonical declaration group row\n  expected: {row}\n  rendered:\n{declaration_rendered}"
+            );
+        }
+
+        let feature_output = repo_fixture_output("target_feature_simd_dispatch_repetition")?;
+        let feature_rendered = render(&feature_output);
+        let feature_groups = target_feature_summary::target_feature_groups(&feature_output);
+        assert!(
+            !feature_groups.is_empty(),
+            "target-feature fixture must produce canonical groups"
+        );
+        assert!(
+            feature_rendered.contains("## Target-feature summary"),
+            "repo-scope direct markdown must render the target-feature summary section:\n{feature_rendered}"
+        );
+        for group in &feature_groups {
+            let row = format!(
+                "| `{}` | `{}` | {} | {} | {} |",
+                oracle_cell(&group.module_or_file),
+                group.class,
+                group.total,
+                render_backtick_string_list(&group.features, 4),
+                render_target_feature_representatives(group),
+            );
+            assert!(
+                feature_rendered.contains(&row),
+                "repo-scope direct markdown must project the canonical target-feature group row\n  expected: {row}\n  rendered:\n{feature_rendered}"
+            );
+        }
+
+        // Quiet inputs must not gain either aggregate section.
+        let quiet = render(&repo_fixture_output("raw_pointer_alignment")?);
+        assert!(
+            !quiet.contains("## Declaration summary"),
+            "a repo scan with no declaration cards must not render the declaration section:\n{quiet}"
+        );
+        assert!(
+            !quiet.contains("## Target-feature summary"),
+            "a repo scan with no target-feature cards must not render the target-feature section:\n{quiet}"
+        );
+        Ok(())
+    }
+
+    /// The direct-markdown consumer is locked on its own. It must not become
+    /// an alias of the human, PR-summary, or GitHub-summary renderer, and it
+    /// must not silently absorb their consumer-specific sections.
+    #[test]
+    fn direct_markdown_is_locked_separately_from_the_other_consumers() -> Result<(), String> {
+        let output = fixture_output("raw_pointer_alignment")?;
+        let direct = render(&output);
+        let pr_summary = render_pr_summary(&output);
+        let github_summary = render_github_summary(&output);
+        let human = crate::output::human::render(&output);
+
+        assert_ne!(
+            direct, pr_summary,
+            "direct markdown must stay a distinct consumer from the PR summary"
+        );
+        assert_ne!(
+            direct, github_summary,
+            "direct markdown must stay a distinct consumer from the GitHub summary"
+        );
+        assert_ne!(
+            direct, human,
+            "direct markdown must stay a distinct consumer from the human renderer"
+        );
+
+        assert!(
+            direct.starts_with("# unsafe-review\n"),
+            "direct markdown keeps its own document header:\n{direct}"
+        );
+        for foreign_section in [
+            "# unsafe-review PR summary",
+            "## Reviewer cockpit",
+            "## Card table",
+            "BUILD THIS FIRST",
+        ] {
+            assert!(
+                !direct.contains(foreign_section),
+                "direct markdown must not absorb the PR-summary section `{foreign_section}`:\n{direct}"
+            );
+        }
+
+        // Repo scope is the same consumer, not a fourth one.
+        let repo = render(&repo_fixture_output("raw_pointer_alignment")?);
+        assert!(
+            repo.starts_with("# unsafe-review repo posture\n"),
+            "repo-scope direct markdown keeps its own document header:\n{repo}"
+        );
+        assert!(
+            !repo.contains("## Reviewer cockpit"),
+            "repo-scope direct markdown must not absorb PR-summary sections:\n{repo}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn direct_markdown_carries_the_advisory_trust_boundary_in_both_scopes() -> Result<(), String> {
+        let diff = render(&fixture_output("raw_pointer_alignment")?);
+        let repo = render(&repo_fixture_output("raw_pointer_alignment")?);
+
+        for (label, rendered) in [("diff", &diff), ("repo", &repo)] {
+            assert!(
+                rendered.contains("## Trust boundary"),
+                "{label}-scope direct markdown must render the trust boundary section:\n{rendered}"
+            );
+            assert!(
+                rendered.contains(REVIEWCARD_TRUST_BOUNDARY),
+                "{label}-scope direct markdown must carry the canonical advisory boundary verbatim:\n{rendered}"
+            );
+            // The renderer may narrow the boundary; it must never strengthen
+            // it into a safety, UB-free, Miri, or execution claim.
+            assert_no_claim_strengthening(&format!("{label}-scope direct markdown"), rendered);
+        }
+        Ok(())
+    }
+
+    /// The parity rows above are assembled with the same `md_cell`/`one_line`
+    /// helpers the renderer uses, so helper drift would move both sides
+    /// together. These two tests pin the helpers' contract independently, with
+    /// hardcoded expectations, so that drift fails here instead of silently
+    /// passing everywhere.
+    #[test]
+    fn md_cell_and_one_line_normalize_table_hostile_text() {
+        // `one_line` collapses every run of whitespace, including newlines
+        // and tabs, into single spaces and trims the ends.
+        assert_eq!(one_line("  alpha \n\t beta   gamma  "), "alpha beta gamma");
+        assert_eq!(one_line(""), "");
+        assert_eq!(one_line("   "), "");
+        assert_eq!(one_line("single"), "single");
+
+        // `md_cell` collapses the same way and additionally escapes the pipe
+        // so a card value can never forge a table column.
+        assert_eq!(md_cell("alpha | beta"), "alpha \\| beta");
+        assert_eq!(md_cell("a|b|c"), "a\\|b\\|c");
+        assert_eq!(md_cell("alpha\n| beta"), "alpha \\| beta");
+        assert_eq!(md_cell("no pipes here"), "no pipes here");
+    }
+
+    /// End-to-end version of the same contract, asserted against the rendered
+    /// table with literal expectations rather than through the helpers: a card
+    /// value carrying a pipe and a newline must not break the row's shape.
+    #[test]
+    fn direct_markdown_row_shape_survives_table_hostile_card_text() -> Result<(), String> {
+        let mut output = fixture_output("raw_pointer_alignment")?;
+        let card = output
+            .cards
+            .first_mut()
+            .ok_or_else(|| "fixture should emit one card".to_string())?;
+        card.next_action.summary = "alpha | beta\n  gamma".to_string();
+
+        let rendered = render(&output);
+        // Only the table row is escaped; the prose "Recommended next action"
+        // section legitimately emits the summary verbatim.
+        let row = rendered
+            .lines()
+            .find(|line| line.starts_with("| `") && line.contains("gamma"))
+            .ok_or_else(|| format!("rendered output should contain the card row:\n{rendered}"))?;
+        assert!(
+            row.contains("alpha \\| beta gamma"),
+            "the pipe must be escaped and the newline collapsed in the rendered row:\n{row}"
+        );
+        assert!(
+            !row.contains("alpha | beta"),
+            "an unescaped pipe would forge a table column:\n{row}"
+        );
+
+        let mut unescaped_pipes = 0usize;
+        let mut previous = ' ';
+        for current in row.chars() {
+            if current == '|' && previous != '\\' {
+                unescaped_pipes += 1;
+            }
+            previous = current;
+        }
+        assert_eq!(
+            unescaped_pipes, 9,
+            "the diff-scope card row must keep exactly eight columns; row was:\n{row}"
+        );
+        Ok(())
+    }
+
+    // ------------------------------------------------------------------
+    // issue #2120: `explain --format markdown` ReviewCard parity.
+    //
+    // `render_card_detail` is a distinct, richer single-card projection. It
+    // stays its own consumer: these lock the canonical fields it shares with
+    // the map, plus the obligation/evidence/route material it emits straight
+    // from the selected card. Fields with no canonical row here remain
+    // parked under the shared owner rather than being invented as new rows.
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn explain_markdown_projects_canonical_card_fields() -> Result<(), String> {
+        for fixture in ["raw_pointer_alignment", "attributed_unsafe_fn_no_duplicate"] {
+            let output = fixture_output(fixture)?;
+            for card in &output.cards {
+                let rendered = render_card_detail(card);
+
+                assert!(
+                    rendered.starts_with(&format!("# unsafe-review card `{}`\n", card.id)),
+                    "explain markdown must lead with the canonical card identity `{}`:\n{rendered}",
+                    card.id
+                );
+                assert!(
+                    rendered.contains(&format!("**Class:** `{}`", card.class.as_str())),
+                    "explain markdown must project the canonical class/code `{}`:\n{rendered}",
+                    card.class.as_str()
+                );
+                assert!(
+                    rendered.contains(&format!(
+                        "**Location:** {}:{}",
+                        path_display(&card.site.location.file),
+                        card.site.location.line
+                    )),
+                    "explain markdown must project the canonical site location:\n{rendered}"
+                );
+                assert!(
+                    rendered.contains(&format!("**Operation:** `{}`", card.operation.expression)),
+                    "explain markdown must project the operation text from the selected card:\n{rendered}"
+                );
+                assert!(
+                    rendered.contains(&format!(
+                        "**Operation family:** `{}`",
+                        card.operation.family.as_str()
+                    )),
+                    "explain markdown must project the canonical operation family:\n{rendered}"
+                );
+                assert!(
+                    rendered.contains(&format!("**Proof path:** `{}`", card.proof_path.as_str())),
+                    "explain markdown must project the proof path from the selected card:\n{rendered}"
+                );
+                assert!(
+                    rendered.contains(&format!("- {}\n", card.next_action.summary)),
+                    "explain markdown must project the canonical next action:\n{rendered}"
+                );
+                for hazard in &card.hazards {
+                    assert!(
+                        rendered.contains(&format!("- `{}`\n", hazard.as_str())),
+                        "explain markdown must project hazard `{}` from the selected card:\n{rendered}",
+                        hazard.as_str()
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn explain_markdown_projects_obligations_and_evidence_without_reclassification()
+    -> Result<(), String> {
+        let output = fixture_output("raw_pointer_alignment")?;
+        let card = output
+            .cards
+            .first()
+            .ok_or_else(|| "fixture should emit one card".to_string())?;
+        let rendered = render_card_detail(card);
+
+        assert!(
+            !card.obligations.is_empty(),
+            "fixture card must carry obligations for this lock to mean anything"
+        );
+        for obligation in &card.obligations {
+            assert!(
+                rendered.contains(&format!("- {}\n", obligation.description)),
+                "explain markdown must project obligation description verbatim:\n{rendered}"
+            );
+        }
+
+        // Evidence summaries come straight from the card's evidence blocks.
+        for (label, summary) in [
+            ("Contract", card.contract.summary.as_str()),
+            ("Guard/discharge", card.discharge.summary.as_str()),
+            ("Reach", card.reach.summary.as_str()),
+            ("Witness", card.witness.summary.as_str()),
+        ] {
+            assert!(
+                rendered.contains(&format!("- {label}: {summary}\n")),
+                "explain markdown must project the `{label}` evidence summary from the card:\n{rendered}"
+            );
+        }
+        assert!(
+            rendered.contains(
+                "- Reach note: static reach evidence only; it does not prove site execution."
+            ),
+            "explain markdown must keep reach evidence short of an execution claim:\n{rendered}"
+        );
+
+        assert!(
+            !card.obligation_evidence.is_empty(),
+            "fixture card must carry an obligation-evidence matrix for this lock"
+        );
+        assert!(
+            rendered.contains("Obligation evidence matrix:"),
+            "explain markdown must render the obligation-evidence matrix:\n{rendered}"
+        );
+        for evidence in &card.obligation_evidence {
+            let row = format!(
+                "- `{}`: contract `{}`, guard `{}`, reach `{}`, witness `{}`\n",
+                evidence.obligation.key,
+                evidence.contract.state,
+                evidence.discharge.state,
+                evidence.reach.state,
+                evidence.witness.state
+            );
+            assert!(
+                rendered.contains(&row),
+                "explain markdown must project obligation-evidence states unchanged\n  expected: {row}  rendered:\n{rendered}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn explain_markdown_projects_next_action_commands_and_witness_routes() -> Result<(), String> {
+        let output = fixture_output("raw_pointer_alignment")?;
+        let card = output
+            .cards
+            .first()
+            .ok_or_else(|| "fixture should emit one card".to_string())?;
+        let rendered = render_card_detail(card);
+
+        assert!(
+            !card.next_action.verify_commands.is_empty(),
+            "fixture card must carry verify commands for this lock"
+        );
+        assert!(
+            rendered.contains(
+                "- Then attach a matching witness receipt only after running a focused command such as:"
+            ),
+            "explain markdown must keep verify commands behind the receipt precondition:\n{rendered}"
+        );
+        for command in &card.next_action.verify_commands {
+            assert!(
+                rendered.contains(&format!("```bash\n{command}\n```")),
+                "explain markdown must project verify command `{command}` from the card:\n{rendered}"
+            );
+        }
+
+        assert!(
+            !card.routes.is_empty(),
+            "fixture card must carry witness routes for this lock"
+        );
+        for route in &card.routes {
+            assert!(
+                rendered.contains(&format!("- `{}`: {}\n", route.kind.as_str(), route.reason)),
+                "explain markdown must project witness route `{}` from the card:\n{rendered}",
+                route.kind.as_str()
+            );
+            if let Some(command) = &route.command {
+                assert!(
+                    rendered.contains(&format!("```bash\n{command}\n```")),
+                    "explain markdown must project the route command `{command}`:\n{rendered}"
+                );
+            }
+        }
+
+        // Route-less and command-less cards fall back to explicit statements
+        // rather than emitting an empty section or inventing a route.
+        let mut bare = card.clone();
+        bare.routes.clear();
+        bare.next_action.verify_commands.clear();
+        let bare_rendered = render_card_detail(&bare);
+        assert!(
+            bare_rendered
+                .contains("- No focused witness route was selected; route this to human review.\n"),
+            "a route-less card must state the absence explicitly:\n{bare_rendered}"
+        );
+        assert!(
+            bare_rendered.contains(
+                "- Keep the static limitation explicit if no focused witness route is available.\n"
+            ),
+            "a command-less card must keep the static limitation explicit:\n{bare_rendered}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn explain_markdown_missing_evidence_paths_are_explicit() -> Result<(), String> {
+        let output = fixture_output("raw_pointer_alignment")?;
+        let card = output
+            .cards
+            .first()
+            .ok_or_else(|| "fixture should emit one card".to_string())?;
+        let rendered = render_card_detail(card);
+
+        assert!(
+            !card.missing.is_empty(),
+            "fixture card must record missing evidence for this lock"
+        );
+        // Unlike diff-scope direct markdown, explain emits every missing
+        // message, not just the first kind.
+        for missing in &card.missing {
+            assert!(
+                rendered.contains(&format!("- {}\n", missing.message)),
+                "explain markdown must project missing-evidence message `{}`:\n{rendered}",
+                missing.message
+            );
+        }
+
+        let mut cleared = card.clone();
+        cleared.missing.clear();
+        let cleared_rendered = render_card_detail(&cleared);
+        assert!(
+            cleared_rendered.contains("- No missing evidence recorded for this card.\n"),
+            "a card with no missing evidence must say so rather than rendering an empty section:\n{cleared_rendered}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn explain_markdown_stays_distinct_from_every_other_consumer() -> Result<(), String> {
+        let output = fixture_output("raw_pointer_alignment")?;
+        let card = output
+            .cards
+            .first()
+            .ok_or_else(|| "fixture should emit one card".to_string())?;
+        let detail = render_card_detail(card);
+        let direct = render(&output);
+
+        for (label, other) in [
+            ("direct markdown", &direct),
+            ("the PR summary", &render_pr_summary(&output)),
+            ("the GitHub summary", &render_github_summary(&output)),
+            ("the human renderer", &crate::output::human::render(&output)),
+        ] {
+            assert_ne!(
+                &detail, other,
+                "explain markdown must stay a distinct consumer from {label}"
+            );
+        }
+        // Detail-only sections that direct markdown deliberately does not emit.
+        for detail_section in [
+            "## Why this card exists",
+            "## Required safety conditions",
+            "## Evidence found",
+            "## Evidence missing",
+            "## What would resolve this",
+            "## What would not resolve this",
+            "## Witness route",
+        ] {
+            assert!(
+                detail.contains(detail_section),
+                "explain markdown must render `{detail_section}`:\n{detail}"
+            );
+            assert!(
+                !direct.contains(detail_section),
+                "direct markdown must not absorb the explain-only section `{detail_section}`:\n{direct}"
+            );
+        }
+        // Direct markdown's card table has no place in a single-card detail.
+        assert!(
+            !detail.contains("| ID | Class | Proof path |"),
+            "explain markdown must not render the direct-markdown card table:\n{detail}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn explain_markdown_keeps_the_advisory_boundary_and_non_resolution_guidance()
+    -> Result<(), String> {
+        let output = fixture_output("raw_pointer_alignment")?;
+        let card = output
+            .cards
+            .first()
+            .ok_or_else(|| "fixture should emit one card".to_string())?;
+        let rendered = render_card_detail(card);
+
+        assert!(
+            rendered.contains("## Trust boundary"),
+            "explain markdown must render the trust boundary section:\n{rendered}"
+        );
+        assert!(
+            rendered.contains(REVIEWCARD_TRUST_BOUNDARY),
+            "explain markdown must carry the canonical advisory boundary verbatim:\n{rendered}"
+        );
+        for guidance in [
+            "- A `SAFETY:` comment alone does not discharge missing guard evidence.\n",
+            "- A related test mention is not proof that this unsafe site executed.\n",
+            "- Do not claim witness proof unless a matching receipt exists.\n",
+        ] {
+            assert!(
+                rendered.contains(guidance),
+                "explain markdown must keep the obligation-level non-resolution guidance:\n{rendered}"
+            );
+        }
+        assert_no_claim_strengthening("explain markdown", &rendered);
         Ok(())
     }
 

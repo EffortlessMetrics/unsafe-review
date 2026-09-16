@@ -39,7 +39,7 @@ jobs:
       TMPDIR: /mnt/ci-scratch/tmp/${{ github.run_id }}-${{ github.run_attempt }}
       CARGO_TARGET_DIR: /mnt/ci-scratch/unsafe-review-coverage/${{ github.run_id }}-${{ github.run_attempt }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -62,7 +62,7 @@ jobs:
           mkdir -p "$TMPDIR" "$CARGO_TARGET_DIR"
           df -h /mnt/ci-scratch /mnt/ci-cache || true
 
-      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: dtolnay/rust-toolchain@1.98
         with:
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
@@ -80,7 +80,7 @@ jobs:
             --lcov \
             --output-path target/llvm-cov/lcov.info
 
-      - uses: codecov/codecov-action@v6
+      - uses: codecov/codecov-action@v7
         if: always()
         with:
           files: target/llvm-cov/lcov.info

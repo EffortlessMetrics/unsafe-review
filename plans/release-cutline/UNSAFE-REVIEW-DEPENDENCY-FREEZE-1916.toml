@@ -1,0 +1,107 @@
+# UNSAFE-REVIEW-DEPENDENCY-FREEZE-1916
+schema_version = "1"
+issue = "https://github.com/EffortlessMetrics/unsafe-review-swarm/issues/1916"
+status = "draft_not_active"
+activation = "requires_owner_decision_after_targeted_dependency_proof"
+freeze_scope = "candidate_dependency_inputs_only"
+audited_at = "2026-09-09"
+audit_swarm_base = "b2d7bbff4001b7465fe7c516625147d9c0400c8e"
+audit_source_base = "c25d65272c760c3630eb9528b7efaae2234d9e19"
+security_exception = "allowed_with_focused_issue_and_pr"
+publication = "owner_gated_out_of_scope"
+rollback = "Supersede this draft with a refreshed lockfile snapshot; accepted dependency changes invalidate only their affected qualification receipts."
+
+[swarm]
+commit = "b2d7bbff4001b7465fe7c516625147d9c0400c8e"
+lockfile_sha256 = "4afb189e3d56487a3d12b40117c90814ae4b9dfe"
+ra_ap_syntax = "0.0.350"
+ignore = "0.4.33"
+signal_hook = "0.4.4"
+
+[source]
+commit = "c25d65272c760c3630eb9528b7efaae2234d9e19"
+lockfile_sha256 = "aba7bae758bba26e835a01b5b6d45858b658cab1dc12b456c713cc4551203527"
+ra_ap_syntax = "0.0.341"
+ignore = "0.4.27"
+signal_hook = "0.3.18"
+
+[[candidate_input]]
+id = "SOURCE-548"
+surface = "ra_ap_syntax"
+version = "0.0.341"
+status = "accepted_merged_targeted_proof_green"
+reset_receipts = ["parser/input tests", "detector contracts", "fixture/calibration parity", "surface determinism", "real-PR/evidence-loss corpus where relevant", "full check-pr"]
+
+[[candidate_input]]
+id = "SOURCE-547"
+surface = "ignore"
+version = "0.4.27"
+status = "accepted_merged_directly_affected_tests_green"
+reset_receipts = ["workspace tests", "clippy", "check-pr", "discovery/path tests"]
+
+[[candidate_input]]
+id = "SOURCE-515"
+surface = "signal-hook"
+version = "0.4.4"
+status = "owner_gated_directly_affected_tests_required"
+reset_receipts = ["workspace tests", "clippy", "check-pr", "signal-handling tests"]
+
+[[candidate_input]]
+id = "SOURCE-551"
+surface = "ra_ap_syntax"
+version = "0.0.343"
+status = "owner_gated_open_source_pr_551_targeted_proof_required"
+reset_receipts = ["parser/input tests", "detector contracts", "fixture/calibration parity", "surface determinism", "real-PR/evidence-loss corpus where relevant", "full check-pr"]
+
+[[candidate_input]]
+id = "SOURCE-549"
+surface = "github_actions"
+version = "paired pins"
+status = "closed_unmerged_source_pr_549_open_source_pr_565_owner_gated"
+reset_receipts = ["check-policy", "Unsafe Review Rust Result", "hosted CI"]
+
+[[candidate_input]]
+id = "SOURCE-550"
+surface = "cargo-minor-and-patch"
+version = "live source dependency group"
+status = "owner_gated_open_source_pr_550_targeted_disposition_required"
+reset_receipts = ["affected tests", "clippy", "check-pr", "lockfile refresh"]
+
+[[candidate_input]]
+id = "SOURCE-565"
+surface = "github_actions"
+version = "live source actions group, 5 updates"
+status = "owner_gated_open_source_pr_565_head_f5a99574"
+reset_receipts = ["check-policy", "Unsafe Review Rust Result", "hosted CI"]
+
+[[deferred_input]]
+id = "SWARM-1874-1875"
+reason = "Duplicate swarm lockfile updates are deferred while source candidates remain the chosen publication history path. Reviewed 2026-09-09; no open duplicate remains at b2d7bbff."
+
+[[deferred_input]]
+id = "SWARM-2014"
+reason = "The historical swarm Actions pin update is integrated; follow-on paired droid-action repairs #2183 and #2185 moved workflow pins and allowlist entries together with pin-sync and policy proof green. Bare bumps #2181 and #2184 were closed as superseded. Reviewed 2026-09-09; the paired contract still applies to future bumps."
+
+[[deferred_input]]
+id = "SWARM-2013-SOURCE-PROMOTION"
+reason = "Swarm ra_ap_syntax 0.0.350 is integrated in the workbench at the audited base (via 0.0.344/0.345/0.347/0.348 plus #2165 0.0.349 and merged #2180 0.0.350), but source #551 remains the owner-gated publication history; no source promotion or public release claim is inferred. Reviewed 2026-09-09 at b2d7bbff with source_divergence new_source_commits=0."
+
+[[deferred_input]]
+id = "SWARM-2180"
+reason = "Swarm ra_ap_syntax 0.0.350 bump merged as b2d7bbff (#2180) after the MSRV 1.98 floor (#2188); parser proof and hosted Rust gate green. Freeze still draft_not_active pending owner activation; #2135 retains its separate runner lane. Reviewed 2026-09-09."
+
+[[deferred_input]]
+id = "SWARM-1620"
+reason = "RSS/self-unsafe telemetry is closed unmerged and remains outside the candidate absent its separate owner decision. Reviewed 2026-09-09."
+
+[[rule]]
+id = "EXCEPTION-1"
+text = "Reject non-security dependency additions after activation; a security or Rust/MSRV-critical exception must name security impact, semver impact, invalidated proof, and required reruns in a focused issue/PR."
+
+[[rule]]
+id = "EXCEPTION-2"
+text = "Any accepted dependency change resets the affected qualification receipts and requires a refreshed lockfile SHA before closeout."
+
+[[rule]]
+id = "BOUNDARY-1"
+text = "This draft records reproducibility inputs; it does not claim dependency safety, release readiness, source promotion, publication, tag movement, or public v1."
