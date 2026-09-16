@@ -5,6 +5,7 @@ what not to do next. Do not put active specs here.
 
 | Handoff | Date | Scope |
 |---|---|---|
+| [Source 0.4.0 candidate catch-up](2026-09-16-source-0.4.0-catchup-receipt.md) | 2026-09-16 | history-preserving swarm 0.4.0 cutline import onto source main: exact parents, 51-conflict swarm-tree resolution, packaging identity; draft candidate only, no merge, publication, proof, UB-free, Miri-clean, site-execution, or calibrated claim |
 | [Issue #1857 tokmd packet acceptance](2026-08-08-tokmd-packets-1857-acceptance.md) | 2026-08-08 | records current-main producer schema identity, exact tokmd-swarm consumer commit, five-preset rendering, packet/output hashes, limitations, and no-publication boundary |
 | [Issue #1889 recovery audit](2026-08-08-issue-1889-recovery-audit.md) | 2026-08-08 | compares reported local-only repo-improvement commits with current swarm main, routes already-landed and still-open slices, and preserves the no-release/no-publication boundary |
 | [Source policy sync](2026-07-29-source-policy-sync.md) | 2026-07-29 | acknowledges source PRs #558/#559 after their effective RTK-guidance removals were already represented by swarm PRs #1971/#1973/#1975; advances the source-sync checkpoint without importing source-only workbench differences or claiming release, publication, proof, UB-free, Miri-clean, site-execution, calibrated, or policy-readiness status |
