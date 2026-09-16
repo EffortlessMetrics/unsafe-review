@@ -1,25 +1,28 @@
-# Draft release cutline — issue #1915
+# Frozen release cutline — issue #1915
 
-This is a draft qualification contract, not a release, tag, source promotion,
-publication, or `v1` decision. Its machine-readable source is
+This is the frozen 0.4.0 qualification contract, not a release, tag, source
+promotion, publication, or `v1` decision. Its machine-readable source is
 [`plans/release-cutline/UNSAFE-REVIEW-CUTLINE-1915.toml`](../../plans/release-cutline/UNSAFE-REVIEW-CUTLINE-1915.toml).
 
 ## Live snapshot
 
-Audited 2026-09-10.
+Frozen 2026-09-16 for candidate version `0.4.0`.
 
-- Swarm base: `46afd7086a90a957f1fcdf08235e42721540253c`
+- Swarm cutline: `785e032d40a6c06f142ca7138d1a71a4a4a7f28d`
+  (`ci(2203): hosted rustdoc gate (#2209)`)
+- Superseded draft base: `46afd7086a90a957f1fcdf08235e42721540253c`
   (`docs(1916): refresh dependency records to b2d7bbff after MSRV and parser merges (#2189)`)
 - Source base: `c25d65272c760c3630eb9528b7efaae2234d9e19`
   (`sync: remove residual RTK command guidance (#559)`)
-- Draft candidate head: `46afd7086a90a957f1fcdf08235e42721540253c` (refresh candidate; advisory only, not a freeze, tag, or publication).
-- `source-divergence`: `new_source_commits=0`, `raw_swarm_only=344`; the swarm
-  contains expected unpromoted workbench commits. See `cargo run --locked -p xtask -- source-divergence`.
-- Candidate version: not frozen. All three published crates are still `0.3.8`.
-  Historical `0.3.9` and `0.4.0` names are references only; semver follows the
-  integrated public surface.
+- Source candidate: this branch (`release/0.4.0`, draft PR; the merge joins
+  exactly the frozen parents). Advisory only until the #1925 closeout.
+- `source-divergence`: `new_source_commits=0`. See `cargo run --locked -p xtask -- source-divergence`.
+- Candidate version: `0.4.0`. All three crates (`unsafe-review-core`,
+  `unsafe-review-cli`, `unsafe-review`) carry `0.4.0` with MSRV 1.98.
+- Dependency freeze: active. Installed qualification: executed on Linux;
+  Windows explicitly untested.
 
-The previous drafts named `7649bff733b7f4cf1676b9b4b4fb40226c5744b5` (no object on any swarm or source ref, withdrawn), `aae31001431a69f4a4fc318423d1566257eebde1` (mio pilot #2101), and `ed345b71f84e3cc4344fba52c21322f8fd4efbf6` (2026-08-29 audit). No qualification result was recorded against the withdrawn SHA. This refresh moves the draft candidate to `46afd708` to reflect the integrated slices `ed345b71..46afd708` (MSRV 1.98 floor #2188, parser 0.0.350 #2180, badge dedup #2187, disposition refresh #2189, #2095 merge, action-pin pairing #2183/#2185); it remains an advisory snapshot, not a qualification, safety, or publication claim. Main has since advanced with docs-only refreshes plus the structured-runner substrate (#2135) and test-selector fix (#2193); full re-audit lands with the freeze.
+The previous drafts named `7649bff733b7f4cf1676b9b4b4fb40226c5744b5` (no object on any swarm or source ref, withdrawn), `aae31001431a69f4a4fc318423d1566257eebde1` (mio pilot #2101), and `ed345b71f84e3cc4344fba52c21322f8fd4efbf6` (2026-08-29 audit). No qualification result was recorded against the withdrawn SHA. This refresh moves the draft candidate to `46afd708` to reflect the integrated slices `ed345b71..46afd708` (MSRV 1.98 floor #2188, parser 0.0.350 #2180, badge dedup #2187, disposition refresh #2189, #2095 merge, action-pin pairing #2183/#2185); it remains an advisory snapshot, not a qualification, safety, or publication claim. The 2026-09-16 freeze landed that re-audit: candidate `785e032d`, version `0.4.0`, active dependency freeze, installed qualification executed on Linux. Prior drafts remain audit records only.
 
 ## Disposition
 

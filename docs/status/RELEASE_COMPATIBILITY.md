@@ -1,14 +1,14 @@
 # Release compatibility receipt
 
-Audited 2026-09-07 against swarm `origin/main` at
-`a78770cfabe5daf631e5829133a0cae8db0210d7` and the last public release
-`v0.3.8` (2026-06-18). The next candidate has no frozen version or candidate
-SHA. This is a documentation inventory, not a compatibility guarantee,
-installed qualification result, or publication decision.
+Audited 2026-09-16 against the frozen 0.4.0 candidate (swarm cutline
+`785e032d`, source candidate branch `release/0.4.0`, packages `0.4.0`) and the
+last public release `v0.3.8` (2026-06-18). This is a documentation inventory,
+not a compatibility guarantee, installed qualification result, or publication
+decision. The compatibility decision boundary below is unchanged and was the
+basis for the #1921 consumer-interop execution.
 
-The [dependency ledger](DEPENDENCY_FREEZE.md) remains a historical, inactive
-draft at `125de5f683286c4e8da04b76c6633a2a8e123f5a`. This audit does not refresh
-that ledger, activate a freeze, or rerun its receipts.
+The [dependency ledger](DEPENDENCY_FREEZE.md) is now the active 0.4.0 freeze
+record. This audit does not rerun its receipts.
 
 ## Compatibility decision boundary
 

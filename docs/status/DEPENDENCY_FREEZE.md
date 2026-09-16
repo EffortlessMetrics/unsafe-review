@@ -1,14 +1,14 @@
-# Draft dependency freeze record — issue #1916
+# Active dependency freeze record — issue #1916
 
-This record makes the current qualification inputs reproducible without
-activating a repository-wide or permanent dependency freeze. Its machine-
+This record makes the 0.4.0 qualification inputs reproducible without
+imposing a repository-wide or permanent dependency freeze. Its machine-
 readable source is
 [`UNSAFE-REVIEW-DEPENDENCY-FREEZE-1916.toml`](../../plans/release-cutline/UNSAFE-REVIEW-DEPENDENCY-FREEZE-1916.toml).
 
-Audited 2026-09-09 against swarm `main` at
-`b2d7bbff4001b7465fe7c516625147d9c0400c8e` and source `main` at
-`c25d65272c760c3630eb9528b7efaae2234d9e19`. This remains a draft and is not an
-active dependency freeze. Source divergence is `new_source_commits=0`.
+Frozen 2026-09-16 against swarm cutline `785e032d` and source `main` at
+`c25d65272c760c3630eb9528b7efaae2234d9e19`. This is the active candidate
+freeze through the #1925 closeout; non-security dependency PRs defer.
+Source divergence is `new_source_commits=0`.
 
 ## Exact snapshot
 
