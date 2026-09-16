@@ -9,16 +9,16 @@ memory safety, UB-free status, Miri-clean status, site execution, calibrated
 precision/recall, or policy readiness, and it does not run witnesses, post
 comments, edit source, or block by default.
 
-## Unreleased
+## 0.4.0
 
-Unreleased remains advisory static review evidence. It does not prove UB,
+0.4.0 remains advisory static review evidence. It does not prove UB,
 memory safety, UB-free status, Miri-clean status, site execution, calibrated
 precision/recall, or policy readiness, and it does not run witnesses, post
 comments, edit source, or block by default.
 
 ### Added
 
-- Added top-level preview-only `init` on unpublished swarm main. It prints a
+- Added top-level preview-only `init`. It prints a
   repository adoption proposal; explicit `--out` writes only the proposal JSON,
   without applying workflows or configuration. Public `v0.3.8` does not include
   this command; baseline creation remains separate.
