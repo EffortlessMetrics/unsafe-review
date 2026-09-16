@@ -12,7 +12,7 @@
 | CLI guide | current user-facing commands and artifact surfaces | `docs/CLI.md` |
 | Repo style | evidence-machine doctrine, tool-role split, exception ownership, CI economics, and review-fast agent rule | `docs/REPO_STYLE.md` |
 | CI economics and PR artifacts | advisory CI lanes, LEM budgeting, cost policy, ripr/unsafe-review lane boundaries, UB-risk review cookbook, first-pr packets, comment plans, and future trusted poster design | `docs/ci/cost-and-verification-policy.md`, `docs/ci/lem-budgeting.md`, `docs/ci/ripr.md`, `docs/ci/unsafe-review.md`, `docs/ci/UB_RISK_REVIEW_CI.md`, `docs/ci/PR_CI.md`, `docs/ci/COMMENT_PLAN_EXAMPLES.md`, `docs/ci/TRUSTED_COMMENT_POSTER.md` |
-| GitHub Actions user guide | copy-paste drop-in workflow for downstream Rust repositories | `docs/ci/github-actions.md`, `.github/examples/unsafe-review-first-pr.yml` |
+| GitHub Actions user guide | copy-paste drop-in workflow for downstream Rust repositories | `docs/ci/github-action.md`, `.github/examples/unsafe-review-first-pr.yml` |
 | Coverage telemetry | advisory cargo-llvm-cov + Codecov execution-surface signal, not unsafe correctness | `docs/ci/coverage.md`, `.github/workflows/coverage.yml` |
 | Analysis design | analyzer evidence applicability and refactor rails | `docs/analysis/` |
 | Explanations | concept notes, trust boundaries, reviewer examples, fix recipes, agent repair workflow, and agent packet examples | `docs/explanation/` |
@@ -27,7 +27,8 @@
 | Contribution process | swarm-to-main routing, PR disposition, source PR requirements, and source history catch-up | `docs/contributing/SWARM_TO_MAIN.md`, `docs/contributing/SOURCE_HISTORY_CATCHUP.md` |
 | Spec style | durable source-of-truth ownership boundaries and artifact role split | `docs/spec-style.md` |
 | Spec rails guide | contributor workflow for source-of-truth rails and tool-state boundaries | `docs/contributing/spec-rails.md` |
-| Agent orchestration | portable multi-agent build doctrine: spine, model tiers, two orchestration modes, issue routing, hygiene, and adopt-in-your-lane template | `docs/contributing/AGENT-ORCHESTRATION.md` |
+| Agent orchestration | runtime-neutral repository protocol for work contracts, writer ownership, proportional proof, exact-head review, integration, and cleanup | `docs/contributing/AGENT-ORCHESTRATION.md` |
+| Repository lifecycle surface map | authority, consumers, overlaps, and migration dispositions for lifecycle docs, runtime role adapters, and proof commands | `docs/contributing/LIFECYCLE_SURFACE_MAP.md` |
 | Implementation plans | PR-sized sequence and proof commands | `plans/` |
 | Active lane | current dogfood-calibrated evidence loop | `docs/status/DOGFOOD_CALIBRATED_EVIDENCE_LANE.md` |
 | Dogfood index | selected real-crate dogfood targets, usefulness notes, and recorded outcome movement | `docs/dogfood/index.md`, `docs/dogfood/index.json`, `docs/dogfood/usefulness-notes.md` |

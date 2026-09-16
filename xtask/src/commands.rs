@@ -7,17 +7,23 @@ pub(crate) enum XtaskCommand {
     CheckDocs,
     CheckPolicy,
     CheckDocArtifacts,
+    CheckWorkSpecs,
+    CheckSubagentBriefs,
+    CheckSubagentResults,
     CheckDocsAutomation,
     CheckSpecStatus,
     CheckPublicSurfaces,
     CheckGoals,
     CheckPackageBoundary,
     CheckCiLanes,
+    CiTest,
+    CiTestValidate(PathBuf),
     CheckSupportTiers,
     CheckFixtures,
     CheckCalibration,
     CheckDogfood,
     CheckFuzz,
+    CleanupAudit,
     CheckAdvisoryArtifacts(PathBuf),
     CheckFirstPrArtifacts(PathBuf),
     CheckManualCandidateExamples,
@@ -31,13 +37,22 @@ pub(crate) enum XtaskCommand {
     CorpusUsefulness(Option<PathBuf>),
     CheckCorpusUsefulnessSchema(PathBuf),
     CheckDetectorContracts,
+    CheckSelfUnsafe,
     CheckStanceDecisions,
     CheckStanceCoverage,
     CheckSpecCoverage,
     CheckFixtureSurfaceParity,
     CheckSurfaceDeterminism,
     CheckRealPrCorpus,
+    CheckCorpusPartitions,
+    CheckEvidenceLossChallenges,
+    CheckExternalPilots,
+    ExternalPilotRollup,
+    LspSmoke,
+    CheckLocal(Vec<String>),
+    CheckLocalRun(String),
     DogfoodExec(Vec<String>),
+    WorkflowPinSync(Vec<String>),
 }
 
 impl XtaskCommand {
@@ -49,6 +64,15 @@ impl XtaskCommand {
             Some("check-policy") => parse_no_extra(args, "check-policy", Self::CheckPolicy),
             Some("check-doc-artifacts") => {
                 parse_no_extra(args, "check-doc-artifacts", Self::CheckDocArtifacts)
+            }
+            Some("check-work-specs") => {
+                parse_no_extra(args, "check-work-specs", Self::CheckWorkSpecs)
+            }
+            Some("check-subagent-briefs") => {
+                parse_no_extra(args, "check-subagent-briefs", Self::CheckSubagentBriefs)
+            }
+            Some("check-subagent-results") => {
+                parse_no_extra(args, "check-subagent-results", Self::CheckSubagentResults)
             }
             Some("check-docs-automation") => {
                 parse_no_extra(args, "check-docs-automation", Self::CheckDocsAutomation)
@@ -64,6 +88,10 @@ impl XtaskCommand {
                 parse_no_extra(args, "check-package-boundary", Self::CheckPackageBoundary)
             }
             Some("check-ci-lanes") => parse_no_extra(args, "check-ci-lanes", Self::CheckCiLanes),
+            Some("ci-test") => parse_no_extra(args, "ci-test", Self::CiTest),
+            Some("ci-test-validate") => Ok(Self::CiTestValidate(
+                command_args::require_subcommand_dir_arg(args, "ci-test-validate")?,
+            )),
             Some("check-support-tiers") => {
                 parse_no_extra(args, "check-support-tiers", Self::CheckSupportTiers)
             }
@@ -73,6 +101,7 @@ impl XtaskCommand {
             }
             Some("check-dogfood") => parse_no_extra(args, "check-dogfood", Self::CheckDogfood),
             Some("check-fuzz") => parse_no_extra(args, "check-fuzz", Self::CheckFuzz),
+            Some("cleanup-audit") => parse_no_extra(args, "cleanup-audit", Self::CleanupAudit),
             Some("check-advisory-artifacts") => Ok(Self::CheckAdvisoryArtifacts(
                 command_args::require_subcommand_dir_arg(args, "check-advisory-artifacts")?,
             )),
@@ -118,6 +147,9 @@ impl XtaskCommand {
                 "check-detector-contracts",
                 Self::CheckDetectorContracts,
             ),
+            Some("check-self-unsafe") => {
+                parse_no_extra(args, "check-self-unsafe", Self::CheckSelfUnsafe)
+            }
             Some("check-stance-decisions") => {
                 parse_no_extra(args, "check-stance-decisions", Self::CheckStanceDecisions)
             }
@@ -140,9 +172,40 @@ impl XtaskCommand {
             Some("check-real-pr-corpus") => {
                 parse_no_extra(args, "check-real-pr-corpus", Self::CheckRealPrCorpus)
             }
+            Some("check-corpus-partitions") => {
+                parse_no_extra(args, "check-corpus-partitions", Self::CheckCorpusPartitions)
+            }
+            Some("check-evidence-loss-challenges") => parse_no_extra(
+                args,
+                "check-evidence-loss-challenges",
+                Self::CheckEvidenceLossChallenges,
+            ),
+            Some("check-external-pilots") => {
+                parse_no_extra(args, "check-external-pilots", Self::CheckExternalPilots)
+            }
+            Some("external-pilot-rollup") => {
+                parse_no_extra(args, "external-pilot-rollup", Self::ExternalPilotRollup)
+            }
+            Some("check-local") => {
+                // Trailing flags are forwarded to the CheckLocal arg parser.
+                Ok(Self::CheckLocal(args.to_vec()))
+            }
+            Some("check-local-run") => {
+                command_args::require_max_args(args, "check-local-run", 3)?;
+                let id = args
+                    .get(2)
+                    .cloned()
+                    .ok_or_else(|| "check-local-run requires a check id".to_string())?;
+                Ok(Self::CheckLocalRun(id))
+            }
+            Some("lsp-smoke") => parse_no_extra(args, "lsp-smoke", Self::LspSmoke),
             Some("dogfood-exec") => {
                 // All trailing args are forwarded to the DogfoodExec arg parser.
                 Ok(Self::DogfoodExec(args.to_vec()))
+            }
+            Some("workflow-pin-sync") => {
+                // All trailing args are forwarded to the WorkflowPinSync arg parser.
+                Ok(Self::WorkflowPinSync(args.to_vec()))
             }
             Some(other) => Err(format!("unknown xtask command `{other}`")),
         }

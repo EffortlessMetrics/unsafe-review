@@ -2,8 +2,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use crate::{
-    SOURCE_OF_TRUTH_INDEX, markdown, markdown_files, markdown_table_columns, parse_toml_file,
-    read_to_string, require_known, source_truth_index_ids, workspace_path,
+    markdown, markdown_files, markdown_table_columns, read_to_string, require_known, workspace_path,
 };
 
 pub(crate) const DASHBOARD: &str = "docs/specs/UNSAFE-REVIEW-SPEC-STATUS.md";
@@ -21,14 +20,20 @@ const XTASK_COMMANDS: &[&str] = &[
     "check-calibration",
     "check-ci-lanes",
     "check-corpus-backstop-schema",
+    "check-corpus-partitions",
     "check-detector-contracts",
     "check-doc-artifacts",
     "check-docs",
     "check-docs-automation",
+    "check-work-specs",
+    "check-subagent-briefs",
     "check-dogfood",
+    "check-evidence-loss-challenges",
+    "check-external-pilots",
     "check-first-hour",
     "check-first-pr-artifacts",
     "check-goals",
+    "check-local",
     "check-manual-candidate-examples",
     "check-package-boundary",
     "check-pr",
@@ -38,6 +43,7 @@ const XTASK_COMMANDS: &[&str] = &[
     "check-spec-status",
     "check-surface-determinism",
     "source-divergence",
+    "workflow-pin-sync",
 ];
 
 pub(crate) fn check() -> Result<(), String> {
@@ -102,19 +108,6 @@ pub(crate) fn check_dashboard_impl() -> Result<usize, String> {
             ));
         }
         check_proof_commands(&row.spec_id, &row.proof_commands)?;
-    }
-
-    let source_index = parse_toml_file(&workspace_path(SOURCE_OF_TRUTH_INDEX))?;
-    let indexed_artifact_ids = source_truth_index_ids(&source_index, "artifact")?;
-    for id in indexed_artifact_ids
-        .iter()
-        .filter(|id| id.starts_with("UNSAFE-REVIEW-SPEC-"))
-    {
-        if !seen.contains(id) {
-            return Err(format!(
-                "{DASHBOARD} is missing source-of-truth indexed spec `{id}`"
-            ));
-        }
     }
 
     Ok(rows.len())
@@ -284,4 +277,50 @@ fn is_iso_date(value: &str) -> bool {
             .iter()
             .enumerate()
             .all(|(idx, byte)| idx == 4 || idx == 7 || byte.is_ascii_digit())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The index.toml status-field cross-check added in #1799 relies on
+    // check_lifecycle_match rejecting a mismatch between an indexed status and
+    // the spec file header. Lock that behavior so a future refactor cannot
+    // silently turn the cross-check into a no-op.
+    #[test]
+    fn check_lifecycle_match_rejects_status_mismatch() -> Result<(), String> {
+        let err = check_lifecycle_match("UNSAFE-REVIEW-SPEC-9999", "proposed", "accepted", "file");
+        let Err(msg) = err else {
+            return Err("mismatched lifecycle statuses must be rejected, got Ok".to_string());
+        };
+        if !msg.contains("UNSAFE-REVIEW-SPEC-9999") {
+            return Err(format!("error msg must name the spec id: {msg}"));
+        }
+        if !msg.contains("proposed") || !msg.contains("accepted") {
+            return Err(format!("error msg must name both statuses: {msg}"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn check_lifecycle_match_accepts_aligned_status() -> Result<(), String> {
+        check_lifecycle_match("SPEC-X", "accepted", "accepted", "file")
+    }
+
+    // The cross-check only applies to spec-kind artifacts (not ADRs/proposals),
+    // because only spec files carry a `Status:` header. lifecycle_status must
+    // normalize case so an `Accepted` header matches an `accepted` index field.
+    #[test]
+    fn lifecycle_status_normalizes_case_for_header_comparison() -> Result<(), String> {
+        if lifecycle_status("Accepted") != "accepted" {
+            return Err("Accepted must normalize to accepted".to_string());
+        }
+        if lifecycle_status("ACCEPTED") != "accepted" {
+            return Err("ACCEPTED must normalize to accepted".to_string());
+        }
+        if lifecycle_status("proposed") != "proposed" {
+            return Err("proposed must stay proposed".to_string());
+        }
+        Ok(())
+    }
 }

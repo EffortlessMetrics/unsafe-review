@@ -10,16 +10,15 @@ name: CI
 # (`Unsafe Review Rust Result`); the router never blocks the merge and there is
 # no per-size routing (whatever idle trusted self-hosted runner catches it).
 #
-# The gate job itself is unchanged in shape: the deterministic core floor
-# (`xtask check-pr` plus the full suite) is the only hard blocker; ub-review
-# rides along in the SAME job as an advisory LLM layer. The LLM investigation
-# window (lanes analysing the diff, model calls) is the long pole and leaves the
-# runner CPU idle, so the full deterministic core gate runs concurrently and
-# tucks under that latency for free:
+# The gate job is the deterministic core floor (fmt + clippy + test + rustdoc
+# + `xtask check-pr`) and nothing else. The advisory ub-review LLM lane runs as its own
+# standalone non-blocking workflow (.github/workflows/ub-review.yml); it is not
+# part of this job and can never flip the gate verdict:
 #
 #   0. route (advisory, ubuntu-latest): pick self-hosted (idle trusted em-ci
 #      runner) else ubuntu-latest overflow; emit a runs-on value + runner_kind.
-#   1. Shared setup once (checkout fetch-depth 0, toolchain 1.95.0, rust-cache).
+#   1. Shared setup once (checkout fetch-depth 0, toolchain 1.98, rust-cache
+#      with the shared ci-gate cache key also used by cache-warm.yml).
 #   2. Fast precontext (~seconds, no full build): a runner-kind-aware disk/scratch
 #      check, then cargo fmt --check plus repo/PR facts written to
 #      target/ci-core/precontext.md, AND the deterministic core gate
@@ -28,15 +27,14 @@ name: CI
 #      safely (no corruption; worst case a little extra wall-clock), so this
 #      avoids doubling disk with a second target dir and works on both runner
 #      kinds.
-#   3. ub-review (advisory) runs next, concurrent with the backgrounded core gate.
-#      It reuses the warmed toolchain/cache (setup-rust:false) and is fed the fast
-#      precontext via pr-thread-context.
-#   4. Advisory status: emit a concise, actionable note if the advisory lane failed
-#      or was skipped, so it reads as "advisory + actionable" rather than a bare X.
-#   5. Final assert: wait for the backgrounded core gate, surface its result in the
-#      job summary, and fail the job iff its exit code != 0. The single required
-#      check reflects ONLY the deterministic core verdict; ub-review never blocks
-#      the merge (continue-on-error + fail-on-gate:false).
+#   3. Final assert: wait for this run's backgrounded core gate, surface a
+#      bounded closed-vocabulary step-status summary, and fail the job iff its
+#      exit code != 0. The single required check reflects ONLY the deterministic
+#      core verdict.
+#   4. Failure evidence: on a non-zero core verdict only, upload the bounded
+#      allowlisted summary, command/commit/exit/path metadata, and sanitized
+#      structured test-diagnostics. The upload is always attempted, non-fatal,
+#      short-retention, and never reads or includes core.log.
 
 on:
   pull_request:
@@ -59,6 +57,9 @@ defaults:
 env:
   CARGO_INCREMENTAL: "0"
   CARGO_TERM_COLOR: always
+  # Names the verdict file for this exact Actions run/attempt. A cancelled or
+  # retried background process therefore cannot satisfy a later run's wait.
+  CORE_RUN_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
   # Minimal capacity router (NOT a required check). It decides where the single
@@ -128,9 +129,9 @@ jobs:
 
   unsafe-review-rust-result:
     # Single required check. The job conclusion reflects ONLY the mandatory
-    # deterministic core gate (final assert step); the advisory ub-review step is
-    # continue-on-error and fail-on-gate:false so it can never flip this result.
-    # The job name is kept stable for branch protection.
+    # deterministic core gate (final assert step). The advisory ub-review lane
+    # lives in the standalone ub-review.yml workflow and can never flip this
+    # result. The job name is kept stable for branch protection.
     #
     # runs-on is decided by the router: a self-hosted label array when the owned
     # fleet has idle trusted capacity, else "ubuntu-latest" overflow. fromJSON
@@ -142,33 +143,50 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: read
-      # Needed only so the advisory ub-review step can post its grouped PR review.
-      pull-requests: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
-          # Full history so ub-review can diff base..head; the core gate is happy with it too.
+          # Full history for the diff-scoped test skip and base comparisons.
           fetch-depth: 0
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: dtolnay/rust-toolchain@1.98
         with:
           components: rustfmt, clippy
+      # shared-key (#1515 candidate 3): one cache entry family shared by the PR
+      # gate lane and the scheduled cache-warm.yml lane, so gh-hosted fallback
+      # PR runs restore the entry the weekly warm run saves on main. The id
+      # exposes the action's cache-hit output for the advisory floor-time
+      # cache_hit_state below.
       - uses: Swatinem/rust-cache@v2
+        id: rust-cache
+        with:
+          shared-key: ci-gate
       # Fast precontext + background launch of the deterministic core gate. The
       # disk/scratch handling is runner-kind aware: on gh-hosted overflow we free
       # the big preinstalled SDKs when headroom is low; on self-hosted we leave the
       # gh-only paths alone (they are not present) and instead report headroom and
-      # reuse the shared workspace target dir. The cheap repo/PR facts are written
-      # immediately so the LLM lanes start off them; the full deterministic core
-      # gate (fmt + clippy + test + check-pr) is launched in the background sharing
-      # the workspace target dir (cargo's lock serialises any overlap safely) and
-      # its verdict is the only thing that gates the merge.
+      # reuse the shared workspace target dir. The cheap repo/PR facts are
+      # written first as a durable run record; the full deterministic core
+      # gate (fmt + clippy + test + check-pr) is launched in the background
+      # sharing the workspace target dir (cargo's lock serialises any overlap
+      # safely) and its verdict is the only thing that gates the merge. The
+      # precontext facts and floor-time signal below stay advisory: they feed
+      # the standalone ub-review workflow's cost-receipt composition and the
+      # job summary, never the gate verdict.
       - name: Fast precontext and launch core gate
         env:
           RUNNER_KIND: ${{ needs.route.outputs.runner_kind }}
+          RUST_CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit }}
         run: |
           set +e
           mkdir -p target/ci-core
+          core_exit_path="target/ci-core/core_exit-${CORE_RUN_KEY}"
+          # A self-hosted workspace may retain untracked target files between
+          # runs. Clear the legacy verdict and this exact run's atomic verdict
+          # files before launch. A successful run therefore cannot observe stale
+          # exit evidence; failure staging is created later under RUNNER_TEMP.
+          rm -f target/ci-core/core_exit "$core_exit_path" "${core_exit_path}.tmp"
+          : > target/ci-core/step-status.tsv
           if [ "${RUNNER_KIND}" = "self-hosted" ]; then
             # Self-hosted primary: do NOT run the gh disk-free (android/dotnet/ghc/
             # CodeQL are not on the fleet). GC stale per-run scratch dirs before
@@ -194,13 +212,14 @@ jobs:
             fi
           fi
           {
-            echo "# Deterministic precontext for ub-review"
+            echo "# Deterministic core-gate context"
             echo
             echo "- core gate (gates the merge; running concurrently): the full"
             echo "  deterministic suite —"
             echo "    cargo fmt --all --check"
             echo "    cargo clippy --workspace --all-targets --locked -- -D warnings"
-            echo "    cargo test --workspace --locked"
+            echo "    cargo run --locked -p xtask -- ci-test"
+            echo "    RUSTDOCFLAGS=\"-D warnings\" cargo doc --workspace --no-deps --locked"
             echo "    cargo run --locked -p xtask -- check-pr"
             echo "- check-pr covers the repo contract: docs, public badges, policy"
             echo "  bundle, support tiers, fixtures, calibration, dogfood manifest,"
@@ -212,104 +231,239 @@ jobs:
           # required_floor_wall_seconds. It is purely advisory and never gates the
           # merge; failures here are non-fatal (|| true).
           date +%s > target/ci-core/gate_start || true
-          # Launch the full deterministic core gate in the background, sharing the
-          # workspace target dir (cargo's lock serialises any overlap with
-          # ub-review's cargo work safely). The && chain short-circuits, so the
-          # recorded exit code is the first failing command's, or 0 if all pass.
-          (
-            cargo fmt --all --check \
-              && cargo clippy --workspace --all-targets --locked -- -D warnings \
-              && cargo test --workspace --locked \
-              && cargo run --locked -p xtask -- check-pr
-            echo "$?" > target/ci-core/core_exit
-          ) > target/ci-core/core.log 2>&1 &
-          echo "launched background core gate (pid $!): fmt + clippy + test + check-pr"
-      # ADVISORY LLM layer, in this same job, concurrent with the backgrounded core
-      # gate (the CPU-bound build runs under the network-bound LLM latency).
-      # setup-rust:false reuses the toolchain installed above. intelligent-ci posts a
-      # grouped PR review and emits its gate manifest, but fail-on-gate:false +
-      # continue-on-error keep it advisory: it must not fail the merge. The fast
-      # precontext is fed via pr-thread-context so the LLM lanes review on top of the
-      # deterministic context. MiniMax-M3 primary, OpenCode deepseek-v4-flash fallback.
-      # Skipped on fork PRs (no access to org secrets); the core gate still runs for
-      # forks. !cancelled() lets the advisory review post even when the core gate fails.
-      - name: UB Review (advisory)
-        id: ubreview
-        if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false }}
-        continue-on-error: true
-        # Pinned to the structured-ingestion commit SHA (immutable) so a re-tag cannot silently
-        # change unsafe-review's gate. Bump deliberately; keep the allowlist in sync.
-        # SHA 4053bc0df7cd5918f8c6f80ceb3f714a572789d7 — #363 structured gate.json ingestion
-        # (routes by schema, no markdown scraping) + #365 inline path:line review comments.
-        uses: EffortlessMetrics/ub-review@4053bc0df7cd5918f8c6f80ceb3f714a572789d7
-        with:
-          preset: bun-ub
-          mode: intelligent-ci
-          posting: review
-          fail-on-gate: false
-          setup-rust: false
-          tool-bundle: core
-          provider-policy: primary-with-fallback
-          minimax-api-key: ${{ secrets.MINIMAX_API_KEY }}
-          minimax-model: MiniMax-M3
-          opencode-api-key: ${{ secrets.OPENCODE }}
-          opencode-model: deepseek-v4-flash
-          base: origin/${{ github.base_ref }}
-          pr-thread-context: target/ci-core/precontext.md
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          github-summary: true
-      # Advisory-failure UX: keep the advisory lane legibly "advisory + actionable".
-      # When ub-review fails or is skipped, emit a concise note (what, why, fix) to
-      # the job summary instead of a bare red X, so the gate's signal stays trusted.
-      - name: UB Review advisory status
-        if: ${{ always() }}
-        env:
-          UB_OUTCOME: ${{ steps.ubreview.outcome }}
-        run: |
-          set -u
-          case "${UB_OUTCOME}" in
-            success)
-              echo "ub-review advisory lane completed; see the grouped PR review." >> "$GITHUB_STEP_SUMMARY" ;;
-            skipped|"")
-              echo "ub-review advisory lane skipped (fork PR without org secrets, or non-PR event); deterministic gate verdict stands." >> "$GITHUB_STEP_SUMMARY" ;;
-            *)
-              echo "ub-review advisory lane failed (${UB_OUTCOME}): check MINIMAX_API_KEY/OPENCODE secrets and provider/model availability (provider-policy primary-with-fallback, MiniMax-M3 primary, deepseek-v4-flash fallback), then re-run. Deterministic gate verdict stands." >> "$GITHUB_STEP_SUMMARY" ;;
+          # Cache observability (#1515 candidate 1): rust-cache exposes only a
+          # boolean exact-match output, so derive a tri-state here, before the
+          # build populates anything: exact hit from the step output; else a
+          # populated registry cache dir means a partial restore-key match,
+          # else a miss. Advisory only; captured for the floor-time emit and
+          # never read by the gate verdict. Failures are non-fatal (|| true).
+          cache_hit_state="unknown"
+          case "${RUST_CACHE_HIT:-}" in
+            true)
+              cache_hit_state="hit"
+              ;;
+            false)
+              if [ -n "$(ls -A "${CARGO_HOME:-$HOME/.cargo}/registry/cache" 2>/dev/null)" ]; then
+                cache_hit_state="partial"
+              else
+                cache_hit_state="miss"
+              fi
+              ;;
           esac
+          echo "${cache_hit_state}" > target/ci-core/cache_hit_state || true
+          # Diff-scoped test skip (#2171): one shared selector implementation
+          # (.github/scripts/select-core-mode.sh, also executed by the xtask
+          # contract fixtures) decides the core mode. It prints with-tests
+          # unless the diff is non-empty and every changed path is a Markdown
+          # document; manifests, lockfiles, toolchain/config files, sources,
+          # and unknown, empty, or unavailable diffs all run the full path.
+          base_ref="${GITHUB_BASE_REF:-main}"
+          core_mode="$(bash .github/scripts/select-core-mode.sh "origin/${base_ref}")"
+          printf '%s\n' "$core_mode" > target/ci-core/core_mode
+          # Launch the full deterministic core gate in the background, sharing
+          # the workspace target dir (cargo's lock serialises any overlap
+          # safely). The && chain short-circuits, so the
+          # recorded exit code is the first failing command's, or 0 if all pass.
+          # Per-step timing (#1515): each step prints its elapsed seconds so the
+          # runner-local core.log shows which step dominates. A separate closed-
+          # vocabulary status file records only step id, elapsed seconds, and
+          # exit status for the retained diagnostic; raw command output never
+          # enters the uploaded artifact.
+          #
+          # Diff-scoped test skip (#1515 candidate 2, #2171): if the PR touches
+          # only Markdown documents (per select-core-mode.sh), skip the slow
+          # test step. fmt + clippy + rustdoc + check-pr still run — they are
+          # the real gate. This cuts ~3-5 min off docs-only PRs.
+          (
+            _step() {
+              local _id="$1" _s _rc _elapsed
+              shift
+              _s=$(date +%s)
+              "$@"
+              _rc=$?
+              _now=$(date +%s)
+              _elapsed=$((_now - _s))
+              printf '%s\t%s\t%s\n' "$_id" "$_elapsed" "$_rc" >> target/ci-core/step-status.tsv
+              echo "[step-timing] ${_elapsed}s: $*"
+              return $_rc
+            }
+            if [ "$core_mode" = "without-tests" ]; then
+              echo "[diff-scope] Markdown-only diff — skipping test step (#2171)"
+              _step fmt cargo fmt --all --check \
+                && _step clippy cargo clippy --workspace --all-targets --locked -- -D warnings \
+                && printf 'test\t0\tskipped\n' >> target/ci-core/step-status.tsv \
+                && echo "[diff-scope] skipped test step (Markdown-only PR)" \
+                && _step doc env RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked \
+                && _step check-pr cargo run --locked -p xtask -- check-pr
+            else
+              _step fmt cargo fmt --all --check \
+                && _step clippy cargo clippy --workspace --all-targets --locked -- -D warnings \
+                && _step test env UNSAFE_REVIEW_CI_HANDOFF_DIR="${RUNNER_TEMP}/unsafe-review-structured-${CORE_RUN_KEY}" cargo run --locked -p xtask -- ci-test \
+                && _step doc env RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked \
+                && _step check-pr cargo run --locked -p xtask -- check-pr
+            fi
+            core_rc=$?
+            printf '%s\n' "$core_rc" > "${core_exit_path}.tmp"
+            mv "${core_exit_path}.tmp" "$core_exit_path"
+          ) > target/ci-core/core.log 2>&1 &
+          echo "launched background core gate (pid $!): fmt + clippy + [test?] + rustdoc + check-pr"
       # Join + final gate assert. Wait for the backgrounded core gate to finish,
       # surface its result in the job summary, and fail the job iff it exited
-      # non-zero. The single required check reflects ONLY this deterministic verdict;
-      # ub-review's outcome is irrelevant here, so LLM availability or opinion never
-      # blocks the merge.
+      # non-zero. The single required check reflects ONLY this deterministic
+      # verdict; the advisory ub-review lane runs in the standalone
+      # ub-review.yml workflow, so LLM availability or opinion never blocks the
+      # merge.
       - name: Assert core gate verdict
+        id: core-verdict
         if: ${{ always() }}
         env:
           RUNNER_KIND: ${{ needs.route.outputs.runner_kind }}
         run: |
           set -uo pipefail
+          core_exit_path="target/ci-core/core_exit-${CORE_RUN_KEY}"
           deadline=$((SECONDS + 3000))
-          while [ ! -f target/ci-core/core_exit ]; do
+          while [ ! -f "$core_exit_path" ]; do
             if [ "${SECONDS}" -ge "${deadline}" ]; then
               echo "core gate did not finish within the budget" >&2
-              echo "124" > target/ci-core/core_exit
+              printf '124\n' > "${core_exit_path}.tmp"
+              mv "${core_exit_path}.tmp" "$core_exit_path"
               break
             fi
             sleep 5
           done
-          core_exit="$(cat target/ci-core/core_exit)"
-          {
-            echo "## Deterministic core gate"
-            echo
-            if [ "${core_exit}" = "0" ]; then
-              echo "Result: PASS (xtask check-pr exit 0)"
-            else
-              echo "Result: FAIL (xtask check-pr exit ${core_exit})"
-            fi
-            echo
-            echo '```'
-            tail -n 60 target/ci-core/core.log 2>/dev/null || echo "(no core gate log captured)"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          core_exit="$(cat "$core_exit_path")"
           echo "core_exit=${core_exit}"
+          if [ "${core_exit}" != "0" ]; then
+            # PR-controlled commands have finished. Discard any predictable
+            # staging tree, then create a private unpredictable directory under
+            # this job's RUNNER_TEMP. The upload step receives only the exact
+            # regular-file paths below, never this directory, so pre-populated
+            # workspace extras and core.log symlinks cannot enter the artifact.
+            umask 077
+            failure_root="${RUNNER_TEMP}/unsafe-review-core-evidence-${CORE_RUN_KEY}"
+            rm -rf "$failure_root"
+            mkdir -m 700 "$failure_root"
+            failure_dir="$(mktemp -d "${failure_root}/staging-XXXXXX")"
+            excerpt_path="${failure_dir}/step-status.txt"
+            excerpt_tmp="$(mktemp "${failure_dir}/.step-status-XXXXXX")"
+            failure_summary_path="${failure_dir}/summary.md"
+            failure_metadata_path="${failure_dir}/metadata.json"
+            diagnostics_source="${RUNNER_TEMP}/unsafe-review-structured-${CORE_RUN_KEY}/test-diagnostics.json"
+            diagnostics_path="${failure_dir}/test-diagnostics.json"
+            failure_summary_source="$(mktemp "${failure_dir}/.summary-source-XXXXXX")"
+            failure_summary_tmp="$(mktemp "${failure_dir}/.summary-XXXXXX")"
+            failure_metadata_tmp="$(mktemp "${failure_dir}/.metadata-XXXXXX")"
+            # Build the retained diagnostic exclusively in private staging from
+            # the closed-vocabulary step-status sidecar. The predictable
+            # workspace excerpt path is never read or written. Only known step
+            # ids plus bounded decimal timing/status fields survive; arbitrary
+            # command output, bare tokens, PEM blocks, and core.log content have
+            # no path into the evidence.
+            staging_ready="true"
+            if ! {
+              printf 'step_id\telapsed_seconds\texit_status\n'
+              LC_ALL=C awk -F '\t' '
+                NF == 3 &&
+                $1 ~ /^(fmt|clippy|test|doc|check-pr)$/ &&
+                $2 ~ /^[0-9]+$/ && length($2) <= 10 &&
+                (($3 ~ /^[0-9]+$/ && length($3) <= 3) || $3 == "skipped") {
+                  print $1 "\t" $2 "\t" $3
+                }
+              ' target/ci-core/step-status.tsv 2>/dev/null
+            } | head -n 80 | head -c 16384 > "$excerpt_tmp"; then
+              staging_ready="false"
+            elif ! mv "$excerpt_tmp" "$excerpt_path"; then
+              staging_ready="false"
+            elif [ ! -f "$excerpt_path" ] || [ -L "$excerpt_path" ]; then
+              staging_ready="false"
+            fi
+            if [ "$staging_ready" != "true" ]; then
+              echo "core failure evidence staging rejected step-status output" >&2
+              rm -rf "$failure_root"
+            fi
+            if [ "$staging_ready" = "true" ]; then
+            # Treat even the sidecar as untrusted after PR-controlled commands
+            # have run: accept only its closed mode vocabulary, then select a
+            # fixed command string rather than copying file content.
+            core_mode="$(cat target/ci-core/core_mode 2>/dev/null || true)"
+            case "$core_mode" in
+              without-tests)
+                core_command="cargo fmt --all --check && cargo clippy --workspace --all-targets --locked -- -D warnings && RUSTDOCFLAGS=\"-D warnings\" cargo doc --workspace --no-deps --locked && cargo run --locked -p xtask -- check-pr"
+                ;;
+              with-tests)
+                core_command="cargo fmt --all --check && cargo clippy --workspace --all-targets --locked -- -D warnings && cargo run --locked -p xtask -- ci-test && RUSTDOCFLAGS=\"-D warnings\" cargo doc --workspace --no-deps --locked && cargo run --locked -p xtask -- check-pr"
+                ;;
+              *) core_command="deterministic core suite (launch mode unavailable)" ;;
+            esac
+            # The xtask wrapper owns sanitization. Select only its exact regular
+            # file and keep the upload bounded; no runner stream or arbitrary
+            # path is copied into the artifact.
+            if [ -f "$diagnostics_source" ] && [ ! -L "$diagnostics_source" ] \
+              && [ "$(wc -c < "$diagnostics_source" 2>/dev/null || echo 999999)" -le 16385 ]; then
+              cp --no-dereference "$diagnostics_source" "$diagnostics_path"
+            fi
+            if [ ! -f "$diagnostics_path" ] || [ -L "$diagnostics_path" ]; then
+              rm -f "$diagnostics_path"
+            elif ! cargo run --locked -p xtask -- ci-test-validate "$diagnostics_path"; then
+              echo "structured test diagnostics failed schema/integrity validation" >&2
+              rm -f "$diagnostics_path"
+            fi
+            failed_step="$(awk -F '\t' 'NR > 1 && $3 != "0" && $3 != "skipped" { print $1; exit }' "$excerpt_path" 2>/dev/null || true)"
+            case "$failed_step" in
+              fmt|clippy|test|doc|check-pr) ;;
+              *) failed_step="unknown" ;;
+            esac
+            {
+              echo "# Deterministic core-gate failure evidence"
+              echo
+              echo "- commit: \`${GITHUB_SHA}\`"
+              echo "- command: \`${core_command}\`"
+              echo "- exit code: \`${core_exit}\`"
+              echo "- failed step: \`${failed_step}\`"
+              echo "- result path: \`${core_exit_path}\`"
+              echo
+              echo "## Bounded allowlisted step status"
+              echo
+              sed 's/^/    /' "$excerpt_path"
+              echo
+              echo "> Closed-vocabulary diagnostic only. The raw core log is not retained."
+            } > "$failure_summary_source"
+            # Cap the final uploaded summary itself, including headings and
+            # metadata, rather than bounding only its embedded status table.
+            head -n 80 "$failure_summary_source" | head -c 16384 > "$failure_summary_tmp"
+            printf '{"schema_version":"1.0","commit":"%s","command":"%s","exit_code":%s,"failed_step":"%s","result_path":"%s","summary_path":"%s"}\n' \
+              "${GITHUB_SHA}" "${core_command}" "${core_exit}" "${failed_step}" "${core_exit_path}" "$failure_summary_path" > "$failure_metadata_tmp"
+            rm -f "$failure_summary_source"
+            mv "$failure_summary_tmp" "$failure_summary_path"
+            mv "$failure_metadata_tmp" "$failure_metadata_path"
+            if [ -f "$failure_summary_path" ] && [ ! -L "$failure_summary_path" ] \
+              && [ -f "$failure_metadata_path" ] && [ ! -L "$failure_metadata_path" ]; then
+              echo "summary_path=$failure_summary_path" >> "$GITHUB_OUTPUT"
+              echo "metadata_path=$failure_metadata_path" >> "$GITHUB_OUTPUT"
+              if [ -f "$diagnostics_path" ] && [ ! -L "$diagnostics_path" ]; then
+                echo "diagnostics_path=$diagnostics_path" >> "$GITHUB_OUTPUT"
+              fi
+            else
+              echo "core failure evidence staging rejected non-regular output" >&2
+              rm -rf "$failure_root"
+            fi
+            fi
+            {
+              echo "## Deterministic core gate"
+              echo
+              echo "Result: FAIL (xtask check-pr exit ${core_exit})"
+              if [ "$staging_ready" = "true" ]; then
+                echo
+                sed 's/^/    /' "$excerpt_path"
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "## Deterministic core gate"
+              echo
+              echo "Result: PASS (xtask check-pr exit 0)"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
           # Advisory floor-time signal: emit wall-time + run context for
           # ub-review's cost receipt (ub-review#336) to compose. This block is
           # wrapped in a subshell with || true so any arithmetic or write failure
@@ -326,11 +480,34 @@ jobs:
             if [ "${RUNNER_KIND:-github}" = "github" ]; then
               fallback_used="true"
             fi
+            # Cache hit/miss/partial captured pre-build by the precontext step
+            # (#1515); fall back to "unknown" if the capture file is missing or
+            # holds an unexpected value.
+            cache_hit_state="$(cat target/ci-core/cache_hit_state 2>/dev/null || echo "")"
+            case "${cache_hit_state}" in
+              hit|partial|miss) ;;
+              *) cache_hit_state="unknown" ;;
+            esac
             {
-              printf '{"required_floor_wall_seconds":%s,"runner_kind":"%s","fallback_used":%s,"cache_hit_state":"unknown"}\n' \
-                "${elapsed}" "${RUNNER_KIND:-github}" "${fallback_used}"
+              printf '{"required_floor_wall_seconds":%s,"runner_kind":"%s","fallback_used":%s,"cache_hit_state":"%s"}\n' \
+                "${elapsed}" "${RUNNER_KIND:-github}" "${fallback_used}" "${cache_hit_state}"
             } > target/ci-core/floor-time.json
-            echo "floor-time: required_floor_wall_seconds=${elapsed} runner_kind=${RUNNER_KIND:-github} fallback_used=${fallback_used} cache_hit_state=unknown" \
+            echo "floor-time: required_floor_wall_seconds=${elapsed} runner_kind=${RUNNER_KIND:-github} fallback_used=${fallback_used} cache_hit_state=${cache_hit_state}" \
               >> "$GITHUB_STEP_SUMMARY"
           ) || true
           test "${core_exit}" = "0"
+      - name: Upload bounded core-gate failure evidence
+        if: >-
+          ${{ always() &&
+              steps.core-verdict.outputs.summary_path != '' &&
+              steps.core-verdict.outputs.metadata_path != '' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: core-gate-failure-evidence
+          path: |
+            ${{ steps.core-verdict.outputs.summary_path }}
+            ${{ steps.core-verdict.outputs.metadata_path }}
+            ${{ steps.core-verdict.outputs.diagnostics_path }}
+          if-no-files-found: ignore
+          retention-days: 7

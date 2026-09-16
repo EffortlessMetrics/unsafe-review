@@ -51,10 +51,31 @@ top-level action object and nested command payloads.
 Witness-command actions must copy only commands already projected from the same
 ReviewCard's verify commands.
 
+The canonical action producer is
+`output/lsp/action_contract.rs::actions_for_card`. It owns stable action IDs,
+hierarchical kinds, diagnostic/card association, analysis identity,
+agent-readiness wording, applicability, disabled reason codes, and the explicit
+command-only posture. Saved and live adapters preserve those semantics rather
+than deriving them from titles. The closed card-action IDs are `agent-packet`,
+`witness-route`, `witness-command`, and `related-test`.
+
+Unavailable route, witness-command, or related-test capabilities are omitted or
+represented with the canonical disabled reason; an enabled action must not
+execute to an unexplained null. Human-review actions remain non-preferred and
+must not imply automatic repair authority. Saved `lsp.json` schema 0.2 carries
+the canonical action objects and full analysis identity. Consumers may render
+legacy 0.1 actions for compatibility, but must not mix the two action shapes or
+recover executable 0.2 semantics from titles and positional arguments.
+
 Every diagnostic and card-scoped action must carry the relevant `card_id` and
 the static-review trust boundary. Diagnostic data must include the operation
 identity, required safety conditions, obligation-level evidence states, missing
 evidence, witness routes, and verify commands.
+
+Diagnostic `severity` is a ReviewClass projection. It must use the same class
+table as SARIF `level`, must not be derived from priority, operation family,
+baseline state, or comment eligibility, and must not emit LSP `Error` severity
+for the default advisory projection.
 
 ## Non-goals
 

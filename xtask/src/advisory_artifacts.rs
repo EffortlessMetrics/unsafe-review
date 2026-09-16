@@ -1,13 +1,17 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path};
 
-use unsafe_review_core::COMMENT_BODY_WORD_LIMIT as COMMENT_PLAN_BODY_WORD_LIMIT;
+use unsafe_review_core::{COMMENT_BODY_WORD_LIMIT as COMMENT_PLAN_BODY_WORD_LIMIT, ReviewClass};
+
+const GATE_MANIFEST_TRUST_BOUNDARY: &str =
+    "static unsafe-review coverage evidence; not proof, not a merge verdict";
 
 struct AdvisoryArtifactSummary {
     card_ids: BTreeSet<String>,
     card_order: Vec<String>,
     card_projections: BTreeMap<String, CardProjection>,
     repair_queue_projections: BTreeMap<String, RepairQueueProjection>,
+    movement: GateMovementProjection,
     scope: String,
     changed_files: usize,
     changed_rust_files: usize,
@@ -21,6 +25,7 @@ struct AdvisoryArtifactManifest {
     card_ids: BTreeSet<String>,
     card_order: Vec<String>,
     card_projections: BTreeMap<String, CardProjection>,
+    movement: GateMovementProjection,
     scope: String,
     changed_files: usize,
     changed_rust_files: usize,
@@ -54,12 +59,24 @@ struct CardProjection {
     obligation_evidence: Vec<serde_json::Value>,
     verify_commands: Vec<String>,
     witness_routes: Vec<WitnessRouteProjection>,
-    /// SPEC-0029 coverage block slots (from cards.json coverage_block).
-    /// Empty string when coverage_block is absent from the card JSON.
+    /// SPEC-0029 coverage slots from cards.json coverage.
     contract_coverage: String,
     guard_coverage: String,
     test_reach_coverage: String,
     witness_receipt_coverage: String,
+    manual_context: String,
+    baseline_state: String,
+    outcome_movement: String,
+    comment_plan_status: String,
+    agent_lsp_readiness: String,
+}
+
+struct GateMovementProjection {
+    new_gaps: usize,
+    worsened_gaps: usize,
+    improved_gaps: usize,
+    resolved_gaps: usize,
+    inherited_gaps: usize,
 }
 
 struct WitnessRouteProjection {
@@ -208,6 +225,7 @@ const COMMENT_PLAN_NON_SELECTION_REASONS: &[&str] = &[
     "owner-contract obligation covered by a more-specific operation card at the same region",
     "comment-plan max of three candidates reached",
     "not selected by current inline comment policy",
+    "grouped with an equivalent repetitive target_feature site; see the target-feature summary for the selected representative",
 ];
 const COMMENT_PLAN_NON_SELECTION_REASON_CODES: &[&str] = &[
     "outside_changed_hunk",
@@ -217,6 +235,7 @@ const COMMENT_PLAN_NON_SELECTION_REASON_CODES: &[&str] = &[
     "covered_by_specific_operation_card",
     "budget_exhausted",
     "not_selected_by_policy",
+    "grouped_repetition",
 ];
 const KNOWN_PROOF_PATHS: &[&str] = &[
     "observable_red_green",
@@ -279,26 +298,126 @@ const REPAIR_QUEUE_READINESS_STATES: [&str; 4] = [
     "requires_witness_receipt",
     "unsupported",
 ];
-const FIRST_PR_BUNDLE_ARTIFACTS: [&str; 18] = [
-    "review-kit.json",
-    "unsafe-review-gate.json",
-    "cards.json",
-    "pr-summary.md",
-    "github-summary.md",
-    "cards.sarif",
-    "comment-plan.json",
-    "witness-plan.md",
-    "receipt-audit.md",
-    "receipt-audit.json",
-    "policy-report.json",
-    "policy-report.md",
-    "manual-candidates.json",
-    "manual-repair-queue.json",
-    "tokmd-packets.json",
-    "usefulness-telemetry.json",
-    "lsp.json",
-    "repair-queue.json",
+#[derive(Clone, Copy)]
+struct ArtifactIdentity {
+    path: &'static str,
+    kind: &'static str,
+    format: &'static str,
+    schema_version: Option<&'static str>,
+}
+
+const FIRST_PR_ARTIFACT_IDENTITIES: [ArtifactIdentity; 18] = [
+    ArtifactIdentity {
+        path: "review-kit.json",
+        kind: "review_kit_manifest",
+        format: "json",
+        schema_version: Some("0.1"),
+    },
+    ArtifactIdentity {
+        path: "unsafe-review-gate.json",
+        kind: "gate_manifest",
+        format: "json",
+        schema_version: Some("unsafe-review-gate/v1"),
+    },
+    ArtifactIdentity {
+        path: "cards.json",
+        kind: "review_cards",
+        format: "json",
+        schema_version: Some("0.2"),
+    },
+    ArtifactIdentity {
+        path: "pr-summary.md",
+        kind: "reviewer_summary",
+        format: "markdown",
+        schema_version: None,
+    },
+    ArtifactIdentity {
+        path: "github-summary.md",
+        kind: "github_summary",
+        format: "markdown",
+        schema_version: None,
+    },
+    ArtifactIdentity {
+        path: "cards.sarif",
+        kind: "sarif",
+        format: "sarif",
+        schema_version: Some("2.1.0"),
+    },
+    ArtifactIdentity {
+        path: "comment-plan.json",
+        kind: "comment_plan",
+        format: "json",
+        schema_version: Some("0.1"),
+    },
+    ArtifactIdentity {
+        path: "witness-plan.md",
+        kind: "witness_plan",
+        format: "markdown",
+        schema_version: None,
+    },
+    ArtifactIdentity {
+        path: "receipt-audit.md",
+        kind: "receipt_audit",
+        format: "markdown",
+        schema_version: None,
+    },
+    ArtifactIdentity {
+        path: "receipt-audit.json",
+        kind: "receipt_audit",
+        format: "json",
+        schema_version: Some("0.1"),
+    },
+    ArtifactIdentity {
+        path: "policy-report.json",
+        kind: "policy_report_json",
+        format: "json",
+        schema_version: Some("0.1"),
+    },
+    ArtifactIdentity {
+        path: "policy-report.md",
+        kind: "policy_report_markdown",
+        format: "markdown",
+        schema_version: None,
+    },
+    ArtifactIdentity {
+        path: "manual-candidates.json",
+        kind: "manual_candidates",
+        format: "json",
+        schema_version: Some("manual-candidates/v1"),
+    },
+    ArtifactIdentity {
+        path: "manual-repair-queue.json",
+        kind: "manual_repair_queue",
+        format: "json",
+        schema_version: Some("manual-repair-queue/v1"),
+    },
+    ArtifactIdentity {
+        path: "tokmd-packets.json",
+        kind: "tokmd_packets",
+        format: "json",
+        schema_version: Some("tokmd-packets/v1"),
+    },
+    ArtifactIdentity {
+        path: "usefulness-telemetry.json",
+        kind: "usefulness_telemetry",
+        format: "json",
+        schema_version: Some("usefulness-telemetry/v1"),
+    },
+    ArtifactIdentity {
+        path: "lsp.json",
+        kind: "saved_lsp",
+        format: "json",
+        schema_version: Some("0.2"),
+    },
+    ArtifactIdentity {
+        path: "repair-queue.json",
+        kind: "repair_queue",
+        format: "json",
+        schema_version: Some("0.1"),
+    },
 ];
+
+const MINIMUM_FIRST_PR_PRODUCER_VERSION: (u64, u64, u64) = (0, 3, 8);
 const REPAIR_QUEUE_TRUST_BOUNDARY_LIMITS: [&str; 7] = [
     "not an automatic repair queue",
     "does not run agents",
@@ -317,6 +436,7 @@ pub(crate) fn check_advisory_artifacts(dir: &Path) -> Result<(), String> {
 }
 
 pub(crate) fn check_first_pr_artifacts(dir: &Path) -> Result<(), String> {
+    check_review_kit_artifact_identities(dir)?;
     let summary = check_advisory_artifact_set(dir)?;
     require_expected_value(
         &summary.scope,
@@ -334,6 +454,8 @@ pub(crate) fn check_first_pr_artifacts(dir: &Path) -> Result<(), String> {
     check_receipt_audit_artifact(dir)?;
     check_receipt_audit_json_artifact(dir)?;
     check_policy_report_artifacts(dir, &summary)?;
+    check_gate_manifest_artifact(dir, &summary)?;
+    check_usefulness_telemetry_artifact(dir, &summary, &summary.repair_queue_projections)?;
     let manual_repair_queue = check_manual_repair_queue_artifact(dir, &manual_candidates)?;
     check_tokmd_packets_artifact(dir, &manual_candidates, &manual_repair_queue)?;
     check_manual_candidate_front_door_artifacts(dir, &manual_candidates)?;
@@ -1141,6 +1263,398 @@ fn check_policy_report_artifacts(
     Ok(())
 }
 
+fn check_gate_manifest_artifact(
+    dir: &Path,
+    summary: &AdvisoryArtifactSummary,
+) -> Result<(), String> {
+    let path = dir.join("unsafe-review-gate.json");
+    let manifest = super::parse_json_file(&path)?;
+    super::require_json_str(
+        &manifest,
+        "schema_version",
+        "unsafe-review-gate/v1",
+        "unsafe-review-gate.json",
+    )?;
+    super::require_json_str(
+        &manifest,
+        "dialect",
+        "unsafe-review",
+        "unsafe-review-gate.json",
+    )?;
+    super::require_json_str(&manifest, "status", "advisory", "unsafe-review-gate.json")?;
+    super::require_json_str(
+        &manifest,
+        "tool",
+        "unsafe-review",
+        "unsafe-review-gate.json",
+    )?;
+    super::require_non_empty_json_str(&manifest, "tool_version", "unsafe-review-gate.json")?;
+    let boundary =
+        super::require_non_empty_json_str(&manifest, "trust_boundary", "unsafe-review-gate.json")?;
+    if boundary != GATE_MANIFEST_TRUST_BOUNDARY {
+        return Err(format!(
+            "unsafe-review-gate.json trust_boundary must be `{GATE_MANIFEST_TRUST_BOUNDARY}`; got `{boundary}`"
+        ));
+    }
+    for volatile in ["generated_at", "wall_seconds"] {
+        if manifest.get(volatile).is_some() {
+            return Err(format!(
+                "unsafe-review-gate.json must not contain volatile `{volatile}`"
+            ));
+        }
+    }
+
+    require_gate_movement_count(
+        &manifest,
+        "new_gaps",
+        summary.movement.new_gaps,
+        "cards.json summary.new_gaps",
+    )?;
+    require_gate_movement_count(
+        &manifest,
+        "worsened_gaps",
+        summary.movement.worsened_gaps,
+        "cards.json summary.worsened_gaps",
+    )?;
+    require_gate_movement_count(
+        &manifest,
+        "improved_gaps",
+        summary.movement.improved_gaps,
+        "cards.json summary.improved_gaps",
+    )?;
+    require_gate_movement_count(
+        &manifest,
+        "resolved_gaps",
+        summary.movement.resolved_gaps,
+        "cards.json summary.resolved_gaps",
+    )?;
+    require_gate_movement_count(
+        &manifest,
+        "inherited_gaps",
+        summary.movement.inherited_gaps,
+        "cards.json summary.inherited_gaps",
+    )?;
+
+    let artifacts = manifest
+        .get("artifacts")
+        .ok_or_else(|| "unsafe-review-gate.json is missing artifacts".to_string())?;
+    if !artifacts.is_object() {
+        return Err("unsafe-review-gate.json artifacts must be an object".to_string());
+    }
+    for (key, expected) in [
+        ("cards", "cards.json"),
+        ("comment_plan", "comment-plan.json"),
+        ("repair_queue", "repair-queue.json"),
+        ("receipt_audit", "receipt-audit.json"),
+        ("review_kit", "review-kit.json"),
+        ("pr_summary", "pr-summary.md"),
+        ("sarif", "cards.sarif"),
+        ("lsp", "lsp.json"),
+        ("policy_report", "policy-report.json"),
+        ("usefulness_telemetry", "usefulness-telemetry.json"),
+    ] {
+        require_gate_artifact_pointer(artifacts, key, expected)?;
+    }
+
+    Ok(())
+}
+
+fn require_gate_movement_count(
+    manifest: &serde_json::Value,
+    field: &str,
+    expected: usize,
+    source: &str,
+) -> Result<(), String> {
+    let actual = super::json_usize_at(
+        manifest,
+        &format!("/summary/{field}"),
+        "unsafe-review-gate.json",
+    )?;
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(format!(
+            "unsafe-review-gate.json summary.{field} must project {source} `{expected}`; got `{actual}`"
+        ))
+    }
+}
+
+fn require_gate_artifact_pointer(
+    artifacts: &serde_json::Value,
+    key: &str,
+    expected: &str,
+) -> Result<(), String> {
+    let actual =
+        super::require_non_empty_json_str(artifacts, key, "unsafe-review-gate.json artifacts")?;
+    require_expected_value(
+        actual,
+        expected,
+        &format!("unsafe-review-gate.json artifacts.{key}"),
+    )
+}
+
+fn check_usefulness_telemetry_artifact(
+    dir: &Path,
+    summary: &AdvisoryArtifactSummary,
+    repair_queue_projections: &BTreeMap<String, RepairQueueProjection>,
+) -> Result<(), String> {
+    let path = dir.join("usefulness-telemetry.json");
+    let telemetry = super::parse_json_file(&path)?;
+    super::require_json_str(
+        &telemetry,
+        "schema_version",
+        "usefulness-telemetry/v1",
+        "usefulness-telemetry.json",
+    )?;
+    let boundary = super::require_non_empty_json_str(
+        &telemetry,
+        "trust_boundary",
+        "usefulness-telemetry.json",
+    )?;
+    if !super::text_contains_ignore_ascii_case(boundary, "not calibrated") {
+        return Err(
+            "usefulness-telemetry.json trust_boundary must include `not calibrated`".to_string(),
+        );
+    }
+
+    for (field, expected, source) in [
+        (
+            "total_cards",
+            summary.card_count,
+            "cards.json summary.cards",
+        ),
+        (
+            "actionable_cards",
+            summary.open_actionable_gaps,
+            "cards.json summary.open_actionable_gaps",
+        ),
+        (
+            "new_cards",
+            summary.movement.new_gaps,
+            "cards.json summary.new_gaps",
+        ),
+        (
+            "worsened_cards",
+            summary.movement.worsened_gaps,
+            "cards.json summary.worsened_gaps",
+        ),
+        (
+            "improved_cards",
+            summary.movement.improved_gaps,
+            "cards.json summary.improved_gaps",
+        ),
+        (
+            "resolved_cards",
+            summary.movement.resolved_gaps,
+            "cards.json summary.resolved_gaps",
+        ),
+        (
+            "inherited_cards",
+            summary.movement.inherited_gaps,
+            "cards.json summary.inherited_gaps",
+        ),
+    ] {
+        require_usefulness_card_inventory_count(&telemetry, field, expected, source)?;
+    }
+
+    let comment_plan = super::parse_json_file(&dir.join("comment-plan.json"))?;
+    for (field, pointer, source) in [
+        (
+            "selected_count",
+            "/summary/selected_count",
+            "comment-plan.json summary.selected_count",
+        ),
+        (
+            "not_selected_count",
+            "/summary/not_selected_count",
+            "comment-plan.json summary.not_selected_count",
+        ),
+    ] {
+        let expected = super::json_usize_at(&comment_plan, pointer, "comment-plan.json")?;
+        require_usefulness_comment_selection_count(&telemetry, field, expected, source)?;
+    }
+    let not_selected_histograms = usefulness_not_selected_histograms(&comment_plan)?;
+    require_usefulness_histogram(
+        &telemetry,
+        "/comment_selection/not_selected_reason_histogram",
+        "usefulness-telemetry.json comment_selection.not_selected_reason_histogram",
+        &not_selected_histograms.reason,
+        "comment-plan.json not_selected[].reason_code",
+    )?;
+    require_usefulness_histogram(
+        &telemetry,
+        "/comment_selection/not_selected_class_histogram",
+        "usefulness-telemetry.json comment_selection.not_selected_class_histogram",
+        &not_selected_histograms.class,
+        "comment-plan.json not_selected[].reason_code/class",
+    )?;
+
+    let readiness_counts = usefulness_readiness_counts(repair_queue_projections)?;
+    for (field, expected) in readiness_counts {
+        require_usefulness_agent_readiness_count(
+            &telemetry,
+            field,
+            expected,
+            "repair-queue.json agent_readiness",
+        )?;
+    }
+
+    Ok(())
+}
+
+fn require_usefulness_card_inventory_count(
+    telemetry: &serde_json::Value,
+    field: &str,
+    expected: usize,
+    source: &str,
+) -> Result<(), String> {
+    require_usefulness_count(
+        telemetry,
+        &format!("/card_inventory/{field}"),
+        &format!("usefulness-telemetry.json card_inventory.{field}"),
+        expected,
+        source,
+    )
+}
+
+fn require_usefulness_comment_selection_count(
+    telemetry: &serde_json::Value,
+    field: &str,
+    expected: usize,
+    source: &str,
+) -> Result<(), String> {
+    require_usefulness_count(
+        telemetry,
+        &format!("/comment_selection/{field}"),
+        &format!("usefulness-telemetry.json comment_selection.{field}"),
+        expected,
+        source,
+    )
+}
+
+fn require_usefulness_agent_readiness_count(
+    telemetry: &serde_json::Value,
+    field: &str,
+    expected: usize,
+    source: &str,
+) -> Result<(), String> {
+    require_usefulness_count(
+        telemetry,
+        &format!("/agent_readiness/{field}"),
+        &format!("usefulness-telemetry.json agent_readiness.{field}"),
+        expected,
+        source,
+    )
+}
+
+fn require_usefulness_count(
+    telemetry: &serde_json::Value,
+    pointer: &str,
+    context: &str,
+    expected: usize,
+    source: &str,
+) -> Result<(), String> {
+    let actual = super::json_usize_at(telemetry, pointer, "usefulness-telemetry.json")?;
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(format!(
+            "{context} must project {source} `{expected}`; got `{actual}`"
+        ))
+    }
+}
+
+struct UsefulnessNotSelectedHistograms {
+    reason: BTreeMap<String, usize>,
+    class: BTreeMap<String, usize>,
+}
+
+fn usefulness_not_selected_histograms(
+    comment_plan: &serde_json::Value,
+) -> Result<UsefulnessNotSelectedHistograms, String> {
+    let mut reason = BTreeMap::<String, usize>::new();
+    let mut class = BTreeMap::<String, usize>::new();
+    let Some(not_selected) = comment_plan.get("not_selected") else {
+        return Ok(UsefulnessNotSelectedHistograms { reason, class });
+    };
+    let Some(not_selected) = not_selected.as_array() else {
+        return Err("comment-plan.json not_selected must be an array".to_string());
+    };
+    for entry in not_selected {
+        let reason_code = super::require_non_empty_json_str(
+            entry,
+            "reason_code",
+            "comment-plan.json not_selected",
+        )?;
+        let class_name =
+            super::require_non_empty_json_str(entry, "class", "comment-plan.json not_selected")?;
+        *reason.entry(reason_code.to_string()).or_insert(0) += 1;
+        *class
+            .entry(format!("{reason_code}/{class_name}"))
+            .or_insert(0) += 1;
+    }
+    Ok(UsefulnessNotSelectedHistograms { reason, class })
+}
+
+fn require_usefulness_histogram(
+    telemetry: &serde_json::Value,
+    pointer: &str,
+    context: &str,
+    expected: &BTreeMap<String, usize>,
+    source: &str,
+) -> Result<(), String> {
+    let value = telemetry
+        .pointer(pointer)
+        .ok_or_else(|| format!("{context} is missing"))?;
+    let Some(object) = value.as_object() else {
+        return Err(format!("{context} must be an object"));
+    };
+    let mut actual = BTreeMap::<String, usize>::new();
+    for (key, value) in object {
+        let Some(count) = value.as_u64() else {
+            return Err(format!("{context}.{key} must be an integer count"));
+        };
+        let count = usize::try_from(count)
+            .map_err(|err| format!("{context}.{key} count is out of range: {err}"))?;
+        actual.insert(key.clone(), count);
+    }
+    if &actual == expected {
+        Ok(())
+    } else {
+        Err(format!(
+            "{context} must project {source} `{expected:?}`; got `{actual:?}`"
+        ))
+    }
+}
+
+fn usefulness_readiness_counts(
+    repair_queue_projections: &BTreeMap<String, RepairQueueProjection>,
+) -> Result<BTreeMap<&'static str, usize>, String> {
+    let mut counts = BTreeMap::from([
+        ("ready", 0usize),
+        ("requires_witness_receipt", 0usize),
+        ("needs_human", 0usize),
+        ("unsupported", 0usize),
+    ]);
+    for projection in repair_queue_projections.values() {
+        let field = match projection.readiness_state.as_str() {
+            "ready_for_agent" => "ready",
+            "requires_witness_receipt" => "requires_witness_receipt",
+            "requires_human_review" => "needs_human",
+            "unsupported" => "unsupported",
+            other => {
+                return Err(format!(
+                    "repair-queue.json agent_readiness.state `{other}` cannot be projected into usefulness-telemetry.json"
+                ));
+            }
+        };
+        if let Some(count) = counts.get_mut(field) {
+            *count += 1;
+        }
+    }
+    Ok(counts)
+}
+
 fn check_manual_candidates_artifact(dir: &Path) -> Result<ManualCandidateIndexProjection, String> {
     let path = dir.join("manual-candidates.json");
     let value = super::parse_json_file(&path)?;
@@ -1769,6 +2283,7 @@ fn check_tokmd_packets_artifact(
     let value = super::parse_json_file(&path)?;
     let comment_plan = super::parse_json_file(&dir.join("comment-plan.json"))?;
     let comment_plan_projection = tokmd_comment_plan_projection(&comment_plan)?;
+    super::require_json_str(&value, "schema", "tokmd.packets/v1", "tokmd-packets.json")?;
     super::require_json_str(
         &value,
         "schema_version",
@@ -3643,6 +4158,79 @@ fn require_projected_optional_string_array(
     Ok(())
 }
 
+fn check_review_kit_artifact_identities(dir: &Path) -> Result<(), String> {
+    let review_kit = super::parse_json_file(&dir.join("review-kit.json"))?;
+    require_supported_review_kit_tool_version(&review_kit)?;
+    let Some(artifacts) = review_kit.get("artifacts") else {
+        return Err(artifact_identity_error(
+            "review-kit.json",
+            "artifacts",
+            "array containing the exact 18 first-pr artifact identities",
+            "missing",
+        ));
+    };
+    let Some(artifacts) = artifacts.as_array() else {
+        return Err(artifact_identity_error(
+            "review-kit.json",
+            "artifacts",
+            "array containing the exact 18 first-pr artifact identities",
+            &json_identity_actual(artifacts),
+        ));
+    };
+    let mut seen = BTreeSet::new();
+    for entry in artifacts {
+        let artifact_path = require_artifact_identity_string(
+            entry,
+            "review-kit.json artifacts[]",
+            "path",
+            "known first-pr artifact path",
+        )?;
+        check_review_kit_artifact_path(artifact_path)?;
+        let identity = first_pr_artifact_identity(artifact_path).ok_or_else(|| {
+            artifact_identity_error(
+                artifact_path,
+                "path",
+                "known first-pr artifact path",
+                artifact_path,
+            )
+        })?;
+        if !seen.insert(artifact_path.to_string()) {
+            return Err(artifact_identity_error(
+                artifact_path,
+                "path",
+                "unique first-pr artifact path",
+                artifact_path,
+            ));
+        }
+        if !dir.join(artifact_path).is_file() {
+            return Err(artifact_identity_error(
+                artifact_path,
+                "file",
+                "regular file",
+                "missing",
+            ));
+        }
+        require_artifact_identity_value(entry, identity, "kind", identity.kind)?;
+        require_artifact_identity_value(entry, identity, "format", identity.format)?;
+        check_review_kit_artifact_schema_version(entry, identity)?;
+        check_artifact_payload_schema_version(dir, identity)?;
+    }
+
+    let expected = FIRST_PR_ARTIFACT_IDENTITIES
+        .iter()
+        .map(|artifact| artifact.path.to_string())
+        .collect::<BTreeSet<_>>();
+    if seen != expected {
+        return Err(artifact_identity_error(
+            "review-kit.json",
+            "artifacts",
+            "exact 18 first-pr artifact paths",
+            &format!("{:?}", seen),
+        ));
+    }
+    Ok(())
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "verifier mirrors the review-kit.json manifest surface; a parameter struct would only restate the artifact schema"
@@ -3675,7 +4263,6 @@ fn check_review_kit_manifest(
     super::require_json_str(&review_kit, "source", "first_pr", "review-kit.json")?;
     super::require_json_str(&review_kit, "policy", "advisory", "review-kit.json")?;
     super::require_json_str(&review_kit, "scope", scope, "review-kit.json")?;
-    super::require_non_empty_json_str(&review_kit, "tool_version", "review-kit.json")?;
     require_review_kit_summary_count(
         &review_kit,
         "changed_files",
@@ -3761,45 +4348,6 @@ fn check_review_kit_manifest(
         manual_repair_queue,
     )?;
 
-    let artifacts = super::json_array_at(&review_kit, "/artifacts", "review-kit.json")?;
-    let mut seen = BTreeSet::new();
-    for entry in artifacts {
-        let artifact_path =
-            super::require_non_empty_json_str(entry, "path", "review-kit.json artifact")?;
-        check_review_kit_artifact_path(artifact_path)?;
-        if !seen.insert(artifact_path.to_string()) {
-            return Err(format!(
-                "review-kit.json repeats artifact path `{artifact_path}`"
-            ));
-        }
-        if !dir.join(artifact_path).is_file() {
-            return Err(format!(
-                "review-kit.json lists missing artifact `{artifact_path}`"
-            ));
-        }
-        require_expected_value(
-            super::require_non_empty_json_str(entry, "kind", "review-kit.json artifact")?,
-            expected_review_kit_artifact_kind(artifact_path),
-            "review-kit.json artifact kind",
-        )?;
-        require_expected_value(
-            super::require_non_empty_json_str(entry, "format", "review-kit.json artifact")?,
-            expected_review_kit_artifact_format(artifact_path),
-            "review-kit.json artifact format",
-        )?;
-        check_review_kit_artifact_schema_version(entry, artifact_path)?;
-    }
-
-    let expected = FIRST_PR_BUNDLE_ARTIFACTS
-        .iter()
-        .map(|artifact| artifact.to_string())
-        .collect::<BTreeSet<_>>();
-    if seen != expected {
-        return Err(format!(
-            "review-kit.json artifact set must be {:?}; got {:?}",
-            expected, seen
-        ));
-    }
     Ok(())
 }
 
@@ -5037,8 +5585,11 @@ fn check_review_kit_top_card_handoff(
 fn check_review_kit_artifact_path(path: &str) -> Result<(), String> {
     let artifact = Path::new(path);
     if artifact.is_absolute() {
-        return Err(format!(
-            "review-kit.json artifact path `{path}` must be relative"
+        return Err(artifact_identity_error(
+            path,
+            "path",
+            "relative bundle-local path",
+            path,
         ));
     }
     if artifact.components().any(|component| {
@@ -5047,102 +5598,228 @@ fn check_review_kit_artifact_path(path: &str) -> Result<(), String> {
             Component::ParentDir | Component::RootDir | Component::Prefix(_)
         )
     }) {
-        return Err(format!(
-            "review-kit.json artifact path `{path}` must not escape the artifact directory"
+        return Err(artifact_identity_error(
+            path,
+            "path",
+            "relative bundle-local path without escape components",
+            path,
         ));
     }
     Ok(())
 }
 
-fn expected_review_kit_artifact_kind(path: &str) -> &'static str {
-    match path {
-        "review-kit.json" => "review_kit_manifest",
-        "unsafe-review-gate.json" => "gate_manifest",
-        "cards.json" => "review_cards",
-        "pr-summary.md" => "reviewer_summary",
-        "github-summary.md" => "github_summary",
-        "cards.sarif" => "sarif",
-        "comment-plan.json" => "comment_plan",
-        "witness-plan.md" => "witness_plan",
-        "receipt-audit.md" => "receipt_audit",
-        "receipt-audit.json" => "receipt_audit",
-        "policy-report.json" => "policy_report_json",
-        "policy-report.md" => "policy_report_markdown",
-        "manual-candidates.json" => "manual_candidates",
-        "manual-repair-queue.json" => "manual_repair_queue",
-        "tokmd-packets.json" => "tokmd_packets",
-        "lsp.json" => "saved_lsp",
-        "repair-queue.json" => "repair_queue",
-        "usefulness-telemetry.json" => "usefulness_telemetry",
-        _ => "unknown",
-    }
+fn first_pr_artifact_identity(path: &str) -> Option<&'static ArtifactIdentity> {
+    FIRST_PR_ARTIFACT_IDENTITIES
+        .iter()
+        .find(|identity| identity.path == path)
 }
 
-fn expected_review_kit_artifact_format(path: &str) -> &'static str {
-    match path {
-        "review-kit.json"
-        | "unsafe-review-gate.json"
-        | "cards.json"
-        | "comment-plan.json"
-        | "lsp.json"
-        | "repair-queue.json"
-        | "manual-candidates.json"
-        | "manual-repair-queue.json"
-        | "tokmd-packets.json"
-        | "policy-report.json"
-        | "receipt-audit.json"
-        | "usefulness-telemetry.json" => "json",
-        "pr-summary.md" | "github-summary.md" | "witness-plan.md" | "receipt-audit.md"
-        | "policy-report.md" => "markdown",
-        "cards.sarif" => "sarif",
-        _ => "unknown",
+fn require_artifact_identity_string<'a>(
+    value: &'a serde_json::Value,
+    artifact: &str,
+    field: &str,
+    expected: &str,
+) -> Result<&'a str, String> {
+    let Some(actual) = value.get(field) else {
+        return Err(artifact_identity_error(
+            artifact, field, expected, "missing",
+        ));
+    };
+    let Some(actual) = actual.as_str() else {
+        return Err(artifact_identity_error(
+            artifact,
+            field,
+            expected,
+            &json_identity_actual(actual),
+        ));
+    };
+    if actual.trim().is_empty() {
+        return Err(artifact_identity_error(artifact, field, expected, "empty"));
+    }
+    Ok(actual)
+}
+
+fn require_artifact_identity_value(
+    entry: &serde_json::Value,
+    identity: &ArtifactIdentity,
+    field: &str,
+    expected: &str,
+) -> Result<(), String> {
+    let actual = require_artifact_identity_string(entry, identity.path, field, expected)?;
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(artifact_identity_error(
+            identity.path,
+            field,
+            expected,
+            actual,
+        ))
     }
 }
 
 fn check_review_kit_artifact_schema_version(
     entry: &serde_json::Value,
-    path: &str,
+    identity: &ArtifactIdentity,
 ) -> Result<(), String> {
-    let Some(schema_version) = entry.get("schema_version") else {
-        return Err(format!(
-            "review-kit.json artifact `{path}` is missing schema_version"
+    match identity.schema_version {
+        Some(expected) => {
+            require_artifact_identity_value(entry, identity, "schema_version", expected)
+        }
+        None => match entry.get("schema_version") {
+            Some(serde_json::Value::Null) => Ok(()),
+            Some(actual) => Err(artifact_identity_error(
+                identity.path,
+                "schema_version",
+                "null",
+                &json_identity_actual(actual),
+            )),
+            None => Err(artifact_identity_error(
+                identity.path,
+                "schema_version",
+                "null",
+                "missing",
+            )),
+        },
+    }
+}
+
+fn check_artifact_payload_schema_version(
+    dir: &Path,
+    identity: &ArtifactIdentity,
+) -> Result<(), String> {
+    let Some(expected) = identity.schema_version else {
+        return Ok(());
+    };
+    let payload = super::parse_json_file(&dir.join(identity.path))?;
+    let field = if identity.format == "sarif" {
+        "version"
+    } else {
+        "schema_version"
+    };
+    let Some(actual) = payload.get(field) else {
+        return Err(artifact_identity_error(
+            identity.path,
+            field,
+            expected,
+            "missing",
         ));
     };
-    let expected = match path {
-        // cards.json was bumped to 0.2 when provenance metadata was added.
-        "cards.json" => Some("0.2"),
-        "review-kit.json" | "comment-plan.json" | "lsp.json" | "repair-queue.json"
-        | "policy-report.json" | "receipt-audit.json" => Some("0.1"),
-        "unsafe-review-gate.json" => Some("unsafe-review-gate/v1"),
-        "manual-candidates.json" => Some("manual-candidates/v1"),
-        "manual-repair-queue.json" => Some("manual-repair-queue/v1"),
-        "tokmd-packets.json" => Some("tokmd-packets/v1"),
-        "usefulness-telemetry.json" => Some("usefulness-telemetry/v1"),
-        "cards.sarif" => Some("2.1.0"),
-        "pr-summary.md" | "github-summary.md" | "witness-plan.md" | "receipt-audit.md"
-        | "policy-report.md" => None,
-        _ => {
-            return Err(format!("review-kit.json artifact `{path}` is unknown"));
-        }
+    let Some(actual) = actual.as_str() else {
+        return Err(artifact_identity_error(
+            identity.path,
+            field,
+            expected,
+            &json_identity_actual(actual),
+        ));
     };
-    match expected {
-        Some(expected) => {
-            let Some(actual) = schema_version.as_str() else {
-                return Err(format!(
-                    "review-kit.json artifact `{path}` schema_version must be `{expected}`"
-                ));
-            };
-            require_expected_value(
-                actual,
-                expected,
-                &format!("review-kit.json artifact `{path}` schema_version"),
-            )
-        }
-        None if schema_version.is_null() => Ok(()),
-        None => Err(format!(
-            "review-kit.json artifact `{path}` schema_version must be null for unversioned markdown"
-        )),
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(artifact_identity_error(
+            identity.path,
+            field,
+            expected,
+            actual,
+        ))
     }
+}
+
+fn require_supported_review_kit_tool_version(review_kit: &serde_json::Value) -> Result<(), String> {
+    let expected = ">=0.3.8 semantic version";
+    let actual =
+        require_artifact_identity_string(review_kit, "review-kit.json", "tool_version", expected)?;
+    let Some(version) = parse_semver_core(actual) else {
+        return Err(artifact_identity_error(
+            "review-kit.json",
+            "tool_version",
+            expected,
+            actual,
+        ));
+    };
+    let core = (version.0, version.1, version.2);
+    if core > MINIMUM_FIRST_PR_PRODUCER_VERSION
+        || (core == MINIMUM_FIRST_PR_PRODUCER_VERSION && !version.3)
+    {
+        Ok(())
+    } else {
+        Err(artifact_identity_error(
+            "review-kit.json",
+            "tool_version",
+            expected,
+            actual,
+        ))
+    }
+}
+
+fn parse_semver_core(value: &str) -> Option<(u64, u64, u64, bool)> {
+    let (core_and_prerelease, build) = value
+        .split_once('+')
+        .map_or((value, None), |(core, build)| (core, Some(build)));
+    if build.is_some_and(|build| !valid_semver_identifiers(build, false))
+        || core_and_prerelease.contains('+')
+    {
+        return None;
+    }
+    let (core, prerelease) = core_and_prerelease
+        .split_once('-')
+        .map_or((core_and_prerelease, None), |(core, prerelease)| {
+            (core, Some(prerelease))
+        });
+    if prerelease.is_some_and(|prerelease| !valid_semver_identifiers(prerelease, true)) {
+        return None;
+    }
+    let mut parts = core.split('.');
+    let major = parse_semver_numeric(parts.next()?)?;
+    let minor = parse_semver_numeric(parts.next()?)?;
+    let patch = parse_semver_numeric(parts.next()?)?;
+    if parts.next().is_some() {
+        None
+    } else {
+        Some((major, minor, patch, prerelease.is_some()))
+    }
+}
+
+fn parse_semver_numeric(value: &str) -> Option<u64> {
+    if value.is_empty()
+        || !value.bytes().all(|byte| byte.is_ascii_digit())
+        || (value.len() > 1 && value.starts_with('0'))
+    {
+        None
+    } else {
+        value.parse().ok()
+    }
+}
+
+fn valid_semver_identifiers(value: &str, reject_numeric_leading_zero: bool) -> bool {
+    !value.is_empty()
+        && value.split('.').all(|identifier| {
+            !identifier.is_empty()
+                && identifier
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+                && !(reject_numeric_leading_zero
+                    && identifier.len() > 1
+                    && identifier.starts_with('0')
+                    && identifier.bytes().all(|byte| byte.is_ascii_digit()))
+        })
+}
+
+fn json_identity_actual(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::Null => "null".to_string(),
+        serde_json::Value::Bool(_) => "boolean".to_string(),
+        serde_json::Value::Number(_) => "number".to_string(),
+        serde_json::Value::String(value) => value.clone(),
+        serde_json::Value::Array(_) => "array".to_string(),
+        serde_json::Value::Object(_) => "object".to_string(),
+    }
+}
+
+fn artifact_identity_error(artifact: &str, field: &str, expected: &str, actual: &str) -> String {
+    format!(
+        "artifact identity mismatch: artifact=`{artifact}` field=`{field}` expected=`{expected}` actual=`{actual}`"
+    )
 }
 
 fn require_text_mentions_all_card_ids(
@@ -5211,7 +5888,6 @@ fn require_witness_plan_headings_known(
     path: &Path,
     card_ids: &BTreeSet<String>,
 ) -> Result<(), String> {
-    let mut seen = BTreeSet::new();
     for line in text.lines() {
         let trimmed = line.trim();
         let Some(rest) = trimmed.strip_prefix("#### `") else {
@@ -5232,12 +5908,6 @@ fn require_witness_plan_headings_known(
         if !card_ids.contains(card_id) {
             return Err(format!(
                 "{} witness-plan route heading references unknown card id `{card_id}`",
-                path.display()
-            ));
-        }
-        if !seen.insert(card_id.to_string()) {
-            return Err(format!(
-                "{} witness-plan route heading duplicates ReviewCard id `{card_id}`",
                 path.display()
             ));
         }
@@ -5745,6 +6415,7 @@ fn check_advisory_artifact_set(dir: &Path) -> Result<AdvisoryArtifactSummary, St
         card_order: manifest.card_order,
         card_projections: manifest.card_projections,
         repair_queue_projections,
+        movement: manifest.movement,
         scope: manifest.scope,
         changed_files: manifest.changed_files,
         changed_rust_files: manifest.changed_rust_files,
@@ -5788,6 +6459,7 @@ fn check_cards_json_artifact(dir: &Path) -> Result<AdvisoryArtifactManifest, Str
     let summary_cards = super::json_usize_at(&cards, "/summary/cards", "cards.json")?;
     let open_actionable_gaps =
         super::json_usize_at(&cards, "/summary/open_actionable_gaps", "cards.json")?;
+    let movement = gate_movement_from_cards_summary(&cards)?;
     if summary_cards != card_count {
         return Err(format!(
             "cards.json summary.cards is {summary_cards}, but cards array has {card_count}"
@@ -5802,6 +6474,7 @@ fn check_cards_json_artifact(dir: &Path) -> Result<AdvisoryArtifactManifest, Str
         card_ids,
         card_order,
         card_projections,
+        movement,
         scope,
         changed_files,
         changed_rust_files,
@@ -5809,6 +6482,18 @@ fn check_cards_json_artifact(dir: &Path) -> Result<AdvisoryArtifactManifest, Str
         card_count,
         open_actionable_gaps,
         high_priority_cards,
+    })
+}
+
+fn gate_movement_from_cards_summary(
+    cards: &serde_json::Value,
+) -> Result<GateMovementProjection, String> {
+    Ok(GateMovementProjection {
+        new_gaps: super::json_usize_at(cards, "/summary/new_gaps", "cards.json")?,
+        worsened_gaps: super::json_usize_at(cards, "/summary/worsened_gaps", "cards.json")?,
+        improved_gaps: super::json_usize_at(cards, "/summary/improved_gaps", "cards.json")?,
+        resolved_gaps: super::json_usize_at(cards, "/summary/resolved_gaps", "cards.json")?,
+        inherited_gaps: super::json_usize_at(cards, "/summary/inherited_gaps", "cards.json")?,
     })
 }
 
@@ -5963,6 +6648,13 @@ fn check_sarif_result_projection<'a>(
             "cards.sarif result ruleId `{rule_id}` is not declared in tool.driver.rules"
         ));
     }
+    let review_class = review_class_from_name(&card_projection.class_name, "cards.sarif result")?;
+    let level = super::require_non_empty_json_str(result, "level", "cards.sarif result")?;
+    require_expected_value(
+        level,
+        review_class.sarif_level(),
+        "cards.sarif result level",
+    )?;
     require_projected_str(
         result
             .pointer("/properties")
@@ -6262,6 +6954,7 @@ fn check_comment_plan_artifact(
     }
     let mut not_selected_card_ids = BTreeSet::new();
     let mut changed_card_ids = comment_card_ids.clone();
+    let target_feature_repetition_omitted = target_feature_repetition_omitted_ids(card_projections);
     if let Some(not_selected) = comment_plan.get("not_selected") {
         let Some(not_selected) = not_selected.as_array() else {
             return Err("comment-plan.json not_selected must be an array".to_string());
@@ -6370,6 +7063,7 @@ fn check_comment_plan_artifact(
                     changed_line,
                     card_projections,
                     changed_card_ids: &changed_card_ids,
+                    target_feature_repetition_omitted: &target_feature_repetition_omitted,
                 },
             )?;
             require_comment_plan_repair_projection(
@@ -7246,37 +7940,30 @@ fn advisory_card_projections(
             })
             .transpose()?
             .unwrap_or_default();
-        // Read SPEC-0029 coverage block slots if present (SPEC-0032 validation).
-        let (contract_coverage, guard_coverage, test_reach_coverage, witness_receipt_coverage) =
-            if let Some(block) = card.get("coverage_block") {
-                let cc = super::require_non_empty_json_str(
-                    block,
-                    "contract_coverage",
-                    "cards.json card coverage_block",
-                )
-                .map(str::to_string)?;
-                let gc = super::require_non_empty_json_str(
-                    block,
-                    "guard_coverage",
-                    "cards.json card coverage_block",
-                )
-                .map(str::to_string)?;
-                let trc = super::require_non_empty_json_str(
-                    block,
-                    "test_reach_coverage",
-                    "cards.json card coverage_block",
-                )
-                .map(str::to_string)?;
-                let wrc = super::require_non_empty_json_str(
-                    block,
-                    "witness_receipt_coverage",
-                    "cards.json card coverage_block",
-                )
-                .map(str::to_string)?;
-                (cc, gc, trc, wrc)
-            } else {
-                (String::new(), String::new(), String::new(), String::new())
-            };
+        let coverage = card
+            .get("coverage")
+            .ok_or_else(|| "cards.json card is missing coverage".to_string())?;
+        if !coverage.is_object() {
+            return Err("cards.json card coverage must be an object".to_string());
+        }
+        let contract_coverage =
+            coverage_slot(coverage, "contract_coverage", "cards.json card coverage")?;
+        let guard_coverage = coverage_slot(coverage, "guard_coverage", "cards.json card coverage")?;
+        let test_reach_coverage =
+            coverage_slot(coverage, "test_reach_coverage", "cards.json card coverage")?;
+        let witness_receipt_coverage = coverage_slot(
+            coverage,
+            "witness_receipt_coverage",
+            "cards.json card coverage",
+        )?;
+        let manual_context = coverage_slot(coverage, "manual_context", "cards.json card coverage")?;
+        let baseline_state = coverage_slot(coverage, "baseline_state", "cards.json card coverage")?;
+        let outcome_movement =
+            coverage_slot(coverage, "outcome_movement", "cards.json card coverage")?;
+        let comment_plan_status =
+            coverage_slot(coverage, "comment_plan_status", "cards.json card coverage")?;
+        let agent_lsp_readiness =
+            coverage_slot(coverage, "agent_lsp_readiness", "cards.json card coverage")?;
         let projection = CardProjection {
             id,
             class_name,
@@ -7305,6 +7992,11 @@ fn advisory_card_projections(
             guard_coverage,
             test_reach_coverage,
             witness_receipt_coverage,
+            manual_context,
+            baseline_state,
+            outcome_movement,
+            comment_plan_status,
+            agent_lsp_readiness,
         };
         require_card_confirmation_cue_projection(
             card,
@@ -7314,6 +8006,14 @@ fn advisory_card_projections(
         projections.insert(projection.id.clone(), projection);
     }
     Ok(projections)
+}
+
+fn coverage_slot(
+    coverage: &serde_json::Value,
+    field: &str,
+    context: &str,
+) -> Result<String, String> {
+    super::require_non_empty_json_str(coverage, field, context).map(str::to_string)
 }
 
 fn require_card_confirmation_cue_projection(
@@ -7930,6 +8630,32 @@ fn require_allowed_value(actual: &str, allowed: &[&str], context: &str) -> Resul
     }
 }
 
+fn review_class_from_name(class_name: &str, context: &str) -> Result<ReviewClass, String> {
+    for review_class in [
+        ReviewClass::GuardedAndWitnessed,
+        ReviewClass::GuardedUnwitnessed,
+        ReviewClass::ContractMissing,
+        ReviewClass::GuardMissing,
+        ReviewClass::ReachableUnwitnessed,
+        ReviewClass::UnsafeUnreached,
+        ReviewClass::WitnessMismatch,
+        ReviewClass::RequiresLoom,
+        ReviewClass::RequiresSanitizer,
+        ReviewClass::RequiresKaniOrCrux,
+        ReviewClass::MiriUnsupported,
+        ReviewClass::StaticUnknown,
+        ReviewClass::BaselineKnown,
+        ReviewClass::Suppressed,
+    ] {
+        if review_class.as_str() == class_name {
+            return Ok(review_class);
+        }
+    }
+    Err(format!(
+        "{context} class `{class_name}` is not a known ReviewClass"
+    ))
+}
+
 fn should_project_planned_comment(card: &CardProjection) -> bool {
     class_is_actionable(&card.class_name)
         && comment_surfacing_disposition(card).allows_inline_comment()
@@ -8017,41 +8743,205 @@ fn expected_selection_reason(card: &CardProjection) -> String {
 /// Priority: contract_coverage → guard_coverage → test_reach_coverage →
 /// witness_receipt_coverage → fallback.
 fn expected_coverage_gap(card: &CardProjection) -> String {
-    // When coverage_block is absent (e.g. older fixture cards without the
-    // block), fall back to the class-based heuristic.
-    if !card.contract_coverage.is_empty() {
-        if card.contract_coverage != "present" {
-            return format!("contract_coverage: {}", card.contract_coverage);
-        }
-        if card.guard_coverage != "present" {
-            return format!("guard_coverage: {}", card.guard_coverage);
-        }
-        if card.test_reach_coverage != "present" {
-            return format!("test_reach_coverage: {}", card.test_reach_coverage);
-        }
-        if card.witness_receipt_coverage != "present" {
-            return format!(
-                "witness_receipt_coverage: {}",
-                card.witness_receipt_coverage
-            );
-        }
-        return "witness_receipt_coverage: missing".to_string();
+    if card.contract_coverage != "present" {
+        return format!("contract_coverage: {}", card.contract_coverage);
     }
-    // Fallback heuristic when coverage_block is absent.
-    expected_coverage_gap_from_class(&card.class_name)
-}
-
-fn expected_coverage_gap_from_class(class_name: &str) -> String {
-    match class_name {
-        "contract_missing" => "contract_coverage: missing".to_string(),
-        "guard_missing" => "guard_coverage: missing".to_string(),
-        "unsafe_unreached" => "test_reach_coverage: missing".to_string(),
-        _ => "witness_receipt_coverage: missing".to_string(),
+    if card.guard_coverage != "present" {
+        return format!("guard_coverage: {}", card.guard_coverage);
     }
+    if card.test_reach_coverage != "present" {
+        return format!("test_reach_coverage: {}", card.test_reach_coverage);
+    }
+    if card.witness_receipt_coverage != "present" {
+        return format!(
+            "witness_receipt_coverage: {}",
+            card.witness_receipt_coverage
+        );
+    }
+    "witness_receipt_coverage: missing".to_string()
 }
 
 fn expected_selection_reason_code(_card: &CardProjection) -> &'static str {
     "top_actionable_card"
+}
+
+/// Mirrors `unsafe_review_core::output::target_feature_summary::GroupKey`
+/// equivalence (issue #1894), computed from the `cards.json`-derived
+/// `CardProjection` fields available in this artifact checker. Two
+/// `target_feature` cards are equivalent only when their file, class,
+/// baseline movement, full coverage-slot state, structured set of
+/// unsatisfied obligations, and next action are all identical;
+/// architecture/feature literals in the operation expression are normalized
+/// away first (metadata, not group identity).
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct TargetFeatureGroupKey {
+    path: String,
+    class_name: String,
+    baseline_state: String,
+    contract_coverage: String,
+    guard_coverage: String,
+    test_reach_coverage: String,
+    witness_receipt_coverage: String,
+    next_action: String,
+    missing_obligations: Vec<String>,
+    shape: String,
+}
+
+fn target_feature_group_key(card: &CardProjection) -> TargetFeatureGroupKey {
+    TargetFeatureGroupKey {
+        path: card.path.clone(),
+        class_name: card.class_name.clone(),
+        baseline_state: card.baseline_state.clone(),
+        contract_coverage: card.contract_coverage.clone(),
+        guard_coverage: card.guard_coverage.clone(),
+        test_reach_coverage: card.test_reach_coverage.clone(),
+        witness_receipt_coverage: card.witness_receipt_coverage.clone(),
+        next_action: card.next_action.clone(),
+        missing_obligations: unsatisfied_obligation_keys(card),
+        shape: normalized_target_feature_shape(&card.operation),
+    }
+}
+
+/// Mirrors `target_feature_summary::unsatisfied_obligation_keys` (and thus
+/// `comment_budget_key`'s obligation derivation, minus the family prefix):
+/// sorted, deduplicated unsatisfied `obligation_evidence[].key` values,
+/// falling back to `["review"]` when every obligation is fully discharged
+/// (issue #1894 finding 2). Without this, two `target_feature` cards with
+/// different unmet obligations could collapse into one equivalence group
+/// even though the canonical family/obligation comment budget
+/// (`comment_budget_key`) keeps them distinct candidates.
+fn unsatisfied_obligation_keys(card: &CardProjection) -> Vec<String> {
+    let mut obligations: Vec<String> = card
+        .obligation_evidence
+        .iter()
+        .filter(|evidence| {
+            !evidence_axis_present(evidence, "contract")
+                || !evidence_axis_present(evidence, "discharge")
+                || !evidence_axis_present(evidence, "reach")
+                || !evidence_axis_present(evidence, "witness")
+        })
+        .filter_map(|evidence| evidence.get("key").and_then(serde_json::Value::as_str))
+        .map(str::to_string)
+        .collect();
+    obligations.sort_unstable();
+    obligations.dedup();
+    if obligations.is_empty() {
+        obligations.push("review".to_string());
+    }
+    obligations
+}
+
+/// Mirrors `target_feature_summary::normalized_shape`: replaces every quoted
+/// string literal (the architecture/feature list) with a placeholder so
+/// `enable = "avx2"` and `enable = "neon"` normalize identically.
+fn normalized_target_feature_shape(expression: &str) -> String {
+    let mut shape = String::with_capacity(expression.len());
+    let mut in_quotes = false;
+    for ch in expression.chars() {
+        if ch == '"' {
+            in_quotes = !in_quotes;
+            shape.push('"');
+            if in_quotes {
+                shape.push('*');
+            }
+            continue;
+        }
+        if in_quotes {
+            continue;
+        }
+        shape.push(ch);
+    }
+    shape.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Mirrors `selection::importance_rank`'s gap-severity component exactly,
+/// reading the same SPEC-0029 coverage-slot strings `CardProjection` already
+/// carries.
+fn projection_gap_severity_rank(card: &CardProjection) -> u8 {
+    if card.contract_coverage != "present" {
+        return 0;
+    }
+    if card.guard_coverage == "missing" {
+        return 1;
+    }
+    if card.guard_coverage == "weak" {
+        return 2;
+    }
+    if card.test_reach_coverage == "weak" {
+        return 3;
+    }
+    if card.test_reach_coverage != "present" {
+        return 4;
+    }
+    5
+}
+
+/// Mirrors `selection::importance_rank` exactly (priority, gap severity,
+/// confidence, then `(file, line)` as the deterministic tiebreak) so this
+/// checker picks the identical representative production picks among a
+/// group's eligible members (issue #1894 finding 1).
+fn projection_importance_rank(card: &CardProjection) -> (u8, u8, u8, &str, u64) {
+    let priority_rank: u8 = if card.priority == "high" { 0 } else { 1 };
+    let gap_rank = projection_gap_severity_rank(card);
+    let confidence_rank: u8 = if card.confidence == "high" { 0 } else { 1 };
+    (
+        priority_rank,
+        gap_rank,
+        confidence_rank,
+        card.path.as_str(),
+        card.line,
+    )
+}
+
+/// The set of `target_feature` card ids that are ELIGIBLE (per
+/// `should_project_planned_comment`, which mirrors `should_plan_comment`)
+/// non-representative members of an equivalence group
+/// (`target_feature_group_key` collision with 2+ eligible members),
+/// mirroring `selection::target_feature_grouped_repetition_ids` exactly
+/// (issue #1894 finding 1).
+///
+/// Grouping is applied strictly AFTER eligibility: an equivalence group can
+/// contain a mix of eligible and ineligible cards, and only the eligible
+/// subset competes for the representative slot, chosen by
+/// `projection_importance_rank` (not line/id order). Ineligible members are
+/// never included here -- they keep their own canonical non-selection
+/// reason (`outside_changed_hunk`, `human_deep_review_only`,
+/// `lower_relevance`, ...), never `grouped_repetition`. Computed once per
+/// artifact check so the O(n) grouping pass does not repeat per
+/// `not_selected` entry.
+fn target_feature_repetition_omitted_ids(
+    card_projections: &BTreeMap<String, CardProjection>,
+) -> BTreeSet<String> {
+    let mut by_key: BTreeMap<TargetFeatureGroupKey, Vec<&CardProjection>> = BTreeMap::new();
+    for card in card_projections.values() {
+        if card.operation_family != "target_feature" {
+            continue;
+        }
+        by_key
+            .entry(target_feature_group_key(card))
+            .or_default()
+            .push(card);
+    }
+
+    let mut omitted = BTreeSet::new();
+    for cards in by_key.into_values() {
+        let mut eligible: Vec<&CardProjection> = cards
+            .into_iter()
+            .filter(|card| should_project_planned_comment(card))
+            .collect();
+        if eligible.len() < 2 {
+            continue;
+        }
+        eligible.sort_by(|left, right| {
+            projection_importance_rank(left)
+                .cmp(&projection_importance_rank(right))
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        for card in eligible.into_iter().skip(1) {
+            omitted.insert(card.id.clone());
+        }
+    }
+    omitted
 }
 
 fn expected_non_selection_reason(
@@ -8061,7 +8951,11 @@ fn expected_non_selection_reason(
     changed_line: bool,
     card_projections: &BTreeMap<String, CardProjection>,
     changed_card_ids: &BTreeSet<String>,
+    target_feature_repetition_omitted: &BTreeSet<String>,
 ) -> &'static str {
+    if target_feature_repetition_omitted.contains(&card.id) {
+        return "grouped with an equivalent repetitive target_feature site; see the target-feature summary for the selected representative";
+    }
     if owner_card_covered_by_specific_operation(card, card_projections, changed_card_ids) {
         "owner-contract obligation covered by a more-specific operation card at the same region"
     } else {
@@ -8114,7 +9008,11 @@ fn expected_non_selection_reason_code(
     changed_line: bool,
     card_projections: &BTreeMap<String, CardProjection>,
     changed_card_ids: &BTreeSet<String>,
+    target_feature_repetition_omitted: &BTreeSet<String>,
 ) -> &'static str {
+    if target_feature_repetition_omitted.contains(&card.id) {
+        return "grouped_repetition";
+    }
     if owner_card_covered_by_specific_operation(card, card_projections, changed_card_ids) {
         "covered_by_specific_operation_card"
     } else {
@@ -8158,6 +9056,7 @@ struct NonSelectionReasonContext<'a> {
     changed_line: bool,
     card_projections: &'a BTreeMap<String, CardProjection>,
     changed_card_ids: &'a BTreeSet<String>,
+    target_feature_repetition_omitted: &'a BTreeSet<String>,
 }
 
 fn require_expected_non_selection_reason_pair(
@@ -8173,6 +9072,7 @@ fn require_expected_non_selection_reason_pair(
         context.changed_line,
         context.card_projections,
         context.changed_card_ids,
+        context.target_feature_repetition_omitted,
     );
     let expected_reason_code = expected_non_selection_reason_code(
         card,
@@ -8181,6 +9081,7 @@ fn require_expected_non_selection_reason_pair(
         context.changed_line,
         context.card_projections,
         context.changed_card_ids,
+        context.target_feature_repetition_omitted,
     );
     if actual_reason == expected_reason && actual_reason_code == expected_reason_code {
         return Ok(());
@@ -8443,125 +9344,142 @@ fn require_witness_plan_card_projections(
     card_projections: &BTreeMap<String, CardProjection>,
 ) -> Result<(), String> {
     for (card_id, card) in card_projections {
-        let section = witness_plan_card_section(text, card_id).ok_or_else(|| {
-            format!(
+        let sections = witness_plan_card_sections(text, card_id);
+        if sections.is_empty() {
+            return Err(format!(
                 "{} witness-plan must include a section for ReviewCard `{card_id}`",
                 path.display()
-            )
-        })?;
-        require_witness_plan_card_line(
-            section,
-            path,
-            card_id,
-            "class",
-            &format!("- Class: `{}`", card.class_name),
-        )?;
-        require_witness_plan_card_line(
-            section,
-            path,
-            card_id,
-            "proof path",
-            &format!("- Proof path: `{}`", card.proof_path),
-        )?;
-        require_witness_plan_card_line(
-            section,
-            path,
-            card_id,
-            "location",
-            &format!("- Location: {}:{}", card.path, card.line),
-        )?;
-        require_witness_plan_card_line(
-            section,
-            path,
-            card_id,
-            "operation",
-            &format!("- Operation: `{}`", card.operation),
-        )?;
-        require_witness_plan_card_line(
-            section,
-            path,
-            card_id,
-            "operation family",
-            &format!("- Operation family: `{}`", card.operation_family),
-        )?;
-        require_witness_plan_card_line(
-            section,
-            path,
-            card_id,
-            "hazards",
-            &format!("- Hazards: {}", witness_plan_hazard_summary(&card.hazards)),
-        )?;
-        for (idx, condition) in card.required_safety_conditions.iter().enumerate() {
-            let expected = witness_plan_required_condition_line(
-                condition,
-                &format!("cards.json card `{card_id}` required_safety_conditions[{idx}]"),
-            )?;
-            require_witness_plan_card_line(
-                section,
-                path,
-                card_id,
-                "required safety condition",
-                &expected,
-            )?;
+            ));
         }
-        for (idx, evidence) in card.obligation_evidence.iter().enumerate() {
-            let expected = witness_plan_obligation_evidence_line(
-                evidence,
-                &format!("cards.json card `{card_id}` obligation_evidence[{idx}]"),
-            )?;
-            require_witness_plan_card_line(
-                section,
-                path,
-                card_id,
-                "obligation evidence",
-                &expected,
-            )?;
+        for section in &sections {
+            require_witness_plan_common_card_projection(section, path, card_id, card)?;
         }
-        require_witness_plan_card_line(
-            section,
-            path,
-            card_id,
-            "next action",
-            &format!("- Next action: {}", card.next_action),
-        )?;
-        require_witness_plan_card_line(
-            section,
-            path,
-            card_id,
-            "hypothesis",
-            &format!(
-                "- Hypothesis to confirm: static `{}` ReviewCard",
-                card.class_name
-            ),
-        )?;
-        require_witness_plan_card_line(
-            section,
-            path,
-            card_id,
-            "confirmation step",
-            &expected_confirmation_step_fragment(card),
-        )?;
         for route in &card.witness_routes {
+            let route_line = format!("- Route: `{}`", route.kind);
+            let Some(route_section) = sections
+                .iter()
+                .copied()
+                .find(|section| section.contains(&route_line))
+            else {
+                return Err(format!(
+                    "{} witness-plan ReviewCard `{card_id}` witness route must include `{route_line}`",
+                    path.display()
+                ));
+            };
             require_witness_plan_card_line(
-                section,
+                route_section,
                 path,
                 card_id,
                 "witness route",
-                &format!("- Route: `{}`", route.kind),
+                &route_line,
             )?;
             require_witness_plan_card_line(
-                section,
+                route_section,
                 path,
                 card_id,
                 "witness route reason",
                 &format!("  - Reason: {}", route.reason),
             )?;
             if let Some(command) = &route.command {
-                require_witness_plan_route_command(section, path, card_id, command)?;
+                require_witness_plan_route_command(route_section, path, card_id, command)?;
             }
         }
     }
     Ok(())
+}
+
+fn require_witness_plan_common_card_projection(
+    section: &str,
+    path: &Path,
+    card_id: &str,
+    card: &CardProjection,
+) -> Result<(), String> {
+    require_witness_plan_card_line(
+        section,
+        path,
+        card_id,
+        "class",
+        &format!("- Class: `{}`", card.class_name),
+    )?;
+    require_witness_plan_card_line(
+        section,
+        path,
+        card_id,
+        "proof path",
+        &format!("- Proof path: `{}`", card.proof_path),
+    )?;
+    require_witness_plan_card_line(
+        section,
+        path,
+        card_id,
+        "location",
+        &format!("- Location: {}:{}", card.path, card.line),
+    )?;
+    require_witness_plan_card_line(
+        section,
+        path,
+        card_id,
+        "operation",
+        &format!("- Operation: `{}`", card.operation),
+    )?;
+    require_witness_plan_card_line(
+        section,
+        path,
+        card_id,
+        "operation family",
+        &format!("- Operation family: `{}`", card.operation_family),
+    )?;
+    require_witness_plan_card_line(
+        section,
+        path,
+        card_id,
+        "hazards",
+        &format!("- Hazards: {}", witness_plan_hazard_summary(&card.hazards)),
+    )?;
+    for (idx, condition) in card.required_safety_conditions.iter().enumerate() {
+        let expected = witness_plan_required_condition_line(
+            condition,
+            &format!("cards.json card `{card_id}` required_safety_conditions[{idx}]"),
+        )?;
+        require_witness_plan_card_line(
+            section,
+            path,
+            card_id,
+            "required safety condition",
+            &expected,
+        )?;
+    }
+    for (idx, evidence) in card.obligation_evidence.iter().enumerate() {
+        let expected = witness_plan_obligation_evidence_line(
+            evidence,
+            &format!("cards.json card `{card_id}` obligation_evidence[{idx}]"),
+        )?;
+        require_witness_plan_card_line(section, path, card_id, "obligation evidence", &expected)?;
+    }
+    require_witness_plan_card_line(
+        section,
+        path,
+        card_id,
+        "next action",
+        &format!("- Next action: {}", card.next_action),
+    )?;
+    require_witness_plan_card_line(
+        section,
+        path,
+        card_id,
+        "hypothesis",
+        &format!(
+            "- Hypothesis to confirm: static `{}` ReviewCard",
+            card.class_name
+        ),
+    )?;
+    require_witness_plan_card_line(
+        section,
+        path,
+        card_id,
+        "confirmation step",
+        &expected_confirmation_step_fragment(card),
+    )
 }
 
 fn expected_confirmation_step_fragment(card: &CardProjection) -> String {
@@ -8657,17 +9575,23 @@ fn witness_route_command_projection(
     Ok(Some(command.to_string()))
 }
 
-fn witness_plan_card_section<'a>(text: &'a str, card_id: &str) -> Option<&'a str> {
+fn witness_plan_card_sections<'a>(text: &'a str, card_id: &str) -> Vec<&'a str> {
     let heading = format!("#### `{card_id}`");
-    let start = text.find(&heading)?;
-    let body_start = start + heading.len();
-    let tail = &text[body_start..];
-    let end = [tail.find("\n#### `"), tail.find("\n## Trust boundary")]
-        .into_iter()
-        .flatten()
-        .min()
-        .unwrap_or(tail.len());
-    Some(&tail[..end])
+    let mut sections = Vec::new();
+    let mut offset = 0usize;
+    while let Some(relative_start) = text[offset..].find(&heading) {
+        let start = offset + relative_start;
+        let body_start = start + heading.len();
+        let tail = &text[body_start..];
+        let end = [tail.find("\n#### `"), tail.find("\n## Trust boundary")]
+            .into_iter()
+            .flatten()
+            .min()
+            .unwrap_or(tail.len());
+        sections.push(&tail[..end]);
+        offset = body_start + end;
+    }
+    sections
 }
 
 fn require_witness_plan_card_line(
@@ -8998,7 +9922,12 @@ fn check_lsp_artifact(dir: &Path, summary: &AdvisoryArtifactSummary) -> Result<(
     reject_manual_candidate_markers(&lsp, "lsp.json")?;
     let card_projections = &summary.card_projections;
     let card_ids = card_projections.keys().cloned().collect::<BTreeSet<_>>();
-    super::require_json_str(&lsp, "schema_version", "0.1", "lsp.json")?;
+    let schema_version = super::require_non_empty_json_str(&lsp, "schema_version", "lsp.json")?;
+    if schema_version != "0.2" {
+        return Err(format!(
+            "lsp.json key `schema_version` is `{schema_version}`, expected `0.2`"
+        ));
+    }
     super::require_json_str(&lsp, "tool", "unsafe-review", "lsp.json")?;
     super::require_json_str(&lsp, "mode", "read_only_projection", "lsp.json")?;
     super::require_json_str(&lsp, "policy", "advisory", "lsp.json")?;
@@ -9043,6 +9972,7 @@ fn check_lsp_artifact(dir: &Path, summary: &AdvisoryArtifactSummary) -> Result<(
             "/range/start/line",
         )?;
         require_lsp_diagnostic_card_projection(diagnostic, card_projection)?;
+        require_lsp_diagnostic_severity(diagnostic, card_projection)?;
         super::json_array_at(
             diagnostic,
             "/required_safety_conditions",
@@ -9115,51 +10045,105 @@ fn check_lsp_artifact(dir: &Path, summary: &AdvisoryArtifactSummary) -> Result<(
         }
     }
 
-    let mut code_action_commands = BTreeSet::new();
+    let analysis = lsp
+        .get("analysis")
+        .filter(|value| value.is_object())
+        .ok_or_else(|| "lsp.json is missing analysis identity".to_string())?;
+    super::require_non_empty_json_str(analysis, "analysis_id", "lsp.json analysis")?;
+    super::json_usize_at(analysis, "/generation", "lsp.json analysis")?;
+    super::require_non_empty_json_str(analysis, "tool_version", "lsp.json analysis")?;
+    super::require_json_str(analysis, "scope", &summary.scope, "lsp.json analysis")?;
+    super::require_json_str(analysis, "state", "current", "lsp.json analysis")?;
+    let mut code_action_ids = BTreeSet::new();
     for action in super::json_array_at(&lsp, "/code_actions", "lsp.json")? {
-        let action_card_id = require_known_card_id(action, "lsp.json code_action", &card_ids)?;
-        super::require_non_empty_json_str(action, "path", "lsp.json code_action")?;
-        check_lsp_range(action, "lsp.json code_action")?;
+        let action_id =
+            super::require_non_empty_json_str(action, "action_id", "lsp.json code_action")?;
+        let diagnostic = action
+            .get("diagnostic")
+            .ok_or_else(|| "lsp.json code_action is missing diagnostic".to_string())?;
+        let action_card_id =
+            require_known_card_id(diagnostic, "lsp.json code_action diagnostic", &card_ids)?;
+        super::require_non_empty_json_str(diagnostic, "path", "lsp.json code_action diagnostic")?;
+        check_lsp_range(diagnostic, "lsp.json code_action diagnostic")?;
         let title = super::require_non_empty_json_str(action, "title", "lsp.json code_action")?;
-        super::require_json_str(action, "kind", "quickfix", "lsp.json code_action")?;
-        let Some(command) = action.get("command").and_then(serde_json::Value::as_str) else {
-            return Err("lsp.json code_action is missing command".to_string());
-        };
-        if command.trim().is_empty() {
-            return Err("lsp.json code_action command must not be empty".to_string());
-        }
+        let kind = super::require_non_empty_json_str(action, "kind", "lsp.json code_action")?;
+        let command_object = action
+            .get("command")
+            .filter(|value| value.is_object())
+            .ok_or_else(|| "lsp.json code_action command must be an object".to_string())?;
+        let command = super::require_non_empty_json_str(
+            command_object,
+            "command",
+            "lsp.json code_action command",
+        )?;
+        let arguments = command_object
+            .get("arguments")
+            .filter(|value| value.is_object())
+            .ok_or_else(|| {
+                "lsp.json code_action command arguments must be an object".to_string()
+            })?;
         let Some(card_projection) = card_projections.get(action_card_id) else {
             return Err(format!(
                 "lsp.json code_action references unknown card id `{action_card_id}`"
             ));
         };
-        check_lsp_code_action_location(action, card_projection, command)?;
-        let action_key = (action_card_id.to_string(), command.to_string());
-        if !code_action_commands.insert(action_key) {
+        check_lsp_projection_location(
+            diagnostic,
+            card_projection,
+            "lsp.json code_action diagnostic",
+            "/range/start/line",
+        )?;
+        let saved_diagnostic = super::json_array_at(&lsp, "/diagnostics", "lsp.json")?
+            .iter()
+            .find(|candidate| candidate.get("card_id").and_then(serde_json::Value::as_str) == Some(action_card_id))
+            .ok_or_else(|| format!("lsp.json code_action diagnostic has no saved diagnostic for card id `{action_card_id}`"))?;
+        if diagnostic.get("path") != saved_diagnostic.get("path")
+            || diagnostic.get("range") != saved_diagnostic.get("range")
+        {
             return Err(format!(
-                "lsp.json code_actions repeat command `{command}` for card id `{action_card_id}`"
+                "lsp.json code_action diagnostic must exactly match the saved diagnostic for card id `{action_card_id}`"
+            ));
+        }
+        let action_key = (action_card_id.to_string(), action_id.to_string());
+        if !code_action_ids.insert(action_key) {
+            return Err(format!(
+                "lsp.json code_actions repeat action_id `{action_id}` for card id `{action_card_id}`"
             ));
         }
         reject_lsp_code_action_edit_fields(action, "lsp.json code_action")?;
-        let arguments = super::json_array_at(action, "/arguments", "lsp.json code_action")?;
-        require_lsp_code_action_title(action_card_id, command, title, action)?;
+        if action
+            .get("trust_boundary")
+            .and_then(serde_json::Value::as_str)
+            != Some(boundary)
+        {
+            return Err(
+                "lsp.json code_action trust_boundary must equal the top-level trust_boundary"
+                    .to_string(),
+            );
+        }
+        require_lsp_code_action_title(action_id, command, title, arguments)?;
         check_lsp_code_action_payload(
             action,
+            action_id,
             action_card_id,
             command,
+            kind,
             card_projection,
             &card_ids,
             arguments,
+            analysis,
         )?;
     }
     for card_id in &card_ids {
-        for command in [
-            "unsafe-review.copyAgentPacket",
-            "unsafe-review.explainWitnessRoute",
+        for action_id in [
+            "agent-packet",
+            "witness-route",
+            "witness-command",
+            "related-test",
         ] {
-            if !code_action_commands.contains(&(card_id.to_string(), command.to_string())) {
+            if !code_action_ids.contains(&(card_id.to_string(), action_id.to_string())) {
                 return Err(format!(
-                    "lsp.json code_actions missing command `{command}` for card id `{card_id}`"
+                    "lsp.json code_actions missing action_id `{action_id}` for card id `{card_id}`"
                 ));
             }
         }
@@ -9245,30 +10229,44 @@ fn require_lsp_status_count(
 }
 
 fn require_lsp_code_action_title(
-    action_card_id: &str,
+    action_id: &str,
     command: &str,
     title: &str,
-    action: &serde_json::Value,
+    arguments: &serde_json::Value,
 ) -> Result<(), String> {
-    let expected = match command {
-        "unsafe-review.copyAgentPacket" => {
-            format!("Copy unsafe-review packet for {action_card_id}")
-        }
-        "unsafe-review.explainWitnessRoute" => "Explain unsafe-review witness route".to_string(),
-        "unsafe-review.openRelatedTest" => {
-            let payload = action
-                .get("payload")
-                .ok_or_else(|| "lsp.json code_action is missing payload".to_string())?;
-            let name =
-                super::require_non_empty_json_str(payload, "name", "lsp.json code_action payload")?;
-            format!("Open related test {name}")
-        }
-        "unsafe-review.copyWitnessCommand" => "Copy witness command (does not run)".to_string(),
+    let expected = match action_id {
+        "agent-packet" => None,
+        "witness-route" => Some("Explain unsafe-review witness route".to_string()),
+        "witness-command" => Some("Copy witness command (does not run)".to_string()),
+        "related-test" => Some(
+            arguments
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .map_or_else(
+                    || "Open related test".to_string(),
+                    |name| format!("Open related test `{name}`"),
+                ),
+        ),
         _ => {
             return Err(format!(
-                "lsp.json code_action command `{command}` is not verifier-known"
+                "lsp.json code_action action_id `{action_id}` is not verifier-known"
             ));
         }
+    };
+    if action_id == "agent-packet" {
+        if title == "Copy bounded unsafe-review agent packet"
+            || title == "Copy bounded unsafe-review review context (human review required)"
+        {
+            return Ok(());
+        }
+        return Err(format!(
+            "lsp.json code_action `{command}` has invalid agent packet title `{title}`"
+        ));
+    }
+    let Some(expected) = expected else {
+        return Err(format!(
+            "lsp.json code_action `{command}` has no verifier-known title contract"
+        ));
     };
     if title == expected {
         Ok(())
@@ -9338,41 +10336,6 @@ fn check_lsp_projection_location(
     Ok(())
 }
 
-fn check_lsp_code_action_location(
-    action: &serde_json::Value,
-    card: &CardProjection,
-    command: &str,
-) -> Result<(), String> {
-    if command == "unsafe-review.openRelatedTest" {
-        let payload = action
-            .get("payload")
-            .ok_or_else(|| "lsp.json code_action is missing payload".to_string())?;
-        let file = super::require_non_empty_json_str(
-            payload,
-            "file",
-            "lsp.json code_action related_test payload",
-        )?;
-        let line = super::json_usize_at(
-            payload,
-            "/line",
-            "lsp.json code_action related_test payload",
-        )?;
-        let path = super::require_non_empty_json_str(action, "path", "lsp.json code_action")?;
-        require_expected_value(path, file, "lsp.json code_action related_test path")?;
-        let zero_based_line =
-            super::json_usize_at(action, "/range/start/line", "lsp.json code_action")?;
-        let one_based_line = zero_based_line + 1;
-        if one_based_line != line {
-            return Err(format!(
-                "lsp.json code_action related_test line must point at payload line {line}; got {one_based_line}"
-            ));
-        }
-        return Ok(());
-    }
-
-    check_lsp_projection_location(action, card, "lsp.json code_action", "/range/start/line")
-}
-
 fn require_lsp_diagnostic_card_projection(
     diagnostic: &serde_json::Value,
     card: &CardProjection,
@@ -9402,7 +10365,53 @@ fn require_lsp_diagnostic_card_projection(
         &card.next_action,
         "lsp.json diagnostic",
     )?;
-    require_projected_string_array(diagnostic, "hazards", &card.hazards, "lsp.json diagnostic")
+    require_projected_string_array(diagnostic, "hazards", &card.hazards, "lsp.json diagnostic")?;
+    require_lsp_diagnostic_coverage_projection(diagnostic, card)
+}
+
+fn require_lsp_diagnostic_severity(
+    diagnostic: &serde_json::Value,
+    card: &CardProjection,
+) -> Result<(), String> {
+    let actual = super::json_usize_at(diagnostic, "/severity", "lsp.json diagnostic")?;
+    let review_class = review_class_from_name(&card.class_name, "lsp.json diagnostic")?;
+    let expected = review_class.lsp_severity();
+    if actual == expected {
+        return Ok(());
+    }
+    Err(format!(
+        "lsp.json diagnostic severity must project ReviewClass `{}` value `{expected}`; got `{actual}`",
+        card.class_name
+    ))
+}
+
+fn require_lsp_diagnostic_coverage_projection(
+    diagnostic: &serde_json::Value,
+    card: &CardProjection,
+) -> Result<(), String> {
+    let coverage = diagnostic
+        .get("coverage")
+        .ok_or_else(|| "lsp.json diagnostic is missing coverage".to_string())?;
+    if !coverage.is_object() {
+        return Err("lsp.json diagnostic coverage must be an object".to_string());
+    }
+    for (field, expected) in [
+        ("contract_coverage", card.contract_coverage.as_str()),
+        ("guard_coverage", card.guard_coverage.as_str()),
+        ("test_reach_coverage", card.test_reach_coverage.as_str()),
+        (
+            "witness_receipt_coverage",
+            card.witness_receipt_coverage.as_str(),
+        ),
+        ("manual_context", card.manual_context.as_str()),
+        ("baseline_state", card.baseline_state.as_str()),
+        ("outcome_movement", card.outcome_movement.as_str()),
+        ("comment_plan_status", card.comment_plan_status.as_str()),
+        ("agent_lsp_readiness", card.agent_lsp_readiness.as_str()),
+    ] {
+        require_projected_str(coverage, field, expected, "lsp.json diagnostic coverage")?;
+    }
+    Ok(())
 }
 
 fn check_lsp_diagnostic_evidence(
@@ -9668,13 +10677,20 @@ fn check_lsp_diagnostic_witness_commands(diagnostic: &serde_json::Value) -> Resu
     Ok(())
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the verifier keeps each independently checked canonical relationship explicit"
+)]
 fn check_lsp_code_action_payload(
     action: &serde_json::Value,
+    action_id: &str,
     action_card_id: &str,
     command: &str,
+    kind: &str,
     card_projection: &CardProjection,
     card_ids: &BTreeSet<String>,
-    arguments: &[serde_json::Value],
+    arguments: &serde_json::Value,
+    analysis: &serde_json::Value,
 ) -> Result<(), String> {
     let Some(payload) = action.get("payload") else {
         return Err("lsp.json code_action is missing payload".to_string());
@@ -9688,105 +10704,237 @@ fn check_lsp_code_action_payload(
             "lsp.json code_action payload card_id `{payload_card_id}` does not match action card_id `{action_card_id}`"
         ));
     }
-    let expected_kind = match command {
-        "unsafe-review.copyAgentPacket" => {
-            require_lsp_code_action_arguments(command, arguments, &[action_card_id.to_string()])?;
-            "unsafe-review.agent_packet"
-        }
-        "unsafe-review.explainWitnessRoute" => {
-            require_lsp_code_action_arguments(command, arguments, &[action_card_id.to_string()])?;
-            "unsafe-review.witness_route"
-        }
-        "unsafe-review.openRelatedTest" => {
-            let file =
-                super::require_non_empty_json_str(payload, "file", "lsp.json code_action payload")?;
-            let line = super::json_usize_at(payload, "/line", "lsp.json code_action payload")?;
-            if line == 0 {
-                return Err("lsp.json code_action payload line must be one-based".to_string());
-            }
-            let name =
-                super::require_non_empty_json_str(payload, "name", "lsp.json code_action payload")?;
-            require_lsp_code_action_arguments(
-                command,
-                arguments,
-                &[
-                    action_card_id.to_string(),
-                    file.to_string(),
-                    line.to_string(),
-                    name.to_string(),
-                ],
-            )?;
-            "unsafe-review.related_test"
-        }
-        "unsafe-review.copyWitnessCommand" => {
-            let witness_command = super::require_non_empty_json_str(
-                payload,
-                "command",
-                "lsp.json code_action payload",
-            )?;
-            if !card_projection
-                .verify_commands
-                .iter()
-                .any(|expected| expected == witness_command)
-            {
-                return Err(format!(
-                    "lsp.json code_action copyWitnessCommand payload command `{witness_command}` must match a ReviewCard verify command for card id `{action_card_id}`"
-                ));
-            }
-            require_lsp_code_action_arguments(command, arguments, &[witness_command.to_string()])?;
-            "unsafe-review.witness_command"
-        }
-        _ => {
+    require_expected_value(
+        super::require_non_empty_json_str(payload, "action_id", "lsp.json code_action payload")?,
+        action_id,
+        "lsp.json code_action payload action_id",
+    )?;
+    if payload.get("analysis") != Some(analysis) || arguments.get("analysis") != Some(analysis) {
+        return Err("lsp.json code_action payload and command arguments must preserve the top-level analysis identity".to_string());
+    }
+    require_expected_value(
+        super::require_non_empty_json_str(arguments, "card_id", "lsp.json code_action arguments")?,
+        action_card_id,
+        "lsp.json code_action arguments card_id",
+    )?;
+    if action_id != "related-test"
+        && ["file", "line", "name", "command"]
+            .iter()
+            .any(|field| arguments.get(*field).is_some())
+    {
+        return Err(format!(
+            "lsp.json code_action `{action_id}` must not carry related-test or witness command fields"
+        ));
+    }
+    let readiness = super::require_non_empty_json_str(
+        payload,
+        "agent_readiness",
+        "lsp.json code_action payload",
+    )?;
+    let expected_readiness = match card_projection.agent_lsp_readiness.as_str() {
+        "ready" => "ready_for_agent",
+        "needs_human" => "requires_human_review",
+        "requires_witness_receipt" => "requires_witness_receipt",
+        "unsupported" => "unsupported",
+        other => {
             return Err(format!(
-                "lsp.json code_action command `{command}` is not verifier-known"
+                "cards.json has unknown agent_lsp_readiness `{other}`"
             ));
         }
     };
-    super::require_json_str(
-        payload,
-        "kind",
-        expected_kind,
-        "lsp.json code_action payload",
+    require_expected_value(
+        readiness,
+        expected_readiness,
+        "lsp.json code_action agent_readiness",
     )?;
-    require_projected_str(
-        payload,
-        "proof_path",
-        &card_projection.proof_path,
-        "lsp.json code_action payload",
-    )?;
-    let boundary = payload
-        .get("trust_boundary")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| "lsp.json code_action payload is missing trust_boundary".to_string())?;
-    super::require_boundary_text(boundary, "lsp.json code_action payload")?;
-    Ok(())
-}
-
-fn require_lsp_code_action_arguments(
-    command: &str,
-    arguments: &[serde_json::Value],
-    expected: &[String],
-) -> Result<(), String> {
-    if arguments.len() != expected.len() {
-        return Err(format!(
-            "lsp.json code_action `{command}` arguments length must be {}; got {}",
-            expected.len(),
-            arguments.len()
-        ));
+    if action_id == "agent-packet" {
+        let (expected_packet_kind, expected_packet_title) = if readiness == "ready_for_agent" {
+            (
+                "quickfix.unsafeReview.agentPacket",
+                "Copy bounded unsafe-review agent packet",
+            )
+        } else {
+            (
+                "source.unsafeReview.reviewContext",
+                "Copy bounded unsafe-review review context (human review required)",
+            )
+        };
+        require_expected_value(kind, expected_packet_kind, "lsp.json agent-packet kind")?;
+        require_expected_value(
+            super::require_non_empty_json_str(action, "title", "lsp.json code_action")?,
+            expected_packet_title,
+            "lsp.json agent-packet title",
+        )?;
     }
-    for (idx, expected) in expected.iter().enumerate() {
-        let actual = arguments
-            .get(idx)
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| {
-                format!("lsp.json code_action `{command}` arguments[{idx}] must be a string")
-            })?;
-        if actual != expected {
+    let (expected_command, expected_kind) = match action_id {
+        "agent-packet" => ("unsafe-review.collectAgentPacket", None),
+        "witness-route" => (
+            "unsafe-review.explainWitnessRoute",
+            Some("source.unsafeReview.witnessRoute"),
+        ),
+        "witness-command" => (
+            "unsafe-review.collectWitnessCommand",
+            Some("source.unsafeReview.witnessCommand"),
+        ),
+        "related-test" => {
+            if let Some(line) = arguments.get("line") {
+                let line = line.as_u64().ok_or_else(|| {
+                    "lsp.json code_action related-test line must be an integer".to_string()
+                })?;
+                if line == 0 {
+                    return Err(
+                        "lsp.json code_action related-test line must be one-based".to_string()
+                    );
+                }
+            }
+            (
+                "unsafe-review.openRelatedTest",
+                Some("source.unsafeReview.relatedTest"),
+            )
+        }
+        _ => {
             return Err(format!(
-                "lsp.json code_action `{command}` arguments[{idx}] must be `{expected}`; got `{actual}`"
+                "lsp.json code_action action_id `{action_id}` is not verifier-known"
             ));
         }
+    };
+    require_expected_value(command, expected_command, "lsp.json code_action command")?;
+    if let Some(expected_kind) = expected_kind {
+        require_expected_value(kind, expected_kind, "lsp.json code_action kind")?;
+    } else if !matches!(
+        kind,
+        "quickfix.unsafeReview.agentPacket" | "source.unsafeReview.reviewContext"
+    ) {
+        return Err(format!(
+            "lsp.json code_action agent-packet has invalid kind `{kind}`"
+        ));
     }
+    let applicability = action
+        .get("applicability")
+        .filter(|value| value.is_object())
+        .ok_or_else(|| "lsp.json code_action is missing applicability".to_string())?;
+    let applicability_state = super::require_non_empty_json_str(
+        applicability,
+        "state",
+        "lsp.json code_action applicability",
+    )?;
+    if !matches!(applicability_state, "available" | "disabled") {
+        return Err(format!(
+            "lsp.json code_action applicability state `{applicability_state}` is invalid"
+        ));
+    }
+    if applicability_state == "disabled" {
+        super::require_non_empty_json_str(
+            applicability,
+            "reason_code",
+            "lsp.json code_action applicability",
+        )?;
+        super::require_non_empty_json_str(
+            applicability,
+            "reason",
+            "lsp.json code_action applicability",
+        )?;
+    }
+    let related_fields_present = arguments
+        .get("file")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|value| !value.is_empty())
+        && arguments
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|value| !value.is_empty())
+        && arguments
+            .get("line")
+            .and_then(serde_json::Value::as_u64)
+            .is_some_and(|value| value > 0);
+    let expected_available = match action_id {
+        "agent-packet" => true,
+        "witness-route" => !card_projection.witness_routes.is_empty(),
+        "witness-command" => card_projection
+            .witness_routes
+            .iter()
+            .any(|route| route.command.is_some()),
+        "related-test" => related_fields_present,
+        other => {
+            return Err(format!(
+                "lsp.json code_action action_id `{other}` is not verifier-known"
+            ));
+        }
+    };
+    if (applicability_state == "available") != expected_available {
+        return Err(format!(
+            "lsp.json code_action `{action_id}` applicability does not match ReviewCard capabilities"
+        ));
+    }
+    if applicability_state == "disabled" {
+        let (expected_reason_code, expected_reason) = match action_id {
+            "witness-route" => (
+                "no_witness_route",
+                "No witness route is available for this card.",
+            ),
+            "witness-command" => (
+                "no_witness_command",
+                "No witness command is available for this card.",
+            ),
+            "related-test" => (
+                "no_related_test",
+                "No structured related test is available for this card.",
+            ),
+            "agent-packet" => {
+                return Err("lsp.json code_action agent-packet must never be disabled".to_string());
+            }
+            other => {
+                return Err(format!(
+                    "lsp.json code_action action_id `{other}` is not verifier-known"
+                ));
+            }
+        };
+        super::require_json_str(
+            applicability,
+            "reason_code",
+            expected_reason_code,
+            "lsp.json code_action applicability",
+        )?;
+        super::require_json_str(
+            applicability,
+            "reason",
+            expected_reason,
+            "lsp.json code_action applicability",
+        )?;
+        if action_id == "related-test"
+            && ["file", "line", "name"]
+                .iter()
+                .any(|field| arguments.get(*field).is_some())
+        {
+            return Err(
+                "lsp.json disabled related-test action must not carry target fields".to_string(),
+            );
+        }
+    } else if applicability.get("reason_code").is_some() || applicability.get("reason").is_some() {
+        return Err(
+            "lsp.json available code_action must not carry disabled reason fields".to_string(),
+        );
+    }
+    if action
+        .get("command_only")
+        .and_then(serde_json::Value::as_bool)
+        != Some(true)
+    {
+        return Err("lsp.json code_action command_only must be true".to_string());
+    }
+    if action
+        .get("is_preferred")
+        .and_then(serde_json::Value::as_bool)
+        != Some(false)
+    {
+        return Err("lsp.json code_action is_preferred must be false".to_string());
+    }
+    let boundary = action
+        .get("trust_boundary")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "lsp.json code_action is missing trust_boundary".to_string())?;
+    super::require_boundary_text(boundary, "lsp.json code_action")?;
+    let _ = card_projection;
     Ok(())
 }
 
@@ -9889,6 +11037,212 @@ mod tests {
         }
     }
 
+    #[test]
+    fn usefulness_telemetry_verifier_rejects_not_selected_histogram_drift() -> Result<(), String> {
+        let comment_plan = serde_json::json!({
+            "not_selected": [{
+                "reason_code": "covered_by_specific_operation_card",
+                "class": "contract_missing"
+            }]
+        });
+        let histograms = usefulness_not_selected_histograms(&comment_plan)?;
+        if histograms
+            .reason
+            .get("covered_by_specific_operation_card")
+            .copied()
+            != Some(1)
+        {
+            return Err("reason histogram did not derive expected not_selected count".to_string());
+        }
+        if histograms
+            .class
+            .get("covered_by_specific_operation_card/contract_missing")
+            .copied()
+            != Some(1)
+        {
+            return Err("class histogram did not derive expected not_selected count".to_string());
+        }
+
+        let telemetry = serde_json::json!({
+            "comment_selection": {
+                "not_selected_reason_histogram": {
+                    "covered_by_specific_operation_card": 1
+                },
+                "not_selected_class_histogram": {
+                    "covered_by_specific_operation_card/guard_missing": 1
+                }
+            }
+        });
+        let err = err_text(require_usefulness_histogram(
+            &telemetry,
+            "/comment_selection/not_selected_class_histogram",
+            "usefulness-telemetry.json comment_selection.not_selected_class_histogram",
+            &histograms.class,
+            "comment-plan.json not_selected[].reason_code/class",
+        ))?;
+        if !err.contains("not_selected_class_histogram")
+            || !err.contains("covered_by_specific_operation_card/contract_missing")
+        {
+            return Err(format!("expected class histogram drift error; got {err}"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn lsp_diagnostic_coverage_rejects_cards_json_coverage_drift() -> Result<(), String> {
+        let card = minimal_comment_card_projection(
+            "card-1",
+            "unsafe_operation",
+            "owner",
+            "raw_pointer_read",
+        );
+        let diagnostic = serde_json::json!({
+            "coverage": {
+                "contract_coverage": "missing",
+                "guard_coverage": "missing",
+                "test_reach_coverage": "missing",
+                "witness_receipt_coverage": "present",
+                "manual_context": "absent",
+                "baseline_state": "new",
+                "outcome_movement": "regressed",
+                "comment_plan_status": "not_selected",
+                "agent_lsp_readiness": "ready"
+            }
+        });
+
+        let err = err_text(require_lsp_diagnostic_coverage_projection(
+            &diagnostic,
+            &card,
+        ))?;
+        if !err.contains("witness_receipt_coverage") || !err.contains("missing") {
+            return Err(format!("expected coverage drift error; got {err}"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn witness_plan_projection_accepts_routes_split_across_route_groups() -> Result<(), String> {
+        let mut card = minimal_comment_card_projection("card-1", "ffi_call", "fill_inner", "ffi");
+        card.class_name = "miri_unsupported".to_string();
+        card.proof_path = "observable_red_green".to_string();
+        card.path = "src/backends/windows.rs".to_string();
+        card.line = 51;
+        card.operation =
+            "unsafe { ProcessPrng(dest.as_mut_ptr().cast::<u8>(), dest.len()) }".to_string();
+        card.next_action =
+            "Use sanitizer/cargo-careful or an explicit FFI boundary contract.".to_string();
+        card.verify_commands = vec![
+            "RUSTFLAGS='-Z sanitizer=address' cargo +nightly test fill_inner".to_string(),
+            "cargo +nightly careful test fill_inner".to_string(),
+        ];
+        card.witness_routes = vec![
+            WitnessRouteProjection {
+                kind: "asan".to_string(),
+                reason: "FFI boundary detected; sanitizer route preferred".to_string(),
+                command: Some(
+                    "RUSTFLAGS='-Z sanitizer=address' cargo +nightly test fill_inner".to_string(),
+                ),
+                required: false,
+            },
+            WitnessRouteProjection {
+                kind: "cargo-careful".to_string(),
+                reason: "cargo-careful can exercise Rust-side FFI assumptions".to_string(),
+                command: Some("cargo +nightly careful test fill_inner".to_string()),
+                required: false,
+            },
+            WitnessRouteProjection {
+                kind: "human-deep-review".to_string(),
+                reason: "reviewed FFI assumptions can be recorded manually".to_string(),
+                command: None,
+                required: false,
+            },
+        ];
+        let mut projections = BTreeMap::new();
+        projections.insert(card.id.clone(), card);
+        let text = r#"
+#### `card-1`
+
+- Class: `miri_unsupported`
+- Proof path: `observable_red_green`
+- Location: src/backends/windows.rs:51
+- Operation family: `ffi`
+- Operation: `unsafe { ProcessPrng(dest.as_mut_ptr().cast::<u8>(), dest.len()) }`
+- Hazards: none recorded
+- Next action: Use sanitizer/cargo-careful or an explicit FFI boundary contract.
+- Hypothesis to confirm: static `miri_unsupported` ReviewCard
+- Confirmation step: build/run `RUSTFLAGS='-Z sanitizer=address' cargo +nightly test fill_inner` first
+- Route: `cargo-careful`
+  - Reason: cargo-careful can exercise Rust-side FFI assumptions
+  - Command:
+
+```bash
+cargo +nightly careful test fill_inner
+```
+
+#### `card-1`
+
+- Class: `miri_unsupported`
+- Proof path: `observable_red_green`
+- Location: src/backends/windows.rs:51
+- Operation family: `ffi`
+- Operation: `unsafe { ProcessPrng(dest.as_mut_ptr().cast::<u8>(), dest.len()) }`
+- Hazards: none recorded
+- Next action: Use sanitizer/cargo-careful or an explicit FFI boundary contract.
+- Hypothesis to confirm: static `miri_unsupported` ReviewCard
+- Confirmation step: build/run `RUSTFLAGS='-Z sanitizer=address' cargo +nightly test fill_inner` first
+- Route: `asan`
+  - Reason: FFI boundary detected; sanitizer route preferred
+  - Command:
+
+```bash
+RUSTFLAGS='-Z sanitizer=address' cargo +nightly test fill_inner
+```
+
+#### `card-1`
+
+- Class: `miri_unsupported`
+- Proof path: `observable_red_green`
+- Location: src/backends/windows.rs:51
+- Operation family: `ffi`
+- Operation: `unsafe { ProcessPrng(dest.as_mut_ptr().cast::<u8>(), dest.len()) }`
+- Hazards: none recorded
+- Next action: Use sanitizer/cargo-careful or an explicit FFI boundary contract.
+- Hypothesis to confirm: static `miri_unsupported` ReviewCard
+- Confirmation step: build/run `RUSTFLAGS='-Z sanitizer=address' cargo +nightly test fill_inner` first
+- Route: `human-deep-review`
+  - Reason: reviewed FFI assumptions can be recorded manually
+
+## Trust boundary
+"#;
+
+        require_witness_plan_card_projections(
+            text,
+            Path::new("target/test/witness-plan.md"),
+            &projections,
+        )
+    }
+
+    #[test]
+    fn witness_plan_heading_checker_allows_route_group_repeated_card_headings() -> Result<(), String>
+    {
+        let card_ids = BTreeSet::from(["card-1".to_string()]);
+        let text = r#"
+#### `card-1`
+
+- Route: `cargo-careful`
+
+#### `card-1`
+
+- Route: `asan`
+"#;
+
+        require_witness_plan_headings_known(
+            text,
+            Path::new("target/test/witness-plan.md"),
+            &card_ids,
+        )
+    }
+
     fn minimal_comment_card_projection(
         id: &str,
         site_kind: &str,
@@ -9923,6 +11277,11 @@ mod tests {
             guard_coverage: "missing".to_string(),
             test_reach_coverage: "missing".to_string(),
             witness_receipt_coverage: "missing".to_string(),
+            manual_context: "absent".to_string(),
+            baseline_state: "new".to_string(),
+            outcome_movement: "regressed".to_string(),
+            comment_plan_status: "not_selected".to_string(),
+            agent_lsp_readiness: "ready".to_string(),
         }
     }
 
@@ -9978,6 +11337,7 @@ mod tests {
                 changed_line: true,
                 card_projections: &projections,
                 changed_card_ids: &changed_card_ids,
+                target_feature_repetition_omitted: &BTreeSet::new(),
             },
         )
     }
@@ -9998,6 +11358,7 @@ mod tests {
                 changed_line: true,
                 card_projections: &projections,
                 changed_card_ids: &changed_card_ids,
+                target_feature_repetition_omitted: &BTreeSet::new(),
             },
         )?;
 
@@ -10011,6 +11372,7 @@ mod tests {
                 changed_line: true,
                 card_projections: &projections,
                 changed_card_ids: &changed_card_ids,
+                target_feature_repetition_omitted: &BTreeSet::new(),
             },
         ))?;
         if !err.contains("reason pair") {

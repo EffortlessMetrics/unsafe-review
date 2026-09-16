@@ -173,6 +173,13 @@ struct JsonSummary {
     improved_gaps: usize,
     resolved_gaps: usize,
     inherited_gaps: usize,
+    /// True when `max_cards` dropped cards from this run (SPEC-0035
+    /// `stop_reason=max_cards`).  While true every count above is understated,
+    /// so a consumer must not read this artifact as a complete inventory.
+    scan_capped: bool,
+    /// The cap that bound the run; absent on an uncapped run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    card_cap: Option<usize>,
 }
 
 impl From<&Summary> for JsonSummary {
@@ -197,6 +204,8 @@ impl From<&Summary> for JsonSummary {
             improved_gaps: summary.improved_gaps,
             resolved_gaps: summary.resolved_gaps,
             inherited_gaps: summary.inherited_gaps,
+            scan_capped: summary.scan_capped,
+            card_cap: summary.card_cap,
         }
     }
 }
@@ -589,6 +598,7 @@ const FIXTURE_GOLDENS: &[&str] = &[
     "panic_from_safe_js_non_js_signed_no_card",
     "split_unsafe_block",
     "raw_pointer_deref",
+    "raw_pointer_deref_prior_block_safety_not_owner",
     "raw_pointer_read_unaligned",
     "raw_pointer_read_volatile",
     "raw_pointer_read_len_capacity_assert",
@@ -767,7 +777,13 @@ const FIXTURE_GOLDENS: &[&str] = &[
     "zeroed_invalid_value",
     "zeroed_valid_u32",
     "zeroed_safe_wrapper_no_cards",
+    "box_from_raw_safe_ctor_no_cards",
+    "pin_unchecked_safe_ctor_no_cards",
+    "drop_in_place_safe_fn_no_cards",
+    "unwrap_unchecked_safe_method_no_cards",
+    "unreachable_unchecked_safe_fn_no_cards",
     "inline_asm_human_review",
+    "inline_asm_safe_macro_homonym_no_cards",
     "pointer_arithmetic_num_ctrl_bytes_guard",
     "pointer_arithmetic_other_offset_not_guard",
     "pointer_arithmetic_reassigned_offset_not_guard",
@@ -993,6 +1009,7 @@ const FIXTURE_GOLDENS: &[&str] = &[
     "multiline_transmute_copy_invalid_value",
     "unsafe_impl_send",
     "unsafe_impl_send_generic_owner",
+    "unsafe_impl_send_owner_substring_not_reached",
     "unsafe_impl_sync_generic_bound",
     "unsafe_impl_custom_trait_not_send_sync",
     "ffi_sanitizer_route",
@@ -1153,7 +1170,7 @@ pub fn bless_fixture_surface_goldens_from_workspace(
         return Ok(Vec::new());
     }
     let root = workspace.join("fixtures").join(fixture);
-    let output = analyze(AnalyzeInput {
+    let mut output = analyze(AnalyzeInput {
         root: root.clone(),
         scope: Scope::Diff,
         diff: DiffSource::File(root.join("change.diff")),
@@ -1162,6 +1179,10 @@ pub fn bless_fixture_surface_goldens_from_workspace(
         include_unchanged_tests: true,
         max_cards: None,
     })?;
+    // Fixture goldens retain the additive identity envelope while using a
+    // deterministic test identity. Runtime analyses receive a fresh identity.
+    output.analysis_identity =
+        crate::AnalysisIdentity::for_test(0, format!("fixture-analysis-{fixture}"), "diff");
     let mut written = Vec::new();
     for &surface in surfaces {
         let (filename, rendered) = match surface {
@@ -1221,7 +1242,7 @@ pub fn render_fixture_surface_from_workspace(
     use crate::api::{AnalysisMode, AnalyzeInput, DiffSource, PolicyMode, Scope, analyze};
 
     let root = workspace.join("fixtures").join(fixture);
-    let output = analyze(AnalyzeInput {
+    let mut output = analyze(AnalyzeInput {
         root: root.clone(),
         scope: Scope::Diff,
         diff: DiffSource::File(root.join("change.diff")),
@@ -1230,6 +1251,8 @@ pub fn render_fixture_surface_from_workspace(
         include_unchanged_tests: true,
         max_cards: None,
     })?;
+    output.analysis_identity =
+        crate::AnalysisIdentity::for_test(0, format!("fixture-analysis-{fixture}"), "diff");
     let raw = match surface {
         "lsp" => crate::output::lsp::render(&output),
         "repair-queue" => crate::output::repair_queue::render(&output),
@@ -1725,6 +1748,541 @@ mod tests {
             json_owner, agent_source_owner,
             "cards.json and agent source_context owner placeholder must be identical"
         );
+        Ok(())
+    }
+
+    /// Cross-consumer contract lock (issue #1880 PR2): `priority` is a single
+    /// `ReviewCard.priority` fact, but `cards.json` (`JsonCard::from_with_status`),
+    /// the agent packet (`AgentCard::from`), and the repair queue
+    /// (`RepairQueueEntry::new`) each re-derive it independently via their own
+    /// `card.priority.as_str()` call rather than sharing one projection. Nothing
+    /// today would catch one call site alone being changed (e.g. to a different
+    /// card field) while the others kept the original value. This test proves
+    /// the three surfaces currently agree for one canonical fixture card; it
+    /// locks parity of already-correct behavior and asserts nothing about
+    /// memory safety, UB-freedom, or which priority value is "right".
+    #[test]
+    fn priority_is_identical_across_json_agent_and_repair_queue_surfaces() -> Result<(), String> {
+        let output = fixture_output("raw_pointer_alignment")?;
+        let card = output.cards.first().ok_or("fixture should emit one card")?;
+
+        // Surface 1: cards.json
+        let json_value = parse_json(&render(&output))?;
+        let card_id = json_value["cards"][0]["id"]
+            .as_str()
+            .ok_or("cards.json cards[0].id must be a string")?;
+        let json_priority = json_value["cards"][0]["priority"]
+            .as_str()
+            .ok_or("cards.json cards[0].priority must be a string")?;
+
+        // Surface 2: agent packet
+        let agent_value = parse_json(&crate::output::agent::render(card))?;
+        let agent_priority = agent_value["card"]["priority"]
+            .as_str()
+            .ok_or("agent packet card.priority must be a string")?;
+
+        // Surface 3: repair queue. The fixture card may be routed into more
+        // than one bucket (e.g. `repairable_by_guard` and
+        // `requires_witness_receipt`); every entry for this card id must
+        // carry the same priority as the other two surfaces.
+        let repair_value = parse_json(&crate::output::repair_queue::render(&output))?;
+        let buckets = repair_value["buckets"]
+            .as_object()
+            .ok_or("repair-queue buckets must be an object")?;
+        let mut repair_priorities = Vec::new();
+        for entries in buckets.values() {
+            let entries = entries
+                .as_array()
+                .ok_or("repair-queue bucket must be an array")?;
+            for entry in entries {
+                if entry["card_id"].as_str() == Some(card_id) {
+                    let repair_priority = entry["priority"]
+                        .as_str()
+                        .ok_or("repair-queue entry priority must be a string")?;
+                    repair_priorities.push(repair_priority);
+                }
+            }
+        }
+        if repair_priorities.is_empty() {
+            return Err(
+                "repair queue should contain at least one entry for the fixture card".to_string(),
+            );
+        }
+
+        assert_eq!(
+            json_priority, agent_priority,
+            "cards.json and agent packet priority must be identical"
+        );
+        for repair_priority in repair_priorities {
+            assert_eq!(
+                json_priority, repair_priority,
+                "cards.json and repair-queue priority must be identical"
+            );
+        }
+        assert_eq!(
+            json_priority, "high",
+            "raw_pointer_alignment fixture card priority is high"
+        );
+
+        Ok(())
+    }
+
+    /// Cross-consumer contract lock (issue #1880 PR2): `baseline_state` and
+    /// `outcome_movement` are a single `CoverageBlock` fact
+    /// (`domain/coverage.rs::CoverageBlock::derive`), but `cards.json`
+    /// (`JsonCoverageBlock::from`), the agent packet (`AgentCoverageBlock::from`),
+    /// and the saved LSP projection (`EditorCoverageBlock::from`) each build
+    /// their own struct from that one `CoverageBlock` value independently
+    /// (`policy/spec-coverage.toml` names all three as canonical consumers of
+    /// both fields; `policy_report` is deliberately excluded here because it
+    /// does not project `outcome_movement` at all, per that manifest's note).
+    /// Nothing today would catch one projection alone drifting (e.g. mapping a
+    /// different `CoverageBlock` field) while the others kept the original
+    /// value. This test proves the three surfaces currently agree for one
+    /// canonical fixture card; it locks parity of already-correct behavior and
+    /// asserts nothing about memory safety, UB-freedom, or which movement
+    /// value is "right".
+    #[test]
+    fn baseline_state_and_outcome_movement_are_identical_across_json_agent_and_lsp_surfaces()
+    -> Result<(), String> {
+        let output = fixture_output("raw_pointer_alignment")?;
+        let card = output.cards.first().ok_or("fixture should emit one card")?;
+
+        // Surface 1: cards.json
+        let json_value = parse_json(&render(&output))?;
+        let card_id = json_value["cards"][0]["id"]
+            .as_str()
+            .ok_or("cards.json cards[0].id must be a string")?;
+        let json_baseline_state = json_value["cards"][0]["coverage"]["baseline_state"]
+            .as_str()
+            .ok_or("cards.json cards[0].coverage.baseline_state must be a string")?;
+        let json_outcome_movement = json_value["cards"][0]["coverage"]["outcome_movement"]
+            .as_str()
+            .ok_or("cards.json cards[0].coverage.outcome_movement must be a string")?;
+
+        // Surface 2: agent packet. `coverage` is top-level on the packet (not
+        // nested under `card`, unlike `priority`).
+        let agent_value = parse_json(&crate::output::agent::render(card))?;
+        let agent_baseline_state = agent_value["coverage"]["baseline_state"]
+            .as_str()
+            .ok_or("agent packet coverage.baseline_state must be a string")?;
+        let agent_outcome_movement = agent_value["coverage"]["outcome_movement"]
+            .as_str()
+            .ok_or("agent packet coverage.outcome_movement must be a string")?;
+
+        // Surface 3: saved LSP projection. Match the diagnostic entry by
+        // `card_id` rather than assuming index 0, since `diagnostics` is a
+        // plain array keyed by card identity.
+        let lsp_value = parse_json(&crate::output::lsp::render(&output))?;
+        let diagnostics = lsp_value["diagnostics"]
+            .as_array()
+            .ok_or("lsp diagnostics must be an array")?;
+        let lsp_diagnostic = diagnostics
+            .iter()
+            .find(|entry| entry["card_id"].as_str() == Some(card_id))
+            .ok_or("lsp diagnostics should contain an entry for the fixture card")?;
+        let lsp_baseline_state = lsp_diagnostic["coverage"]["baseline_state"]
+            .as_str()
+            .ok_or("lsp diagnostic coverage.baseline_state must be a string")?;
+        let lsp_outcome_movement = lsp_diagnostic["coverage"]["outcome_movement"]
+            .as_str()
+            .ok_or("lsp diagnostic coverage.outcome_movement must be a string")?;
+
+        assert_eq!(
+            json_baseline_state, agent_baseline_state,
+            "cards.json and agent packet baseline_state must be identical"
+        );
+        assert_eq!(
+            json_baseline_state, lsp_baseline_state,
+            "cards.json and lsp diagnostic baseline_state must be identical"
+        );
+        assert_eq!(
+            json_outcome_movement, agent_outcome_movement,
+            "cards.json and agent packet outcome_movement must be identical"
+        );
+        assert_eq!(
+            json_outcome_movement, lsp_outcome_movement,
+            "cards.json and lsp diagnostic outcome_movement must be identical"
+        );
+        assert_eq!(
+            json_baseline_state, "new",
+            "raw_pointer_alignment fixture card baseline_state is new"
+        );
+        assert_eq!(
+            json_outcome_movement, "regressed",
+            "raw_pointer_alignment fixture card outcome_movement is regressed"
+        );
+
+        Ok(())
+    }
+
+    /// Cross-consumer contract lock (issue #1880 PR2): class-derived severity
+    /// is a single `ReviewClass` fact, but `cards.json` (`JsonCard::class_name`),
+    /// SARIF (`SarifResult::level`, via `ReviewClass::sarif_level()`), and the
+    /// saved LSP projection (`EditorDiagnostic::severity`, via
+    /// `ReviewClass::lsp_severity()`) each independently build their own
+    /// severity encoding from that one `ReviewCard.class` value rather than
+    /// sharing one projection (`policy/spec-coverage.toml` names all three as
+    /// canonical consumers of the severity seam). This is distinct from the
+    /// existing domain-level lock in `domain/classification.rs`
+    /// (`sarif_level_and_lsp_severity_are_consistent_for_every_class`,
+    /// issue #1770), which only compares `ReviewClass::sarif_level()` against
+    /// `ReviewClass::lsp_severity()` directly and never renders an artifact —
+    /// it would not catch a renderer wiring the wrong field (e.g. a stale
+    /// severity constant, or reading a different card's class) even if the
+    /// two domain methods still agree. This test proves the three *rendered*
+    /// surfaces currently agree for one canonical fixture card: `cards.json`'s
+    /// `class` string names the `ReviewClass`, and SARIF's string `level` and
+    /// LSP's integer `severity` are each that class's correct projection
+    /// through the same public `sarif_level()` / `lsp_severity()` accessors.
+    /// The three surfaces use different encodings (a class-name string, a
+    /// SARIF level string, and an LSP severity integer) so this locks mutual
+    /// consistency of already-correct behavior, not byte-identical values,
+    /// and asserts nothing about memory safety, UB-freedom, or which severity
+    /// value is "right".
+    #[test]
+    fn severity_is_identical_across_json_sarif_and_lsp_surfaces() -> Result<(), String> {
+        let output = fixture_output("raw_pointer_alignment")?;
+        let card = output.cards.first().ok_or("fixture should emit one card")?;
+
+        // Surface 1: cards.json carries the class string (the anchor fact the
+        // other two surfaces derive their own severity encoding from).
+        let json_value = parse_json(&render(&output))?;
+        let card_id = json_value["cards"][0]["id"]
+            .as_str()
+            .ok_or("cards.json cards[0].id must be a string")?;
+        let json_class = json_value["cards"][0]["class"]
+            .as_str()
+            .ok_or("cards.json cards[0].class must be a string")?;
+
+        // Surface 2: SARIF result `level`, matched by the `card_id` result
+        // property rather than assuming index 0.
+        let sarif_value = parse_json(&crate::output::sarif::render(&output))?;
+        let results = sarif_value["runs"][0]["results"]
+            .as_array()
+            .ok_or("sarif runs[0].results must be an array")?;
+        let sarif_result = results
+            .iter()
+            .find(|result| result["properties"]["cardId"].as_str() == Some(card_id))
+            .ok_or("sarif results should contain an entry for the fixture card")?;
+        let sarif_level = sarif_result["level"]
+            .as_str()
+            .ok_or("sarif result level must be a string")?;
+
+        // Surface 3: saved LSP projection `severity`, matched by `card_id`.
+        let lsp_value = parse_json(&crate::output::lsp::render(&output))?;
+        let diagnostics = lsp_value["diagnostics"]
+            .as_array()
+            .ok_or("lsp diagnostics must be an array")?;
+        let lsp_diagnostic = diagnostics
+            .iter()
+            .find(|entry| entry["card_id"].as_str() == Some(card_id))
+            .ok_or("lsp diagnostics should contain an entry for the fixture card")?;
+        let lsp_severity = lsp_diagnostic["severity"]
+            .as_u64()
+            .ok_or("lsp diagnostic severity must be a number")?;
+
+        // Derive the expected per-surface projections from the SAME
+        // `ReviewClass` that cards.json named, using the public accessors
+        // each renderer is supposed to call.
+        assert_eq!(
+            json_class,
+            card.class.as_str(),
+            "cards.json class must name the fixture card's ReviewClass"
+        );
+        assert_eq!(
+            sarif_level,
+            card.class.sarif_level(),
+            "sarif level must be the same ReviewClass's sarif_level() projection"
+        );
+        assert_eq!(
+            lsp_severity,
+            card.class.lsp_severity() as u64,
+            "lsp diagnostic severity must be the same ReviewClass's lsp_severity() projection"
+        );
+
+        assert_eq!(
+            json_class, "guard_missing",
+            "raw_pointer_alignment fixture card class is guard_missing"
+        );
+        assert_eq!(
+            sarif_level, "warning",
+            "raw_pointer_alignment fixture card sarif level is warning"
+        );
+        assert_eq!(
+            lsp_severity, 2,
+            "raw_pointer_alignment fixture card lsp severity is 2 (Warning)"
+        );
+
+        Ok(())
+    }
+
+    /// Cross-consumer contract lock (issue #1880 PR2): a single unsafe site
+    /// (`ReviewCard.id` plus `ReviewCard.site.location`) is independently
+    /// re-encoded by three renderers, each with its own location shape.
+    /// `cards.json`'s `JsonSite` (`From<&ReviewCard> for JsonSite`, this
+    /// file) copies `card.site.location.line`/`.column` verbatim, so it is
+    /// 1-based. SARIF's `SarifRegion` (`output/sarif.rs::SarifLocation::from`)
+    /// also copies `card.site.location.line`/`.column` verbatim into
+    /// `startLine`/`startColumn`, so it too is 1-based and numerically equal
+    /// to cards.json. The saved LSP projection's `EditorRange`
+    /// (`output/lsp/projection.rs::position_for`) instead subtracts 1 from
+    /// each field to produce LSP's 0-based `range.start.line`/`.character`,
+    /// per the LSP spec. All three renderers also encode the file path via
+    /// the same `path_display` helper. Nothing today would catch one of the
+    /// three re-deriving the position from a stale field, dropping the file,
+    /// or getting the 0/1-based conversion wrong on only one side. This test
+    /// proves the three surfaces currently name the same card id and agree,
+    /// modulo the documented 0/1-based offset, on the same source file and
+    /// position for one canonical fixture card; it locks parity of
+    /// already-correct behavior and asserts nothing about memory safety,
+    /// UB-freedom, or which position is "right".
+    #[test]
+    fn card_id_and_source_range_are_identical_across_json_sarif_and_lsp_surfaces()
+    -> Result<(), String> {
+        let output = fixture_output("raw_pointer_alignment")?;
+
+        // Surface 1: cards.json carries the raw 1-based line/column plus the
+        // file path and card id.
+        let json_value = parse_json(&render(&output))?;
+        let json_card_id = json_value["cards"][0]["id"]
+            .as_str()
+            .ok_or("cards.json cards[0].id must be a string")?;
+        let json_file = json_value["cards"][0]["site"]["file"]
+            .as_str()
+            .ok_or("cards.json cards[0].site.file must be a string")?;
+        let json_line = json_value["cards"][0]["site"]["line"]
+            .as_u64()
+            .ok_or("cards.json cards[0].site.line must be a number")?;
+        let json_column = json_value["cards"][0]["site"]["column"]
+            .as_u64()
+            .ok_or("cards.json cards[0].site.column must be a number")?;
+
+        // Surface 2: SARIF, matched by the `cardId` result property. SARIF's
+        // `region.startLine`/`startColumn` are 1-based, same as cards.json.
+        let sarif_value = parse_json(&crate::output::sarif::render(&output))?;
+        let results = sarif_value["runs"][0]["results"]
+            .as_array()
+            .ok_or("sarif runs[0].results must be an array")?;
+        let sarif_result = results
+            .iter()
+            .find(|result| result["properties"]["cardId"].as_str() == Some(json_card_id))
+            .ok_or("sarif results should contain an entry for the fixture card")?;
+        let sarif_location = &sarif_result["locations"][0]["physicalLocation"];
+        let sarif_file = sarif_location["artifactLocation"]["uri"]
+            .as_str()
+            .ok_or("sarif physicalLocation.artifactLocation.uri must be a string")?;
+        let sarif_line = sarif_location["region"]["startLine"]
+            .as_u64()
+            .ok_or("sarif physicalLocation.region.startLine must be a number")?;
+        let sarif_column = sarif_location["region"]["startColumn"]
+            .as_u64()
+            .ok_or("sarif physicalLocation.region.startColumn must be a number")?;
+
+        // Surface 3: saved LSP projection, matched by `card_id`. LSP's
+        // `range.start` is 0-based, so it must be exactly one less than the
+        // 1-based cards.json/SARIF position on both axes.
+        let lsp_value = parse_json(&crate::output::lsp::render(&output))?;
+        let diagnostics = lsp_value["diagnostics"]
+            .as_array()
+            .ok_or("lsp diagnostics must be an array")?;
+        let lsp_diagnostic = diagnostics
+            .iter()
+            .find(|entry| entry["card_id"].as_str() == Some(json_card_id))
+            .ok_or("lsp diagnostics should contain an entry for the fixture card")?;
+        let lsp_path = lsp_diagnostic["path"]
+            .as_str()
+            .ok_or("lsp diagnostic path must be a string")?;
+        let lsp_start_line = lsp_diagnostic["range"]["start"]["line"]
+            .as_u64()
+            .ok_or("lsp diagnostic range.start.line must be a number")?;
+        let lsp_start_character = lsp_diagnostic["range"]["start"]["character"]
+            .as_u64()
+            .ok_or("lsp diagnostic range.start.character must be a number")?;
+
+        assert_eq!(
+            json_file, sarif_file,
+            "cards.json and sarif file path must be identical"
+        );
+        assert_eq!(
+            json_file, lsp_path,
+            "cards.json and lsp diagnostic file path must be identical"
+        );
+        assert_eq!(
+            json_line, sarif_line,
+            "cards.json and sarif line must be identical (both 1-based)"
+        );
+        assert_eq!(
+            json_column, sarif_column,
+            "cards.json and sarif column must be identical (both 1-based)"
+        );
+        assert_eq!(
+            json_line,
+            lsp_start_line + 1,
+            "lsp start.line must be exactly one less than cards.json's 1-based line"
+        );
+        assert_eq!(
+            json_column,
+            lsp_start_character + 1,
+            "lsp start.character must be exactly one less than cards.json's 1-based column"
+        );
+
+        assert_eq!(
+            json_line, 8,
+            "raw_pointer_alignment fixture card site.line is 8"
+        );
+        assert_eq!(
+            json_column, 5,
+            "raw_pointer_alignment fixture card site.column is 5"
+        );
+
+        Ok(())
+    }
+
+    /// Cross-consumer contract lock (issue #1880 PR2): agent-readiness
+    /// (`agent_lsp_readiness`) and receipt state (`witness_receipt_coverage`)
+    /// are single `CoverageBlock`-derived facts, but `cards.json`
+    /// (`JsonCoverageBlock`), the agent packet (`AgentCoverageBlock`), and the
+    /// saved LSP projection (`EditorCoverageBlock`) each build their own
+    /// coverage struct from the card independently -- and the LSP path even
+    /// recomputes readiness via `compute_agent_lsp_readiness`. Nothing today
+    /// would catch one projection reporting a different readiness or receipt
+    /// state than the others while the rest stayed correct. This test proves
+    /// the three surfaces currently agree on both fields for one canonical
+    /// fixture card; it locks parity of already-correct behavior and asserts
+    /// nothing about memory safety, UB-freedom, whether the site is actually
+    /// agent-ready, or whether a receipt is truly present.
+    #[test]
+    fn agent_readiness_and_receipt_state_are_identical_across_json_agent_and_lsp_surfaces()
+    -> Result<(), String> {
+        let output = fixture_output("raw_pointer_alignment")?;
+        let card = output.cards.first().ok_or("fixture should emit one card")?;
+
+        // Surface 1: cards.json coverage block.
+        let json_value = parse_json(&render(&output))?;
+        let card_id = json_value["cards"][0]["id"]
+            .as_str()
+            .ok_or("cards.json cards[0].id must be a string")?;
+        let json_readiness = json_value["cards"][0]["coverage"]["agent_lsp_readiness"]
+            .as_str()
+            .ok_or("cards.json coverage.agent_lsp_readiness must be a string")?;
+        let json_receipt = json_value["cards"][0]["coverage"]["witness_receipt_coverage"]
+            .as_str()
+            .ok_or("cards.json coverage.witness_receipt_coverage must be a string")?;
+
+        // Surface 2: agent packet. `coverage` is top-level on the packet.
+        let agent_value = parse_json(&crate::output::agent::render(card))?;
+        let agent_readiness = agent_value["coverage"]["agent_lsp_readiness"]
+            .as_str()
+            .ok_or("agent packet coverage.agent_lsp_readiness must be a string")?;
+        let agent_receipt = agent_value["coverage"]["witness_receipt_coverage"]
+            .as_str()
+            .ok_or("agent packet coverage.witness_receipt_coverage must be a string")?;
+
+        // Surface 3: saved LSP projection, matched by `card_id`.
+        let lsp_value = parse_json(&crate::output::lsp::render(&output))?;
+        let diagnostics = lsp_value["diagnostics"]
+            .as_array()
+            .ok_or("lsp diagnostics must be an array")?;
+        let lsp_diagnostic = diagnostics
+            .iter()
+            .find(|entry| entry["card_id"].as_str() == Some(card_id))
+            .ok_or("lsp diagnostics should contain an entry for the fixture card")?;
+        let lsp_readiness = lsp_diagnostic["coverage"]["agent_lsp_readiness"]
+            .as_str()
+            .ok_or("lsp diagnostic coverage.agent_lsp_readiness must be a string")?;
+        let lsp_receipt = lsp_diagnostic["coverage"]["witness_receipt_coverage"]
+            .as_str()
+            .ok_or("lsp diagnostic coverage.witness_receipt_coverage must be a string")?;
+
+        assert_eq!(
+            json_readiness, agent_readiness,
+            "cards.json and agent packet agent_lsp_readiness must be identical"
+        );
+        assert_eq!(
+            json_readiness, lsp_readiness,
+            "cards.json and lsp diagnostic agent_lsp_readiness must be identical"
+        );
+        assert_eq!(
+            json_receipt, agent_receipt,
+            "cards.json and agent packet witness_receipt_coverage must be identical"
+        );
+        assert_eq!(
+            json_receipt, lsp_receipt,
+            "cards.json and lsp diagnostic witness_receipt_coverage must be identical"
+        );
+
+        assert_eq!(
+            json_readiness, "ready",
+            "raw_pointer_alignment fixture card agent_lsp_readiness is ready"
+        );
+        assert_eq!(
+            json_receipt, "missing",
+            "raw_pointer_alignment fixture card witness_receipt_coverage is missing"
+        );
+
+        Ok(())
+    }
+
+    /// Cross-consumer contract lock (issue #1880 PR2): the advisory
+    /// trust-boundary string is a single canonical constant
+    /// (`REVIEWCARD_TRUST_BOUNDARY`), but `cards.json`, the agent packet, the
+    /// saved LSP projection, and SARIF each embed their own copy of it. Nothing
+    /// today would catch one surface emitting a different, weaker, or
+    /// overclaiming boundary string while the others stayed correct -- which
+    /// would be a claim-boundary regression, not merely field drift. This test
+    /// proves all four surfaces emit the identical canonical string for one
+    /// fixture card and that it is exactly `REVIEWCARD_TRUST_BOUNDARY`. It
+    /// asserts wording parity only; it makes no memory-safety, UB-free,
+    /// Miri-clean, or site-execution claim of its own.
+    #[test]
+    fn trust_boundary_is_identical_across_json_agent_lsp_and_sarif_surfaces() -> Result<(), String>
+    {
+        let output = fixture_output("raw_pointer_alignment")?;
+        let card = output.cards.first().ok_or("fixture should emit one card")?;
+
+        // Surface 1: cards.json top-level trust_boundary.
+        let json_value = parse_json(&render(&output))?;
+        let json_tb = json_value["trust_boundary"]
+            .as_str()
+            .ok_or("cards.json trust_boundary must be a string")?;
+
+        // Surface 2: agent packet top-level trust_boundary.
+        let agent_value = parse_json(&crate::output::agent::render(card))?;
+        let agent_tb = agent_value["trust_boundary"]
+            .as_str()
+            .ok_or("agent packet trust_boundary must be a string")?;
+
+        // Surface 3: saved LSP top-level trust_boundary.
+        let lsp_value = parse_json(&crate::output::lsp::render(&output))?;
+        let lsp_tb = lsp_value["trust_boundary"]
+            .as_str()
+            .ok_or("lsp trust_boundary must be a string")?;
+
+        // Surface 4: SARIF run-level trust boundary (camelCase property).
+        let sarif_value = parse_json(&crate::output::sarif::render(&output))?;
+        let sarif_tb = sarif_value["runs"][0]["properties"]["trustBoundary"]
+            .as_str()
+            .ok_or("sarif runs[0].properties.trustBoundary must be a string")?;
+
+        assert_eq!(
+            json_tb, agent_tb,
+            "cards.json and agent packet trust_boundary must be identical"
+        );
+        assert_eq!(
+            json_tb, lsp_tb,
+            "cards.json and lsp trust_boundary must be identical"
+        );
+        assert_eq!(
+            json_tb, sarif_tb,
+            "cards.json and sarif trust_boundary must be identical"
+        );
+        assert_eq!(
+            json_tb,
+            crate::output::REVIEWCARD_TRUST_BOUNDARY,
+            "every surface must emit the canonical REVIEWCARD_TRUST_BOUNDARY string"
+        );
+
         Ok(())
     }
 }

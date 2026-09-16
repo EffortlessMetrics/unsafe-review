@@ -156,11 +156,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: dtolnay/rust-toolchain@1.98
 
       - name: Download unsafe-review artifacts
         run: |

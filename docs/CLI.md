@@ -24,6 +24,28 @@ external evidence only, policy reports are advisory, witness execution is not
 default, comment posting is not default, source edits are not supported, and
 live LSP remains deferred.
 
+## Preview Repository Adoption
+
+Before adding a workflow, inspect a deterministic, reviewable proposal:
+
+```bash
+unsafe-review init
+unsafe-review init --format json --out target/unsafe-review-init
+```
+
+`init` is preview-only. It does not create or edit repository files. The
+proposal includes workflow content, create/unchanged/conflict status, rollback
+guidance, repository warnings, recommended ignores, explicit baseline guidance,
+an optional badge snippet, the canonical ub-review gate-manifest pointer, and
+the exact `doctor` and `pr` commands. `--out` writes only
+`unsafe-review-init.json` to the explicitly selected proposal directory; with
+`--format json`, stdout remains valid JSON and the write receipt goes to stderr.
+
+The workflow contains a release placeholder rather than assuming the parked
+public Action/publish lane is ready. Replace it only with a separately verified
+release or pinned CLI invocation before applying the proposal. Baseline creation
+remains a separate explicit command and never labels debt as safe.
+
 ## Review A Diff
 
 Review the current branch against `origin/main`:
@@ -91,15 +113,36 @@ classification explanations, limitations, unmatched baseline entries, and
 invalid-ledger-entry fields. It does not block, execute witnesses, or create
 broad suppression authority.
 
+## Pilot
+
+For a fast first look at a diff, `pilot` runs the same diff-scoped analysis as
+`check` but defaults `--max-cards` to 5:
+
+```bash
+unsafe-review pilot --base origin/main
+```
+
+```bash
+unsafe-review pilot --diff change.diff --format json
+unsafe-review pilot --base origin/main --max-cards 10
+```
+
+`pilot` accepts every `check` flag except `--policy` (it is always advisory) and
+`--out`. Because it caps cards by default, a `pilot` run is a sample of the
+diff's cards, not a complete inventory — use `check` or `pr` when you need the
+full card list.
+
 ## First PR Bundle
 
 For a first local review pass, write the standard advisory artifact bundle:
 
 ```bash
-unsafe-review first-pr --base origin/main
+unsafe-review pr
 ```
 
-`review` is an alias for `first-pr`.
+`pr` auto-detects the repository root and default base ref. `first-pr` and
+`review` remain compatibility aliases for the same advisory bundle; use
+`unsafe-review pr --base origin/main` when the base ref must be explicit.
 
 By default this writes:
 
@@ -112,29 +155,77 @@ target/unsafe-review/cards.sarif
 target/unsafe-review/comment-plan.json
 target/unsafe-review/witness-plan.md
 target/unsafe-review/receipt-audit.md
+target/unsafe-review/receipt-audit.json
+target/unsafe-review/policy-report.json
+target/unsafe-review/policy-report.md
 target/unsafe-review/manual-candidates.json
 target/unsafe-review/manual-repair-queue.json
 target/unsafe-review/tokmd-packets.json
 target/unsafe-review/usefulness-telemetry.json
 target/unsafe-review/lsp.json
 target/unsafe-review/repair-queue.json
+target/unsafe-review/unsafe-review-gate.json
 ```
 
 Use `--out-dir <dir>` to choose another artifact directory, or `--diff file|-`
 to review a supplied diff.
 
-The command analyzes once and renders every artifact from the same
+For an external GitHub PR, prefer a local checkout from the base branch name and
+exact base/head SHAs instead of a rendered display diff. `--head-sha` validates
+that `--root` is checked out at the expected PR head before analysis starts:
+
+```bash
+gh pr view 827 --repo tokio-rs/bytes --json baseRefName,baseRefOid,headRefOid
+unsafe-review pr-setup \
+  --repo tokio-rs/bytes \
+  --number 827 \
+  --base-ref <base-ref-name> \
+  --base-sha <base-sha> \
+  --head-sha <head-sha> \
+  --root /path/to/bytes \
+  --out-dir /absolute/path/to/bytes-pr827/first-pr \
+  --diff-out /absolute/path/to/bytes-pr827.diff
+```
+
+`pr-setup` only prints commands; it does not fetch, checkout, run witnesses,
+post comments, or edit source. It prints one copyable checkout route and one
+copyable saved-diff route:
+
+```bash
+# Checkout-based review route. Copy as one shell block.
+git -C /path/to/bytes fetch origin <base-ref-name> pull/827/head && git -C /path/to/bytes checkout --detach <head-sha> && unsafe-review pr --root /path/to/bytes --base-sha <base-sha> --head-sha <head-sha> --out-dir /absolute/path/to/bytes-pr827/first-pr
+
+# Saved raw-diff route, after checkout. Copy as one shell block.
+mkdir -p /absolute/path/to && git -C /path/to/bytes diff --binary --full-index --output=/absolute/path/to/bytes-pr827.diff <base-sha>...<head-sha> && unsafe-review pr --root /path/to/bytes --diff /absolute/path/to/bytes-pr827.diff --out-dir /absolute/path/to/bytes-pr827/first-pr
+```
+
+Use the checkout-based route for normal analysis. Use the saved-diff route when
+you need a replayable raw patch for receipts or replay.
+
+Use the `baseRefName` value for `<base-ref-name>`, `baseRefOid` for
+`<base-sha>`, and `headRefOid` for `<head-sha>`. The pull-ref fetch works for
+same-repo and fork PR heads; `--head-sha` then validates the checkout against
+the immutable SHA reported by `gh pr view`.
+
+For saved patch files, let Git write the file with `git diff --output=<path>`
+so shell redirection cannot re-encode the file on Windows. Use absolute
+`--output` and `--out-dir` paths for external pilots so the raw diff and
+advisory bundle stay anchored outside the external checkout while `git -C`
+changes directories. The saved patch must keep the `diff --git`, `---`, `+++`,
+and `@@` unified-diff lines that `unsafe-review` uses to scope the review.
+
+Each analysis command renders every artifact from the same
 `ReviewCard`s. It stays advisory-only: it does not execute witness tools, post
 comments, edit source, or enforce blocking policy.
 
-For the full maintainer workflow that starts with `first-pr` and continues
+For the full maintainer workflow that starts with `pr` and continues
 through `pr-summary.md`, `explain`, `context --json`, `witness-plan.md`,
 receipt audit, and `outcome`, see
 [Find and fix UB-risk review seams](FIND_AND_FIX_UB.md).
 
 The bundle also includes `receipt-audit.md`, and the terminal handoff prints the
 matching `unsafe-review receipt audit` command so reviewers can check whether
-saved witness receipt metadata still matches the current first-pr cards. The
+saved witness receipt metadata still matches the current PR cards. The
 audit is metadata-only and does not run the witness.
 When a top ReviewCard is present, the terminal handoff also prints its
 hypothesis, build/run-this-first cue, minimal repro cue, and confirmation step.
@@ -207,8 +298,10 @@ and Markdown surfaces.
 
 `lsp` writes saved JSON only. It includes a read-only status object,
 diagnostics, hovers, and command data for copying packets, copying witness
-commands, explaining routes, and opening statically related tests. There is no
-editor extension or live LSP server in this surface.
+commands, explaining routes, and opening statically related tests. This
+projection does not start the live `unsafe-review lsp` server (SPEC-0018) and
+does not install an editor extension; the saved-bundle viewer MVP is documented
+separately in [Saved LSP JSON workflow](editor/saved-lsp-json.md).
 
 `witness-plan` is a routing artifact. It groups existing `ReviewCard`s by
 witness family: Miri / `cargo-careful`, sanitizers, Loom / Shuttle, Kani /
@@ -541,6 +634,73 @@ run witnesses, post policy decisions, or claim repository safety. It is not
 memory-safety proof, not UB-free status, not Miri-clean status, not
 site-execution evidence, not calibrated precision/recall, and not policy-ready
 status.
+
+## Baseline
+
+`baseline` records pre-existing debt as the coverage floor (SPEC-0030), so
+`--policy no-new-debt` can flag only what a change adds. The ledger is
+`policy/unsafe-review-baseline.toml` and the snapshot is
+`policy/unsafe-review-baseline-snapshot.toml`.
+
+Preview the ledger and snapshot plan without writing anything:
+
+```bash
+unsafe-review baseline init --dry-run --format json
+```
+
+Record the floor, then commit both generated files:
+
+```bash
+unsafe-review baseline init
+git add policy/unsafe-review-baseline.toml policy/unsafe-review-baseline-snapshot.toml
+git commit -m 'baseline: record pre-existing debt floor'
+```
+
+Run `init` from a clean base or default branch before feature changes, not from
+the PR branch under review. From then on:
+
+```bash
+unsafe-review check --policy no-new-debt
+```
+
+### Subcommands
+
+| Subcommand | Purpose | Writes |
+|---|---|---|
+| `baseline init` | Scan the repo for open actionable cards and record each as a ledger entry with its current coverage state | ledger + snapshot (nothing under `--dry-run`) |
+| `baseline add` | Add or update one ledger entry and its snapshot state without rescanning the whole ledger | ledger + snapshot |
+| `baseline status` | Read-only health report classifying every ledger entry and every unbaselined open actionable card | nothing |
+| `baseline refresh --dry-run` | Preview the per-entry action a maintainer could take | plan artifact only when `--out` is given |
+
+```bash
+unsafe-review baseline add \
+  --card-id UR-...-c1 \
+  --owner <name> \
+  --reason <text> \
+  --evidence <text>
+
+unsafe-review baseline status [--root .] [--format human|json]
+unsafe-review baseline refresh --dry-run [--root .] [--out target/baseline-refresh]
+```
+
+`status` sorts every entry into one of ten SPEC-0030 buckets:
+`active_unchanged`, `active_improved`, `active_worsened`, `resolved`,
+`review_due`, `snapshot_missing_or_invalid`, `duplicate_or_conflicting_entry`,
+`suppression_overlap`, `identity_unmatched`, and `new_unbaselined`. Check it
+before refreshing a ledger.
+
+`refresh --dry-run` previews per-entry actions (`keep`, `update_snapshot`,
+`mark_resolved`, `advance_review_after`, `add_new_debt`, `conflict`). It leaves
+policy, source, and snapshot state unchanged, and **there is no apply mode** —
+refreshing a ledger is a manual edit.
+
+`init` and `status` run a full repository scan, so their cost scales with repo
+size rather than diff size — see [Scan cost and large-repo
+scoping](#scan-cost-and-large-repo-scoping).
+
+Baseline entries are debt records, not safety records. Recording a card as
+pre-existing debt does not prove memory safety, UB-free status, Miri-clean
+status, or that any unsafe site executed safely.
 
 ## Witness Receipts
 

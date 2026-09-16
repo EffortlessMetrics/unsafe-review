@@ -28,11 +28,11 @@ jobs:
       run:
         working-directory: editors/vscode
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
@@ -46,6 +46,9 @@ jobs:
 
       - name: Run extension unit tests
         run: npm test
+
+      - name: Run extension host smoke
+        run: npm run smoke:extension-host
 
       - name: Package VSIX
         run: |

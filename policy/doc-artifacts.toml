@@ -1,5 +1,8 @@
 schema_version = "1.0"
 
+# Legacy parity ledger during migration. Current governance linkage is owned by
+# .allow/artifacts/doc-artifacts.toml and cargo-allow's spec-system profile.
+
 [[artifact]]
 id = "UNSAFE-REVIEW-PROP-0002"
 kind = "proposal"
@@ -110,14 +113,14 @@ linked_spec = "UNSAFE-REVIEW-SPEC-0020"
 id = "UNSAFE-REVIEW-SPEC-0037"
 kind = "spec"
 path = "docs/specs/UNSAFE-REVIEW-SPEC-0037-pr-gate-composite-action.md"
-status = "proposed"
+status = "accepted"
 owner = "repo-infra / ci"
 
 [[artifact]]
 id = "UNSAFE-REVIEW-SPEC-0038"
 kind = "spec"
 path = "docs/specs/UNSAFE-REVIEW-SPEC-0038-low-noise-usefulness-telemetry.md"
-status = "proposed"
+status = "accepted"
 owner = "product / cli"
 
 [[artifact]]
@@ -131,14 +134,14 @@ owner = "repo-infra"
 id = "UNSAFE-REVIEW-SPEC-0040"
 kind = "spec"
 path = "docs/specs/UNSAFE-REVIEW-SPEC-0040-detector-contracts-ledger.md"
-status = "proposed"
+status = "accepted"
 owner = "core / analysis"
 
 [[artifact]]
 id = "UNSAFE-REVIEW-SPEC-0041"
 kind = "spec"
 path = "docs/specs/UNSAFE-REVIEW-SPEC-0041-syntax-first-dispatch-architecture.md"
-status = "proposed"
+status = "accepted"
 owner = "core / analysis"
 
 [[artifact]]
@@ -147,3 +150,10 @@ kind = "spec"
 path = "docs/specs/UNSAFE-REVIEW-SPEC-0042-corpus-validation-taxonomy.md"
 status = "proposed"
 owner = "repo-infra"
+
+[[artifact]]
+id = "UNSAFE-REVIEW-SPEC-0043"
+kind = "spec"
+path = "docs/specs/UNSAFE-REVIEW-SPEC-0043-release-ergonomics-prebuilt-and-automated-promotion.md"
+status = "proposed"
+owner = "release/public-surface"

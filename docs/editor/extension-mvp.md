@@ -97,18 +97,26 @@ The MVP refresh model is deliberately minimal:
 
 Diagnostics are taken directly from the saved projection. The MVP must:
 
-- preserve the `card_id` in `Diagnostic.code` (string),
-- use the projection's `severity` field (default `Information`),
+- preserve the canonical ReviewClass/rule `code` in `Diagnostic.code` (string),
+- retain `card_id` in the parsed adapter diagnostic and card-scoped action
+  payloads; hovers and actions bind to the exact saved card/range/analysis
+  identity rather than selecting by nearby lines,
+- use the projection's `severity` field and skip missing or unsupported
+  severity values with an output warning,
 - preserve `source` as the literal string `unsafe-review`,
 - preserve the message exactly as saved (it already includes the obligation,
   missing evidence, and next action),
 - preserve the saved range when present and reject (skip) entries whose
   range fields are missing or non-numeric. Line `0` is valid because the saved
   projection uses LSP-style zero-based ranges.
+- reject (skip) entries without a canonical rule code or supported severity,
+  and write an output warning rather than presenting an empty or invented
+  semantic value.
 
 The extension may cap diagnostics per file at `unsafeReview.maxDiagnosticsPerFile`
 to keep editor UI responsive on very noisy bundles; capping always discards
-extras, never reorders.
+extras, never reorders, and reports the hidden count in the status bar and
+Output channel with the configured bundle path for the complete set.
 
 ## Code actions shape
 
@@ -164,8 +172,9 @@ The MVP is acceptable when:
   immediately shows diagnostics for the changed unsafe sites.
 - Hovering over a diagnostic shows the saved obligation, missing evidence,
   and next action, plus the trust boundary footer.
-- `Unsafe Review: Copy Agent Packet (copy)` writes the bounded packet to the
-  clipboard with no side effects on the file.
+- `Unsafe Review: Copy Agent Packet (copy)` writes the bounded JSON packet from
+  the canonical saved bundle to the clipboard with no side effects on the
+  file; a missing or mismatched packet is refused.
 - `Unsafe Review: Refresh Bundle` re-reads the saved file without running
   any subprocess.
 - The extension never edits source, never starts a long-running process,

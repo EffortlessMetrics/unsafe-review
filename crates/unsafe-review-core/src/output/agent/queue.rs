@@ -1,17 +1,20 @@
 use super::{readiness, repairs};
 use crate::domain::ReviewCard;
+use repairs::candidates::RepairCandidate;
 use serde::Serialize;
 
 pub(super) struct PacketRepairProjection {
     pub(super) allowed_repairs: Vec<String>,
     pub(super) agent_readiness: AgentReadiness,
     pub(super) repair_queue: AgentRepairQueue,
+    pub(super) repair_candidates: Vec<repairs::candidates::RepairCandidate>,
 }
 
 #[derive(Clone, Serialize)]
 pub(crate) struct AgentQueueProjection {
     pub(crate) agent_readiness: AgentReadiness,
     pub(crate) repair_queue: AgentRepairQueue,
+    pub(crate) repair_candidates: Vec<RepairCandidate>,
     /// Card-scoped allowed repair strings, threaded from `packet_repair_projection`
     /// for use by the aggregate repair queue artifact. Not emitted into context
     /// packet JSON because the field is skipped during serialization.
@@ -58,6 +61,7 @@ impl AgentReadiness {
 pub(super) struct AllowedRepairs {
     pub(super) repairs: Vec<String>,
     pub(super) has_card_scoped_repairs: bool,
+    pub(super) candidates: Vec<repairs::candidates::RepairCandidate>,
 }
 
 pub(super) fn packet_repair_projection(card: &ReviewCard) -> PacketRepairProjection {
@@ -68,6 +72,7 @@ pub(super) fn packet_repair_projection(card: &ReviewCard) -> PacketRepairProject
         allowed_repairs: allowed_repairs.repairs,
         agent_readiness,
         repair_queue,
+        repair_candidates: allowed_repairs.candidates,
     }
 }
 
@@ -76,6 +81,7 @@ pub(crate) fn repair_queue_projection(card: &ReviewCard) -> AgentQueueProjection
     AgentQueueProjection {
         agent_readiness: projection.agent_readiness,
         repair_queue: projection.repair_queue,
+        repair_candidates: projection.repair_candidates,
         allowed_repairs: projection.allowed_repairs,
     }
 }
@@ -104,11 +110,11 @@ pub(crate) fn card_has_scoped_repairs(card: &ReviewCard) -> bool {
 
 fn repair_queue(card: &ReviewCard, readiness: &AgentReadiness) -> AgentRepairQueue {
     let mut buckets = Vec::new();
-    if has_missing_kind(card, "contract") {
-        push_bucket(&mut buckets, "repairable_by_safety_docs");
-    }
     if has_missing_kind(card, "guard") {
         push_bucket(&mut buckets, "repairable_by_guard");
+    }
+    if has_missing_kind(card, "contract") {
+        push_bucket(&mut buckets, "repairable_by_safety_docs");
     }
     if has_missing_kind(card, "reach") {
         push_bucket(&mut buckets, "repairable_by_test");

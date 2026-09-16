@@ -1,6 +1,6 @@
 # UNSAFE-REVIEW-SPEC-0018: Live LSP server
 
-Status: proposed
+Status: accepted, partial-runtime
 Owner: editor/lsp
 Created: 2026-05-20
 Linked proposal: ../proposals/UNSAFE-REVIEW-PROP-0001-product-contract.md
@@ -170,6 +170,12 @@ Invalid configuration must log warning, fall back to defaults, and must not enab
 - Analysis and `spawn_blocking` failures must be logged.
 - Refresh failures must not imply clean/safe state.
 - Refresh failures clear stale diagnostics or mark status stale.
+- A configured `maxCards` cap may publish selected diagnostics, but the live
+  server must log the canonical partial-scan notice and identify those
+  diagnostics as partial rather than presenting a complete inventory.
+- Concurrent refresh requests must coalesce while one scan is in flight; at
+  most one pending follow-up scan may run, and stale generations must not
+  overwrite the newer result.
 - Stale generations must not publish diagnostics.
 - Refresh publishing must not hold state locks across `.await`.
 - `AnalyzeOutput`/`ReviewCard` remain canonical facts.
@@ -177,7 +183,9 @@ Invalid configuration must log warning, fall back to defaults, and must not enab
 ## Diagnostics / hover / actions
 
 - One `ReviewCard` maps to one `Diagnostic`.
-- High priority maps to Warning; all others to Information.
+- Diagnostic severity derives from the `ReviewClass` class table shared with
+  SARIF: warning classes map to Warning, note classes to Information, and
+  non-actionable classes to Hint. Priority remains a ranking signal only.
 - No `Error` severity in v1.
 - Diagnostic ranges use UTF-16 character width.
 - Diagnostic `data` includes `card_id`, operation details, `operation_family`,
@@ -189,6 +197,21 @@ Invalid configuration must log warning, fall back to defaults, and must not enab
   optional witness route, and trust boundary.
 - Hover must not overclaim safety/soundness/UB-free/Miri-clean status.
 - All code actions are card-scoped and command-only (`edit == None`).
+- Card actions consume the canonical typed action contract from SPEC-0012.
+  Stable action identity, hierarchical kind, diagnostic/card binding, analysis
+  identity, readiness wording, applicability, and disabled reasons must not be
+  re-derived in the live adapter. Explanation/navigation/copy actions are not
+  automatic fixes, are never preferred, and remain edit-free.
+- An unavailable route, witness command, or related test must be omitted or
+  disabled with its canonical reason. No enabled action may knowingly execute
+  to an unexplained `null`.
+- Live card actions are native diagnostic-bound `CodeAction` values. They carry
+  the full analysis identity in typed command arguments, set `edit = None`, and
+  are never preferred. Disabled actions carry no command. Refresh remains the
+  only workspace-scoped bare `Command`.
+- Analysis and diagnostics are installed and read as one live snapshot. A
+  refreshing, failed, changed, or superseded snapshot is not executable; full
+  analysis identity must match before current card capability is resolved.
 
 ## Execute command contract
 

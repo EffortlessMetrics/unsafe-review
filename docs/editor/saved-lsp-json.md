@@ -33,12 +33,16 @@ target/unsafe-review/cards.sarif
 target/unsafe-review/comment-plan.json
 target/unsafe-review/witness-plan.md
 target/unsafe-review/receipt-audit.md
+target/unsafe-review/receipt-audit.json
+target/unsafe-review/policy-report.json
+target/unsafe-review/policy-report.md
 target/unsafe-review/manual-candidates.json
 target/unsafe-review/lsp.json
 target/unsafe-review/manual-repair-queue.json
 target/unsafe-review/tokmd-packets.json
 target/unsafe-review/usefulness-telemetry.json
 target/unsafe-review/repair-queue.json
+target/unsafe-review/unsafe-review-gate.json
 ```
 
 For only the saved editor projection, run:
@@ -71,7 +75,8 @@ Open `target/unsafe-review/lsp.json` and look for:
 - `hovers`: compact card explanations with required conditions, evidence
   summaries, missing evidence, next action, witness route, and trust boundary,
 - `code_actions`: command-shaped copy/open actions with stable object
-  `payload` fields and legacy positional `arguments`.
+  `payload` fields and legacy positional `arguments`; agent-packet actions also
+  carry the exact bounded JSON packet in `payload.agent_packet`.
 
 The projection is useful when checking whether a card would be explainable in
 an editor before any live client exists.
@@ -109,7 +114,7 @@ A future editor adapter should consume this same artifact shape first:
 
 - show diagnostics from `diagnostics`,
 - show hover text from `hovers`,
-- copy bounded agent packets through existing `context` data,
+- copy bounded agent packets from the canonical `payload.agent_packet` value,
 - copy witness commands from existing witness routes,
 - open related tests when static reach evidence exists.
 

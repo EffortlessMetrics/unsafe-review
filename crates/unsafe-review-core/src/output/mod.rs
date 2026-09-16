@@ -1,7 +1,9 @@
 pub(crate) mod agent;
 pub(crate) mod badges;
+pub(crate) mod baseline_health;
 pub(crate) mod comment_plan;
 pub(crate) mod confirmation;
+pub(crate) mod declaration_summary;
 pub(crate) mod gate_manifest;
 pub(crate) mod human;
 pub(crate) mod json;
@@ -12,6 +14,7 @@ pub(crate) mod policy_report;
 pub(crate) mod receipt_audit;
 pub(crate) mod repair_queue;
 pub(crate) mod sarif;
+pub(crate) mod target_feature_summary;
 pub(crate) mod usefulness_telemetry;
 pub(crate) mod witness_plan;
 

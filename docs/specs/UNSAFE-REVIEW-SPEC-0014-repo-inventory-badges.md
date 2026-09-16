@@ -99,6 +99,7 @@ unsafe_unreached
 requires_loom
 miri_unsupported
 static_unknown
+scan_capped
 ```
 
 `unsafe_sites` is the count of unsafe seams discovered by the scanner before
@@ -106,6 +107,25 @@ any `max_cards` cap is applied.  On uncapped runs `unsafe_sites == cards`; on
 capped runs `unsafe_sites >= cards` because spread-selection reduces the card
 output but not the raw site count.  This field is advisory and heuristic — it
 does not prove memory safety, UB-freedom, Miri-clean status, or site-execution.
+
+`scan_capped` is `true` when the `max_cards` cap actually dropped cards from
+the emitted set, and `card_cap` (present only when `scan_capped` is `true`)
+carries the cap that bound the run.  These fields mirror the SPEC-0035 status
+vocabulary (`stop_reason: "max_cards"` + `cap: N`) onto the summary object so a
+consumer holding only the report can tell a truncated scan from a complete one.
+
+`scan_capped` is **projected from the pipeline's cap decision, never
+re-derived** by a consumer.  `cards == max_cards` is not equivalent: a run that
+found exactly `max_cards` cards dropped nothing and is complete, so re-deriving
+the flag would report a false truncation (registry FM8, project-vs-re-derive).
+
+While `scan_capped` is `true` every count in `summary` — including
+`open_actionable_gaps` and the SPEC-0030 movement counters — is understated.
+Any surface that renders those counts must render the cap disclosure with them,
+so a bounded run cannot be read as a complete review that found fewer gaps.
+The disclosure reports coverage of the emitted card set only; neither a capped
+nor a complete scan is a memory-safety, UB-free, Miri-clean, site-execution, or
+calibrated precision/recall claim.
 
 For diff-backed runs, `changed_files` and `changed_non_rust_files` summarize
 the input diff breadth so mixed-language PRs can show non-Rust scale without
@@ -210,6 +230,15 @@ the current `unsafe-review badges` repo projection.
   classes, operation families, witness routes, cards with direct `path:line`
   source locations, concrete operation expressions and next actions, and the
   trust boundary.
+- Repo Markdown for a declaration-heavy fixture additionally reports the
+  bounded declaration-summary grouping (SPEC-0011 §3.2, issue #1895) when at
+  least one `unsafe_declaration` ReviewCard is present, and omits the section
+  entirely otherwise.
+- Repo Markdown for a `target_feature`-repetition-heavy fixture additionally
+  reports the bounded target-feature-summary grouping (SPEC-0011 §3.2, issue
+  #1894) when at least one `target_feature` ReviewCard is present, and omits
+  the section entirely otherwise. Badge counts keep reading raw card counts,
+  never group counts.
 - Badge JSON for a fixture reports open unsafe-review gaps rather than raw
   unsafe count or safe/unsafe status.
 - The `unsafe-review+` badge message equals the evidence-quality component sum:

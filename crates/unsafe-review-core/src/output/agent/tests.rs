@@ -181,6 +181,30 @@ fn agent_packet_is_parseable_bounded_and_card_sourced() -> Result<(), String> {
     assert!(allowed_repairs.contains("alignment guard"));
     assert!(allowed_repairs.contains("unaligned operation"));
     assert!(allowed_repairs.contains("witness receipt"));
+    let repair_candidates = value["repair_candidates"]
+        .as_array()
+        .ok_or("repair_candidates should be an array when typed candidates exist")?;
+    let guard_candidate = repair_candidates
+        .iter()
+        .find(|candidate| candidate["repair_id"] == "add-raw_pointer_read-alignment-guard")
+        .ok_or("raw-pointer fixture should expose a typed alignment candidate")?;
+    assert_eq!(
+        guard_candidate["repair_id"],
+        "add-raw_pointer_read-alignment-guard"
+    );
+    assert_eq!(guard_candidate["target"]["file"], "src/lib.rs");
+    assert_eq!(guard_candidate["target"]["range"]["start"]["line"], 8);
+    assert_eq!(guard_candidate["applicability"], "candidate");
+    assert_eq!(
+        guard_candidate["expected_evidence_movement"][0]["slot"],
+        "guard_coverage"
+    );
+    assert!(
+        guard_candidate["claim_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("not a patch")
+    );
     assert_eq!(value["repair_scope"], "this card only");
     let witness_routes = value["witness_routes"]
         .as_array()
@@ -760,6 +784,70 @@ fn agent_packet_scopes_target_feature_repairs_to_dispatch_invariant() -> Result<
 }
 
 #[test]
+fn grouped_target_feature_packet_preserves_membership_and_per_site_authority() -> Result<(), String>
+{
+    let output = fixture_output("target_feature_simd_dispatch_repetition")?;
+    let card = output
+        .cards
+        .first()
+        .ok_or_else(|| "repetition fixture should emit cards".to_string())?;
+    let value = parse_json(&render_with_output(&output, card))?;
+    let group = &value["target_feature_group"];
+    let underlying = group["underlying_cards"]
+        .as_array()
+        .ok_or_else(|| "grouped packet should expose underlying cards".to_string())?;
+
+    assert!(group["total"].as_u64().is_some_and(|total| total > 1));
+    assert_eq!(
+        underlying.len() as u64,
+        group["total"].as_u64().unwrap_or(0)
+    );
+    assert!(underlying.iter().any(|member| {
+        member["card_id"] == card.id.0
+            && member["context_command"] == format!("unsafe-review context {} --json", card.id.0)
+    }));
+    assert!(
+        group["representatives"]
+            .as_array()
+            .is_some_and(|items| items.len() <= 3)
+    );
+    assert!(
+        group["edit_authority"]
+            .as_str()
+            .unwrap_or("")
+            .contains("this card/site only")
+    );
+    assert!(
+        group["edit_authority"]
+            .as_str()
+            .unwrap_or("")
+            .contains("does not repair or discharge any sibling")
+    );
+
+    let sibling_id = underlying
+        .iter()
+        .filter_map(|member| member["card_id"].as_str())
+        .find(|id| *id != card.id.0)
+        .ok_or_else(|| "group should contain a sibling card".to_string())?;
+    let sibling = output
+        .cards
+        .iter()
+        .find(|candidate| candidate.id.0 == sibling_id)
+        .ok_or_else(|| "sibling id should resolve through cards.json truth".to_string())?;
+    let sibling_value = parse_json(&render_with_output(&output, sibling))?;
+    assert_ne!(value["card_id"], sibling_value["card_id"]);
+    assert_eq!(
+        group["group_id"],
+        sibling_value["target_feature_group"]["group_id"]
+    );
+    assert_eq!(
+        group["underlying_cards"],
+        sibling_value["target_feature_group"]["underlying_cards"]
+    );
+    Ok(())
+}
+
+#[test]
 fn agent_packet_routes_non_miri_cards_without_overclaiming() -> Result<(), String> {
     let output = fixture_output("ffi_sanitizer_route")?;
     let Some(card) = output.cards.first() else {
@@ -784,6 +872,7 @@ fn agent_packet_routes_non_miri_cards_without_overclaiming() -> Result<(), Strin
     assert!(!allowed_repairs.contains("same raw pointer"));
     assert!(!allowed_repairs.contains("all-zero bit pattern"));
     assert!(!allowed_repairs.contains("target_feature"));
+    assert!(value["repair_candidates"].is_null());
     assert_eq!(value["agent_readiness"]["ready"], false);
     assert_eq!(value["agent_readiness"]["state"], "requires_human_review");
     let reasons = serde_json::to_string(&value["agent_readiness"]["reasons"])
@@ -795,6 +884,39 @@ fn agent_packet_routes_non_miri_cards_without_overclaiming() -> Result<(), Strin
             .as_str()
             .unwrap_or("")
             .contains("not UB-free status")
+    );
+    Ok(())
+}
+
+#[test]
+fn agent_packet_exposes_human_only_safety_docs_candidate_for_unsafe_declaration()
+-> Result<(), String> {
+    let output = fixture_output("public_unsafe_fn_safety_comment_not_docs")?;
+    let card = output
+        .cards
+        .iter()
+        .find(|card| card.operation.family == crate::domain::OperationFamily::UnsafeDeclaration)
+        .ok_or_else(|| "fixture should emit an unsafe declaration card".to_string())?;
+    let value = parse_json(&render(card))?;
+    let candidates = value["repair_candidates"]
+        .as_array()
+        .ok_or("unsafe declaration should expose typed candidates")?;
+    let contract = candidates
+        .iter()
+        .find(|candidate| candidate["kind"] == "safety_docs")
+        .ok_or("unsafe declaration should expose a safety-docs candidate")?;
+
+    assert_eq!(contract["applicability"], "human_only");
+    assert_eq!(contract["target"]["file"], "src/lib.rs");
+    assert_eq!(
+        contract["expected_evidence_movement"][0]["slot"],
+        "contract_coverage"
+    );
+    assert!(
+        contract["claim_boundary"]
+            .as_str()
+            .unwrap_or("")
+            .contains("not a patch")
     );
     Ok(())
 }
@@ -1066,7 +1188,43 @@ fn agent_packet_repair_queue_matches_aggregate_projection() -> Result<(), String
             projection.agent_readiness.reasons,
             "{fixture} context packet must match aggregate repair queue readiness reasons"
         );
+        let expected_candidates = serde_json::to_value(&projection.repair_candidates)
+            .map_err(|err| format!("serialize repair candidates failed: {err}"))?;
+        if projection.repair_candidates.is_empty() {
+            assert!(
+                value["repair_candidates"].is_null(),
+                "{fixture} should omit an empty repair candidate projection"
+            );
+        } else {
+            assert_eq!(
+                value["repair_candidates"], expected_candidates,
+                "{fixture} context packet must retain the canonical typed repair candidates"
+            );
+        }
     }
+    Ok(())
+}
+
+#[test]
+fn agent_packet_repair_queue_uses_canonical_bucket_order() -> Result<(), String> {
+    let output = fixture_output("split_unsafe_block")?;
+    let Some(card) = output.cards.first() else {
+        return Err("fixture should emit at least one card".to_string());
+    };
+    let value = parse_json(&render(card))?;
+
+    assert_eq!(
+        json_string_array(&value["repair_queue"]["buckets"], "repair queue buckets")?,
+        vec![
+            "repairable_by_guard",
+            "repairable_by_safety_docs",
+            "repairable_by_test",
+            "requires_witness_receipt",
+            "requires_human_review",
+            "do_not_auto_repair",
+        ],
+        "agent packet bucket order must match repair-queue/comment-plan projection order"
+    );
     Ok(())
 }
 
@@ -1498,15 +1656,81 @@ fn file_range_scan_returns_envelope_with_correct_shape() -> Result<(), String> {
     assert_eq!(packets.len(), 1, "one card should produce one packet");
     assert_eq!(packets[0]["mode"], "bounded_repair_packet");
     assert_eq!(packets[0]["card_id"], card.id.0);
+    assert_eq!(value["analysis"]["analysis_id"], "test-range-scan");
 
     let staleness = &value["staleness_marker"];
-    assert!(staleness["refresh_generation"].is_string());
-    assert!(staleness["analyzed_base"].is_string());
+    assert!(staleness["refresh_generation"].is_u64());
+    assert!(staleness.get("analyzed_base").is_none());
 
     let do_not_do = value["do_not_do"]
         .as_array()
         .ok_or("do_not_do should be an array")?;
     assert!(!do_not_do.is_empty());
+    Ok(())
+}
+
+#[test]
+fn output_range_scan_carries_analysis_identity() -> Result<(), String> {
+    let output = fixture_output("raw_pointer_alignment")?;
+    let root =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/raw_pointer_alignment");
+    let envelope_json = crate::api::collect_context_range(
+        &output,
+        &root,
+        std::path::Path::new("src/lib.rs"),
+        1,
+        1000,
+        false,
+    );
+    let value = parse_json(&envelope_json)?;
+    assert_eq!(
+        value["analysis"]["analysis_id"],
+        output.analysis_identity.analysis_id
+    );
+    assert_eq!(
+        value["analysis"]["generation"],
+        output.analysis_identity.generation
+    );
+    assert_eq!(value["packets"][0]["analysis"], value["analysis"]);
+    assert_eq!(
+        value["staleness_marker"]["refresh_generation"],
+        output.analysis_identity.generation
+    );
+    assert!(value["staleness_marker"].get("analyzed_base").is_none());
+    Ok(())
+}
+
+#[test]
+fn narrow_range_packet_keeps_complete_target_feature_group() -> Result<(), String> {
+    let output = fixture_output("target_feature_simd_dispatch_repetition")?;
+    let card = output
+        .cards
+        .first()
+        .ok_or_else(|| "repetition fixture should emit cards".to_string())?;
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/target_feature_simd_dispatch_repetition");
+    let line = card.site.location.line as u32;
+    let envelope = parse_json(&crate::api::collect_context_range(
+        &output,
+        &root,
+        &card.site.location.file,
+        line,
+        line,
+        false,
+    ))?;
+    let packets = envelope["packets"]
+        .as_array()
+        .ok_or_else(|| "range scan should expose packets".to_string())?;
+    let packet = packets
+        .iter()
+        .find(|packet| packet["card_id"] == card.id.0)
+        .ok_or_else(|| "range scan should contain the queried card".to_string())?;
+    let group = &packet["target_feature_group"];
+    assert!(group["total"].as_u64().is_some_and(|total| total > 1));
+    assert_eq!(
+        group["underlying_cards"].as_array().map(Vec::len),
+        group["total"].as_u64().map(|total| total as usize)
+    );
     Ok(())
 }
 

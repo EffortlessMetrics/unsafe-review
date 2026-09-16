@@ -1,18 +1,23 @@
 {
   "schema_version": "0.1",
   "status": "experimental",
-  "updated": "2026-06-15",
+  "updated": "2026-08-10",
   "manifest": "docs/dogfood/corpus.toml",
   "trust_boundary": "Dogfood corpus records are static unsafe contract review evidence, not memory-safety proof, not UB-free status, not Miri-clean status, and not a site-execution claim unless an exact witness receipt is attached.",
   "summary": {
-    "repositories": 15,
-    "targets": 40,
-    "repo_snapshots": 15,
+    "repositories": 19,
+    "targets": 47,
+    "repo_snapshots": 22,
     "pr_diffs": 23,
     "fixture_controls": 2,
     "checked_in_scan_outputs": 0,
+    "partitions": {
+      "conformance": 2,
+      "regression": 38,
+      "holdout": 7
+    },
     "artifact_statuses": {
-      "local_untracked": 40
+      "local_untracked": 47
     }
   },
   "repositories": [
@@ -48,9 +53,9 @@
     },
     {
       "repository": "crossbeam-rs/crossbeam",
-      "snapshot_targets": ["crossbeam-capped"],
+      "snapshot_targets": ["crossbeam-capped", "crossbeam-holdout"],
       "pr_diff_targets": ["crossbeam-pr1226", "crossbeam-pr1187"],
-      "primary_exercise": "Unsafe Send/Sync, atomics, raw pointer, ownership-transfer, strict-provenance Miri cfg cards, and atomic pointer state transitions"
+      "primary_exercise": "Unsafe Send/Sync, atomics, raw pointer, ownership-transfer, strict-provenance Miri cfg cards, atomic pointer state transitions, and release-readiness holdout"
     },
     {
       "repository": "tokio-rs/mio",
@@ -66,9 +71,9 @@
     },
     {
       "repository": "tokio-rs/slab",
-      "snapshot_targets": ["slab-capped"],
+      "snapshot_targets": ["slab-capped", "slab-holdout"],
       "pr_diff_targets": [],
-      "primary_exercise": "Pointer arithmetic, unsafe fn call, and unsafe impl review cards; fresh-crate capstone validation"
+      "primary_exercise": "Pointer arithmetic, unsafe fn call, unsafe impl review cards, and a comparatively quiet release-readiness holdout; fresh-crate capstone validation"
     },
     {
       "repository": "Lokathor/bytemuck",
@@ -96,15 +101,39 @@
     },
     {
       "repository": "rusticstuff/simdutf8",
-      "snapshot_targets": ["simdutf8-capped"],
+      "snapshot_targets": ["simdutf8-capped", "simdutf8-holdout"],
       "pr_diff_targets": [],
-      "primary_exercise": "SIMD target_feature unsafe fn call and intrinsic review cards; control-plane validation"
+      "primary_exercise": "SIMD target_feature unsafe fn call, intrinsic, and unchecked UTF-8 review cards; control-plane validation and release-readiness holdout"
     },
     {
       "repository": "google/zerocopy",
       "snapshot_targets": ["zerocopy-capped"],
       "pr_diff_targets": [],
       "primary_exercise": "Raw pointer dereference, transmute, and byte-cast review cards; control-plane validation"
+    },
+    {
+      "repository": "rust-random/getrandom",
+      "snapshot_targets": ["getrandom-holdout"],
+      "pr_diff_targets": [],
+      "primary_exercise": "Release-readiness holdout for platform RNG unsafe declarations, FFI-style bindings, and raw pointer review cards; recorded before tuning"
+    },
+    {
+      "repository": "taiki-e/portable-atomic",
+      "snapshot_targets": ["portable-atomic-holdout"],
+      "pr_diff_targets": [],
+      "primary_exercise": "Release-readiness holdout for no_std atomics, pointer state, and platform-specific unsafe contracts; recorded before tuning"
+    },
+    {
+      "repository": "rkyv/rkyv",
+      "snapshot_targets": ["rkyv-holdout"],
+      "pr_diff_targets": [],
+      "primary_exercise": "Release-readiness holdout for macro-heavy generated code, allocation, raw pointers, and byte-cast contracts; recorded before tuning"
+    },
+    {
+      "repository": "serde-rs/serde",
+      "snapshot_targets": ["serde-holdout"],
+      "pr_diff_targets": [],
+      "primary_exercise": "Release-readiness holdout for a multi-crate workspace with derive macro-generated code and a modest core unsafe surface; recorded before tuning"
     }
   ],
   "recorded_outcomes": [
@@ -171,6 +200,7 @@
     "Fixture controls are indexed separately from real-crate repository coverage.",
     "Saved-output artifacts are local_untracked under target/dogfood-work.",
     "Outcome comparison reads saved snapshots only and does not rerun analysis.",
+    "Holdout targets require explicit release-readiness opt-in and are not ordinary tuning inputs.",
     "Dogfood records do not execute witness tools or make policy decisions."
   ]
 }

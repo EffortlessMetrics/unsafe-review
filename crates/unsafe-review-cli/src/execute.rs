@@ -1,10 +1,11 @@
 use crate::command::{
-    BaselineAddOptions, BaselineCommand, BaselineInitOptions, CandidateCommand,
-    CandidateImportOptions, CandidateLintOptions, CandidateListOptions, CandidateNewOptions,
-    CandidateWitnessPlanOptions, CheckOptions, Command, ContextQuery, DiffInput, FirstPrOptions,
-    Format, OutcomeOptions, ReceiptTemplateOptions, RepoOptions, SavedOutputReceiptOptions,
-    SubcommandHelpTarget,
+    BaselineAddOptions, BaselineCommand, BaselineInitOptions, BaselineRefreshOptions,
+    BaselineStatusOptions, CandidateCommand, CandidateImportOptions, CandidateLintOptions,
+    CandidateListOptions, CandidateNewOptions, CandidateWitnessPlanOptions, CheckOptions, Command,
+    ContextQuery, DiffInput, ExternalPrSetupOptions, FirstPrOptions, Format, OutcomeOptions,
+    ReceiptTemplateOptions, RepoOptions, SavedOutputReceiptOptions, SubcommandHelpTarget,
 };
+use serde_json::json;
 #[cfg(unix)]
 use signal_hook::consts::signal::{SIGINT, SIGTERM};
 #[cfg(unix)]
@@ -23,22 +24,25 @@ use unsafe_review_core::{
     ProofReceiptInput, Provenance, RepoScanEvent, RepoScanPhase, RepoScanStatus, RepoStopReason,
     SanitizerReceiptInput, ScanCost, Scope, WITNESS_RECEIPT_SCHEMA_VERSION, WitnessReceipt,
     analyze, analyze_with_discovery, analyze_with_discovery_and_repo_events,
-    audit_witness_receipts, baseline_add, baseline_init, collect_context_range,
-    compare_outcome_json, discover_repo_files, evaluate_policy_report,
-    evaluate_policy_report_from_output, lint_manual_candidate_text, load_manual_candidates,
-    manual_candidate_implementer_handoff, new_manual_candidate_skeleton, read_manual_candidate,
-    render_badge_jsons, render_comment_plan, render_gate_manifest, render_gate_manifest_repo,
-    render_github_summary, render_human, render_json, render_json_with_provenance, render_lsp,
-    render_manual_candidate_witness_plan, render_markdown, render_outcome_json,
-    render_outcome_markdown, render_policy_report_json, render_policy_report_markdown,
-    render_pr_summary, render_receipt_audit_json, render_receipt_audit_markdown,
-    render_repair_queue, render_sarif, render_usefulness_telemetry_with_cost, render_witness_plan,
-    validate_witness_receipts,
+    audit_witness_receipts, baseline_add, baseline_init, baseline_init_preview,
+    baseline_refresh_preview, baseline_status, collect_context_range, compare_outcome_json,
+    discover_repo_files, evaluate_policy_report, evaluate_policy_report_from_output,
+    lint_manual_candidate_text, load_manual_candidates, manual_candidate_implementer_handoff,
+    new_manual_candidate_skeleton, read_manual_candidate, render_badge_jsons,
+    render_baseline_refresh_human, render_baseline_refresh_json, render_baseline_status_human,
+    render_baseline_status_json, render_comment_plan, render_gate_manifest,
+    render_gate_manifest_repo, render_github_summary, render_human, render_json,
+    render_json_with_provenance, render_lsp, render_manual_candidate_witness_plan, render_markdown,
+    render_outcome_json, render_outcome_markdown, render_policy_report_json,
+    render_policy_report_markdown, render_pr_summary, render_receipt_audit_json,
+    render_receipt_audit_markdown, render_repair_queue, render_sarif,
+    render_usefulness_telemetry_with_cost, render_witness_plan, validate_witness_receipts,
 };
 
 mod card_lookup;
 mod confirm;
 mod first_pr;
+mod init;
 
 const NO_CHANGED_GAPS_MESSAGE: &str = "No changed unsafe-review gaps were found.";
 const NO_CHANGED_GAPS_LIMITATION: &str =
@@ -87,7 +91,39 @@ const FIRST_PR_ARTIFACTS: [&str; 18] = [
     "repair-queue.json",
 ];
 
+/// Reject a `--root` that cannot be scanned, before any command runs.
+///
+/// Without this check a missing root surfaces the directory walker's raw IO
+/// string, and a root that names a file scans nothing at all and reports
+/// `cards: 0` — a clean review the user never actually ran.
+fn ensure_review_root(root: &Path) -> Result<(), String> {
+    if root.is_dir() {
+        return Ok(());
+    }
+    Err(review_root_error(root, &root.try_exists(), root.is_file()))
+}
+
+/// Explain why a `--root` is not a usable scan directory.
+///
+/// `existence` is `Path::try_exists`, not `Path::exists`. `exists` collapses a
+/// failed stat into `false`, so an unreadable directory would be reported as
+/// missing and send the user hunting for a typo instead of a permission.
+fn review_root_error(root: &Path, existence: &io::Result<bool>, is_file: bool) -> String {
+    let hint =
+        "Pass --root <dir> pointing at a Rust crate or workspace (default: the current directory).";
+    let root = root.display();
+    match existence {
+        Ok(true) if is_file => format!("--root {root} is a file, not a directory. {hint}"),
+        Ok(true) => format!("--root {root} is not a directory. {hint}"),
+        Ok(false) => format!("--root {root} does not exist. {hint}"),
+        Err(err) => format!("--root {root} cannot be read: {err}. {hint}"),
+    }
+}
+
 pub(crate) fn execute(command: Command) -> Result<(), crate::RunFailure> {
+    if let Some(root) = command.review_root() {
+        ensure_review_root(root).map_err(crate::RunFailure::Tool)?;
+    }
     match command {
         Command::Help => {
             print_help();
@@ -118,6 +154,7 @@ pub(crate) fn execute(command: Command) -> Result<(), crate::RunFailure> {
             Ok(())
         }
         Command::Doctor { root } => doctor(&root).map_err(crate::RunFailure::Tool),
+        Command::Init(options) => init::run(options).map_err(crate::RunFailure::Tool),
         Command::Check(options) => run_check(
             options,
             Scope::Diff,
@@ -132,6 +169,10 @@ pub(crate) fn execute(command: Command) -> Result<(), crate::RunFailure> {
             DiscoveryOptions::default(),
         ),
         Command::FirstPr(options) => first_pr(options).map_err(crate::RunFailure::Tool),
+        Command::PrSetup(options) => {
+            pr_setup(options);
+            Ok(())
+        }
         Command::Badges { root, out } => badges(&root, &out).map_err(crate::RunFailure::Tool),
         Command::Explain { root, id, format } => {
             explain(&root, &id, format).map_err(crate::RunFailure::Tool)
@@ -185,7 +226,9 @@ fn print_support() {
     println!("- source edits: not supported.");
     println!("- witness execution: not default.");
     println!("- blocking policy: not default.");
-    println!("- live LSP: deferred; saved lsp.json is the current editor-adjacent artifact.");
+    println!(
+        "- live LSP: re-analyzes the workspace on open/save/change; saved lsp.json remains the batch projection from first-pr."
+    );
     println!();
     println!("Trust boundary:");
     println!("- static unsafe contract review only.");
@@ -1352,14 +1395,14 @@ fn detect_git_root(start_dir: &Path) -> Result<PathBuf, String> {
         .map_err(|err| {
             format!(
                 "failed to run git: {err}. \
-                 Run `unsafe-review first-pr --root <repo> --base <ref>` to supply the paths explicitly."
+                 Run `unsafe-review pr --root <repo> --base <ref>` to supply the paths explicitly."
             )
         })?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!(
             "could not detect a git repository in the current directory ({}).\n\
-             Run `unsafe-review first-pr --root <repo> --base <ref>` to supply them explicitly.",
+             Run `unsafe-review pr --root <repo> --base <ref>` to supply them explicitly.",
             stderr.trim()
         ));
     }
@@ -1417,6 +1460,8 @@ fn detect_default_base(repo_root: &Path) -> Result<String, String> {
 }
 
 fn first_pr(options: FirstPrOptions) -> Result<(), String> {
+    let terminal_command = options.entrypoint.terminal_command();
+    let expected_head_sha = options.expected_head_sha;
     let mut check = options.check;
     check.policy = PolicyMode::Advisory;
     // When the caller requested auto-detection (i.e. `unsafe-review pr` with no
@@ -1430,6 +1475,14 @@ fn first_pr(options: FirstPrOptions) -> Result<(), String> {
         let detected_base = detect_default_base(&detected_root)?;
         check.root = detected_root;
         check.base = Some(detected_base);
+    }
+    if let Some(expected_head_sha) = &expected_head_sha {
+        validate_expected_head_sha(
+            &check.root,
+            check.base.as_deref(),
+            expected_head_sha,
+            terminal_command,
+        )?;
     }
     let provenance = build_provenance(&check);
     let diff = diff_source(&check)?;
@@ -1460,7 +1513,7 @@ fn first_pr(options: FirstPrOptions) -> Result<(), String> {
     let manual_candidates = load_manual_candidates(&root)?;
 
     fs::create_dir_all(&options.out_dir)
-        .map_err(|err| format!("create {} failed: {err}", options.out_dir.display()))?;
+        .map_err(|err| artifact_write_failure("create", &options.out_dir, err))?;
     // Accumulate bytes written across all artifact writes.  The total is
     // the disk footprint of this run's output bundle — diagnostic only,
     // not a coverage claim, proof, UB-free, Miri-clean, site-execution, or
@@ -1547,11 +1600,13 @@ fn first_pr(options: FirstPrOptions) -> Result<(), String> {
     )?;
 
     first_pr::print_first_pr_report(first_pr::FirstPrReport {
+        terminal_command,
         output: &output,
         out_dir: &options.out_dir,
         root: &root,
         check: &check,
         manual_candidates: &manual_candidates,
+        comment_plan: comment_plan_artifact.as_deref(),
         no_changed_gaps_message: NO_CHANGED_GAPS_MESSAGE,
         no_changed_gaps_limitation: NO_CHANGED_GAPS_LIMITATION,
         artifacts: &FIRST_PR_ARTIFACTS,
@@ -1559,6 +1614,36 @@ fn first_pr(options: FirstPrOptions) -> Result<(), String> {
     });
 
     Ok(())
+}
+
+/// Explain a `no-new-debt` failure that has no baseline ledger to compare against,
+/// or return an empty string when a ledger exists.
+///
+/// An absent ledger is not an error — brownfield adoption starts there, and the
+/// loader correctly treats "no ledger" as "no recorded floor". But the resulting
+/// count then means something different from what the flag's name implies: with
+/// no floor, *every* open actionable gap is "new", including debt that predates
+/// the change under review. The bare count cannot be told apart from a genuine
+/// regression against a recorded baseline, so say which one this is.
+///
+/// Diagnosis only. The exit code, the counts, and what counts as new debt are all
+/// unchanged, and this is not a memory-safety, UB-free, Miri-clean, or
+/// site-execution claim.
+fn absent_baseline_note(root: &Path) -> String {
+    let ledger = unsafe_review_core::baseline_ledger_path(root);
+    // `is_file` (not `try_exists`): an unreadable ledger is a load failure that
+    // surfaces its own error before policy is evaluated, so reaching here with an
+    // unreadable path is not a case this note should try to describe.
+    if ledger.is_file() {
+        return String::new();
+    }
+    format!(
+        ". No baseline ledger at {}, so every open actionable gap counts as new — \
+         this is not necessarily debt your change introduced. Record the current \
+         state as the floor with `{}` from a clean base branch, then re-run.",
+        ledger.display(),
+        first_pr::baseline_init_command(root)
+    )
 }
 
 fn enforce_policy(output: &unsafe_review_core::AnalyzeOutput) -> Result<(), crate::RunFailure> {
@@ -1574,8 +1659,10 @@ fn enforce_policy(output: &unsafe_review_core::AnalyzeOutput) -> Result<(), crat
                 Ok(())
             } else {
                 Err(crate::RunFailure::PolicyViolation(format!(
-                    "no-new-debt policy: {} new gap(s), {} worsened gap(s)",
-                    new, worsened
+                    "no-new-debt policy: {} new gap(s), {} worsened gap(s){}",
+                    new,
+                    worsened,
+                    absent_baseline_note(&output.root)
                 )))
             }
         }
@@ -1592,16 +1679,29 @@ fn enforce_policy(output: &unsafe_review_core::AnalyzeOutput) -> Result<(), crat
 /// diagnostic only, not a coverage claim, proof, UB-free, Miri-clean,
 /// site-execution, or performance guarantee.
 fn write_artifact(path: &Path, rendered: String) -> Result<u64, String> {
-    ensure_parent_dir(path)?;
+    ensure_parent_dir(path)
+        .map_err(|err| artifact_write_failure("prepare", path, std::io::Error::other(err)))?;
     let byte_count = rendered.len() as u64;
-    fs::write(path, rendered).map_err(|err| format!("write {} failed: {err}", path.display()))?;
+    fs::write(path, rendered).map_err(|err| artifact_write_failure("write", path, err))?;
     Ok(byte_count)
+}
+
+fn artifact_write_failure(action: &str, path: &Path, err: impl std::fmt::Display) -> String {
+    format!(
+        "{action} {} failed: {err}\nRecovery:\n  unsafe-review doctor --root .\n  choose a writable output directory or parent for {}",
+        path.display(),
+        path.display()
+    )
 }
 
 fn diff_source(options: &CheckOptions) -> Result<DiffSource, String> {
     if let Some(diff) = &options.diff {
         return match diff {
-            DiffInput::File(path) => Ok(DiffSource::File(resolve_diff_path(&options.root, path))),
+            DiffInput::File(path) => {
+                let resolved = resolve_diff_path(&options.root, path);
+                ensure_readable_diff(path, &resolved, &options.root)?;
+                Ok(DiffSource::File(resolved))
+            }
             DiffInput::Stdin => read_stdin_diff(),
         };
     }
@@ -1615,7 +1715,7 @@ fn diff_source(options: &CheckOptions) -> Result<DiffSource, String> {
         if !output.status.success() {
             let git_stderr = String::from_utf8_lossy(&output.stderr);
             let git_stderr = git_stderr.trim();
-            return Err(git_ref_error(base, git_stderr));
+            return Err(git_ref_error(&options.root, base, git_stderr));
         }
         return Ok(DiffSource::Text(
             String::from_utf8_lossy(&output.stdout).into_owned(),
@@ -1629,20 +1729,81 @@ fn diff_source(options: &CheckOptions) -> Result<DiffSource, String> {
 /// When git stderr contains well-known "unknown revision" phrases we add a hint
 /// that names the bad ref and suggests valid alternatives.  The original git
 /// message is always preserved so power users retain the full detail.
-fn git_ref_error(base: &str, git_stderr: &str) -> String {
+fn git_ref_error(root: &Path, base: &str, git_stderr: &str) -> String {
     let is_ref_error = git_stderr.contains("unknown revision")
         || git_stderr.contains("ambiguous argument")
         || git_stderr.contains("bad revision")
         || git_stderr.contains("not a tree object")
-        || git_stderr.contains("does not exist");
+        || git_stderr.contains("does not exist")
+        || git_stderr.contains("no merge base")
+        || git_stderr.contains("shallow");
     if is_ref_error {
-        format!(
+        return format!(
             "base ref '{base}' could not be resolved by git ({git_stderr}). \
              Pass a branch, tag, or commit SHA that exists in the repository \
-             (e.g. --base origin/main), or supply --diff <file> instead."
+             (e.g. --base origin/main), or supply --diff <file> instead.\n\
+             Recovery:\n  \
+             git fetch --no-tags origin\n  \
+             # For a shallow checkout, use this instead:\n  \
+             git fetch --unshallow origin\n  \
+             unsafe-review pr --root \"{}\" --base {base}",
+            root.display()
+        );
+    }
+    // Outside a work tree git answers with its full `diff --no-index` usage
+    // text, which buries the actual problem. Name the condition instead.
+    if git_stderr.contains("Not a git repository") || git_stderr.contains("not a git repository") {
+        return format!(
+            "--root is not inside a git repository, so --base '{base}' cannot be \
+             resolved. Run unsafe-review from a git checkout, pass --root <repo>, \
+             or supply --diff <file> instead."
+        );
+    }
+    // Every other git failure — dubious repository ownership, a shallow clone with no
+    // merge base, a corrupt object — still shows git's own text, because that text is
+    // the only description of the problem we have. Keep it, but stop ending there: the
+    // two escape hatches are the same regardless of which git error it was, and a user
+    // reading raw git output has no reason to know either exists.
+    format!(
+        "git diff failed while resolving --base '{base}': {git_stderr}. \
+         Fix the repository state git is reporting, or supply --diff <file> to review a \
+         saved patch instead."
+    )
+}
+
+fn validate_expected_head_sha(
+    root: &Path,
+    base_ref: Option<&str>,
+    expected_head_sha: &str,
+    terminal_command: &str,
+) -> Result<(), String> {
+    let actual = git_rev_parse(root, "HEAD").ok_or_else(|| {
+        format!(
+            "could not resolve HEAD in `{}` for --head-sha validation. \
+             Fetch and check out the external PR head SHA, or use --diff <file>.",
+            root.display()
         )
+    })?;
+    if !actual.eq_ignore_ascii_case(expected_head_sha) {
+        let base_ref = base_ref.unwrap_or("<base-sha>");
+        let root_display = root.display();
+        Err(format!(
+            "current HEAD in `{root_display}` is {actual}, but --head-sha expected {expected_head_sha}. \
+             Prepare the exact external PR checkout before running {terminal_command}:\n\
+             \n  gh pr view <number> --repo <owner>/<repo> --json baseRefName,baseRefOid,headRefOid\n  \
+             git -C \"{root_display}\" fetch origin <base-ref-name> pull/<number>/head\n  \
+             git -C \"{root_display}\" checkout --detach {expected_head_sha}\n  \
+             unsafe-review {terminal_command} --root \"{root_display}\" --base-sha {base_ref} --head-sha {expected_head_sha}"
+        ))
+    } else if git_dirty_worktree(root).unwrap_or(true) {
+        Err(format!(
+            "dirty worktree in `{}` is not allowed with --head-sha. \
+             Commit, stash, or discard local changes before running {terminal_command}, \
+             or use --diff <file> for a saved patch input.",
+            root.display()
+        ))
     } else {
-        format!("git diff failed: {git_stderr}")
+        Ok(())
     }
 }
 
@@ -1722,6 +1883,65 @@ fn git_dirty_worktree(root: &Path) -> Option<bool> {
         return None;
     }
     Some(!output.stdout.is_empty())
+}
+
+/// Reject an unusable `--diff` argument before any scan runs, naming the flag and
+/// the fix rather than surfacing a bare `io::Error` from deep in the pipeline
+/// (SPEC-0023 §9.2: an input failure prints an actionable message naming the exact
+/// flag to use).
+///
+/// The relative-path case gets its own sentence because `resolve_diff_path` joins a
+/// relative `--diff` onto `--root`: a user who ran from a different directory would
+/// otherwise see a path they never typed, with nothing explaining where it came
+/// from. `requested` is what they wrote; `resolved` is what was opened.
+///
+/// This reports on reading the file only. It is not a claim that the diff is
+/// well-formed — parse rejection stays where it is, in the pipeline — and says
+/// nothing about memory safety, UB-free status, or Miri-clean status.
+fn ensure_readable_diff(requested: &Path, resolved: &Path, root: &Path) -> Result<(), String> {
+    // `try_exists` distinguishes "absent" from "cannot be determined": an unreadable
+    // parent directory is a permission problem, not a typo, and must not be reported
+    // as a missing file (matching `ensure_review_root`).
+    let relative_note = if requested == resolved {
+        String::new()
+    } else {
+        format!(
+            " The relative path `{}` was resolved against --root, giving `{}`; \
+             pass an absolute path to --diff if that is not what you meant.",
+            requested.display(),
+            root.join(requested).display()
+        )
+    };
+    let unreadable = |err: &dyn std::fmt::Display| {
+        format!(
+            "diff file {} could not be read: {err}.{relative_note} Check the path and its \
+             directory permissions, then pass a readable file to --diff.",
+            resolved.display()
+        )
+    };
+    let existence = resolved.try_exists().map_err(|err| unreadable(&err))?;
+    if !existence {
+        return Err(format!(
+            "diff file {} does not exist.{relative_note} Capture one with \
+             `git diff --binary --full-index --output=<file> <base-sha>...<head-sha>`, \
+             pass `--diff -` to read a diff from stdin, or use `--base <ref>` to let \
+             unsafe-review run the diff itself.",
+            resolved.display()
+        ));
+    }
+    if resolved.is_dir() {
+        return Err(format!(
+            "diff file {} is a directory, not a file.{relative_note} Pass the unified-diff \
+             file itself to --diff.",
+            resolved.display()
+        ));
+    }
+    // Existence is not readability: a file the process cannot open passes `try_exists`
+    // and would then fail inside the pipeline with the bare `read diff … failed` error
+    // this preflight exists to replace. Open it here so the permission case is reported
+    // at the boundary like every other unusable-input case.
+    std::fs::File::open(resolved).map_err(|err| unreadable(&err))?;
+    Ok(())
 }
 
 fn resolve_diff_path(root: &Path, path: &Path) -> PathBuf {
@@ -1943,14 +2163,14 @@ fn explain(root: &Path, id: &str, format: Format) -> Result<(), String> {
     let detail = match card_lookup::explain_text(&output, &id) {
         Ok(detail) => detail,
         Err(_) => card_lookup::manual_candidate_explain(root, &id.0)?
-            .ok_or_else(|| format!("card `{id}` not found"))?,
+            .ok_or_else(|| card_lookup::card_not_found(root, &id.0))?,
     };
     match format {
         Format::Json => {
             let packet = match card_lookup::context_packet(&output, &id) {
                 Ok(packet) => packet,
                 Err(_) => card_lookup::manual_candidate_context(root, &id.0)?
-                    .ok_or_else(|| format!("card `{id}` not found"))?,
+                    .ok_or_else(|| card_lookup::card_not_found(root, &id.0))?,
             };
             println!("{packet}");
         }
@@ -1967,7 +2187,7 @@ fn context(root: &Path, query: ContextQuery) -> Result<(), String> {
             let packet = match card_lookup::context_packet(&output, &card_id) {
                 Ok(packet) => packet,
                 Err(_) => card_lookup::manual_candidate_context(root, &id)?
-                    .ok_or_else(|| format!("card `{id}` not found"))?,
+                    .ok_or_else(|| card_lookup::card_not_found(root, &id))?,
             };
             println!("{packet}");
             Ok(())
@@ -2712,6 +2932,8 @@ fn run_baseline(command: BaselineCommand) -> Result<(), String> {
     match command {
         BaselineCommand::Init(options) => run_baseline_init(options),
         BaselineCommand::Add(options) => run_baseline_add(options),
+        BaselineCommand::Status(options) => run_baseline_status(options),
+        BaselineCommand::Refresh(options) => run_baseline_refresh(options),
         BaselineCommand::Help => {
             print_baseline_help();
             Ok(())
@@ -2719,13 +2941,93 @@ fn run_baseline(command: BaselineCommand) -> Result<(), String> {
     }
 }
 
+const BASELINE_REFRESH_PLAN_ARTIFACT: &str = "baseline-refresh-plan.json";
+
+/// `baseline status` (issue #1893): read-only baseline-ledger health report. Human and
+/// JSON output project from the same `BaselineHealthReport`, so they always report
+/// identical bucket counts and entry identities.
+fn run_baseline_status(options: BaselineStatusOptions) -> Result<(), String> {
+    let report = baseline_status(&options.root)?;
+    match options.format {
+        Format::Json => println!("{}", render_baseline_status_json(&report)),
+        _ => print!("{}", render_baseline_status_human(&report)),
+    }
+    Ok(())
+}
+
+/// `baseline refresh --dry-run` (issue #1893): deterministic per-entry refresh preview.
+/// Writes nothing to policy, source, or snapshot files; `--out`, if given, additionally
+/// writes the JSON plan to `<out>/baseline-refresh-plan.json`.
+fn run_baseline_refresh(options: BaselineRefreshOptions) -> Result<(), String> {
+    let plan = baseline_refresh_preview(&options.root)?;
+    print!("{}", render_baseline_refresh_human(&plan));
+    if let Some(out) = &options.out {
+        let path = out.join(BASELINE_REFRESH_PLAN_ARTIFACT);
+        write_artifact(&path, render_baseline_refresh_json(&plan))?;
+        println!("plan written: {}", repo_path_display(&path));
+    }
+    Ok(())
+}
+
 fn run_baseline_init(options: BaselineInitOptions) -> Result<(), String> {
-    let result = baseline_init(
-        &options.root,
-        options.out.as_deref(),
-        options.review_after.as_deref(),
-    )?;
-    println!("baseline init: ok");
+    let result = if options.dry_run {
+        baseline_init_preview(
+            &options.root,
+            options.out.as_deref(),
+            options.review_after.as_deref(),
+        )?
+    } else {
+        baseline_init(
+            &options.root,
+            options.out.as_deref(),
+            options.review_after.as_deref(),
+        )?
+    };
+    match options.format {
+        Format::Json => println!("{}", render_baseline_init_json(&result, options.dry_run)?),
+        _ => print_baseline_init_human(&result, options.dry_run),
+    }
+    Ok(())
+}
+
+const BASELINE_INIT_TRUST_BOUNDARY: &str = "baseline entries are debt records, not safety records; a baseline init pass records pre-existing gaps and does not prove memory safety, UB-free status, Miri-clean status, or site execution";
+
+fn render_baseline_init_json(
+    result: &unsafe_review_core::BaselineInitResult,
+    dry_run: bool,
+) -> Result<String, String> {
+    let cards = result
+        .cards
+        .iter()
+        .map(|card| {
+            json!({
+                "card_id": card.id.0,
+                "path": repo_path_display(&card.site.location.file),
+                "line": card.site.location.line,
+                "operation_family": card.operation.family.as_str(),
+                "hazards": card.hazards.iter().map(|hazard| hazard.as_str()).collect::<Vec<_>>(),
+            })
+        })
+        .collect::<Vec<_>>();
+    serde_json::to_string_pretty(&json!({
+        "mode": if dry_run { "preview" } else { "apply" },
+        "writes_files": !dry_run,
+        "captured": result.captured,
+        "ledger_existed": result.ledger_existed,
+        "ledger_path": repo_path_display(&result.ledger_path),
+        "snapshot_path": repo_path_display(&result.snapshot_path),
+        "cards": cards,
+        "trust_boundary": BASELINE_INIT_TRUST_BOUNDARY,
+    }))
+    .map_err(|error| format!("render baseline init JSON failed: {error}"))
+}
+
+fn print_baseline_init_human(result: &unsafe_review_core::BaselineInitResult, dry_run: bool) {
+    if dry_run {
+        println!("baseline init: preview (no files written)");
+    } else {
+        println!("baseline init: ok");
+    }
     println!("captured: {} open actionable card(s)", result.captured);
     if !result.cards.is_empty() {
         println!("debt scope:");
@@ -2734,39 +3036,45 @@ fn run_baseline_init(options: BaselineInitOptions) -> Result<(), String> {
             let line = card.site.location.line;
             let family = card.operation.family.as_str();
             let hazards: Vec<&str> = card.hazards.iter().map(|h| h.as_str()).collect();
-            let hazard_list = hazards.join(", ");
             println!(
                 "  {}  {}:{}  {}  [{}]",
-                card.id.0, file, line, family, hazard_list
+                card.id.0,
+                file,
+                line,
+                family,
+                hazards.join(", ")
             );
         }
     }
-    println!("ledger: {}", result.ledger_path.display());
-    println!("snapshot: {}", result.snapshot_path.display());
-    if result.ledger_existed {
-        println!(
-            "note: ledger already existed; merged existing entries (new entries added, unchanged entries kept)."
-        );
+    if dry_run {
+        println!("would write ledger: {}", result.ledger_path.display());
+        println!("would write snapshot: {}", result.snapshot_path.display());
+        println!("note: preview only; the scanned repository was not modified.");
     } else {
-        println!("note: new ledger created.");
+        println!("ledger: {}", result.ledger_path.display());
+        println!("snapshot: {}", result.snapshot_path.display());
+        if result.ledger_existed {
+            println!(
+                "note: ledger already existed; merged existing entries (new entries added, unchanged entries kept)."
+            );
+        } else {
+            println!("note: new ledger created.");
+        }
+        println!();
+        println!("next:");
+        println!(
+            "  git add {} {}",
+            result.ledger_path.display(),
+            result.snapshot_path.display()
+        );
+        println!("  git commit -m 'baseline: record pre-existing debt floor'");
+        println!("  # from now on:");
+        println!(
+            "  unsafe-review check --policy no-new-debt   # fails only when the diff adds or worsens debt"
+        );
     }
     println!();
-    println!("next:");
-    println!(
-        "  git add {} {}",
-        result.ledger_path.display(),
-        result.snapshot_path.display()
-    );
-    println!("  git commit -m 'baseline: record pre-existing debt floor'");
-    println!("  # from now on:");
-    println!(
-        "  unsafe-review check --policy no-new-debt   # fails only when the diff adds or worsens debt"
-    );
-    println!();
-    println!(
-        "trust boundary: baseline entries are debt records, not safety records. A baseline init pass means only that the open actionable gaps were recorded as pre-existing; it does not prove memory safety, UB-free status, Miri-clean status, or that any unsafe site executed safely."
-    );
-    Ok(())
+    println!("trust boundary: {BASELINE_INIT_TRUST_BOUNDARY}.");
 }
 
 fn run_baseline_add(options: BaselineAddOptions) -> Result<(), String> {
@@ -2788,6 +3096,69 @@ fn run_baseline_add(options: BaselineAddOptions) -> Result<(), String> {
     Ok(())
 }
 
+fn pr_setup(options: ExternalPrSetupOptions) {
+    let root = shell_path_arg(&options.root);
+    let out_dir = shell_path_arg(&options.out_dir);
+    let diff_out = shell_path_arg(&options.diff_out);
+    let diff_out_parent = options
+        .diff_out
+        .parent()
+        .map(shell_path_arg)
+        .unwrap_or_else(|| shell_path_arg(Path::new(".")));
+    println!("unsafe-review pr-setup");
+    println!();
+    println!(
+        "Read-only setup commands for external GitHub PR {}#{}.",
+        options.repo, options.number
+    );
+    println!(
+        "This command did not fetch, checkout, run unsafe-review, execute witnesses, post comments, or edit source."
+    );
+    println!();
+    println!("Capture immutable PR refs:");
+    println!(
+        "  gh pr view {} --repo {} --json baseRefName,baseRefOid,headRefOid",
+        options.number, options.repo
+    );
+    println!();
+    println!("Checkout-based review route (copy as one shell block):");
+    println!(
+        "  git -C {root} fetch origin {} pull/{}/head && git -C {root} checkout --detach {} && unsafe-review pr --root {root} --base-sha {} --head-sha {} --out-dir {out_dir}",
+        options.base_ref, options.number, options.head_sha, options.base_sha, options.head_sha,
+    );
+    println!();
+    println!("Saved raw-diff route (copy as one shell block after checkout):");
+    println!(
+        "  mkdir -p {diff_out_parent} && git -C {root} diff --binary --full-index --output={diff_out} {}...{} && unsafe-review pr --root {root} --diff {diff_out} --out-dir {out_dir}",
+        options.base_sha, options.head_sha,
+    );
+    println!();
+    println!("Inputs kept visible:");
+    println!("  repo: {}", options.repo);
+    println!("  number: {}", options.number);
+    println!("  baseRefName: {}", options.base_ref);
+    println!("  baseRefOid: {}", options.base_sha);
+    println!("  headRefOid: {}", options.head_sha);
+    println!("  out_dir: {}", options.out_dir.display());
+    println!();
+    println!("Trust boundary: always advisory; {FIRST_RUN_TRUST_BOUNDARY}");
+}
+
+fn shell_path_arg(path: &Path) -> String {
+    let raw = path.display().to_string();
+    format!("\"{}\"", normalize_shell_path(&raw))
+}
+
+#[cfg(windows)]
+fn normalize_shell_path(raw: &str) -> String {
+    raw.replace('\\', "/")
+}
+
+#[cfg(not(windows))]
+fn normalize_shell_path(raw: &str) -> String {
+    raw.to_string()
+}
+
 fn print_subcommand_help(target: SubcommandHelpTarget) {
     match target {
         SubcommandHelpTarget::Check => print_check_help(),
@@ -2799,11 +3170,24 @@ fn print_subcommand_help(target: SubcommandHelpTarget) {
         SubcommandHelpTarget::Receipt => print_receipt_help(),
         SubcommandHelpTarget::Outcome => print_outcome_help(),
         SubcommandHelpTarget::Policy => print_policy_help(),
+        SubcommandHelpTarget::Init => print_init_help(),
+        SubcommandHelpTarget::PrSetup => print_pr_setup_help(),
         SubcommandHelpTarget::Doctor => print_doctor_help(),
         SubcommandHelpTarget::Badges => print_badges_help(),
         SubcommandHelpTarget::Lsp => print_lsp_help(),
         SubcommandHelpTarget::Support => print_support(),
     }
+}
+
+fn print_init_help() {
+    println!("unsafe-review init: preview a guided repository adoption proposal");
+    println!();
+    println!("Usage:");
+    println!("  unsafe-review init [--root .] [--format human|json] [--out <directory>]");
+    println!();
+    println!("Preview-only by default: no repository files are written. The proposal shows");
+    println!("workflow content, conflicts, warnings, rollback guidance, and next commands.");
+    println!("Use `unsafe-review doctor` and `unsafe-review pr` after reviewing the proposal.");
 }
 
 fn print_check_help() {
@@ -2847,38 +3231,102 @@ fn print_first_pr_help() {
     println!();
     println!("Usage:");
     println!(
-        "  unsafe-review first-pr [--root .] [--base origin/main | --diff <file|->] \
+        "  unsafe-review first-pr [--root .] [--base origin/main | --base-sha <sha> [--head-sha <sha>] | --diff <file|->] \
          [--out-dir target/unsafe-review] [--max-cards <N>]"
     );
     println!();
+    println!("  pr       preferred first-run entry point for the same advisory bundle");
     println!("  review   alias for first-pr");
     println!();
     println!("What first-pr writes:");
-    println!("- cards.json, pr-summary.md, github-summary.md, cards.sarif, comment-plan.json,");
-    println!(
-        "  witness-plan.md, lsp.json, repair-queue.json, receipt-audit.md, receipt-audit.json,"
-    );
-    println!("  policy-report.json, policy-report.md, manual-candidates.json,");
-    println!(
-        "  manual-repair-queue.json, tokmd-packets.json, review-kit.json, unsafe-review-gate.json"
-    );
+    print_first_pr_artifacts_help();
     println!();
     println!("Options:");
     println!("- --root <dir>    repository or subdirectory to review (default: current directory)");
     println!("- --base <ref>    git ref to diff against HEAD (default: origin/main)");
+    println!("- --base-sha <sha> exact 40-hex base commit SHA for an external PR");
+    println!(
+        "- --head-sha <sha> exact 40-hex expected HEAD SHA; validates the checkout before analysis"
+    );
     println!("- --diff <file|-> read diff from a file or stdin instead of --base");
     println!("- --out-dir <dir> directory for all artifacts (default: target/unsafe-review)");
     println!("- --max-cards <N> stop collecting after N cards");
     println!();
     println!("Examples:");
-    println!("  unsafe-review first-pr");
-    println!("  unsafe-review first-pr --diff change.diff --out-dir target/review");
+    println!("  unsafe-review pr");
+    println!("  unsafe-review pr --base origin/main");
+    println!(
+        "  unsafe-review pr --root /path/to/repo --base-sha <base-sha> --head-sha <head-sha> --out-dir /path/to/review-kit"
+    );
+    println!("  unsafe-review pr --diff change.diff --out-dir target/review");
     println!("  unsafe-review review --base origin/main --max-cards 20");
+    println!();
+    println!("External PR setup:");
+    println!(
+        "  gh pr view <number> --repo <owner>/<repo> --json baseRefName,baseRefOid,headRefOid"
+    );
+    println!(
+        "  unsafe-review pr-setup --repo <owner>/<repo> --number <number> --base-ref <base-ref-name> --base-sha <base-sha> --head-sha <head-sha> --root /path/to/repo --out-dir /path/to/review-kit --diff-out /path/to/change.diff"
+    );
+    println!("Checkout-based review route (copy as one shell block):");
+    println!(
+        "  git -C /path/to/repo fetch origin <base-ref-name> pull/<number>/head && git -C /path/to/repo checkout --detach <head-sha> && unsafe-review pr --root /path/to/repo --base-sha <base-sha> --head-sha <head-sha> --out-dir /path/to/review-kit"
+    );
+    println!("Saved raw-diff route (copy as one shell block after checkout):");
+    println!(
+        "  mkdir -p /path/to && git -C /path/to/repo diff --binary --full-index --output=/path/to/change.diff <base-sha>...<head-sha> && unsafe-review pr --root /path/to/repo --diff /path/to/change.diff --out-dir /path/to/review-kit"
+    );
     println!();
     println!("Trust boundary: always advisory; {FIRST_RUN_TRUST_BOUNDARY}");
     println!(
         "unsafe-review does not execute witnesses, post comments, edit source, or enforce blocking policy by default."
     );
+}
+
+fn print_pr_setup_help() {
+    println!("unsafe-review pr-setup: print read-only external GitHub PR setup commands");
+    println!();
+    println!("Usage:");
+    println!(
+        "  unsafe-review pr-setup --repo <owner>/<repo> --number <pr> --base-ref <baseRefName> --base-sha <baseRefOid> --head-sha <headRefOid> [--root .] [--out-dir target/unsafe-review] [--diff-out target/unsafe-review/external-pr.diff]"
+    );
+    println!();
+    println!("What pr-setup does:");
+    println!(
+        "- Expands exact PR metadata into copyable checkout, first-pr, and raw-diff commands."
+    );
+    println!(
+        "- Prints commands only; it does not run gh, git, unsafe-review, witnesses, agents, or comments."
+    );
+    println!("- Keeps exact base/head SHAs visible for pilot receipts and review handoffs.");
+    println!();
+    println!("Inputs:");
+    println!("- --repo <owner>/<repo>      GitHub repository slug from `gh pr view --repo`");
+    println!("- --number <pr>             GitHub PR number");
+    println!("- --base-ref <baseRefName>  base branch name reported by `gh pr view`");
+    println!("- --base-sha <baseRefOid>   exact 40-hex base commit SHA");
+    println!("- --head-sha <headRefOid>   exact 40-hex head commit SHA");
+    println!("- --root <dir>              local checkout path to use in printed commands");
+    println!(
+        "- --out-dir <dir>           advisory bundle path; relative values resolve from the current directory"
+    );
+    println!(
+        "- --diff-out <file>         raw diff path; relative values resolve from the current directory"
+    );
+    println!();
+    println!("Example:");
+    println!("  gh pr view 827 --repo tokio-rs/bytes --json baseRefName,baseRefOid,headRefOid");
+    println!(
+        "  unsafe-review pr-setup --repo tokio-rs/bytes --number 827 --base-ref main --base-sha <baseRefOid> --head-sha <headRefOid> --root /path/to/bytes --out-dir target/external-pilots/bytes-pr827/first-pr --diff-out target/external-pilots/bytes-pr827.diff"
+    );
+    println!();
+    println!("Trust boundary: always advisory; {FIRST_RUN_TRUST_BOUNDARY}");
+}
+
+fn print_first_pr_artifacts_help() {
+    for chunk in FIRST_PR_ARTIFACTS.chunks(4) {
+        println!("- {}", chunk.join(", "));
+    }
 }
 
 fn print_pilot_help() {
@@ -3159,10 +3607,10 @@ fn print_lsp_help() {
     println!();
     println!("What lsp does:");
     println!(
-        "- Reads lsp.json (the saved LSP diagnostic artifact from first-pr) and serves it over the LSP stdio protocol."
+        "- Starts a live Language Server Protocol server over stdio that re-analyzes the workspace on open/save/change and publishes diagnostics, hovers, code actions, and commands (SPEC-0018)."
     );
     println!(
-        "- Intended for editor integration where the lsp.json was produced by a previous first-pr or check run."
+        "- This is distinct from the saved lsp.json batch projection emitted by first-pr (SPEC-0012); the live server is the editor-integration entrypoint."
     );
     println!();
     println!("Examples:");
@@ -3176,10 +3624,14 @@ fn print_baseline_help() {
     println!();
     println!("Usage:");
     println!(
-        "  unsafe-review baseline init [--root .] [--out policy/unsafe-review-baseline.toml] [--review-after YYYY-MM-DD]"
+        "  unsafe-review baseline init [--root .] [--out policy/unsafe-review-baseline.toml] [--review-after YYYY-MM-DD] [--dry-run] [--format human|json]"
     );
     println!(
         "  unsafe-review baseline add --card-id <UR-...-cN> --owner <name> --reason <text> --evidence <text> [--root .] [--review-after YYYY-MM-DD] [--out policy/unsafe-review-baseline.toml]"
+    );
+    println!("  unsafe-review baseline status [--root .] [--format human|json]");
+    println!(
+        "  unsafe-review baseline refresh --dry-run [--root .] [--out target/baseline-refresh]"
     );
     println!();
     println!("What baseline does:");
@@ -3187,13 +3639,23 @@ fn print_baseline_help() {
         "- `init` scans the repo for open actionable cards and records each as a baseline ledger entry with its current coverage state in the snapshot."
     );
     println!(
+        "- `init --dry-run` previews the same ledger and snapshot plan without writing repository files; `--format json` emits the same proposal fields in machine-readable form."
+    );
+    println!(
         "- `add` adds or updates a single ledger entry and its snapshot state without rescanning the entire ledger."
+    );
+    println!(
+        "- `status` is a read-only health report: it classifies every ledger entry (and every unbaselined open actionable card) into one of ten SPEC-0030 buckets — active_unchanged, active_improved, active_worsened, resolved, review_due, snapshot_missing_or_invalid, duplicate_or_conflicting_entry, suppression_overlap, identity_unmatched, new_unbaselined."
+    );
+    println!(
+        "- `refresh --dry-run` previews the per-entry action a maintainer could take (keep, update_snapshot, mark_resolved, advance_review_after, add_new_debt, conflict); it leaves repository policy, source, and snapshot state unchanged, writing a plan artifact only when --out is explicitly given, and there is no apply mode."
     );
     println!(
         "- The baseline ledger is `policy/unsafe-review-baseline.toml`; the snapshot is `policy/unsafe-review-baseline-snapshot.toml`."
     );
     println!();
     println!("Brownfield onboarding:");
+    println!("  unsafe-review baseline init --dry-run --format json");
     println!("  unsafe-review baseline init");
     println!(
         "  git add policy/unsafe-review-baseline.toml policy/unsafe-review-baseline-snapshot.toml"
@@ -3201,6 +3663,8 @@ fn print_baseline_help() {
     println!("  git commit -m 'baseline: record pre-existing debt floor'");
     println!("  # from now on:");
     println!("  unsafe-review check --policy no-new-debt");
+    println!("  # to check ledger health before refreshing it:");
+    println!("  unsafe-review baseline status");
     println!();
     println!("Trust boundary:");
     println!(
@@ -3210,6 +3674,9 @@ fn print_baseline_help() {
         "- Adding a card to the baseline does not prove memory safety, UB-free status, Miri-clean status, or that any unsafe site executed safely."
     );
     println!(
+        "- `status` and `refresh --dry-run` are read-only: they classify existing SPEC-0030 movement/ledger signals. `status` writes nothing. `refresh` never edits policy, source, or snapshot files, and writes a plan artifact only when --out is explicitly given."
+    );
+    println!(
         "- unsafe-review does not execute witnesses, post comments, edit source, run an agent, or enforce blocking policy by default."
     );
 }
@@ -3217,71 +3684,62 @@ fn print_baseline_help() {
 fn print_help() {
     println!("unsafe-review: cheap unsafe contract review for Rust");
     println!();
-    println!("Commands:");
     println!(
-        "  check   [--root .] [--base origin/main | --diff file|-] [--format human|json|markdown|pr-summary|github-summary|sarif|comment-plan|lsp|witness-plan] [--policy advisory|no-new-debt] [--out file]"
+        "unsafe-review finds unsafe Rust changes missing a safety contract, guard, test, or witness."
+    );
+    println!();
+    println!("Usage:");
+    println!("  unsafe-review <command> [flags]");
+    println!("  unsafe-review <command> --help    full flags and examples for one command");
+    println!();
+    println!("Start here:");
+    println!(
+        "  unsafe-review doctor                    check this repository is set up for review"
     );
     println!(
-        "  repo    [--root .] [--include glob] [--exclude glob] [--list-files|--dry-run] [--progress] [--timeout-seconds N] [--respect-gitignore|--no-respect-gitignore] [--large-repo-ignores|--no-large-repo-ignores] [--max-files N] [--format human|json|markdown|pr-summary|github-summary|sarif|comment-plan|lsp|witness-plan] [--policy advisory|no-new-debt] [--out file] [--max-cards N]"
+        "  unsafe-review init                      preview a guided, read-only adoption proposal"
     );
     println!(
-        "  pr      zero-config entry point: auto-detects root and base ref; alias for first-pr"
+        "  unsafe-review pr                        review the current PR and write the bundle"
+    );
+    println!("  unsafe-review check --base origin/main  advisory review of the current diff");
+    println!();
+    println!("Review a change:");
+    println!("  check     advisory review of a diff; the core command");
+    println!("  pr        first-run PR review bundle: auto-detects root and base ref");
+    println!("  first-pr  same bundle as `pr`, with inputs passed explicitly (compatibility name)");
+    println!("  review    alias for first-pr");
+    println!("  pilot     quick diff review capped at 5 cards");
+    println!("  repo      advisory review of every Rust file under --root, not a diff");
+    println!("  pr-setup  print read-only external GitHub PR checkout and raw-diff commands");
+    println!();
+    println!("Inspect a finding:");
+    println!("  explain   show full detail for a single ReviewCard");
+    println!("  context   emit an LLM-ready context packet for a card or file range");
+    println!("  badges    generate badge JSON files for the repository");
+    println!("  lsp       start the Language Server Protocol server over stdio for editors");
+    println!();
+    println!("Track and discharge coverage debt:");
+    println!(
+        "  baseline  record pre-existing debt as the coverage floor (init/add/status/refresh)"
+    );
+    println!("  policy    advisory no-new-debt policy simulation report");
+    println!("  outcome   compare two cards.json snapshots for movement");
+    println!(
+        "  confirm   route a witness for one card: `confirm <card-id> --dry-run|--allow-heavy`"
     );
     println!(
-        "  first-pr [--root .] [--base origin/main|--diff file|-] [--out-dir target/unsafe-review] [--max-cards N]"
+        "            executes the routed witness command only with --allow-heavy; never default;"
     );
-    println!("  review  alias for first-pr");
-    println!("  pilot   [--root .] [--base origin/main] [--max-cards 5]");
-    println!("  badges  [--root .] [--out badges]");
-    println!("  explain [--root .] [--json|--format json] <card-id>");
-    println!("  context [--root .] [--json|--format json] <card-id>");
-    println!("  context [--root .] --file <path> --lines Y-Z [--changed-only] --json");
-    println!("  candidate new --class <stable-byte-class> [--id R4R2-S000-TODO] [--out file]");
-    println!(
-        "  candidate import <manual-candidate.json> [--out .unsafe-review/candidates/<id>.json]"
-    );
-    println!("  candidate lint <manual-candidate.json>");
-    println!("  candidate list [--root .] [--format json|markdown] [--out file]");
-    println!("  candidate witness-plan [--root .] <candidate-id> [--out file]");
-    println!(
-        "  baseline init [--root .] [--out policy/unsafe-review-baseline.toml] [--review-after YYYY-MM-DD]"
-    );
-    println!(
-        "  baseline add --card-id <UR-...-cN> --owner <name> --reason <text> --evidence <text> [--root .] [--review-after YYYY-MM-DD] [--out policy/unsafe-review-baseline.toml]"
-    );
-    println!(
-        "  confirm <card-id> --dry-run|--allow-heavy [--author <owner>] [--root .] [--base origin/main|--diff file] [--expires-at <date>] [--timeout-seconds 600] [--command <override>] [--out file]  (executes the routed witness command only with --allow-heavy; never default; --dry-run previews without executing)"
-    );
-    println!("  support");
-    println!(
-        "  outcome --before <cards.json> --after <cards.json> [--format json|markdown] [--out file]"
-    );
-    println!(
-        "  policy report [--root .] [--base origin/main|--diff file] [--format json|markdown] [--out file] [--max-cards N]"
-    );
-    println!(
-        "  receipt template <card-id> --tool <lane> --strength configured|ran|test_targeted|site_reached|reviewed --author <owner> --recorded-at <utc> --expires-at <date> [--summary text] [--command text] [--limitation text] [--out file]"
-    );
-    println!(
-        "  receipt import-miri <card-id> --log <file> --author <owner> --recorded-at <utc> --expires-at <date> --command <cmd> [--limitation text] [--out file]"
-    );
-    println!(
-        "  receipt import-careful <card-id> --log <file> --author <owner> --recorded-at <utc> --expires-at <date> --command <cmd> [--limitation text] [--out file]"
-    );
-    println!(
-        "  receipt import-sanitizer <card-id> --tool asan|msan|tsan|lsan --log <file> --author <owner> --recorded-at <utc> --expires-at <date> --command <cmd> [--allow-runtime] [--limitation text] [--out file]"
-    );
-    println!(
-        "  receipt import-concurrency <card-id> --tool loom|shuttle --log <file> --author <owner> --recorded-at <utc> --expires-at <date> --command <cmd> [--limitation text] [--out file]"
-    );
-    println!(
-        "  receipt import-proof <card-id> --tool kani|crux --log <file> --author <owner> --recorded-at <utc> --expires-at <date> --command <cmd> [--limitation text] [--out file]"
-    );
-    println!("  receipt validate [--root .]");
-    println!(
-        "  receipt audit [--root .] [--base origin/main|--diff file] [--format json|markdown] [--out file] [--max-cards N]"
-    );
-    println!("  doctor  [--root .]");
+    println!("            --dry-run previews without executing");
+    println!("  receipt   create, import, validate, and audit witness receipts");
+    println!("            `receipt-template` is a compatibility name for `receipt template`");
+    println!("  candidate import and project manual advisory candidates");
+    println!();
+    println!("Repository posture:");
+    println!("  doctor    check the repository setup");
+    println!("  init      preview repository adoption without writing files");
+    println!("  support   print the current support tiers and advisory posture");
     println!();
     println!("Flags may be passed as `--flag value` or `--flag=value`.");
     println!();
@@ -3291,6 +3749,9 @@ fn print_help() {
     println!("  2  tool did not complete a review: usage, input/IO, or internal error");
     println!();
     println!("Trust boundary: {FIRST_RUN_TRUST_BOUNDARY}");
+    println!(
+        "unsafe-review does not run witnesses, post comments, edit source, or block by default."
+    );
 }
 
 fn print_repo_help() {
@@ -3459,9 +3920,11 @@ fn print_candidate_help() {
 #[cfg(test)]
 mod tests {
     use super::{
-        RepoScanScopeMetadata, render_repo_scan_incomplete_status, render_repo_scan_status,
-        repo_status_operator_json, resolve_diff_path, writable_status, yes_no,
+        RepoScanScopeMetadata, ensure_readable_diff, ensure_review_root, git_ref_error,
+        render_repo_scan_incomplete_status, render_repo_scan_status, repo_status_operator_json,
+        resolve_diff_path, review_root_error, shell_path_arg, writable_status, yes_no,
     };
+    use std::io;
     use std::path::{Path, PathBuf};
     use unsafe_review_core::{
         DiscoveryOptions, PerFileScanStats, RepoScanPhase, RepoScanStatus, RepoStopReason,
@@ -3469,6 +3932,191 @@ mod tests {
 
     fn test_scan_scope() -> RepoScanScopeMetadata {
         RepoScanScopeMetadata::new(Path::new("/tmp/repo"), &DiscoveryOptions::repo_defaults())
+    }
+
+    #[test]
+    fn ensure_review_root_accepts_a_directory() -> Result<(), String> {
+        ensure_review_root(Path::new("."))
+    }
+
+    #[test]
+    fn ensure_review_root_rejects_a_missing_root_by_name() -> Result<(), String> {
+        let Err(err) = ensure_review_root(Path::new("definitely-not-here-9a1f")) else {
+            return Err("a missing root must not scan".to_string());
+        };
+        assert!(
+            err.contains("--root definitely-not-here-9a1f does not exist"),
+            "{err}"
+        );
+        assert!(err.contains("Pass --root <dir>"), "{err}");
+        Ok(())
+    }
+
+    #[test]
+    fn ensure_review_root_rejects_a_file_root_instead_of_reporting_a_clean_scan()
+    -> Result<(), String> {
+        // A file root walks to zero Rust files, which would otherwise render as
+        // `cards: 0` — a clean review the user never ran.
+        let file = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+        assert!(file.is_file(), "test needs an existing file path");
+        let Err(err) = ensure_review_root(&file) else {
+            return Err("a file root must not scan".to_string());
+        };
+        assert!(err.contains("is a file, not a directory"), "{err}");
+        assert!(err.contains("Pass --root <dir>"), "{err}");
+        Ok(())
+    }
+
+    #[test]
+    fn review_root_error_separates_unreadable_from_missing() {
+        // `Path::exists` reports a permission failure as "not there"; the user
+        // needs to know the path could not be read at all.
+        let unreadable = review_root_error(
+            Path::new("/srv/restricted"),
+            &Err(io::Error::from(io::ErrorKind::PermissionDenied)),
+            false,
+        );
+        assert!(unreadable.contains("cannot be read"), "{unreadable}");
+        assert!(!unreadable.contains("does not exist"), "{unreadable}");
+
+        let missing = review_root_error(Path::new("/srv/gone"), &Ok(false), false);
+        assert!(missing.contains("does not exist"), "{missing}");
+
+        let file = review_root_error(Path::new("/srv/lib.rs"), &Ok(true), true);
+        assert!(file.contains("is a file, not a directory"), "{file}");
+
+        let other = review_root_error(Path::new("/srv/sock"), &Ok(true), false);
+        assert!(other.contains("is not a directory"), "{other}");
+        assert!(!other.contains("is a file"), "{other}");
+
+        for message in [unreadable, missing, file, other] {
+            assert!(message.contains("Pass --root <dir>"), "{message}");
+        }
+    }
+
+    #[test]
+    fn git_ref_error_names_an_unresolvable_ref() {
+        let err = git_ref_error(
+            Path::new("."),
+            "origin/nope",
+            "fatal: ambiguous argument 'origin/nope...HEAD': unknown revision",
+        );
+        assert!(
+            err.contains("base ref 'origin/nope' could not be resolved by git"),
+            "{err}"
+        );
+        assert!(err.contains("--diff <file>"), "{err}");
+    }
+
+    /// A git failure we do not specifically classify still keeps git's own text —
+    /// it is the only description of the problem we have — but must not end there.
+    /// Drift-lock: restore the bare `git diff failed: {stderr}` fallback → RED.
+    #[test]
+    fn git_ref_error_fallback_keeps_git_text_and_adds_a_way_out() {
+        let err = git_ref_error(
+            Path::new("."),
+            "origin/main",
+            "fatal: detected dubious ownership in repository at '/repo'",
+        );
+        assert!(err.contains("detected dubious ownership"), "{err}");
+        assert!(err.contains("--base 'origin/main'"), "{err}");
+        assert!(err.contains("--diff <file>"), "{err}");
+    }
+
+    #[test]
+    fn git_ref_error_adds_recovery_for_shallow_merge_failures() {
+        let err = git_ref_error(
+            Path::new("/workspace/project"),
+            "origin/main",
+            "fatal: no merge base",
+        );
+        assert!(err.contains("no merge base"), "{err}");
+        assert!(err.contains("git fetch --unshallow origin"), "{err}");
+        assert!(err.contains("unsafe-review pr --root"), "{err}");
+    }
+
+    #[test]
+    fn ensure_readable_diff_accepts_an_existing_file() -> Result<(), String> {
+        let root = Path::new(".");
+        let existing = Path::new("Cargo.toml");
+        ensure_readable_diff(existing, existing, root)
+    }
+
+    #[test]
+    fn ensure_readable_diff_notes_root_resolution_only_when_it_happened()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = Path::new("/workspace/project");
+        let requested = Path::new("missing.diff");
+        let resolved = root.join(requested);
+
+        let relative = match ensure_readable_diff(requested, &resolved, root) {
+            Err(message) => message,
+            Ok(()) => return Err("a missing diff file must be rejected".into()),
+        };
+        assert!(relative.contains("resolved against --root"), "{relative}");
+
+        // An absolute path was not resolved against --root, so explaining the
+        // resolution would describe something that did not happen.
+        let absolute = Path::new("/tmp/missing.diff");
+        let untouched = match ensure_readable_diff(absolute, absolute, root) {
+            Err(message) => message,
+            Ok(()) => return Err("a missing diff file must be rejected".into()),
+        };
+        assert!(
+            !untouched.contains("resolved against --root"),
+            "{untouched}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn git_ref_error_names_a_missing_repository_instead_of_echoing_git_usage() {
+        // Outside a work tree git replies with its whole `diff --no-index`
+        // usage block; the user needs the condition, not the manual page.
+        let git_stderr = "warning: Not a git repository. Use --no-index to compare two paths outside a working tree\nusage: git diff --no-index [<options>] <path> <path>";
+        let err = git_ref_error(Path::new("."), "origin/main", git_stderr);
+        assert!(
+            err.contains("--root is not inside a git repository"),
+            "{err}"
+        );
+        assert!(err.contains("--base 'origin/main'"), "{err}");
+        assert!(err.contains("--diff <file>"), "{err}");
+        assert!(!err.contains("usage: git diff --no-index"), "{err}");
+    }
+
+    /// An unclassified git failure must keep git's own text — we cannot describe a
+    /// condition we did not recognize, and paraphrasing would lose the only
+    /// diagnosis available.
+    ///
+    /// This originally asserted byte-equality with a bare `git diff failed: {stderr}`.
+    /// The guarantee it exists to protect is the *preservation* of git's text, not the
+    /// absence of anything after it, so it now asserts preservation directly and
+    /// leaves room for the escape hatches (which are the same whatever git said).
+    #[test]
+    fn git_ref_error_preserves_unclassified_git_failures() {
+        let err = git_ref_error(
+            Path::new("."),
+            "origin/main",
+            "fatal: something else entirely",
+        );
+        assert!(
+            err.contains("fatal: something else entirely"),
+            "git's own text is the only diagnosis for an unclassified failure: {err}"
+        );
+        assert!(
+            err.starts_with("git diff failed"),
+            "the message must still lead with the failure, not the remedy: {err}"
+        );
+    }
+
+    #[test]
+    fn shell_path_arg_only_rewrites_backslashes_on_windows() {
+        let formatted = shell_path_arg(Path::new(r"dir\name"));
+        if cfg!(windows) {
+            assert_eq!(formatted, "\"dir/name\"");
+        } else {
+            assert_eq!(formatted, "\"dir\\name\"");
+        }
     }
 
     #[test]

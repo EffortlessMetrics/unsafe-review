@@ -1,5 +1,6 @@
 schema_version = "0.1"
 status = "experimental"
+partition_default = "conformance"
 
 required_core_fixtures = [
   "raw_pointer_alignment",
@@ -25,6 +26,7 @@ required_core_fixtures = [
   "raw_pointer_deref_alignment_post_check_not_guard",
   "raw_pointer_deref_free_fn_stray_align_not_guard",
   "raw_pointer_deref_alignment_is_aligned_guard",
+  "raw_pointer_deref_prior_block_safety_not_owner",
   "raw_pointer_read_unaligned",
   "raw_pointer_write_assignment",
   "raw_pointer_write_unaligned",
@@ -39,6 +41,7 @@ required_core_fixtures = [
   "public_unsafe_fn_safety_colon_docs",
   "pub_crate_unsafe_fn_missing_safety",
   "documented_private_unsafe_fn",
+  "unsafe_declaration_volume_summary",
   "private_unsafe_helper_safety_comment",
   "local_safety_colon_comment",
   "maybeuninit_assume_init",
@@ -400,7 +403,13 @@ required_core_fixtures = [
   "zeroed_definition_no_cards",
   "zeroed_safe_wrapper_no_cards",
   "zeroed_call_still_cards",
+  "box_from_raw_safe_ctor_no_cards",
+  "pin_unchecked_safe_ctor_no_cards",
+  "drop_in_place_safe_fn_no_cards",
+  "unwrap_unchecked_safe_method_no_cards",
+  "unreachable_unchecked_safe_fn_no_cards",
   "inline_asm_human_review",
+  "inline_asm_safe_macro_homonym_no_cards",
   "raw_pointer_read_volatile",
   "raw_pointer_read_len_capacity_assert",
   "raw_pointer_read_assert_shadowed_origin_not_guard",
@@ -531,6 +540,7 @@ required_core_fixtures = [
   "static_lifetime_mut_ref_not_static_mut",
   "target_feature_safety_docs",
   "target_feature_missing_safety_docs",
+  "target_feature_simd_dispatch_repetition",
   "attributed_unsafe_fn_no_duplicate",
   "inline_unsafe_raw_pointer_deref_no_duplicate",
   "unsafe_fn_call_wrapper",
@@ -851,6 +861,16 @@ expected_operation_family = "raw_pointer_deref"
 expected_hazard = "alignment"
 
 [[cases]]
+fixture = "raw_pointer_deref_prior_block_safety_not_owner"
+kind = "false_positive_control"
+claim = "a `// SAFETY:` comment attached to an earlier unsafe block is not credited as contract evidence for a later, uncommented raw pointer deref site in the same function"
+support_tier = "Contract evidence mining"
+expected_cards = 2
+expected_class = "contract_missing"
+expected_operation_family = "raw_pointer_deref"
+expected_hazard = "pointer_validity"
+
+[[cases]]
 fixture = "raw_pointer_read_unaligned"
 kind = "positive"
 claim = "read_unaligned reports raw pointer read obligations without requiring an alignment hazard"
@@ -989,6 +1009,16 @@ claim = "documented private unsafe fn with SAFETY comment but no call-shaped tes
 support_tier = "Contract evidence mining"
 expected_cards = 1
 expected_class = "unsafe_unreached"
+expected_operation_family = "unsafe_declaration"
+expected_hazard = "unknown"
+
+[[cases]]
+fixture = "unsafe_declaration_volume_summary"
+kind = "positive"
+claim = "a declaration-heavy file with four unsafe_declaration owner-contract cards emits four cards (two contract_missing, two unsafe_unreached) for the declaration-summary grouping projection (issue #1895)"
+support_tier = "Contract evidence mining"
+expected_cards = 4
+expected_class = "contract_missing"
 expected_operation_family = "unsafe_declaration"
 expected_hazard = "unknown"
 
@@ -4583,6 +4613,16 @@ expected_operation_family = "inline_asm"
 expected_hazard = "inline_asm"
 
 [[cases]]
+fixture = "inline_asm_safe_macro_homonym_no_cards"
+kind = "positive"
+claim = "KNOWN FALSE POSITIVE (text-fallback D5 limitation): a user-defined safe `asm!` macro called inside an unsafe block IS detected as inline_asm because line.contains(\"asm!\") cannot distinguish core::arch::asm! from a user macro_rules! asm. The AST path would classify it correctly. This case pins the known-FP behavior so a future detector improvement is detected as a golden change."
+support_tier = "Core operation smoke slice"
+expected_cards = 1
+expected_class = "guard_missing"
+expected_operation_family = "inline_asm"
+expected_hazard = "inline_asm"
+
+[[cases]]
 fixture = "raw_pointer_read_len_capacity_assert"
 kind = "false_positive_control"
 claim = "raw pointer read does not credit debug_assert_eq! for bounds; debug_assert_eq!(values.len(), values.capacity()) is compiled out in release builds and cannot satisfy the bounds obligation"
@@ -5059,6 +5099,13 @@ expected_cards = 1
 expected_class = "guard_missing"
 expected_operation_family = "box_from_raw"
 expected_hazard = "drop_or_deallocation"
+
+[[cases]]
+fixture = "pin_unchecked_safe_ctor_no_cards"
+kind = "false_positive_control"
+claim = "a safe inherent new_unchecked() constructor called outside any unsafe scope is not carded as Pin::new_unchecked"
+support_tier = "Core operation smoke slice"
+expected_cards = 0
 
 [[cases]]
 fixture = "static_mut_global_state"
@@ -5840,6 +5887,16 @@ kind = "positive"
 claim = "target-feature declarations without safety docs report missing caller-contract evidence"
 support_tier = "Core operation smoke slice"
 expected_cards = 1
+expected_class = "contract_missing"
+expected_operation_family = "target_feature"
+expected_hazard = "target_feature"
+
+[[cases]]
+fixture = "target_feature_simd_dispatch_repetition"
+kind = "positive"
+claim = "a SIMD-dispatch file with three undocumented target_feature arch variants plus one documented, differently-classed variant emits four target_feature cards for the target-feature-summary grouping projection (issue #1894)"
+support_tier = "Core operation smoke slice"
+expected_cards = 4
 expected_class = "contract_missing"
 expected_operation_family = "target_feature"
 expected_hazard = "target_feature"
@@ -6657,3 +6714,31 @@ expected_cards = 2
 expected_class = "guard_missing"
 expected_operation_family = "unsafe_fn_call"
 expected_hazard = "unknown"
+
+[[cases]]
+fixture = "box_from_raw_safe_ctor_no_cards"
+kind = "false_positive_control"
+claim = "a safe inherent from_raw() constructor called outside any unsafe scope is not carded as Box::from_raw"
+support_tier = "Core operation smoke slice"
+expected_cards = 0
+
+[[cases]]
+fixture = "drop_in_place_safe_fn_no_cards"
+kind = "false_positive_control"
+claim = "a safe free function named drop_in_place called outside any unsafe scope is not carded as ptr::drop_in_place"
+support_tier = "Core operation smoke slice"
+expected_cards = 0
+
+[[cases]]
+fixture = "unwrap_unchecked_safe_method_no_cards"
+kind = "false_positive_control"
+claim = "a safe inherent unwrap_unchecked() method called outside any unsafe scope is not carded as Option::unwrap_unchecked"
+support_tier = "Core operation smoke slice"
+expected_cards = 0
+
+[[cases]]
+fixture = "unreachable_unchecked_safe_fn_no_cards"
+kind = "false_positive_control"
+claim = "a safe free function named unreachable_unchecked called outside any unsafe scope is not carded as hint::unreachable_unchecked"
+support_tier = "Core operation smoke slice"
+expected_cards = 0

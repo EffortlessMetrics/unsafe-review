@@ -12,7 +12,7 @@
   <a href="https://github.com/EffortlessMetrics/unsafe-review/actions/workflows/ci.yml"><img src="https://github.com/EffortlessMetrics/unsafe-review/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
   <a href="https://docs.rs/unsafe-review"><img src="https://docs.rs/unsafe-review/badge.svg" alt="docs.rs" /></a>
   <a href="https://crates.io/crates/unsafe-review"><img src="https://img.shields.io/crates/d/unsafe-review.svg?label=crates.io%20downloads" alt="crates.io downloads" /></a>
-  <a href="https://doc.rust-lang.org/cargo/reference/manifest.html#the-rust-version-field"><img src="https://img.shields.io/badge/MSRV-1.95-blue.svg" alt="MSRV" /></a>
+  <a href="https://doc.rust-lang.org/cargo/reference/manifest.html#the-rust-version-field"><img src="https://img.shields.io/badge/MSRV-1.98-blue.svg" alt="MSRV" /></a>
   <a href="#license"><img src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg" alt="License: MIT OR Apache-2.0" /></a>
 </p>
 
@@ -40,7 +40,7 @@ Run the first-use PR cockpit from a repository checkout:
 
 ```bash
 unsafe-review doctor
-unsafe-review first-pr --base origin/main
+unsafe-review pr
 ```
 
 Then open the summary and inspect the top card:
@@ -67,9 +67,10 @@ outcome comparison, see
 
 ## Artifact Bundle
 
-`first-pr` writes a standard advisory bundle under `target/unsafe-review/`:
+`pr` writes a standard advisory bundle under `target/unsafe-review/`:
 
 ```text
+review-kit.json
 cards.json
 pr-summary.md
 github-summary.md
@@ -77,17 +78,23 @@ cards.sarif
 comment-plan.json
 witness-plan.md
 receipt-audit.md
+receipt-audit.json
+policy-report.json
+policy-report.md
 manual-candidates.json
 manual-repair-queue.json
 tokmd-packets.json
+usefulness-telemetry.json
 lsp.json
 repair-queue.json
+unsafe-review-gate.json
 ```
 
 The bundle is artifact-first:
 
 | Artifact | Use |
 |---|---|
+| `review-kit.json` | Review handoff packet with bounded card queue |
 | `cards.json` | Canonical ReviewCard data |
 | `pr-summary.md` | Reviewer first screen |
 | `github-summary.md` | Bounded GitHub job summary text |
@@ -95,11 +102,16 @@ The bundle is artifact-first:
 | `comment-plan.json` | Planned comments, not posted |
 | `witness-plan.md` | Suggested witness routes and limits |
 | `receipt-audit.md` | Saved receipt metadata audit; no witness was run |
+| `receipt-audit.json` | Machine-readable saved receipt metadata audit |
+| `policy-report.json` | Machine-readable advisory no-new-debt simulation |
+| `policy-report.md` | Reviewer-facing advisory no-new-debt simulation |
 | `manual-candidates.json` | Imported manual/advisory candidates, separate from ReviewCards |
 | `manual-repair-queue.json` | Copy-only manual candidate repair handoff; no agent was run |
 | `tokmd-packets.json` | Formatting input for Bun packet presets; tokmd was not run |
+| `usefulness-telemetry.json` | Operational diagnostic telemetry |
 | `lsp.json` | Saved read-only editor projection |
 | `repair-queue.json` | Copy-only agent repair queue; no agent was run |
+| `unsafe-review-gate.json` | Advisory gate manifest: coverage movement, gate status |
 
 ## Explain One Card
 
@@ -140,7 +152,7 @@ artifacts.
 | Need | Command |
 |---|---|
 | Check first-run readiness | `unsafe-review doctor` |
-| Build a PR review bundle | `unsafe-review first-pr --base origin/main` |
+| Build a PR review bundle | `unsafe-review pr` |
 | Explain a card | `unsafe-review explain <card-id>` |
 | Show support posture | `unsafe-review support` |
 | Print a bounded agent packet | `unsafe-review context <card-id> --json` |

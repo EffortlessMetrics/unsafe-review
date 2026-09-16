@@ -1,7 +1,9 @@
 # First-use guide
 
-This guide is for a maintainer trying the published `unsafe-review` CLI for the
-first time.
+This guide is for a maintainer trying the public `v0.3.8` `unsafe-review` CLI
+for the first time. Swarm main may contain newer unpublished candidate work;
+run `unsafe-review --version` and keep any local candidate checkout separate
+from the published install path.
 
 `unsafe-review` is static unsafe contract review. It finds unsafe Rust changes
 missing a safety contract, guard, test, or witness. It does not prove memory
@@ -11,13 +13,46 @@ blocking policy by default.
 ## Install
 
 ```bash
-cargo install unsafe-review --locked
+cargo install unsafe-review --version 0.3.8 --locked
 unsafe-review --help
 ```
+
+The command above installs the last public release from crates.io. It does not
+install the unfrozen Swarm main candidate, and no `v1`, GitHub Release, or
+marketplace publication is implied by the current workbench docs.
 
 If you are working from a local checkout, keep the installed command and the
 workspace command separate. The installed command is the user path; `cargo run`
 is for development.
+
+## Preview Repository Adoption
+
+Top-level `init` is available only in the unpublished swarm/candidate command
+surface; the public `v0.3.8` install above does not include it. Use an explicitly
+identified local checkout for this preview, or continue to
+[Get A First Card](#get-a-first-card).
+
+From the root of that unpublished `unsafe-review-swarm` checkout, inspect a
+deterministic proposal with the workspace binary:
+
+```bash
+cargo run --locked -p unsafe-review-cli --bin cargo-unsafe-review -- init
+cargo run --locked -p unsafe-review-cli --bin cargo-unsafe-review -- init --format json --out target/unsafe-review-init
+```
+
+These commands select the checkout explicitly; entering its directory alone
+does not change the installed `unsafe-review` command.
+
+The default is preview-only: it does not create or edit repository files. The
+proposal includes workflow content, conflict status, rollback guidance,
+repository warnings, recommended ignores, explicit baseline guidance, an
+optional badge snippet, the canonical ub-review gate-manifest pointer, and the
+exact `doctor` and `pr` commands. `--out` writes only
+`unsafe-review-init.json` to the explicitly selected proposal directory.
+
+The generated workflow uses a release placeholder. Do not apply it until the
+placeholder has been replaced with a separately verified public release or
+pinned CLI invocation; no public Action or `v1` publication is implied.
 
 ## Get A First Card
 
@@ -35,10 +70,12 @@ decisions.
 Run against the current branch diff:
 
 ```bash
-unsafe-review first-pr --base origin/main
+unsafe-review pr
 ```
 
-This writes the standard local review bundle:
+This auto-detects the repository root and default base ref, then writes the
+standard local review bundle. If your base ref cannot be detected, pass it
+explicitly with `unsafe-review pr --base origin/main`.
 
 ```text
 target/unsafe-review/review-kit.json
@@ -49,6 +86,9 @@ target/unsafe-review/cards.sarif
 target/unsafe-review/comment-plan.json
 target/unsafe-review/witness-plan.md
 target/unsafe-review/receipt-audit.md
+target/unsafe-review/receipt-audit.json
+target/unsafe-review/policy-report.json
+target/unsafe-review/policy-report.md
 target/unsafe-review/manual-candidates.json
 target/unsafe-review/lsp.json
 target/unsafe-review/manual-repair-queue.json
@@ -70,6 +110,9 @@ target/unsafe-review/unsafe-review-gate.json
 | `comment-plan.json` | Bounded comment plan (advisory; not posted) | ub-review / downstream comment poster |
 | `witness-plan.md` | External witness routes per card (Miri, cargo-careful, sanitizers, Loom, …) | Reviewer / witness operator |
 | `receipt-audit.md` | Saved receipt metadata summary matched against current cards | Reviewer checking prior witness records |
+| `receipt-audit.json` | Machine-readable saved receipt metadata audit | ub-review / receipt tooling |
+| `policy-report.json` | Machine-readable advisory no-new-debt simulation | CI / policy tooling |
+| `policy-report.md` | Reviewer-facing advisory no-new-debt simulation | Human reviewer |
 | `manual-candidates.json` | Cards recommended for manual review | Reviewer / triager |
 | `manual-repair-queue.json` | Manual repair queue sidecar | Agent / repair workflow |
 | `tokmd-packets.json` | Formatting input sidecar for comment rendering | ub-review / comment formatter |
@@ -100,6 +143,68 @@ plan, and comment-plan artifact keep the same boundary: no changed gaps is not
 proof that the repo is safe, UB-free, Miri-clean, or that any unsafe site
 executed.
 
+## Review An External PR
+
+If the PR branch is checked out locally, prefer the normal bundle path with an
+explicit base:
+
+```bash
+unsafe-review pr --root /path/to/repo --base origin/main
+```
+
+For a public GitHub PR that is not checked out as the current branch, capture the
+base branch name and exact base/head SHAs, fetch the base branch and PR ref,
+check out the head, and ask `unsafe-review` to validate that the checkout
+matches before it analyzes:
+
+```bash
+gh pr view 827 --repo tokio-rs/bytes --json baseRefName,baseRefOid,headRefOid
+unsafe-review pr-setup \
+  --repo tokio-rs/bytes \
+  --number 827 \
+  --base-ref <base-ref-name> \
+  --base-sha <base-sha> \
+  --head-sha <head-sha> \
+  --root /path/to/repo \
+  --out-dir /absolute/path/to/review-kit \
+  --diff-out /absolute/path/to/change.diff
+```
+
+`pr-setup` prints the copyable checkout, `unsafe-review pr`, and raw diff
+commands. It does not run `gh`, `git`, `unsafe-review`, witnesses, agents, or PR
+comments. The direct commands it prints are:
+
+```bash
+git -C /path/to/repo fetch origin <base-ref-name> pull/<number>/head
+git -C /path/to/repo checkout --detach <head-sha>
+unsafe-review pr \
+  --root /path/to/repo \
+  --base-sha <base-sha> \
+  --head-sha <head-sha> \
+  --out-dir /absolute/path/to/review-kit
+mkdir -p /absolute/path/to
+git -C /path/to/repo diff --binary --full-index --output=/absolute/path/to/change.diff <base-sha>...<head-sha>
+unsafe-review pr \
+  --root /path/to/repo \
+  --diff /absolute/path/to/change.diff \
+  --out-dir /absolute/path/to/review-kit
+```
+
+Use the first `unsafe-review pr` command for checkout-based analysis. Use the
+final `--diff` form when you need the saved raw patch route for receipts or
+replay.
+
+Use the `baseRefName` value for `<base-ref-name>`, `baseRefOid` for
+`<base-sha>`, and `headRefOid` for `<head-sha>`. The `pull/<number>/head` fetch
+gets the PR head through GitHub's PR ref, so forked PR heads do not depend on
+fetching an arbitrary SHA from `origin`. `--head-sha` still validates that the
+checked-out commit is the exact head SHA reported by `gh pr view`. This avoids
+rendered GitHub diffs and shell-redirection encoding surprises on older Windows
+PowerShell. The raw diff command is the `git diff --output=<path>` route for
+capturing a saved patch, and `--out-dir` anchors the advisory bundle beside the
+pilot artifacts instead of inside the external checkout. A valid saved patch
+should still contain `diff --git`, `---`, `+++`, and `@@` lines.
+
 For a deterministic smoke case, run the bundled fixture from a repo checkout:
 
 ```bash
@@ -116,7 +221,7 @@ That fixture should emit one `guard_missing` raw pointer alignment card.
 For the normal first-run path, prefer the bundle command:
 
 ```bash
-unsafe-review first-pr --base origin/main
+unsafe-review pr
 ```
 
 The lower-level `check` formats remain useful when you only need one artifact.
@@ -150,7 +255,7 @@ artifact only; `unsafe-review` does not post comments by default.
 
 ## Inspect One Card
 
-`first-pr` prints a top-card hypothesis, build/run-this-first cue, minimal
+`pr` prints a top-card hypothesis, build/run-this-first cue, minimal
 repro cue, `Explain top card`, and `Agent packet` commands for the
 highest-priority card. The cue is a confirmation recipe only; unsafe-review did
 not run it or observe runtime behavior.
@@ -162,10 +267,10 @@ what unsafe-review is not claiming:
 unsafe-review explain <card-id>
 ```
 
-It also writes `receipt-audit.md` and prints the matching
-`unsafe-review receipt audit` command for checking saved witness receipt metadata
-against the current first-pr cards. That audit does not run Miri, cargo-careful,
-sanitizers, Loom, Shuttle, Kani, or Crux.
+The `pr` bundle also writes `receipt-audit.md`, and the terminal handoff prints
+the matching `unsafe-review receipt audit` command for checking saved witness
+receipt metadata against the current PR cards. That audit does not run Miri,
+cargo-careful, sanitizers, Loom, Shuttle, Kani, or Crux.
 
 Run the `context --json` command when handing the bounded card packet to an
 agent:
@@ -201,7 +306,7 @@ other. `--lines` requires `--file`; the format is always `--lines A-B`.
 
 ## Preview Editor Data
 
-The first-pr bundle also writes a saved editor projection:
+The PR bundle also writes a saved editor projection:
 
 ```text
 target/unsafe-review/lsp.json

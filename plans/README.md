@@ -1,0 +1,18 @@
+# Plans
+
+This directory contains spec-system artifacts for PR-sized execution sequences and rollback notes.
+
+Register governed artifacts in `.allow/artifacts/doc-artifacts.toml` so `cargo-allow check --profile spec-system` can validate their source-tree graph links.
+
+The current draft release qualification contract is [issue #1915's release
+cutline](release-cutline/UNSAFE-REVIEW-CUTLINE-1915.toml), with a human summary
+in [`docs/status/RELEASE_CUTLINE.md`](../docs/status/RELEASE_CUTLINE.md). It is
+not a scheduler or publication authorization.
+
+Issue #1916's live dependency audit is recorded in
+[`release-cutline/UNSAFE-REVIEW-DEPENDENCY-DISPOSITIONS-1916.toml`](release-cutline/UNSAFE-REVIEW-DEPENDENCY-DISPOSITIONS-1916.toml)
+and [`docs/status/DEPENDENCY_DISPOSITIONS.md`](../docs/status/DEPENDENCY_DISPOSITIONS.md).
+
+Its draft, non-active lockfile and exception record is
+[`release-cutline/UNSAFE-REVIEW-DEPENDENCY-FREEZE-1916.toml`](release-cutline/UNSAFE-REVIEW-DEPENDENCY-FREEZE-1916.toml),
+with a human summary in [`docs/status/DEPENDENCY_FREEZE.md`](../docs/status/DEPENDENCY_FREEZE.md).

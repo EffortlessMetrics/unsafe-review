@@ -6,12 +6,16 @@ use super::queue::{
     AgentReadiness, AgentRepairQueue, READY_FOR_AGENT, REQUIRES_HUMAN_REVIEW,
     REQUIRES_WITNESS_RECEIPT, packet_repair_projection,
 };
+use super::repairs::candidates::RepairCandidate;
 use super::{DO_NOT_DO, TRUST_BOUNDARY};
+use crate::api::AnalyzeOutput;
 use crate::domain::{
     AgentLspReadiness, BaselineState, CommentPlanStatus, Coverage, CoverageBlock, ManualContext,
     OutcomeMovement, ReviewCard, WitnessReceiptCoverage,
 };
+use crate::freshness::AnalysisIdentity;
 use crate::output::confirmation::ConfirmationCue;
+use crate::output::target_feature_summary::{TargetFeatureGroup, target_feature_groups};
 use crate::policy::SnapshotCoverage;
 use serde::Serialize;
 
@@ -102,7 +106,51 @@ fn agent_lsp_readiness_str(readiness: AgentLspReadiness) -> &'static str {
 }
 
 #[derive(Serialize)]
+struct AgentTargetFeatureGroup {
+    group_kind: &'static str,
+    group_id: String,
+    module_or_file: String,
+    total: usize,
+    representatives: Vec<String>,
+    underlying_cards: Vec<AgentGroupedCard>,
+    features: Vec<String>,
+    complete_card_lookup: &'static str,
+    edit_authority: &'static str,
+}
+
+#[derive(Serialize)]
+struct AgentGroupedCard {
+    card_id: String,
+    context_command: String,
+}
+
+impl From<TargetFeatureGroup> for AgentTargetFeatureGroup {
+    fn from(group: TargetFeatureGroup) -> Self {
+        Self {
+            group_kind: group.group_kind,
+            group_id: group.group_id,
+            module_or_file: group.module_or_file,
+            total: group.total,
+            representatives: group.representatives,
+            underlying_cards: group
+                .underlying_card_ids
+                .into_iter()
+                .map(|card_id| AgentGroupedCard {
+                    context_command: format!("unsafe-review context {card_id} --json"),
+                    card_id,
+                })
+                .collect(),
+            features: group.features,
+            complete_card_lookup: "resolve every member through underlying_card_ids in cards.json",
+            edit_authority: "this packet authorizes work on this card/site only; editing one representative does not repair or discharge any sibling card",
+        }
+    }
+}
+
+#[derive(Serialize)]
 pub(super) struct AgentPacket<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    analysis: Option<AnalysisIdentity>,
     schema_version: &'static str,
     tool: &'static str,
     mode: &'static str,
@@ -111,6 +159,8 @@ pub(super) struct AgentPacket<'a> {
     trust_boundary: &'static str,
     card_id: &'a str,
     card: AgentCard<'a>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target_feature_group: Option<AgentTargetFeatureGroup>,
     proof_path: &'static str,
     task: &'a str,
     confirmation_cue: ConfirmationCue,
@@ -124,6 +174,8 @@ pub(super) struct AgentPacket<'a> {
     allowed_repairs: Vec<String>,
     agent_readiness: AgentReadiness,
     repair_queue: AgentRepairQueue,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    repair_candidates: Vec<RepairCandidate>,
     repair_scope: &'static str,
     witness_routes: Vec<AgentWitnessRoute<'a>>,
     verify_commands: &'a [String],
@@ -134,6 +186,31 @@ pub(super) struct AgentPacket<'a> {
 }
 
 impl<'a> AgentPacket<'a> {
+    pub(super) fn from_with_output(
+        output: &AnalyzeOutput,
+        card: &'a ReviewCard,
+        comment_plan_status: CommentPlanStatus,
+        snapshot: Option<&SnapshotCoverage>,
+    ) -> Self {
+        let mut packet = Self::from_with_analysis(
+            card,
+            comment_plan_status,
+            snapshot,
+            Some(output.analysis_identity.clone()),
+        );
+        packet.target_feature_group = target_feature_groups(output)
+            .into_iter()
+            .find(|group| {
+                group.total > 1
+                    && group
+                        .underlying_card_ids
+                        .iter()
+                        .any(|card_id| card_id == &card.id.0)
+            })
+            .map(AgentTargetFeatureGroup::from);
+        packet
+    }
+
     /// Build a packet for `card`, overriding `comment_plan_status` with the
     /// value computed by the comment-plan selection pass (SPEC-0032).
     ///
@@ -150,6 +227,15 @@ impl<'a> AgentPacket<'a> {
         card: &'a ReviewCard,
         comment_plan_status: CommentPlanStatus,
         snapshot: Option<&SnapshotCoverage>,
+    ) -> Self {
+        Self::from_with_analysis(card, comment_plan_status, snapshot, None)
+    }
+
+    pub(super) fn from_with_analysis(
+        card: &'a ReviewCard,
+        comment_plan_status: CommentPlanStatus,
+        snapshot: Option<&SnapshotCoverage>,
+        analysis: Option<AnalysisIdentity>,
     ) -> Self {
         let repairs = packet_repair_projection(card);
         let mut coverage_block = card.coverage_block();
@@ -172,6 +258,7 @@ impl<'a> AgentPacket<'a> {
         coverage_block.agent_lsp_readiness =
             agent_state_to_lsp_readiness(repairs.agent_readiness.state);
         Self {
+            analysis,
             schema_version: "0.1",
             tool: "unsafe-review",
             mode: "bounded_repair_packet",
@@ -180,6 +267,7 @@ impl<'a> AgentPacket<'a> {
             trust_boundary: TRUST_BOUNDARY,
             card_id: &card.id.0,
             card: AgentCard::from(card),
+            target_feature_group: None,
             proof_path: card.proof_path.as_str(),
             task: &card.next_action.summary,
             confirmation_cue: ConfirmationCue::from(card),
@@ -212,6 +300,7 @@ impl<'a> AgentPacket<'a> {
             allowed_repairs: repairs.allowed_repairs,
             agent_readiness: repairs.agent_readiness,
             repair_queue: repairs.repair_queue,
+            repair_candidates: repairs.repair_candidates,
             repair_scope: "this card only",
             witness_routes: card.routes.iter().map(AgentWitnessRoute::from).collect(),
             verify_commands: &card.next_action.verify_commands,

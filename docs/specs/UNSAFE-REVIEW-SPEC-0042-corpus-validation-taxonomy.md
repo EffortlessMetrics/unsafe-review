@@ -11,11 +11,17 @@ It records what each validation layer proves, what it is blind to, when it runs,
 and what artifacts it produces. It also establishes the claim boundaries that
 apply to every layer.
 
+This spec also defines the post-0.3.8 generalization overlay: how the same
+corpus layers are partitioned into conformance, regression, and holdout use;
+how evidence-loss challenge cases are recorded; and how external usefulness
+pilots feed the backlog without becoming accuracy claims.
+
 Most layers already exist. This taxonomy formalizes and extends them. It is not
 a second source of truth: the authoritative artifacts remain
-`policy/detector-contracts.toml`, `policy/calibration.toml`,
-`docs/dogfood/corpus.toml`, and `policy/spec-coverage.toml`. This spec is an
-index and a discipline document, not a replacement for those ledgers.
+`policy/detector-contracts.toml`, `fixtures/calibration.toml`,
+`docs/dogfood/corpus.toml`, `policy/pr-corpus.toml`,
+`policy/evidence-loss-challenges.toml`, and `policy/spec-coverage.toml`. This
+spec is an index and a discipline document, not a replacement for those ledgers.
 
 ## Taxonomy overview
 
@@ -32,10 +38,85 @@ A gap analysis (2026-06-15) confirmed that the first and third layers already
 exist in the repository. The second layer is partial. The fourth layer is the
 genuine new addition this lane delivers.
 
+## Generalization partitions
+
+Corpus partitions are an overlay on the four validation layers, not a fifth
+layer and not a duplicate manifest. Partition metadata belongs next to the
+existing source of truth for the case it classifies:
+
+- fixture and pure-example cases: `fixtures/calibration.toml` and fixture
+  goldens;
+- real-repo cases: `docs/dogfood/corpus.toml`;
+- real-PR cases: `policy/pr-corpus.toml` or the future external PR manifest
+  when those cases are promoted from pilot evidence.
+- evidence-loss challenge cases: `policy/evidence-loss-challenges.toml`.
+
+The enforced partition metadata is intentionally small and lives in those
+ledgers:
+
+```toml
+# fixtures/calibration.toml
+partition_default = "conformance"
+
+# docs/dogfood/corpus.toml
+partition_by_kind = { "fixture-control" = "conformance", "repo-snapshot" = "regression", "pr-diff" = "regression" }
+
+# policy/pr-corpus.toml
+partition_by_kind = { "synthetic-fixture" = "conformance" }
+
+# policy/evidence-loss-challenges.toml
+partition_by_kind = { "fixture-transform" = "conformance" }
+```
+
+`xtask check-corpus-partitions` resolves each case to exactly one owner from
+these defaults or a future per-case `partition` override, rejects unknown
+partition names, rejects branch/ref-shaped floating inputs, and rejects holdout
+cases that opt into an every-PR cadence.
+
+The partitions are:
+
+```text
+conformance:
+  exact fixtures and committed surface goldens
+  every-PR where cheap enough
+  tuned directly by normal development
+
+regression:
+  known real repos and PRs
+  nightly, release-readiness, or manual
+  used to prevent known real-code behavior from drifting
+
+holdout:
+  unseen, fresh, or embargoed repos and PRs
+  release-readiness or scheduled evaluation only
+  result recorded before tuning or detector changes
+```
+
+The holdout partition is diagnostic evidence, not a claim of general accuracy.
+Holdout failures may create follow-up work, but the first recorded holdout run
+must remain visible before the repo adapts to that input.
+
+`xtask dogfood-exec` must not run holdout repo snapshots by default. Holdout
+execution requires `--include-holdout`, including targeted runs, so
+release-readiness inputs do not silently become ordinary tuning inputs.
+
+### Refresh policy
+
+- Pin exact SHAs or checked-in diffs; floating branches are not valid corpus
+  entries.
+- Rotate part of the holdout set each release cycle when fresh suitable inputs
+  are available.
+- Retain historic snapshots or reports for trend comparison.
+- Do not tune directly against holdout findings before recording the result.
+- Promote a holdout case into regression only after the initial result and
+  follow-up decision are recorded.
+- Keep every partition advisory: no precision, recall, UB-free, Miri-clean,
+  site-execution, or memory-safety proof claim is created by partitioning.
+
 ## Layer 1: Detector-control corpus
 
 **Already exists** as `policy/detector-contracts.toml` and
-`policy/calibration.toml`.
+`fixtures/calibration.toml`.
 
 ### Purpose
 
@@ -55,7 +136,7 @@ operation families it covers.
   negative control for each discipline check it must satisfy.
 
 The 616 fixtures and 300+ negative controls (`_not_guard` / `_no_cards` suffix
-naming) are enumerated in `policy/calibration.toml`. The per-family D1-D5
+naming) are enumerated in `fixtures/calibration.toml`. The per-family D1-D5
 discipline contract entries live in `policy/detector-contracts.toml`.
 
 ### What it is blind to
@@ -72,7 +153,7 @@ Every PR. Gates: `check-fixtures`, `check-calibration`, `check-detector-contract
 
 ### Artifacts
 
-`policy/calibration.toml` — fixture-to-expected-cards map with class, operation
+`fixtures/calibration.toml` — fixture-to-expected-cards map with class, operation
 family, hazard, and support tier.
 `policy/detector-contracts.toml` — per-family D1-D5 discipline contract with
 negative-fixture coverage gaps tracked as documented exceptions.
@@ -258,11 +339,97 @@ precision or recall claim. No UB-free, Miri-clean, or site-execution claim.
 ## External validation (informational, not a gate)
 
 Running the tool on a real external PR read-only and classifying the output
-provides adoption proof and surfaces friction the corpus layers cannot. This is
+provides adoption evidence and surfaces friction the corpus layers cannot. This is
 not an automated gate. No automatic third-party issue filing. Results are
-recorded in `docs/dogfood/` as evidence entries. Output is classified into:
-actionable, inherited, noisy, missed, agent-ready, human-only, cost, and
-artifact-friction categories.
+recorded in `docs/dogfood/pilots/` as evidence entries. The manifest-only
+receipt check, `xtask check-external-pilots`, is allowed in `check-pr` because
+it validates committed receipt shape only; it does not run third-party scans.
+Output is classified into: actionable, inherited, duplicate/noisy, missed,
+agent-ready, human-only, setup-friction, and artifact-friction categories.
+
+External pilots should use the public Action or the same artifact bundle shape
+that a new adopter would see. Each pilot records:
+
+- setup friction and acquisition method;
+- selected comments and intentionally omitted cards;
+- one-screen summary usefulness;
+- terminology that confused the maintainer or reviewer;
+- runtime and artifact-size observations;
+- whether the result was agent-ready or human-only.
+
+Human usefulness judgments use this vocabulary:
+
+```text
+actionable
+correct_but_not_worth_surfacing
+inherited
+duplicate
+human_only
+agent_ready
+unclear
+incorrect
+missed_expected_seam
+setup_friction
+artifact_friction
+```
+
+Those judgments are product evidence. They are not calibrated precision or
+recall unless a separate labeled evaluation protocol is approved under
+SPEC-0026.
+
+The receipt schema requires exact base/head SHAs, read-only posture, acquisition
+method, selected and omitted comment counts, runtime and artifact-size metrics,
+required first-pr artifact hashes, and at least one setup or artifact friction
+row. The referenced artifacts may remain under `target/`; the committed receipt
+records their byte sizes and hashes instead of checking in third-party output.
+
+---
+
+## Evidence-loss challenge corpus
+
+False negatives are harder to observe than noisy cards. A challenge corpus
+records controlled evidence-loss transformations against fixture, real-repo, or
+real-PR inputs and checks that the expected ReviewCard movement occurs.
+
+Examples of valid transformations:
+
+- remove a `# Safety` section;
+- replace `assert!` with `debug_assert!` where that weakens the guard;
+- remove a same-receiver guard;
+- change a test call into a bare mention;
+- introduce a wrong-receiver guard;
+- remove a witness receipt;
+- add an unsafe declaration;
+- move an unsafe call outside the expected scope.
+
+Expected results are movement-shaped, not proof-shaped:
+
+```text
+new gap appears
+class changes
+comment eligibility changes only when surfacing policy says so
+repair route remains correct
+artifact bundle stays schema-valid
+```
+
+This establishes that known evidence-loss transformations are detected on the
+selected inputs. It does not establish global recall, source execution, or
+memory-safety proof.
+
+The initial enforced rail is `xtask check-evidence-loss-challenges`. It reads
+`policy/evidence-loss-challenges.toml`, generates transformed fixture roots
+under `target/evidence-loss-challenges/`, runs the standard advisory PR
+surfaces, and asserts:
+
+- ReviewCard movement counts;
+- first-card classification and coverage movement fields;
+- comment-plan selected/not-selected counts;
+- `--policy no-new-debt` exit code where declared.
+
+The first challenge removes the `# Safety` section and SAFETY comment from the
+raw-pointer dereference coverage-improvement fixture while preserving the
+current low-noise comment-plan stance. The result is diagnostic evidence for
+that named transformation only; it is not a recall metric.
 
 ---
 
@@ -290,7 +457,7 @@ spec obligation (SPEC-XXXX clause)
     -> docs/dogfood/corpus.toml target (real-repo layer)
     -> policy/pr-corpus.toml case (real-PR layer)
       -> output surface (cards.json / comment-plan.json / lsp.json / ...)
-        -> xtask gate (check-pr / check-fixture-surface-parity / check-surface-determinism / check-real-pr-corpus)
+        -> xtask gate (check-pr / check-fixture-surface-parity / check-surface-determinism / check-real-pr-corpus / check-corpus-partitions)
           -> documented exception (if coverage is partial)
 ```
 
@@ -318,9 +485,10 @@ These constraints apply to every layer and every output surface:
   corpus manifests.
 - **No automatic third-party issue filing.** Corpus runs are read-only; any
   issue-filing from corpus results is a manual, deliberate action.
-- **Single truth.** Extend `calibration.toml` / `corpus.toml` /
-  `stance-decisions.toml` / `spec-coverage.toml` / `detector-contracts.toml`.
-  Do not duplicate them or create a parallel ledger.
+- **Single truth.** Extend `fixtures/calibration.toml` / `corpus.toml` /
+  `pr-corpus.toml` / `evidence-loss-challenges.toml` /
+  `stance-decisions.toml` / `spec-coverage.toml` /
+  `detector-contracts.toml`. Do not duplicate them or create a parallel ledger.
 - The default analysis path remains syntax-first and build-free. No corpus run
   requires the analyzed repository to build successfully.
 - No corpus result **blocks** merges or posts comments by default. Corpus
@@ -347,6 +515,25 @@ This spec is implemented by the corpus-validation-system lane. The PR sequence i
   base/head SHAs + checked-in diffs + expected outcome_movement counts.
 - PR-5: coverage-map index. Extends `stance-decisions.toml` with fixture /
   dogfood-target / surface links; adds `check-stance-coverage`.
+
+Post-0.3.8 generalization work continues in review-forward slices:
+
+- GPR-1: partition defaults/checks landed via `partition_default`,
+  `partition_by_kind`, and `xtask check-corpus-partitions`; no duplicate corpus
+  ledger.
+- GPR-2: initial holdout target/report landed with `getrandom-holdout`, exact
+  SHA pinning, first result recorded before tuning, and `dogfood-exec`
+  `--include-holdout` opt-in.
+- GPR-3: initial evidence-loss challenge harness landed with
+  `policy/evidence-loss-challenges.toml`,
+  `xtask check-evidence-loss-challenges`, and conformance partition ownership
+  through `xtask check-corpus-partitions`.
+- GPR-4: initial read-only external pilot receipt rail landed in
+  `docs/dogfood/pilots/`, enforced by `xtask check-external-pilots`.
+- GPR-5: validation closeout landed in
+  `docs/dogfood/reports/2026-06-19-generalization-validation-closeout.md`,
+  separating conformance, regression, holdout, challenge, and pilot evidence and
+  recommending first-use friction as the next lane.
 
 See `.rails/lanes/corpus/implementation-plan.md` for the full sequence and
 evidence grounding.

@@ -106,12 +106,16 @@ target/unsafe-review/cards.sarif
 target/unsafe-review/comment-plan.json
 target/unsafe-review/witness-plan.md
 target/unsafe-review/receipt-audit.md
+target/unsafe-review/receipt-audit.json
+target/unsafe-review/policy-report.json
+target/unsafe-review/policy-report.md
 target/unsafe-review/manual-candidates.json
 target/unsafe-review/manual-repair-queue.json
 target/unsafe-review/tokmd-packets.json
 target/unsafe-review/usefulness-telemetry.json
 target/unsafe-review/lsp.json
 target/unsafe-review/repair-queue.json
+target/unsafe-review/unsafe-review-gate.json
 ```
 
 The existing first-run lane already identifies this bundle and verifier as the public first-run cockpit surface.
@@ -158,6 +162,59 @@ must list every required first-pr artifact with relative paths
 must include artifact kind, format, and schema_version/null metadata
 must include trust boundary wording
 ```
+
+The first-pr bundle has exactly eighteen artifact identities. An identity is
+the complete `(path, kind, format, schema_version/null)` tuple; no single
+bundle-wide schema version replaces these per-artifact contracts.
+
+| Path | Kind | Format | Manifest schema | Actual discriminator | Compatibility disposition | Canonical producer |
+| --- | --- | --- | --- | --- | --- | --- |
+| `review-kit.json` | `review_kit_manifest` | `json` | `0.1` | `schema_version` | Exact supported identity; other versions rejected | CLI `render_review_kit_manifest` |
+| `unsafe-review-gate.json` | `gate_manifest` | `json` | `unsafe-review-gate/v1` | `schema_version` | Exact supported identity; other versions rejected | core `render_gate_manifest` |
+| `cards.json` | `review_cards` | `json` | `0.2` | `schema_version` | Exact supported identity; other versions rejected | core `render_json_with_provenance` |
+| `pr-summary.md` | `reviewer_summary` | `markdown` | `null` | none | Supported unversioned; manifest must be `null` | core `render_pr_summary` |
+| `github-summary.md` | `github_summary` | `markdown` | `null` | none | Supported unversioned; manifest must be `null` | core `render_github_summary` |
+| `cards.sarif` | `sarif` | `sarif` | `2.1.0` | `version` | Exact supported identity; other versions rejected | core `render_sarif` |
+| `comment-plan.json` | `comment_plan` | `json` | `0.1` | `schema_version` | Exact supported identity; other versions rejected | core `render_comment_plan` |
+| `witness-plan.md` | `witness_plan` | `markdown` | `null` | none | Supported unversioned; manifest must be `null` | core `render_witness_plan` |
+| `receipt-audit.md` | `receipt_audit` | `markdown` | `null` | none | Supported unversioned; manifest must be `null` | core `render_receipt_audit_markdown` |
+| `receipt-audit.json` | `receipt_audit` | `json` | `0.1` | `schema_version` | Exact supported identity; other versions rejected | core `render_receipt_audit_json` |
+| `policy-report.json` | `policy_report_json` | `json` | `0.1` | `schema_version` | Exact supported identity; other versions rejected | core `render_policy_report_json` |
+| `policy-report.md` | `policy_report_markdown` | `markdown` | `null` | none | Supported unversioned; manifest must be `null` | core `render_policy_report_markdown` |
+| `manual-candidates.json` | `manual_candidates` | `json` | `manual-candidates/v1` | `schema_version` | Exact supported identity; other versions rejected | CLI `render_manual_candidates_artifact` |
+| `manual-repair-queue.json` | `manual_repair_queue` | `json` | `manual-repair-queue/v1` | `schema_version` | Exact supported identity; other versions rejected | CLI `render_manual_repair_queue_artifact` |
+| `tokmd-packets.json` | `tokmd_packets` | `json` | `tokmd-packets/v1` | `schema_version` | Exact supported identity; other versions rejected | CLI `render_tokmd_packets_artifact` |
+| `usefulness-telemetry.json` | `usefulness_telemetry` | `json` | `usefulness-telemetry/v1` | `schema_version` | Exact supported identity; other versions rejected | core `render_usefulness_telemetry_with_cost` |
+| `lsp.json` | `saved_lsp` | `json` | `0.2` | `schema_version` | Exact supported identity; saved LSP `0.1` rejected | core `render_lsp` |
+| `repair-queue.json` | `repair_queue` | `json` | `0.1` | `schema_version` | Exact supported identity; other versions rejected | core `render_repair_queue` |
+
+The manifest tuple and the actual payload discriminator must agree. JSON
+artifacts carry `schema_version`, SARIF carries `version`, and Markdown
+artifacts must use `null` in the manifest. Missing, wrongly typed, unsupported,
+or mismatched discriminators fail verification; the verifier must not silently
+downgrade them. Its terminal identity error names `artifact`, `field`,
+`expected`, and `actual`, so human output and the JSON manifest/payload evidence
+describe the same failed join without creating a second result format.
+
+Required fields remain required. Unknown object fields are additive and must be
+accepted unless a field's contract explicitly defines a closed vocabulary.
+`operation_family` is an opaque, non-empty, additive value when propagated
+consistently across the bundle. The literal `unknown` and fields whose contracts
+already define closed vocabularies remain closed; an unknown optional field does
+not grant authority to change those meanings.
+
+`tool_version` is required and must be valid semver with a minimum supported
+producer version of `0.3.8`. This is a secondary compatibility floor: the exact
+artifact tuple and payload discriminator remain authoritative because producer
+semver alone cannot establish payload compatibility.
+
+No artifact field is deprecated by this contract. A future rename or removal
+must document the artifact, old and replacement fields, `deprecated_since`, and
+the earliest removal producer version here. Producer and verifier must co-emit
+or accept the old and replacement fields for at least one published minor
+release after deprecation; removal requires a schema-version change for the
+affected artifact and cannot occur until the minimum producer floor advances
+past the old producer compatibility window.
 
 The manifest is a discovery projection. It must not reclassify ReviewCards or
 create a second source of truth for operation family, obligation, evidence,
@@ -287,6 +344,56 @@ top actionable card, when present
 compact card table
   rows project ReviewCard id, class, location, operation family, operation,
   missing evidence, primary route, and next action
+declaration summary, when at least one `unsafe_declaration`-family
+  ReviewCard is present (issue #1895)
+  bounded, deterministic groups of `unsafe_declaration` ReviewCards by
+  source file -- presentation-only, projected from the same
+  `CoverageBlock::derive` data every other baseline-movement surface uses;
+  never a second classifier and never a discharge
+  each group row reports: file, total cards, new-or-worsened count,
+  inherited count, contract-missing/weak count (a weak contract slot counts
+  with missing), contract-present count, and a
+  representative card-id sample capped at
+  `declaration_summary::DECLARATION_SUMMARY_REPRESENTATIVE_LIMIT` with a
+  "+N more (see `cards.json`)" pointer to the complete membership
+  groups containing at least one new-or-worsened card MUST sort ahead of
+  inherited-only groups so a changed obligation cannot be hidden behind
+  unchanged declaration volume
+  omitted entirely when there are no `unsafe_declaration` cards -- a quiet
+  PR must not gain a new empty section
+  every underlying card keeps its own id, class, and policy status in
+  `cards.json` and the card table above; this section only bounds what is
+  printed inline
+target-feature summary, when at least one `target_feature`-family
+  ReviewCard is present (issue #1894)
+  bounded, deterministic groups of `target_feature` ReviewCards by source
+  file, review class, and a normalized attribute shape -- presentation-only,
+  projected from the same `CoverageBlock::derive` data every other
+  baseline-movement surface uses; never a second classifier and never a
+  discharge
+  architecture/feature literals (e.g. `enable = "avx2"` vs `enable =
+  "neon"`) are group metadata, never group identity; two cards group
+  together only when their file, class, baseline movement, full
+  contract/guard/test-reach/witness-receipt coverage state, and next action
+  are all identical
+  each group row reports: file, shared class, total sites, deduplicated
+  feature-literal metadata, and a representative card-id sample capped at
+  `target_feature_summary::TARGET_FEATURE_SUMMARY_REPRESENTATIVE_LIMIT` with
+  a "+N more (see `cards.json`)" pointer to the complete membership
+  groups with a `new`/`worsened` baseline posture MUST sort ahead of other
+  groups so a changed obligation cannot be hidden behind unchanged
+  repetition volume
+  omitted entirely when there are no `target_feature` cards -- a quiet PR
+  must not gain a new empty section
+  every underlying card keeps its own id, class, and policy status in
+  `cards.json` and the card table above; this section only bounds what is
+  printed inline
+  human Markdown and agent/context packets consume the same
+  `target_feature_groups` producer; agent packets preserve the complete card
+  membership and explicitly retain per-card/site edit authority
+  the comment-plan (SPEC-0022/0032) selects at most one representative per
+  group for an inline comment slot; every other member is recorded in
+  `not_selected[]` with reason_code `grouped_repetition` -- never dropped
 missing evidence summary
 witness route summary
   rows project ReviewCard id, primary route, route reason, and route command
@@ -363,6 +470,7 @@ Must include:
 card_id
 operation family
 review class
+level derived from review class
 hazards
 location
 message with missing evidence
@@ -372,6 +480,9 @@ trust boundary
 SARIF must not create a separate classification truth. It is a projection from ReviewCards.
 SARIF rule IDs are the stable `ReviewClass` string values; changing a rule ID is
 a code-scanning baseline contract change, not a wording-only edit.
+SARIF `level` must be derived from the same `ReviewClass` table as LSP
+diagnostic severity. It must not be derived from priority, operation family,
+baseline state, or comment eligibility.
 
 #### 3.5 `comment-plan.json`
 
@@ -546,7 +657,7 @@ comments, or blocking policy.
 
 Saved editor/LLM projection.
 
-Must include `schema_version = 0.1`.
+Must include `schema_version = 0.2`.
 
 Must be read-only.
 
@@ -563,6 +674,7 @@ Diagnostics should carry ReviewCard-derived evidence:
 
 ```text
 card_id
+severity
 operation
 hazards
 required safety conditions
@@ -574,8 +686,16 @@ verify commands
 trust boundary
 ```
 
+Diagnostic severity must be derived from the same `ReviewClass` table as SARIF
+`level`. The saved LSP projection must not derive severity from priority,
+operation family, baseline state, or comment eligibility, and must never emit
+LSP `Error` severity in the default advisory projection.
+
 Code actions must be command-only. They must not include `WorkspaceEdit` or
 source-edit fields in the action or nested payloads.
+The `agent-packet` action payload may carry the canonical typed
+`repair_candidates` array from the ReviewCard-derived agent projection; it is
+advisory data and must not be interpreted as an applied edit.
 `copyWitnessCommand` actions must copy only a command already projected from the
 same ReviewCard's verify commands.
 
@@ -643,6 +763,7 @@ missing_evidence
 agent_readiness
 bucket_reason
 context_command
+repair_candidates
 do_not_do
 trust_boundary
 ```
@@ -876,11 +997,15 @@ Open:
 - `target/unsafe-review/github-summary.md`
 - `target/unsafe-review/witness-plan.md`
 - `target/unsafe-review/receipt-audit.md` (saved receipt metadata only; no witness was run)
+- `target/unsafe-review/receipt-audit.json` (machine-readable saved receipt metadata only)
+- `target/unsafe-review/policy-report.json` (advisory no-new-debt simulation)
+- `target/unsafe-review/policy-report.md` (reviewer-facing advisory policy simulation)
 - `target/unsafe-review/manual-candidates.json` (manual/advisory candidates, separate from ReviewCards)
 - `target/unsafe-review/manual-repair-queue.json` (copy-only manual candidate handoff; no agent was run)
 - `target/unsafe-review/tokmd-packets.json` (formatting input only; tokmd was not run)
 - `target/unsafe-review/usefulness-telemetry.json` (operational diagnostic usefulness only; not calibrated precision/recall)
 - `target/unsafe-review/repair-queue.json` (copy-only; no agent was run)
+- `target/unsafe-review/unsafe-review-gate.json` (advisory movement manifest; not a merge verdict)
 
 Trust boundary:
 Static unsafe contract review only. Not memory-safety proof, not UB-free status,
@@ -945,9 +1070,15 @@ This is not Miri-clean status.
 The first-pr artifact verifier scans every required bundle artifact for positive
 overclaim wording, including `review-kit.json`, `cards.json`, `pr-summary.md`,
 `github-summary.md`, `cards.sarif`, `comment-plan.json`, `witness-plan.md`,
-`receipt-audit.md`, `manual-candidates.json`, `manual-repair-queue.json`,
-`tokmd-packets.json`,
-`usefulness-telemetry.json`, `lsp.json`, and `repair-queue.json`.
+`receipt-audit.md`, `receipt-audit.json`, `policy-report.json`,
+`policy-report.md`, `manual-candidates.json`, `manual-repair-queue.json`,
+`tokmd-packets.json`, `usefulness-telemetry.json`, `lsp.json`,
+`repair-queue.json`, and `unsafe-review-gate.json`.
+
+For `unsafe-review-gate.json`, the verifier also checks the consumer contract:
+schema/dialect/tool/status, fixed advisory trust-boundary limits, no volatile
+timestamp or wall-clock fields, movement counts copied from `cards.json`
+summary, and artifact pointers to the structured first-pr bundle files.
 
 ### 8. Policy report relationship
 

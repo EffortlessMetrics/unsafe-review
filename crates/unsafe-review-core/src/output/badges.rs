@@ -102,6 +102,9 @@ mod tests {
     use crate::api::{
         AnalysisMode, AnalyzeInput, AnalyzeOutput, DiffSource, PolicyMode, Scope, Summary,
     };
+    use crate::domain::ReviewClass;
+    use crate::domain::coverage::CoverageBlock;
+    use crate::policy::SnapshotCoverage;
     use std::collections::{BTreeMap, BTreeSet};
     use std::path::PathBuf;
 
@@ -174,8 +177,74 @@ mod tests {
     }
 
     #[test]
+    fn badge_counts_match_card_derived_projection_for_baseline_and_no_baseline()
+    -> Result<(), String> {
+        for fixture in [
+            "raw_pointer_alignment",
+            "raw_pointer_deref_coverage_worsened",
+        ] {
+            let output = fixture_output(fixture)?;
+            assert_eq!(output.scope, Scope::Repo, "fixture helper is repo-scoped");
+
+            let actionable_cards = output
+                .cards
+                .iter()
+                .filter(|card| card.class.is_actionable())
+                .count();
+            let worsened_baseline_cards = card_derived_worsened_count(&output);
+            let card_slot_gaps = card_derived_evidence_quality_count(&output);
+
+            assert_eq!(
+                output.summary.open_actionable_gaps, actionable_cards,
+                "{fixture}: summary open_actionable_gaps must match actionable ReviewCards"
+            );
+            assert_eq!(
+                output.summary.new_gaps, actionable_cards,
+                "{fixture}: repo-mode new_gaps must match actionable non-baseline ReviewCards"
+            );
+            assert_eq!(
+                output.summary.worsened_gaps, worsened_baseline_cards,
+                "{fixture}: summary worsened_gaps must match baseline cards whose coverage regressed"
+            );
+            assert_eq!(
+                output.summary.contract_missing
+                    + output.summary.guard_missing
+                    + output.summary.guarded_unwitnessed,
+                card_slot_gaps,
+                "{fixture}: summary evidence-quality buckets must match ReviewCard classes"
+            );
+
+            let expected_main = if has_baseline(&output.summary) {
+                actionable_cards + worsened_baseline_cards
+            } else {
+                actionable_cards
+            };
+            let expected_plus = if has_baseline(&output.summary) {
+                card_slot_gaps + worsened_baseline_cards
+            } else {
+                card_slot_gaps
+            };
+            let (main, plus) = render(&output);
+
+            assert_eq!(
+                badge_message_count(&main)?,
+                expected_main,
+                "{fixture}: unsafe-review badge must project card-derived movement count"
+            );
+            assert_eq!(
+                badge_message_count(&plus)?,
+                expected_plus,
+                "{fixture}: unsafe-review+ badge must project card-derived evidence quality count"
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
     fn unsafe_review_plus_does_not_double_count_open_actionable_gaps() -> Result<(), String> {
         let output = AnalyzeOutput {
+            analysis_identity: crate::freshness::AnalysisIdentity::for_test(1, "test-1", "repo"),
             schema_version: "0.1".to_string(),
             tool: "unsafe-review".to_string(),
             root: PathBuf::from("."),
@@ -235,6 +304,7 @@ mod tests {
     #[test]
     fn baseline_aware_badge_uses_new_and_worsened_gaps_not_full_debt() -> Result<(), String> {
         let output = AnalyzeOutput {
+            analysis_identity: crate::freshness::AnalysisIdentity::for_test(2, "test-2", "repo"),
             schema_version: "0.1".to_string(),
             tool: "unsafe-review".to_string(),
             root: PathBuf::from("."),
@@ -298,6 +368,7 @@ mod tests {
     #[test]
     fn baseline_aware_badge_includes_worsened_gaps() -> Result<(), String> {
         let output = AnalyzeOutput {
+            analysis_identity: crate::freshness::AnalysisIdentity::for_test(3, "test-3", "repo"),
             schema_version: "0.1".to_string(),
             tool: "unsafe-review".to_string(),
             root: PathBuf::from("."),
@@ -350,6 +421,7 @@ mod tests {
     #[test]
     fn plus_badge_brownfield_worsened_not_silently_dropped() -> Result<(), String> {
         let output = AnalyzeOutput {
+            analysis_identity: crate::freshness::AnalysisIdentity::for_test(4, "test-4", "repo"),
             schema_version: "0.1".to_string(),
             tool: "unsafe-review".to_string(),
             root: PathBuf::from("."),
@@ -410,6 +482,7 @@ mod tests {
     #[test]
     fn resolved_gaps_signal_baseline_is_present() -> Result<(), String> {
         let output = AnalyzeOutput {
+            analysis_identity: crate::freshness::AnalysisIdentity::for_test(5, "test-5", "repo"),
             schema_version: "0.1".to_string(),
             tool: "unsafe-review".to_string(),
             root: PathBuf::from("."),
@@ -448,6 +521,7 @@ mod tests {
     #[test]
     fn no_baseline_fallback_uses_raw_open_actionable_gaps() -> Result<(), String> {
         let output = AnalyzeOutput {
+            analysis_identity: crate::freshness::AnalysisIdentity::for_test(6, "test-6", "repo"),
             schema_version: "0.1".to_string(),
             tool: "unsafe-review".to_string(),
             root: PathBuf::from("."),
@@ -492,6 +566,7 @@ mod tests {
     #[test]
     fn baseline_aware_badge_payloads_are_overclaim_free() -> Result<(), String> {
         let output = AnalyzeOutput {
+            analysis_identity: crate::freshness::AnalysisIdentity::for_test(7, "test-7", "repo"),
             schema_version: "0.1".to_string(),
             tool: "unsafe-review".to_string(),
             root: PathBuf::from("."),
@@ -566,6 +641,57 @@ mod tests {
             }
         }
         Ok(())
+    }
+
+    fn card_derived_worsened_count(output: &AnalyzeOutput) -> usize {
+        output
+            .cards
+            .iter()
+            .filter(|card| card.class == ReviewClass::BaselineKnown)
+            .filter(|card| {
+                output
+                    .coverage_snapshot
+                    .get(&card.id.0)
+                    .map(|snapshot| {
+                        snapshot.is_worsened_by(&snapshot_from_block(CoverageBlock::derive(card)))
+                    })
+                    .unwrap_or(false)
+            })
+            .count()
+    }
+
+    fn card_derived_evidence_quality_count(output: &AnalyzeOutput) -> usize {
+        output
+            .cards
+            .iter()
+            .filter(|card| {
+                matches!(
+                    &card.class,
+                    ReviewClass::ContractMissing
+                        | ReviewClass::GuardMissing
+                        | ReviewClass::GuardedUnwitnessed
+                )
+            })
+            .count()
+    }
+
+    fn snapshot_from_block(block: CoverageBlock) -> SnapshotCoverage {
+        SnapshotCoverage {
+            contract_coverage: block.contract_coverage.as_str().to_string(),
+            guard_coverage: block.guard_coverage.as_str().to_string(),
+            test_reach_coverage: block.test_reach_coverage.as_str().to_string(),
+            witness_receipt_coverage: block.witness_receipt_coverage.as_str().to_string(),
+        }
+    }
+
+    fn badge_message_count(text: &str) -> Result<usize, String> {
+        let badge = parse_json(text)?;
+        let message = badge["message"]
+            .as_str()
+            .ok_or_else(|| "badge message must be a string".to_string())?;
+        message
+            .parse::<usize>()
+            .map_err(|err| format!("badge message count parse failed: {err}"))
     }
 
     fn fixture_output(name: &str) -> Result<AnalyzeOutput, String> {
