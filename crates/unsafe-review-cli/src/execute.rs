@@ -31,9 +31,9 @@ use unsafe_review_core::{
     new_manual_candidate_skeleton, read_manual_candidate, render_badge_jsons,
     render_baseline_refresh_human, render_baseline_refresh_json, render_baseline_status_human,
     render_baseline_status_json, render_comment_plan, render_gate_manifest,
-    render_gate_manifest_repo, render_github_summary, render_human, render_json,
-    render_json_with_provenance, render_lsp, render_manual_candidate_witness_plan, render_markdown,
-    render_outcome_json, render_outcome_markdown, render_policy_report_json,
+    render_gate_manifest_repo, render_github_summary, render_human, render_human_short,
+    render_json, render_json_with_provenance, render_lsp, render_manual_candidate_witness_plan,
+    render_markdown, render_outcome_json, render_outcome_markdown, render_policy_report_json,
     render_policy_report_markdown, render_pr_summary, render_receipt_audit_json,
     render_receipt_audit_markdown, render_repair_queue, render_sarif,
     render_usefulness_telemetry_with_cost, render_witness_plan, validate_witness_receipts,
@@ -48,6 +48,16 @@ const NO_CHANGED_GAPS_MESSAGE: &str = "No changed unsafe-review gaps were found.
 const NO_CHANGED_GAPS_LIMITATION: &str =
     "This does not prove the repo safe, UB-free, Miri-clean, or that any unsafe site executed.";
 const FIRST_RUN_TRUST_BOUNDARY: &str = "static unsafe contract review only; not memory-safety proof, not UB-free status, not Miri-clean status, and not a site-execution claim unless a matching witness receipt says so.";
+
+/// Shared exit-code contract footer for the top-level and review-command helps.
+/// Exit codes are part of the scripting contract: agents branch on 0/1/2.
+fn print_exit_code_footer() {
+    println!("Exit codes:");
+    println!("  0  ran to completion: clean, or advisory findings (advisory policy default)");
+    println!("  1  ran to completion: no-new-debt policy found new or worsened coverage gaps");
+    println!("  2  tool did not complete a review: usage, input/IO, or internal error");
+    println!();
+}
 type FirstPrRenderer = fn(&AnalyzeOutput) -> String;
 
 const REVIEW_KIT_ARTIFACT: &str = "review-kit.json";
@@ -264,7 +274,12 @@ fn run_check(
         discovery,
     )
     .map_err(crate::RunFailure::Tool)?;
-    let rendered = render_with_format_and_provenance(&output, &options.format, Some(&provenance));
+    let rendered = render_with_format_and_provenance(
+        &output,
+        &options.format,
+        options.short,
+        Some(&provenance),
+    );
     if let Some(path) = options.out {
         ensure_parent_dir(&path).map_err(crate::RunFailure::Tool)?;
         fs::write(&path, rendered).map_err(|err| {
@@ -298,6 +313,7 @@ fn run_repo_check(options: RepoOptions) -> Result<(), crate::RunFailure> {
         partial_path.clone(),
         options.progress,
         check.format.clone(),
+        check.short,
         options.timeout_seconds,
         scan_scope,
     )
@@ -334,7 +350,8 @@ fn run_repo_check(options: RepoOptions) -> Result<(), crate::RunFailure> {
             "unsafe-review repo: no Rust files selected after include/exclude/ignores; check --root, --include, --exclude, --[no-]large-repo-ignores, and --[no-]respect-gitignore"
         );
     }
-    let rendered = render_with_format_and_provenance(&output, &check.format, Some(&provenance));
+    let rendered =
+        render_with_format_and_provenance(&output, &check.format, check.short, Some(&provenance));
     if let Some(path) = report_path {
         let partial = repo_partial_path(&path);
         let output_bytes = match write_repo_report(&path, &partial, rendered) {
@@ -539,6 +556,7 @@ struct RepoStatusReporter {
     last_status: Arc<Mutex<Option<RepoScanStatus>>>,
     partial_output: Arc<Mutex<Option<AnalyzeOutput>>>,
     format: Format,
+    short: bool,
     scan_scope: RepoScanScopeMetadata,
     last_phase: Option<String>,
     last_discovery_heartbeat: usize,
@@ -580,6 +598,7 @@ impl RepoStatusReporter {
         partial_path: Option<PathBuf>,
         progress: bool,
         format: Format,
+        short: bool,
         timeout_seconds: Option<u64>,
         scan_scope: RepoScanScopeMetadata,
     ) -> Result<Self, String> {
@@ -603,6 +622,7 @@ impl RepoStatusReporter {
             last_status,
             partial_output,
             format,
+            short,
             scan_scope,
             last_phase: None,
             last_discovery_heartbeat: 0,
@@ -718,7 +738,7 @@ impl RepoStatusReporter {
             return Ok(None);
         };
         ensure_parent_dir(path)?;
-        fs::write(path, render_with_format(&output, &self.format))
+        fs::write(path, render_with_format(&output, &self.format, self.short))
             .map_err(|err| format!("write partial repo report {} failed: {err}", path.display()))?;
         Ok(Some(path.clone()))
     }
@@ -850,7 +870,9 @@ impl RepoSignalState {
             return Ok(None);
         };
         ensure_parent_dir(path)?;
-        fs::write(path, render_with_format(&output, &self.format))
+        // Signal-interrupt partials keep the full rendering: an interrupted
+        // scan needs complete detail for diagnosis, not the short summary.
+        fs::write(path, render_with_format(&output, &self.format, false))
             .map_err(|err| format!("write partial repo report {} failed: {err}", path.display()))?;
         Ok(Some(path.clone()))
     }
@@ -1962,16 +1984,22 @@ fn ensure_parent_dir(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn render_with_format(output: &unsafe_review_core::AnalyzeOutput, format: &Format) -> String {
-    render_with_format_and_provenance(output, format, None)
+fn render_with_format(
+    output: &unsafe_review_core::AnalyzeOutput,
+    format: &Format,
+    short: bool,
+) -> String {
+    render_with_format_and_provenance(output, format, short, None)
 }
 
 fn render_with_format_and_provenance(
     output: &unsafe_review_core::AnalyzeOutput,
     format: &Format,
+    short: bool,
     provenance: Option<&Provenance>,
 ) -> String {
     match format {
+        Format::Human if short => render_human_short(output),
         Format::Human => render_human(output),
         Format::Json => {
             if let Some(prov) = provenance {
@@ -3197,7 +3225,7 @@ fn print_check_help() {
     println!(
         "  unsafe-review check [--root .] [--base <ref> | --diff <file|->] \
          [--format human|json|markdown|pr-summary|github-summary|sarif|comment-plan|lsp|witness-plan] \
-         [--policy advisory|no-new-debt] [--out <file>] [--max-cards <N>]"
+         [--short] [--policy advisory|no-new-debt] [--out <file>] [--max-cards <N>]"
     );
     println!();
     println!("Options:");
@@ -3208,6 +3236,9 @@ fn print_check_help() {
     println!("- --diff <file|->  read a unified diff from a file or stdin (-)");
     println!(
         "- --format <name>  output format: human (default), json, markdown, pr-summary, github-summary, sarif, comment-plan, lsp, or witness-plan"
+    );
+    println!(
+        "- --short          human output only: one risk-ranked line per card (highest risk first)"
     );
     println!(
         "- --policy <name>  advisory (default, exit 0) or no-new-debt (exit 1 for new/worsened gaps)"
@@ -3223,6 +3254,7 @@ fn print_check_help() {
     println!("  unsafe-review check --diff - --format sarif < patch.diff");
     println!("  unsafe-review check --base origin/main --policy no-new-debt");
     println!();
+    print_exit_code_footer();
     println!("Trust boundary: {FIRST_RUN_TRUST_BOUNDARY}");
 }
 
@@ -3277,6 +3309,7 @@ fn print_first_pr_help() {
         "  mkdir -p /path/to && git -C /path/to/repo diff --binary --full-index --output=/path/to/change.diff <base-sha>...<head-sha> && unsafe-review pr --root /path/to/repo --diff /path/to/change.diff --out-dir /path/to/review-kit"
     );
     println!();
+    print_exit_code_footer();
     println!("Trust boundary: always advisory; {FIRST_RUN_TRUST_BOUNDARY}");
     println!(
         "unsafe-review does not execute witnesses, post comments, edit source, or enforce blocking policy by default."
@@ -3346,6 +3379,7 @@ fn print_pilot_help() {
     println!("  unsafe-review pilot --diff change.diff --format json");
     println!("  unsafe-review pilot --base origin/main --max-cards 10");
     println!();
+    print_exit_code_footer();
     println!("Trust boundary: {FIRST_RUN_TRUST_BOUNDARY}");
 }
 
@@ -3743,11 +3777,7 @@ fn print_help() {
     println!();
     println!("Flags may be passed as `--flag value` or `--flag=value`.");
     println!();
-    println!("Exit codes:");
-    println!("  0  ran to completion: clean, or advisory findings (advisory policy default)");
-    println!("  1  ran to completion: no-new-debt policy found new or worsened coverage gaps");
-    println!("  2  tool did not complete a review: usage, input/IO, or internal error");
-    println!();
+    print_exit_code_footer();
     println!("Trust boundary: {FIRST_RUN_TRUST_BOUNDARY}");
     println!(
         "unsafe-review does not run witnesses, post comments, edit source, or block by default."
@@ -3759,7 +3789,7 @@ fn print_repo_help() {
     println!();
     println!("Usage:");
     println!(
-        "  unsafe-review repo [--root .] [--include glob] [--exclude glob] [--list-files|--dry-run] [--progress] [--timeout-seconds N] [--respect-gitignore|--no-respect-gitignore] [--large-repo-ignores|--no-large-repo-ignores] [--max-files N] [--format human|json|markdown|pr-summary|github-summary|sarif|comment-plan|lsp|witness-plan] [--policy advisory|no-new-debt] [--out file] [--max-cards N]"
+        "  unsafe-review repo [--root .] [--include glob] [--exclude glob] [--list-files|--dry-run] [--progress] [--timeout-seconds N] [--respect-gitignore|--no-respect-gitignore] [--large-repo-ignores|--no-large-repo-ignores] [--max-files N] [--format human|json|markdown|pr-summary|github-summary|sarif|comment-plan|lsp|witness-plan] [--short] [--policy advisory|no-new-debt] [--out file] [--max-cards N]"
     );
     println!();
     println!("What repo scans today:");
@@ -3798,6 +3828,9 @@ fn print_repo_help() {
         "- --format <name> chooses human, json, markdown, pr-summary, github-summary, sarif, comment-plan, lsp, or witness-plan output."
     );
     println!(
+        "- --short renders one risk-ranked line per card (highest risk first); human output only."
+    );
+    println!(
         "- --policy advisory is the default; --policy no-new-debt exits 1 for new or worsened coverage gaps."
     );
     println!("- --out <file> writes the rendered report to a file instead of stdout.");
@@ -3829,6 +3862,7 @@ fn print_repo_help() {
     );
     println!("- Without --out, Unix SIGTERM/SIGINT prints an interruption diagnostic to stderr.");
     println!();
+    print_exit_code_footer();
     println!("Trust boundary:");
     println!("- ReviewCards are advisory static findings: {FIRST_RUN_TRUST_BOUNDARY}");
     println!(

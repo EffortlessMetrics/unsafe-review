@@ -1055,8 +1055,17 @@ mod tests {
             (ReviewClass::WitnessMismatch, "matching receipt"),
             (ReviewClass::StaticUnknown, "witness route"),
         ] {
-            let summary =
-                next_action_summary(&class, "raw_pointer_read", false, "private", &[], &[]);
+            let summary = next_action_summary(
+                &class,
+                "raw_pointer_read",
+                false,
+                "private",
+                &[],
+                &[],
+                false,
+                None,
+                &[],
+            );
             assert!(
                 summary.contains(expected),
                 "`{}` next action `{summary}` should mention `{expected}`",
@@ -1074,6 +1083,9 @@ mod tests {
             false,
             "private",
             &human_route,
+            &[],
+            false,
+            None,
             &[],
         );
         assert!(
@@ -1093,6 +1105,9 @@ mod tests {
             "private",
             &miri_careful_routes,
             &[],
+            false,
+            None,
+            &[],
         );
         assert!(miri_supported.contains("Miri"));
         assert!(miri_supported.contains("cargo-careful"));
@@ -1109,6 +1124,9 @@ mod tests {
             false,
             "private",
             &human_route,
+            &[],
+            false,
+            None,
             &[],
         );
 
@@ -1129,6 +1147,9 @@ mod tests {
             "private",
             &human_route,
             &[],
+            false,
+            None,
+            &[],
         );
 
         assert!(summary.contains("pin_unchecked"));
@@ -1148,6 +1169,9 @@ mod tests {
             false,
             "private",
             &human_route,
+            &[],
+            false,
+            None,
             &[],
         );
 
@@ -1477,6 +1501,181 @@ pub unsafe fn advance(ptr: *const u8, offset: usize) -> *const u8 {
         assert!(
             card.contract.present,
             "operation card should inherit enclosing unsafe fn # Safety docs"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn deref_of_get_unchecked_emits_only_the_get_unchecked_card() -> Result<(), String> {
+        // Drift-lock for #2238: dereferencing the `&T`/`&mut T` returned by
+        // `get_unchecked` cannot be UB by itself, so the deref arm must not
+        // emit a second card for the same expression.
+        let output = temp_source_output(
+            "unsafe-review-deref-get-unchecked-dedup",
+            r#"pub fn read_at(slice: &[u8], i: usize) -> u8 {
+    assert!(i < slice.len());
+    unsafe { *slice.get_unchecked(i) }
+}
+
+pub fn write_at(slice: &mut [u8], i: usize, v: u8) {
+    assert!(i < slice.len());
+    unsafe { *slice.get_unchecked_mut(i) = v; }
+}
+
+pub fn read_raw(ptr: *const u8) -> u8 {
+    unsafe { *ptr }
+}
+"#,
+        )?;
+        let owned: Vec<(Option<String>, OperationFamily)> = output
+            .cards
+            .iter()
+            .map(|card| (card.site.owner.clone(), card.operation.family.clone()))
+            .collect();
+        for owner in ["read_at", "write_at"] {
+            let owner_families: Vec<OperationFamily> = owned
+                .iter()
+                .filter(|(name, _)| name.as_deref() == Some(owner))
+                .map(|(_, family)| family.clone())
+                .collect();
+            assert_eq!(
+                owner_families,
+                vec![OperationFamily::GetUnchecked],
+                "`{owner}` should emit only its get_unchecked card, got: {owner_families:?}"
+            );
+        }
+        assert!(
+            owned.contains(&(
+                Some("read_raw".to_string()),
+                OperationFamily::RawPointerDeref
+            )),
+            "genuine raw deref `*ptr` must still card, got: {owned:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn guard_missing_inside_documented_unsafe_fn_routes_to_caller_contract() -> Result<(), String> {
+        // Drift-lock for #2236: an unguarded operation inside a documented
+        // `unsafe fn` is GuardMissing (comment != guard), but the repair
+        // direction must be caller-contract review of the named owner, not
+        // local-guard construction.
+        let output = temp_source_output(
+            "unsafe-review-caller-contract-next-action",
+            r#"/// Reads one byte.
+///
+/// # Safety
+///
+/// `ptr` must be valid for reads of one byte.
+pub unsafe fn read_one(ptr: *const u8) -> u8 {
+    unsafe { *ptr }
+}
+
+/// Reads one byte through a safe wrapper.
+pub fn read_wrapped(ptr: *const u8) -> u8 {
+    // SAFETY: ptr is live for this test fixture.
+    unsafe { *ptr }
+}
+"#,
+        )?;
+        let Some(card) = output.cards.iter().find(|card| {
+            card.operation.family == OperationFamily::RawPointerDeref
+                && card.site.owner.as_deref() == Some("read_one")
+        }) else {
+            return Err(format!(
+                "expected deref card owned by read_one: {:#?}",
+                output.cards
+            ));
+        };
+        assert_eq!(card.class, ReviewClass::GuardMissing);
+        assert!(
+            card.contract.present,
+            "test pre-condition: enclosing # Safety docs should be inherited"
+        );
+        let na = &card.next_action.summary;
+        assert!(
+            na.contains("read_one") && na.contains("caller"),
+            "inner-site next_action must route to caller-contract review of the owner; got: `{na}`"
+        );
+        assert!(
+            !na.contains("local guard"),
+            "inner-site next_action must not ask for a local guard; got: `{na}`"
+        );
+
+        // Safe-fn interior site with only a local rationale keeps the
+        // local-guard repair direction.
+        let Some(wrapped) = output.cards.iter().find(|card| {
+            card.operation.family == OperationFamily::RawPointerDeref
+                && card.site.owner.as_deref() == Some("read_wrapped")
+        }) else {
+            return Err(format!(
+                "expected deref card owned by read_wrapped: {:#?}",
+                output.cards
+            ));
+        };
+        assert_eq!(wrapped.class, ReviewClass::GuardMissing);
+        assert!(
+            wrapped.next_action.summary.contains("local guard"),
+            "safe-fn site must keep the local-guard repair direction; got: `{}`",
+            wrapped.next_action.summary
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn unreached_card_cues_gate_commands_behind_test_first() -> Result<(), String> {
+        // Drift-lock for #2240: a `miri test <owner>` command cannot work when
+        // no test reaches the owner, so the confirmation cue must lead with
+        // the test-first precondition instead of presenting the command as
+        // directly runnable.
+        let output = temp_source_output(
+            "unsafe-review-unreached-test-first-cue",
+            r#"pub fn lonely(ptr: *const u8) -> u8 {
+    unsafe { *ptr }
+}
+
+pub fn accompanied(ptr: *const u8) -> u8 {
+    unsafe { *ptr }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reaches_accompanied() {
+        let value = 7u8;
+        assert_eq!(accompanied(&value as *const u8), 7);
+    }
+}
+"#,
+        )?;
+        let cue_for = |owner: &str| -> Result<String, String> {
+            let card = output
+                .cards
+                .iter()
+                .find(|card| {
+                    card.operation.family == OperationFamily::RawPointerDeref
+                        && card.site.owner.as_deref() == Some(owner)
+                })
+                .ok_or_else(|| format!("expected deref card owned by {owner}"))?;
+            Ok(crate::output::confirmation::build_this_first(card)
+                .summary()
+                .to_string())
+        };
+        let lonely_cue = cue_for("lonely")?;
+        assert!(
+            lonely_cue.contains("lonely") && lonely_cue.contains("test"),
+            "unreached cue must gate behind a test-first step naming the owner; got: `{lonely_cue}`"
+        );
+        assert!(
+            !lonely_cue.starts_with("Build/run"),
+            "unreached cue must not present the command as directly runnable; got: `{lonely_cue}`"
+        );
+        let accompanied_cue = cue_for("accompanied")?;
+        assert!(
+            accompanied_cue.starts_with("Build/run"),
+            "reached cue must keep the direct command; got: `{accompanied_cue}`"
         );
         Ok(())
     }
