@@ -9,6 +9,45 @@ memory safety, UB-free status, Miri-clean status, site execution, calibrated
 precision/recall, or policy readiness, and it does not run witnesses, post
 comments, edit source, or block by default.
 
+## 0.5.0 - 2026-09-17
+
+0.5.0 remains advisory static review evidence. It does not prove UB,
+memory safety, UB-free status, Miri-clean status, site execution, calibrated
+precision/recall, or policy readiness, and it does not run witnesses, post
+comments, edit source, or block by default.
+
+### Added
+
+- Added `--short` for human `check`, `repo`, and `pilot` output: one
+  risk-ranked line per card (highest risk first). Human output only; the
+  policy report rejects `--short`.
+  ([#2245](https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/2245),
+  [#2249](https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/2249))
+- Documented the 0/1/2 exit-code contract in `check`, `first-pr`, `pilot`,
+  and `repo` `--help`, sharing one footer helper with top-level `--help`.
+  ([#2250](https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/2250))
+- Expanded the `unsafe-review` facade rustdoc (product sentence, install,
+  `unsafe-review-core` pointer) for docs.rs.
+  ([#2250](https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/2250))
+
+### Changed
+
+- Header blocks now show slot-level missing counts alongside class counters.
+  ([#2243](https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/2243))
+- Next-action routes inner unsafe-fn sites to caller-contract review.
+  ([#2237](https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/2237))
+- Unreached witness commands are gated behind a test-first cue.
+  ([#2241](https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/2241))
+- Bumped `sha2` `0.10.9` → `0.11.0`.
+  ([#2207](https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/2207))
+
+### Fixed
+
+- Recognized `SAFETY:` in doc comments as contract evidence.
+  ([#2235](https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/2235))
+- Folded deref-of-`get_unchecked` into the single `get_unchecked` card.
+  ([#2239](https://github.com/EffortlessMetrics/unsafe-review-swarm/pull/2239))
+
 ## 0.4.0
 
 0.4.0 remains advisory static review evidence. It does not prove UB,

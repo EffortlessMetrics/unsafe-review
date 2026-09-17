@@ -1002,7 +1002,7 @@ checksum = "7df058c713841ad818f1dc5d3fd88063241cc61f49f5fbea4b951e8cf5a8d71d"
 
 [[package]]
 name = "unsafe-review"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "serde_json",
  "unsafe-review-cli",
@@ -1011,7 +1011,7 @@ dependencies = [
 
 [[package]]
 name = "unsafe-review-cli"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "futures",
  "serde_json",
@@ -1024,7 +1024,7 @@ dependencies = [
 
 [[package]]
 name = "unsafe-review-core"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "globset",
  "ignore",
