@@ -1551,6 +1551,13 @@ fn init_handoff_carries_each_detected_base() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn work_tree_state(root: &Path) -> Result<String, Box<dyn Error>> {
+    let staged = run_git(root, &["diff", "--cached"])?;
+    let unstaged = run_git(root, &["diff"])?;
+    let status = run_git(root, &["status", "--porcelain"])?;
+    Ok(format!("{staged}\n---\n{unstaged}\n---\n{status}"))
+}
+
 fn init_handoff_repo(root: &Path) -> Result<(), Box<dyn Error>> {
     fs::create_dir_all(root.join("src"))?;
     run_git(root, &["init", "-q"])?;
