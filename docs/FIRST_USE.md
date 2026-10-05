@@ -75,12 +75,18 @@ Command text uses PowerShell quoting on Windows and POSIX shell quoting elsewher
 If no base can be resolved, JSON `commands.first_pr` is `null` and
 `commands.first_pr_prerequisite` (also shown in human output) asks for an explicit
 `--base` or `--diff`; init does not offer a repository-wide scan as a PR review.
-If the resolved root cannot be represented as UTF-8, init still inspects the
-native path and preserves the preview. JSON marks `root` and unrepresentable
-commands/absolute destinations as null, labels `root_display` as display-only
-through the `unrepresentable_path` warning, and human output explains why
-handoffs are unavailable. Use a UTF-8 checkout path for generated commands;
-lossy display text never selects another repository.
+If the resolved root has no lossless command spelling, init still inspects the
+native path and preserves the preview. This includes non-UTF-8 Unix roots and
+Windows verbatim names whose normalized spelling selects a different directory,
+such as distinct `repo` and `repo.` or `repo ` directories. Windows command text
+must resolve to the same native canonical root before init offers it.
+JSON marks `root` and unavailable commands/absolute destinations as null, labels
+`root_display` as display-only through the `unrepresentable_path` warning, and
+human output explains why handoffs are unavailable. Use a UTF-8 checkout path
+whose command spelling preserves its filesystem identity for generated commands.
+Git checkout detection remains independent of path text: a null `git_root` from
+unrepresentable output does not imply a missing checkout. Lossy display text never
+selects another repository.
 Baseline creation remains a separate explicit action from the selected clean
 base/default branch.
 

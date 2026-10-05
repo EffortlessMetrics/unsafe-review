@@ -41,16 +41,20 @@ proof = ["cargo test --locked -p unsafe-review-cli --test e2e init_"]
 
 [[acceptance]]
 id = "AC-1885-ENCODING"
-text = "A native Unix cwd with non-UTF8 bytes retains preview/conflict inspection and explicit proposal output, while unrepresentable commands and absolute identities are null with typed guidance; a lossy-name alias is never selected."
+text = "A native Unix cwd with non-UTF8 bytes retains preview/conflict inspection and explicit proposal output, while unrepresentable commands and absolute identities are null with typed guidance; a lossy-name alias is never selected and an existing checkout never gains a false missing_git warning."
 proof = ["cargo test --locked -p unsafe-review-cli --test e2e init_unrepresentable_root_retains_preview_without_lossy_handoffs"]
 
+[[acceptance]]
+id = "AC-1885-NATIVE-IDENTITY"
+text = "Native Windows trailing-period and trailing-space roots inspect their own manifest and owner workflow, refuse every ambiguous command/absolute destination, preserve both target and ordinary alias, and remain deterministic. An ordinary root retains executable handoffs; Git/no-Git controls retain truthful diagnostics."
+proof = ["cargo test --locked -p unsafe-review-cli --test e2e init_native_identity_windows_", "cargo test --locked -p unsafe-review-cli --test e2e init_missing_base_requires_input_instead_of_repo_scan"]
 [[integration]]
 surface = "CLI human and JSON init proposals"
-expected = "Representable platform shell commands share exact target scope and destination identities; absent commands are explicit null with prerequisite guidance. Non-UTF8 native paths retain inspection and display-only preview without lossy handoffs."
+expected = "Representable platform shell commands share exact target scope and destination identities; absent commands are explicit null with prerequisite guidance. Native paths retain inspection and display-only preview without lossy handoffs; encoding and Windows aliasing both require lossless identity."
 
 [[integration]]
 surface = "Hosted CI and review"
-expected = "Test-only red head precedes implementation; existing CI proves the final head, with independent exact-head consumer review before protected merge. No local Cargo under the128MiB allocation."
+expected = "Test-only red head precedes implementation; existing CI proves the final head, with independent exact-head consumer review before protected merge. Actual hosted Linux/Windows execution is required for native refusal and positive controls; cfg-skipped Windows tests do not qualify. No local Cargo under the 128 MiB allocation."
 
 [[risk]]
 id = "RISK-1885-QUOTING"
