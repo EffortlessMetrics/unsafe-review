@@ -21,6 +21,24 @@ The command above installs the public 0.4.0 release from crates.io. It does not
 install the unfrozen Swarm main candidate. A `v0.4.0` GitHub Release exists on
 the source repository; no `v1` or marketplace publication is implied.
 
+If `init` is unknown, check which executable your shell selected before
+retrying. Entering a source checkout does not change PATH.
+
+```bash
+command -v unsafe-review
+unsafe-review --version
+unsafe-review init --root . --format json
+```
+
+In PowerShell, use `Get-Command unsafe-review -All` to inspect competing
+commands. Run the preview from a known Rust checkout; a supported invocation
+returns an `unsafe-review/init/v1` proposal without writing files. Version
+text alone cannot identify a development build, and older 0.3.8 executables can
+print global help and exit zero for `init --help` while rejecting the actual
+command. Select the intended executable explicitly, or use the workspace
+command below for source behavior. Keep published-package and source-built
+qualification results separate.
+
 If you are working from a local checkout, keep the installed command and the
 workspace command separate. The installed command is the user path; `cargo run`
 is for development.
@@ -48,6 +66,23 @@ repository warnings, recommended ignores, explicit baseline guidance, an
 optional badge snippet, the canonical ub-review gate-manifest pointer, and the
 exact `doctor` and `pr` commands. `--out` writes only
 `unsafe-review-init.json` to the explicitly selected proposal directory.
+
+In this source checkout, generated commands retain the resolved absolute
+repository root, detected PR base, and root-local output destinations when
+copied into another directory. Check the installed version separately before
+relying on this handoff correction.
+Command text uses PowerShell quoting on Windows and POSIX shell quoting elsewhere.
+If no base can be resolved, JSON `commands.first_pr` is `null` and
+`commands.first_pr_prerequisite` (also shown in human output) asks for an explicit
+`--base` or `--diff`; init does not offer a repository-wide scan as a PR review.
+If the resolved root cannot be represented as UTF-8, init still inspects the
+native path and preserves the preview. JSON marks `root` and unrepresentable
+commands/absolute destinations as null, labels `root_display` as display-only
+through the `unrepresentable_path` warning, and human output explains why
+handoffs are unavailable. Use a UTF-8 checkout path for generated commands;
+lossy display text never selects another repository.
+Baseline creation remains a separate explicit action from the selected clean
+base/default branch.
 
 The generated workflow uses a release placeholder. Do not apply it until the
 placeholder has been replaced with a separately verified public release or
