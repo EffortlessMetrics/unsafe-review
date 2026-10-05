@@ -1480,6 +1480,7 @@ fn init_missing_base_requires_input_instead_of_repo_scan() -> Result<(), Box<dyn
             init_handoff_repo(&root)?;
         }
         let proposal = init_handoff_proposal(temp.path(), &root)?;
+        assert_eq!(proposal["repository"]["git_root"].is_null(), !git_checkout);
         assert!(
             proposal["commands"]
                 .as_object()
@@ -1498,7 +1499,8 @@ fn init_missing_base_requires_input_instead_of_repo_scan() -> Result<(), Box<dyn
         let human = checked_output(
             Command::new(env!("CARGO_BIN_EXE_cargo-unsafe-review"))
                 .args(["unsafe-review", "init", "--root"])
-                .arg(&root),
+                .arg(&root)
+                .env("GIT_CEILING_DIRECTORIES", temp.path()),
         )?;
         assert_contains(&String::from_utf8(human.stdout)?, prerequisite);
         assert!(!root.join("target").exists());
@@ -1584,6 +1586,7 @@ fn init_handoff_proposal(caller: &Path, root: &Path) -> Result<Value, Box<dyn Er
             .args(["unsafe-review", "init", "--root"])
             .arg(root)
             .args(["--format", "json"])
+            .env("GIT_CEILING_DIRECTORIES", caller)
             .current_dir(caller),
     )?;
     Ok(serde_json::from_slice(&output.stdout)?)
